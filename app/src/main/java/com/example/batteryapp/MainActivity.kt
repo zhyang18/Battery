@@ -4,16 +4,12 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.RadioButton
-import android.widget.RadioGroup
-import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
-import androidx.appcompat.widget.SwitchCompat
+import androidx.core.view.GravityCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -29,7 +25,7 @@ import rikka.shizuku.Shizuku
 
 /**
  * 应用程序的主活动界面。
- * 负责展示顶部沉浸式标题栏、双列电池数据对比、管理全局设置（主题/深色模式、Shizuku授权、实时刷新）及生命周期。
+ * 负责展示顶部沉浸式标题栏、双列电池数据对比、管理右侧抽屉式设置面板（主题/深色模式、Shizuku授权、实时刷新）及生命周期。
  */
 class MainActivity : AppCompatActivity() {
 
@@ -53,16 +49,11 @@ class MainActivity : AppCompatActivity() {
     private var isAutoRefreshEnabled: Boolean = false
 
     /**
-     * 当前打开的设置对话框弱引用或组件，用于动态更新内部 Shizuku 状态。
-     */
-    private var settingsDialogShizukuStatusTv: TextView? = null
-
-    /**
      * Shizuku 权限请求回调监听器。
      */
     private val requestPermissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode == SHIZUKU_REQUEST_CODE) {
-            updateSettingsDialogShizukuStatus()
+            updateDrawerShizukuStatus()
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(this, "Shizuku 授权成功", Toast.LENGTH_SHORT).show()
                 refreshBatteryInfo()
@@ -75,7 +66,7 @@ class MainActivity : AppCompatActivity() {
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         runOnUiThread {
-            updateSettingsDialogShizukuStatus()
+            updateDrawerShizukuStatus()
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
                 refreshBatteryInfo()
             }
@@ -84,12 +75,12 @@ class MainActivity : AppCompatActivity() {
 
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
         runOnUiThread {
-            updateSettingsDialogShizukuStatus()
+            updateDrawerShizukuStatus()
         }
     }
 
     /**
-     * 活动创建时调用，开启沉浸式状态栏、处理系统栏边距、加载保存的主题配置并初始化界面。
+     * 活动创建时调用，开启沉浸式状态栏、处理系统栏边距、加载保存的主题与抽屉设置配置。
      *
      * @param savedInstanceState 包含活动先前保存状态的包
      */
@@ -106,8 +97,8 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // 自动适配顶部状态栏与底部导航栏避让间距
-        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
+        // 处理主界面内容边距（避让状态栏与导航栏）
+        ViewCompat.setOnApplyWindowInsetsListener(binding.mainContent) { view, insets ->
             val statusBarInsets = insets.getInsets(WindowInsetsCompat.Type.statusBars())
             val navBarInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
             view.setPadding(
@@ -115,6 +106,19 @@ class MainActivity : AppCompatActivity() {
                 statusBarInsets.top + 16,
                 view.paddingRight,
                 navBarInsets.bottom + 16
+            )
+            insets
+        }
+
+        // 处理右侧抽屉内部边距（避让状态栏与导航栏）
+        ViewCompat.setOnApplyWindowInsetsListener(binding.drawerSettings) { view, insets ->
+            val statusBarInsets = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+            val navBarInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            view.setPadding(
+                view.paddingLeft,
+                statusBarInsets.top + 20,
+                view.paddingRight,
+                navBarInsets.bottom + 20
             )
             insets
         }
@@ -134,11 +138,115 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "数据已刷新", Toast.LENGTH_SHORT).show()
         }
 
+        // 打开右侧抽屉设置
         binding.btnSettings.setOnClickListener {
-            showSettingsDialog()
+            binding.drawerLayout.openDrawer(GravityCompat.END)
         }
 
+        // 关闭抽屉按钮
+        binding.btnCloseDrawer.setOnClickListener {
+            binding.drawerLayout.closeDrawer(GravityCompat.END)
+        }
+
+        // 处理返回键拦截（若抽屉打开则优先关闭抽屉）
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (binding.drawerLayout.isDrawerOpen(GravityCompat.END)) {
+                    binding.drawerLayout.closeDrawer(GravityCompat.END)
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+
+        // 初始化右侧抽屉设置面板各个功能组件
+        setupDrawerSettings()
+
         refreshBatteryInfo()
+    }
+
+    /**
+     * 初始化右侧抽屉设置板块（主题设置、实时刷新、Shizuku授权）。
+     */
+    private fun setupDrawerSettings() {
+        // 1. 主题/深色模式
+        val currentThemeMode = prefs.getInt("theme_mode", AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
+        when (currentThemeMode) {
+            AppCompatDelegate.MODE_NIGHT_NO -> binding.rbThemeLight.isChecked = true
+            AppCompatDelegate.MODE_NIGHT_YES -> binding.rbThemeDark.isChecked = true
+            else -> binding.rbThemeSystem.isChecked = true
+        }
+
+        binding.rgThemeMode.setOnCheckedChangeListener { _, checkedId ->
+            val newMode = when (checkedId) {
+                R.id.rb_theme_light -> AppCompatDelegate.MODE_NIGHT_NO
+                R.id.rb_theme_dark -> AppCompatDelegate.MODE_NIGHT_YES
+                else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+            }
+            prefs.edit().putInt("theme_mode", newMode).apply()
+            AppCompatDelegate.setDefaultNightMode(newMode)
+        }
+
+        // 2. 实时刷新
+        binding.switchAutoRefreshDrawer.isChecked = isAutoRefreshEnabled
+        binding.tvCurrentIntervalDrawer.text = "${refreshIntervalMs / 1000} 秒"
+
+        binding.switchAutoRefreshDrawer.setOnCheckedChangeListener { _, isChecked ->
+            isAutoRefreshEnabled = isChecked
+            prefs.edit().putBoolean("auto_refresh_enabled", isChecked).apply()
+            if (isChecked) {
+                startAutoRefresh()
+                Toast.makeText(this, "已开启实时刷新 (${refreshIntervalMs / 1000}秒)", Toast.LENGTH_SHORT).show()
+            } else {
+                stopAutoRefresh()
+                Toast.makeText(this, "已关闭实时刷新", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        binding.layoutIntervalSettingDrawer.setOnClickListener {
+            val intervals = arrayOf("1 秒", "2 秒", "3 秒", "5 秒", "10 秒")
+            val intervalValues = arrayOf(1000L, 2000L, 3000L, 5000L, 10000L)
+            val currentIndex = intervalValues.indexOf(refreshIntervalMs).coerceAtLeast(0)
+
+            AlertDialog.Builder(this)
+                .setTitle("选择刷新时间间隔")
+                .setSingleChoiceItems(intervals, currentIndex) { intervalDialog, which ->
+                    refreshIntervalMs = intervalValues[which]
+                    prefs.edit().putLong("refresh_interval_ms", refreshIntervalMs).apply()
+                    binding.tvCurrentIntervalDrawer.text = intervals[which]
+                    intervalDialog.dismiss()
+                    if (isAutoRefreshEnabled) {
+                        startAutoRefresh()
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+
+        // 3. Shizuku 授权与状态
+        updateDrawerShizukuStatus()
+        binding.btnAuthShizukuDrawer.setOnClickListener {
+            requestShizukuAuth()
+        }
+    }
+
+    /**
+     * 更新右侧抽屉中 Shizuku 状态的提示文本及颜色。
+     */
+    private fun updateDrawerShizukuStatus() {
+        if (!Shizuku.pingBinder()) {
+            binding.tvShizukuStatusDrawer.text = "Shizuku: 未运行"
+            binding.tvShizukuStatusDrawer.setTextColor(android.graphics.Color.RED)
+        } else {
+            if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                binding.tvShizukuStatusDrawer.text = "Shizuku: 已授权"
+                binding.tvShizukuStatusDrawer.setTextColor(android.graphics.Color.GREEN)
+            } else {
+                binding.tvShizukuStatusDrawer.text = "Shizuku: 未授权"
+                binding.tvShizukuStatusDrawer.setTextColor(android.graphics.Color.parseColor("#FFA500"))
+            }
+        }
     }
 
     /**
@@ -175,122 +283,9 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         stopAutoRefresh()
-        settingsDialogShizukuStatusTv = null
         Shizuku.removeRequestPermissionResultListener(requestPermissionResultListener)
         Shizuku.removeBinderReceivedListener(binderReceivedListener)
         Shizuku.removeBinderDeadListener(binderDeadListener)
-    }
-
-    /**
-     * 弹出全局综合设置对话框（包含主题/深色模式、实时刷新、Shizuku授权）。
-     */
-    private fun showSettingsDialog() {
-        val dialogView = layoutInflater.inflate(R.layout.dialog_settings, null)
-        val dialog = AlertDialog.Builder(this)
-            .setView(dialogView)
-            .create()
-
-        // 1. 主题/深色模式设置
-        val rgTheme = dialogView.findViewById<RadioGroup>(R.id.rg_theme_mode)
-        val rbSystem = dialogView.findViewById<RadioButton>(R.id.rb_theme_system)
-        val rbLight = dialogView.findViewById<RadioButton>(R.id.rb_theme_light)
-        val rbDark = dialogView.findViewById<RadioButton>(R.id.rb_theme_dark)
-
-        val currentThemeMode = prefs.getInt("theme_mode", AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
-        when (currentThemeMode) {
-            AppCompatDelegate.MODE_NIGHT_NO -> rbLight.isChecked = true
-            AppCompatDelegate.MODE_NIGHT_YES -> rbDark.isChecked = true
-            else -> rbSystem.isChecked = true
-        }
-
-        rgTheme.setOnCheckedChangeListener { _, checkedId ->
-            val newMode = when (checkedId) {
-                R.id.rb_theme_light -> AppCompatDelegate.MODE_NIGHT_NO
-                R.id.rb_theme_dark -> AppCompatDelegate.MODE_NIGHT_YES
-                else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
-            }
-            prefs.edit().putInt("theme_mode", newMode).apply()
-            AppCompatDelegate.setDefaultNightMode(newMode)
-        }
-
-        // 2. 实时刷新设置
-        val switchAutoRefresh = dialogView.findViewById<SwitchCompat>(R.id.switch_auto_refresh_dialog)
-        val layoutInterval = dialogView.findViewById<LinearLayout>(R.id.layout_interval_setting)
-        val tvInterval = dialogView.findViewById<TextView>(R.id.tv_current_interval)
-
-        switchAutoRefresh.isChecked = isAutoRefreshEnabled
-        tvInterval.text = "${refreshIntervalMs / 1000} 秒"
-
-        switchAutoRefresh.setOnCheckedChangeListener { _, isChecked ->
-            isAutoRefreshEnabled = isChecked
-            prefs.edit().putBoolean("auto_refresh_enabled", isChecked).apply()
-            if (isChecked) {
-                startAutoRefresh()
-                Toast.makeText(this, "已开启实时刷新 (${refreshIntervalMs / 1000}秒)", Toast.LENGTH_SHORT).show()
-            } else {
-                stopAutoRefresh()
-                Toast.makeText(this, "已关闭实时刷新", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        layoutInterval.setOnClickListener {
-            val intervals = arrayOf("1 秒", "2 秒", "3 秒", "5 秒", "10 秒")
-            val intervalValues = arrayOf(1000L, 2000L, 3000L, 5000L, 10000L)
-            val currentIndex = intervalValues.indexOf(refreshIntervalMs).coerceAtLeast(0)
-
-            AlertDialog.Builder(this)
-                .setTitle("选择刷新时间间隔")
-                .setSingleChoiceItems(intervals, currentIndex) { intervalDialog, which ->
-                    refreshIntervalMs = intervalValues[which]
-                    prefs.edit().putLong("refresh_interval_ms", refreshIntervalMs).apply()
-                    tvInterval.text = intervals[which]
-                    intervalDialog.dismiss()
-                    if (isAutoRefreshEnabled) {
-                        startAutoRefresh()
-                    }
-                }
-                .setNegativeButton("取消", null)
-                .show()
-        }
-
-        // 3. Shizuku 授权与状态
-        settingsDialogShizukuStatusTv = dialogView.findViewById(R.id.tv_shizuku_status_dialog)
-        val btnAuthShizuku = dialogView.findViewById<Button>(R.id.btn_auth_shizuku_dialog)
-        updateSettingsDialogShizukuStatus()
-
-        btnAuthShizuku.setOnClickListener {
-            requestShizukuAuth()
-        }
-
-        // 4. 关闭完成按钮
-        dialogView.findViewById<Button>(R.id.btn_close_settings).setOnClickListener {
-            dialog.dismiss()
-        }
-
-        dialog.setOnDismissListener {
-            settingsDialogShizukuStatusTv = null
-        }
-
-        dialog.show()
-    }
-
-    /**
-     * 更新设置弹窗中 Shizuku 状态的提示文本及颜色。
-     */
-    private fun updateSettingsDialogShizukuStatus() {
-        val tv = settingsDialogShizukuStatusTv ?: return
-        if (!Shizuku.pingBinder()) {
-            tv.text = "Shizuku: 未运行"
-            tv.setTextColor(android.graphics.Color.RED)
-        } else {
-            if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-                tv.text = "Shizuku: 已授权"
-                tv.setTextColor(android.graphics.Color.GREEN)
-            } else {
-                tv.text = "Shizuku: 未授权"
-                tv.setTextColor(android.graphics.Color.parseColor("#FFA500"))
-            }
-        }
     }
 
     /**
@@ -306,7 +301,7 @@ class MainActivity : AppCompatActivity() {
                 }
             } else {
                 Toast.makeText(this, "已经授权，无需再次请求", Toast.LENGTH_SHORT).show()
-                updateSettingsDialogShizukuStatus()
+                updateDrawerShizukuStatus()
             }
         } else {
             Toast.makeText(this, "Shizuku 尚未连接，尝试打开 Shizuku App...", Toast.LENGTH_SHORT).show()
@@ -320,7 +315,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-            updateSettingsDialogShizukuStatus()
+            updateDrawerShizukuStatus()
         }
     }
 

@@ -66,12 +66,12 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        // 如果底层未直接解析到电压，尝试从系统粘性广播读取当前电压
-        if (voltage == null) {
+        // 如果底层未直接解析到电压或电压超出正常电池物理范围(2.5V-9.5V)，尝试从系统粘性广播读取当前电压
+        if (voltage == null || voltage < 2500f || voltage > 9500f) {
             try {
                 val intent = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
                 val rawVolt = intent?.getIntExtra(android.os.BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
-                if (rawVolt > 0) {
+                if (rawVolt in 2500..9500) {
                     voltage = rawVolt.toFloat()
                 }
             } catch (e: Exception) {
@@ -110,6 +110,40 @@ class ShizukuProvider : BatteryDataProvider {
     }
 
     /**
+     * 将原始电压数值规范化为毫伏（mV）。
+     *
+     * @param rawVolt 原始电压数值
+     * @return 规范化后的毫伏电压，无效则返回 null
+     */
+    private fun normalizeVoltage(rawVolt: Long): Float? {
+        if (rawVolt <= 0) return null
+        return when {
+            rawVolt in 2500..9500 -> rawVolt.toFloat() // 已经为 mV（单电芯 3.0-4.5V，双电芯串联 6.0-9.0V）
+            rawVolt in 25000..95000 -> rawVolt / 10f // 0.1 mV
+            rawVolt in 2500000..9500000 -> rawVolt / 1000f // uV 微伏转换为 mV
+            rawVolt > 9500000 -> rawVolt / 1000f
+            else -> null
+        }
+    }
+
+    /**
+     * 将原始电流数值规范化为毫安（mA）。
+     *
+     * @param rawCur 原始电流数值
+     * @return 规范化后的毫安电流，无效则返回 null
+     */
+    private fun normalizeCurrent(rawCur: Long): Float? {
+        if (rawCur == 0L) return null
+        val abs = Math.abs(rawCur)
+        return when {
+            abs in 1..9999 -> rawCur.toFloat() // 已经为 mA
+            abs in 10000..99999 -> rawCur / 10f // 0.1 mA
+            abs >= 100000 -> rawCur / 1000f // uA 微安转换为 mA
+            else -> rawCur.toFloat()
+        }
+    }
+
+    /**
      * 从 sysfs 节点读取电池信息。
      * 涵盖系统通用节点、uevent 以及全路径直接遍历节点。
      *
@@ -129,8 +163,8 @@ class ShizukuProvider : BatteryDataProvider {
         var technology: String? = null
         var isDualCell: Boolean? = null
 
-        // 1. 读取常见 power_supply 下的 uevent 文件
-        val sysfsCmd = "cat /sys/class/power_supply/battery/uevent /sys/class/power_supply/bms/uevent /sys/class/power_supply/main/uevent /sys/class/qcom-battery/uevent /sys/class/power_supply/*/uevent 2>/dev/null"
+        // 1. 读取专属电池 power_supply 下的 uevent 文件（避免混入 usb/charger 充电头高电压）
+        val sysfsCmd = "cat /sys/class/power_supply/battery/uevent /sys/class/power_supply/bms/uevent /sys/class/qcom-battery/uevent /sys/class/power_supply/battery_gauge/uevent 2>/dev/null"
         val ueventRes = executeCommand(sysfsCmd)
 
         val lines = ueventRes.split('\n')
@@ -171,15 +205,20 @@ class ShizukuProvider : BatteryDataProvider {
             }
             if (trimLine.contains("POWER_SUPPLY_VOLTAGE_NOW=")) {
                 val rawVolt = trimLine.substringAfter("=").toLongOrNull()
-                if (rawVolt != null && rawVolt > 0) {
-                    voltage = if (rawVolt < 10000) rawVolt.toFloat() else rawVolt / 1000f
+                if (rawVolt != null) {
+                    val normVolt = normalizeVoltage(rawVolt)
+                    if (normVolt != null) {
+                        voltage = normVolt
+                    }
                 }
             }
             if (trimLine.contains("POWER_SUPPLY_CURRENT_NOW=") || trimLine.contains("POWER_SUPPLY_CURRENT_AVG=")) {
                 val rawCur = trimLine.substringAfter("=").toLongOrNull()
-                if (rawCur != null && rawCur != 0L) {
-                    val cur = if (Math.abs(rawCur) < 100000) rawCur.toFloat() else rawCur / 1000f
-                    if (currentNow == null || currentNow == 0f) currentNow = cur
+                if (rawCur != null) {
+                    val normCur = normalizeCurrent(rawCur)
+                    if (normCur != null && (currentNow == null || currentNow == 0f)) {
+                        currentNow = normCur
+                    }
                 }
             }
             if (trimLine.contains("POWER_SUPPLY_POWER_NOW=")) {
@@ -202,9 +241,9 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        // 2. 深度扫描各个单独驱动文件节点 (防止某些厂商未写入 uevent)
+        // 2. 深度扫描 battery/bms 驱动文件节点
         val directNodesCmd = """
-            for node in /sys/class/power_supply/battery /sys/class/power_supply/bms /sys/class/power_supply/main /sys/class/qcom-battery /sys/class/power_supply/usb; do
+            for node in /sys/class/power_supply/battery /sys/class/power_supply/bms /sys/class/qcom-battery /sys/class/power_supply/battery_gauge; do
                 if [ -d "${'$'}node" ]; then
                     for f in current_now batt_current battery_current current_avg power_now batt_power voltage_now batt_vol; do
                         if [ -f "${'$'}node/${'$'}f" ]; then
@@ -219,16 +258,20 @@ class ShizukuProvider : BatteryDataProvider {
             val trimLine = line.trim()
             if (trimLine.startsWith("current_now=") || trimLine.startsWith("batt_current=") || trimLine.startsWith("battery_current=") || trimLine.startsWith("current_avg=")) {
                 val raw = trimLine.substringAfter("=").toLongOrNull()
-                if (raw != null && raw != 0L) {
-                    val cur = if (Math.abs(raw) < 100000) raw.toFloat() else raw / 1000f
-                    if (currentNow == null || currentNow == 0f) currentNow = cur
+                if (raw != null) {
+                    val normCur = normalizeCurrent(raw)
+                    if (normCur != null && (currentNow == null || currentNow == 0f)) {
+                        currentNow = normCur
+                    }
                 }
             }
             if (trimLine.startsWith("voltage_now=") || trimLine.startsWith("batt_vol=")) {
                 val raw = trimLine.substringAfter("=").toLongOrNull()
-                if (raw != null && raw > 0) {
-                    val mv = if (raw < 10000) raw.toFloat() else raw / 1000f
-                    if (voltage == null) voltage = mv
+                if (raw != null) {
+                    val normVolt = normalizeVoltage(raw)
+                    if (normVolt != null && voltage == null) {
+                        voltage = normVolt
+                    }
                 }
             }
             if (trimLine.startsWith("power_now=") || trimLine.startsWith("batt_power=")) {
@@ -276,7 +319,7 @@ class ShizukuProvider : BatteryDataProvider {
 
         // 1. 获取 dumpsys battery 信息
         val batteryOutput = executeCommand("dumpsys battery")
-        val regexChargeCounter = Regex("(?i)Charge counter:\\s*(\\d+)")
+        val regexChargeCounter = Regex("(?m)^\\s*Charge counter:\\s*(\\d+)")
         val matchCharge = regexChargeCounter.find(batteryOutput)
         if (matchCharge != null) {
             val raw = matchCharge.groupValues[1].toLongOrNull()
@@ -285,13 +328,13 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        val regexLevel = Regex("(?i)level:\\s*(\\d+)")
+        val regexLevel = Regex("(?m)^\\s*level:\\s*(\\d+)")
         val matchLevel = regexLevel.find(batteryOutput)
         if (matchLevel != null) {
             batteryLevel = matchLevel.groupValues[1].toIntOrNull()
         }
 
-        val regexStatus = Regex("(?i)status:\\s*(\\d+)")
+        val regexStatus = Regex("(?m)^\\s*status:\\s*(\\d+)")
         val matchStatus = regexStatus.find(batteryOutput)
         if (matchStatus != null) {
             statusStr = when (matchStatus.groupValues[1].toIntOrNull()) {
@@ -303,7 +346,7 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        val regexHealth = Regex("(?i)health:\\s*(\\d+)")
+        val regexHealth = Regex("(?m)^\\s*health:\\s*(\\d+)")
         val matchHealth = regexHealth.find(batteryOutput)
         if (matchHealth != null) {
             healthStr = when (matchHealth.groupValues[1].toIntOrNull()) {
@@ -317,7 +360,7 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        val regexTemp = Regex("(?i)temperature:\\s*(\\d+)")
+        val regexTemp = Regex("(?m)^\\s*temperature:\\s*(\\d+)")
         val matchTemp = regexTemp.find(batteryOutput)
         if (matchTemp != null) {
             val rawTemp = matchTemp.groupValues[1].toFloatOrNull()
@@ -326,13 +369,17 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        val regexVolt = Regex("(?i)voltage:\\s*(\\d+)")
+        // 精确匹配行首的 voltage（防止误匹配 Max charging voltage: 5000000）
+        val regexVolt = Regex("(?m)^\\s*voltage:\\s*(\\d+)")
         val matchVolt = regexVolt.find(batteryOutput)
         if (matchVolt != null) {
-            voltage = matchVolt.groupValues[1].toFloatOrNull()
+            val raw = matchVolt.groupValues[1].toLongOrNull()
+            if (raw != null) {
+                voltage = normalizeVoltage(raw)
+            }
         }
 
-        val regexTech = Regex("(?i)technology:\\s*(\\w+)")
+        val regexTech = Regex("(?m)^\\s*technology:\\s*(\\w+)")
         val matchTech = regexTech.find(batteryOutput)
         if (matchTech != null) {
             technology = matchTech.groupValues[1]

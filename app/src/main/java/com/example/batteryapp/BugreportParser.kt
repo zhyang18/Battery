@@ -50,7 +50,7 @@ class CountingInputStream(
     private fun notifyProgressThrottled() {
         if (totalBytes > 0) {
             val now = System.currentTimeMillis()
-            if (now - lastReportTime > 120L) {
+            if (now - lastReportTime > 100L) {
                 lastReportTime = now
                 val percent = ((bytesRead * 100) / totalBytes).toInt().coerceIn(0, 99)
                 if (percent != lastPercent) {
@@ -67,7 +67,7 @@ class CountingInputStream(
 }
 
 /**
- * 负责深度、精准解析安卓错误报告（Bugreport）中 getHealthInfo -> HealthInfo 结构体的解析器。
+ * 负责毫秒级极速、深度解析安卓错误报告（Bugreport）中 getHealthInfo -> HealthInfo 结构体的解析器。
  */
 class BugreportParser {
 
@@ -129,14 +129,15 @@ class BugreportParser {
 
         while (entry != null && coroutineContext.isActive) {
             val name = entry.name.lowercase()
-            val isIgnored = name == "version.txt" || name == "metadata.txt" || name.endsWith(".png") || name.endsWith(".proto") || name.endsWith(".bin") || name.endsWith(".xml") || name.startsWith("fs/")
+            val isMainBugreport = !name.contains("/") && (name.startsWith("bugreport-") || name == "bugreport.txt")
+            val isTextFile = !entry.isDirectory && !name.contains("/") && name.endsWith(".txt") && name != "version.txt" && name != "metadata.txt"
 
-            if (!entry.isDirectory && !isIgnored && name.endsWith(".txt")) {
-                Log.d(TAG, "正在扫描主日志条目: ${entry.name} ...")
+            if (isMainBugreport || isTextFile) {
+                Log.d(TAG, "正在快速读取主日志条目: ${entry.name} ...")
                 val reader = BufferedReader(InputStreamReader(zipIn, StandardCharsets.UTF_8), 65536)
                 val result = parseFromReader(reader)
                 if (result.hasRealData) {
-                    Log.d(TAG, "在条目 ${entry.name} 中成功匹配到 getHealthInfo 真实数据！")
+                    Log.d(TAG, "在条目 ${entry.name} 中成功匹配到 getHealthInfo 真实数据，极速返回！")
                     zipIn.closeEntry()
                     zipIn.close()
                     return result
@@ -193,6 +194,7 @@ class BugreportParser {
 
         val healthInfoRawLines = mutableListOf<String>()
         var inHealthInfoBlock = false
+        var hasFinishedHealthBlock = false
         var line: String?
         var totalLineCount = 0
 
@@ -215,21 +217,28 @@ class BugreportParser {
                 trimLine.contains("Health HAL - getHealthInfo") ||
                 trimLine.contains("android.hardware.health")) {
                 inHealthInfoBlock = true
-                Log.d(TAG, "进入 getHealthInfo 结构体段落: $trimLine (Line $totalLineCount)")
             }
 
             // 2. 录入 getHealthInfo 原始代码块
             if (inHealthInfoBlock) {
                 if (trimLine.startsWith("DUMP OF SERVICE") && !trimLine.contains("health") && !trimLine.contains("battery")) {
                     inHealthInfoBlock = false
+                    hasFinishedHealthBlock = true
                 } else if (trimLine.startsWith("------ ") && healthInfoRawLines.size > 5) {
                     inHealthInfoBlock = false
+                    hasFinishedHealthBlock = true
                 } else if (healthInfoRawLines.size < 65) {
                     healthInfoRawLines.add(curLine)
                 }
             }
 
-            // 3. 智能早停：若已读过 getHealthInfo 或 battery 且已进入后续无关服务，则直接退出
+            // 3. 毫秒级极速早停：getHealthInfo 结构体读完且已有核心数据，立即退出循环
+            if (hasFinishedHealthBlock && batteryVoltage != null && (batteryFullCharge != null || batteryLevel != null)) {
+                Log.d(TAG, "getHealthInfo 结构体已完整提取，在第 $totalLineCount 行立即极速早停！")
+                break
+            }
+
+            // 4. 兜底早停：如果进入后续无关服务，也立即退出
             if (batteryVoltage != null && (batteryFullCharge != null || batteryLevel != null)) {
                 if (trimLine.startsWith("DUMP OF SERVICE package:") ||
                     trimLine.startsWith("DUMP OF SERVICE window:") ||
@@ -241,9 +250,9 @@ class BugreportParser {
                 }
             }
 
-            // 4. 精准匹配 getHealthInfo -> HealthInfo 中各个字段（支持 = 与 : 分隔符，支持 AIDL/HIDL 2.0/2.1 标准命名）
+            // 5. 精准匹配 getHealthInfo -> HealthInfo 中各个字段
 
-            // 4.1 充电方式
+            // 5.1 充电方式
             if (trimLine.contains("chargerUsbOnline", ignoreCase = true) || trimLine.startsWith("USB powered:", ignoreCase = true)) {
                 val v = parseBooleanValue(trimLine)
                 if (v != null && chargerUsbOnline == null) chargerUsbOnline = v
@@ -261,7 +270,7 @@ class BugreportParser {
                 if (v != null && chargerDockOnline == null) chargerDockOnline = v
             }
 
-            // 4.2 最大充电电流/电压
+            // 5.2 最大充电电流/电压
             if (trimLine.contains("maxChargingCurrent", ignoreCase = true) || trimLine.startsWith("Max charging current:", ignoreCase = true)) {
                 val v = extractLongValue(trimLine)
                 if (v != null && v > 0 && maxChargingCurrent == null) maxChargingCurrent = v
@@ -271,7 +280,7 @@ class BugreportParser {
                 if (v != null && v > 0 && maxChargingVoltage == null) maxChargingVoltage = v
             }
 
-            // 4.3 电池状态与健康
+            // 5.3 电池状态与健康
             if (trimLine.contains("batteryStatus", ignoreCase = true) || trimLine.startsWith("status:", ignoreCase = true) || trimLine.startsWith("mBatteryStatus:", ignoreCase = true)) {
                 if (batteryStatus == null) batteryStatus = extractStringValue(trimLine)
             }
@@ -279,31 +288,31 @@ class BugreportParser {
                 if (batteryHealth == null) batteryHealth = extractStringValue(trimLine)
             }
 
-            // 4.4 电量
+            // 5.4 电量
             if (trimLine.contains("batteryLevel", ignoreCase = true) || trimLine.startsWith("level:", ignoreCase = true) || trimLine.startsWith("mBatteryLevel:", ignoreCase = true)) {
                 val v = extractIntValue(trimLine)
                 if (v != null && v in 0..100 && batteryLevel == null) batteryLevel = v
             }
 
-            // 4.5 电池类型
+            // 5.5 电池类型
             if (trimLine.contains("batteryTechnology", ignoreCase = true) || trimLine.startsWith("technology:", ignoreCase = true)) {
                 val tech = extractStringValue(trimLine)
                 if (tech.isNotEmpty() && batteryTechnology == null) batteryTechnology = tech
             }
 
-            // 4.6 电池电压
+            // 5.6 电池电压
             if (trimLine.contains("batteryVoltage", ignoreCase = true) || trimLine.startsWith("voltage:", ignoreCase = true)) {
                 val v = extractLongValue(trimLine)
                 if (v != null && v > 0 && batteryVoltage == null) batteryVoltage = v
             }
 
-            // 4.7 电池温度
+            // 5.7 电池温度
             if (trimLine.contains("batteryTemperature", ignoreCase = true) || trimLine.startsWith("temperature:", ignoreCase = true)) {
                 val v = extractFloatValue(trimLine)
                 if (v != null && v > 0 && batteryTemperature == null) batteryTemperature = v
             }
 
-            // 4.8 循环次数
+            // 5.8 循环次数
             if (trimLine.contains("batteryCycleCount", ignoreCase = true) || 
                 trimLine.contains("cycle count:", ignoreCase = true) || 
                 trimLine.contains("mCycleCount:", ignoreCase = true) || 
@@ -318,7 +327,7 @@ class BugreportParser {
                 }
             }
 
-            // 4.9 满充容量 (FCC)
+            // 5.9 满充容量 (FCC)
             if (trimLine.contains("batteryFullCharge", ignoreCase = true) || 
                 trimLine.startsWith("Learned battery capacity:", ignoreCase = true) || 
                 trimLine.startsWith("mLearnedCap:", ignoreCase = true) || 
@@ -329,7 +338,7 @@ class BugreportParser {
                 }
             }
 
-            // 4.10 设计容量
+            // 5.10 设计容量
             if (trimLine.contains("batteryFullChargeDesign", ignoreCase = true) || 
                 trimLine.contains("battery_design_capacity", ignoreCase = true) || 
                 trimLine.startsWith("Estimated battery capacity:", ignoreCase = true) || 
@@ -340,14 +349,14 @@ class BugreportParser {
                 }
             }
 
-            // 4.11 预计充满时间
+            // 5.11 预计充满时间
             if (trimLine.contains("batteryChargeTimeToFullNow", ignoreCase = true) || trimLine.contains("chargeTimeToFullNow", ignoreCase = true)) {
                 val v = extractLongValue(trimLine)
                 if (v != null && batteryChargeTimeToFullNow == null) batteryChargeTimeToFullNow = v
             }
         }
 
-        // 5. 构建 14 项表格数据
+        // 6. 构建 14 项表格数据
         val tableItems = mutableListOf<HealthInfoItem>()
 
         // 1. 🔌 充电方式

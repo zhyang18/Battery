@@ -117,7 +117,7 @@ class BugreportParser {
     }
 
     /**
-     * 从 ZIP 压缩流中寻找并流式解析主错误报告文本文件。
+     * 从 ZIP 压缩流中寻找并流式解析真正的主错误报告文本文件（过滤 version.txt、metadata.txt 等小文件）。
      *
      * @param inputStream 带有进度统计的输入流
      * @return 解析出的 [BugreportResult]
@@ -125,23 +125,30 @@ class BugreportParser {
     private suspend fun parseZipStream(inputStream: InputStream): BugreportResult? {
         val zipIn = ZipInputStream(inputStream)
         var entry = zipIn.nextEntry
+        var fallbackResult: BugreportResult? = null
+
         while (entry != null && coroutineContext.isActive) {
             val name = entry.name.lowercase()
-            if (!entry.isDirectory && (name.startsWith("bugreport-") && name.endsWith(".txt") || (!name.contains("/") && name.endsWith(".txt")))) {
-                Log.d(TAG, "找到主日志条目: ${entry.name}, 开始流式读取...")
+            val isIgnored = name == "version.txt" || name == "metadata.txt" || name.endsWith(".png") || name.endsWith(".proto") || name.endsWith(".bin") || name.endsWith(".xml")
+
+            if (!entry.isDirectory && !isIgnored && name.endsWith(".txt")) {
+                Log.d(TAG, "检查日志条目: ${entry.name} ...")
                 val reader = BufferedReader(InputStreamReader(zipIn, StandardCharsets.UTF_8), 65536)
                 val result = parseFromReader(reader)
-                if (result.tableItems.isNotEmpty()) {
+                if (result.hasRealData) {
+                    Log.d(TAG, "在条目 ${entry.name} 中成功匹配到电池真实数据！")
                     zipIn.closeEntry()
                     zipIn.close()
                     return result
+                } else if (fallbackResult == null && result.tableItems.isNotEmpty()) {
+                    fallbackResult = result
                 }
             }
             zipIn.closeEntry()
             entry = zipIn.nextEntry
         }
         zipIn.close()
-        return null
+        return fallbackResult
     }
 
     /**
@@ -192,7 +199,7 @@ class BugreportParser {
         while (reader.readLine().also { line = it } != null) {
             totalLineCount++
             if (!coroutineContext.isActive) {
-                return BugreportResult(emptyList(), "")
+                return BugreportResult(emptyList(), "", false)
             }
             val curLine = line!!
             val trimLine = curLine.trim()
@@ -456,15 +463,17 @@ class BugreportParser {
         }
         tableItems.add(HealthInfoItem("🩺 电池健康", healthStatusVal, "Android 判断正常"))
 
+        val hasRealData = (batteryLevel != null || batteryVoltageMillivolts != null || batteryFullChargeUah != null || batteryCycleCount != null || batteryTemperatureTenthsCelsius != null)
+
         val rawText = if (rawLinesList.isNotEmpty()) {
             rawLinesList.joinToString("\n").trim()
         } else {
             buildSynthesizedRawLog(tableItems)
         }
 
-        Log.d(TAG, "===> 全量 14 项表格数据构建完毕，原始文本行数: ${rawLinesList.size}")
+        Log.d(TAG, "===> 条目解析完毕: 行数 = $totalLineCount, 是否捕获有效数据 = $hasRealData")
 
-        return BugreportResult(tableItems, rawText)
+        return BugreportResult(tableItems, rawText, hasRealData)
     }
 
     private fun buildSynthesizedRawLog(items: List<HealthInfoItem>): String {

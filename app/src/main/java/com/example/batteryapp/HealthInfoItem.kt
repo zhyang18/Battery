@@ -18,8 +18,10 @@ data class HealthInfoItem(
  *
  * @property tableItems 精简表格项列表
  * @property rawHealthInfoText 提取到的原始 getHealthInfo 文本日志
+ * @property hasRealData 是否成功提取到了真实的电池核心参数
  */
 data class BugreportResult(
     val tableItems: List<HealthInfoItem>,
-    val rawHealthInfoText: String
+    val rawHealthInfoText: String,
+    val hasRealData: Boolean = false
 )

@@ -131,7 +131,7 @@ class BugreportParser {
                 Log.d(TAG, "找到主日志条目: ${entry.name}, 开始流式读取...")
                 val reader = BufferedReader(InputStreamReader(zipIn, StandardCharsets.UTF_8), 65536)
                 val result = parseFromReader(reader)
-                if (result.tableItems.isNotEmpty() || result.rawHealthInfoText.isNotEmpty()) {
+                if (result.tableItems.isNotEmpty()) {
                     zipIn.closeEntry()
                     zipIn.close()
                     return result
@@ -159,7 +159,7 @@ class BugreportParser {
     }
 
     /**
-     * 逐行读取流，提取目标 12-14 项精简指标以及原始 getHealthInfo 代码文本。
+     * 逐行读取流，提取目标 14 项精简指标以及原始 getHealthInfo 代码文本。
      *
      * @param reader 缓冲字符读取流
      * @return 组装好的 [BugreportResult]
@@ -185,10 +185,7 @@ class BugreportParser {
         var batteryChargeTimeToFullNowSeconds: Long? = null
 
         val rawLinesList = mutableListOf<String>()
-        var inHealthInfoSection = false
-        var currentSection = ""
-        var hasFoundHealthInfoData = false
-        var hasFoundBatterySection = false
+        var recordingRawSection = false
         var line: String?
         var totalLineCount = 0
 
@@ -200,158 +197,138 @@ class BugreportParser {
             val curLine = line!!
             val trimLine = curLine.trim()
 
-            // 早停机制（Early Termination）
-            if ((hasFoundHealthInfoData || hasFoundBatterySection) && 
-                trimLine.startsWith("DUMP OF SERVICE") && 
-                !trimLine.contains("battery") && 
-                !trimLine.contains("Health")) {
-                if (batteryFullChargeDesignCapacityUah != null || batteryFullChargeUah != null || batteryVoltageMillivolts != null || batteryLevel != null) {
-                    Log.d(TAG, "早停机制触发：已获取核心数据并在第 $totalLineCount 行退出！")
-                    break
+            // 1. 判断是否进入关键日志段落（getHealthInfo / Health HAL / DUMP OF SERVICE battery / batterystats）
+            if (trimLine.contains("getHealthInfo", ignoreCase = true) ||
+                trimLine.contains("Health HAL", ignoreCase = true) ||
+                trimLine.startsWith("HealthInfo") ||
+                trimLine.startsWith("mHealthInfo") ||
+                trimLine.contains("DUMP OF SERVICE battery:") ||
+                trimLine.contains("DUMP OF SERVICE android.hardware.health")) {
+                recordingRawSection = true
+            } else if (recordingRawSection) {
+                if (trimLine.startsWith("DUMP OF SERVICE") && !trimLine.contains("battery") && !trimLine.contains("health")) {
+                    recordingRawSection = false
                 }
             }
 
-            // 极速行过滤
-            if (!inHealthInfoSection && currentSection.isEmpty()) {
-                val startsWithDump = trimLine.startsWith("DUMP OF SERVICE")
-                val isHealthHeader = trimLine.startsWith("HealthInfo") || trimLine.startsWith("Health HAL") || trimLine.contains("getHealthInfo")
-                val isCycleBroadcast = trimLine.contains("android.os.extra.CYCLE_COUNT")
-
-                if (!startsWithDump && !isHealthHeader && !isCycleBroadcast) {
-                    continue
-                }
-            }
-
-            // 1. 进入 getHealthInfo / Health HAL 结构体
-            if (trimLine.contains("getHealthInfo", ignoreCase = true) || 
-                trimLine.startsWith("HealthInfo_2_") || 
-                trimLine.startsWith("HealthInfo:") ||
-                trimLine.contains("Health HAL - getHealthInfo") ||
-                trimLine.contains("Health HAL:")) {
-                inHealthInfoSection = true
-                hasFoundHealthInfoData = true
+            if (recordingRawSection && rawLinesList.size < 60) {
                 rawLinesList.add(curLine)
-            } else if (inHealthInfoSection) {
-                if (trimLine.startsWith("DUMP OF SERVICE") || trimLine.startsWith("------ ")) {
-                    inHealthInfoSection = false
+            }
+
+            // 2. 字段模式全量匹配（兼容所有厂商 dumpsys / Health HAL / AIDL / HIDL 格式）
+
+            // 2.1 充电方式相关
+            if (trimLine.contains("chargerUsbOnline", ignoreCase = true) || trimLine.startsWith("USB powered:", ignoreCase = true)) {
+                val v = parseBooleanValue(trimLine)
+                if (v != null && chargerUsbOnline == null) chargerUsbOnline = v
+            }
+            if (trimLine.contains("chargerAcOnline", ignoreCase = true) || trimLine.startsWith("AC powered:", ignoreCase = true)) {
+                val v = parseBooleanValue(trimLine)
+                if (v != null && chargerAcOnline == null) chargerAcOnline = v
+            }
+            if (trimLine.contains("chargerWirelessOnline", ignoreCase = true) || trimLine.startsWith("Wireless powered:", ignoreCase = true)) {
+                val v = parseBooleanValue(trimLine)
+                if (v != null && chargerWirelessOnline == null) chargerWirelessOnline = v
+            }
+            if (trimLine.contains("chargerDockOnline", ignoreCase = true) || trimLine.startsWith("Dock powered:", ignoreCase = true)) {
+                val v = parseBooleanValue(trimLine)
+                if (v != null && chargerDockOnline == null) chargerDockOnline = v
+            }
+
+            // 2.2 最大充电限制
+            if (trimLine.contains("maxChargingCurrent", ignoreCase = true) || trimLine.startsWith("Max charging current:", ignoreCase = true)) {
+                val v = extractLongValue(trimLine)
+                if (v != null && v > 0 && maxChargingCurrentMicroamps == null) maxChargingCurrentMicroamps = v
+            }
+            if (trimLine.contains("maxChargingVoltage", ignoreCase = true) || trimLine.startsWith("Max charging voltage:", ignoreCase = true)) {
+                val v = extractLongValue(trimLine)
+                if (v != null && v > 0 && maxChargingVoltageMicrovolts == null) maxChargingVoltageMicrovolts = v
+            }
+
+            // 2.3 电池状态与健康
+            if (trimLine.contains("batteryStatus", ignoreCase = true) || trimLine.startsWith("status:", ignoreCase = true) || trimLine.startsWith("mBatteryStatus:", ignoreCase = true)) {
+                if (batteryStatus == null) batteryStatus = extractStringValue(trimLine)
+            }
+            if (trimLine.contains("batteryHealth", ignoreCase = true) || trimLine.startsWith("health:", ignoreCase = true) || trimLine.startsWith("mBatteryHealth:", ignoreCase = true)) {
+                if (batteryHealth == null) batteryHealth = extractStringValue(trimLine)
+            }
+
+            // 2.4 电量
+            if (trimLine.contains("batteryLevel", ignoreCase = true) || trimLine.startsWith("level:", ignoreCase = true) || trimLine.startsWith("mBatteryLevel:", ignoreCase = true)) {
+                val v = extractIntValue(trimLine)
+                if (v != null && v in 0..100 && batteryLevel == null) batteryLevel = v
+            }
+
+            // 2.5 电池类型
+            if (trimLine.contains("batteryTechnology", ignoreCase = true) || trimLine.startsWith("technology:", ignoreCase = true)) {
+                val tech = extractStringValue(trimLine)
+                if (tech.isNotEmpty() && batteryTechnology == null) batteryTechnology = tech
+            }
+
+            // 2.6 电压
+            if (trimLine.contains("batteryVoltageMillivolts", ignoreCase = true) || trimLine.contains("batteryVoltage", ignoreCase = true) || trimLine.startsWith("voltage:", ignoreCase = true)) {
+                val v = extractLongValue(trimLine)
+                if (v != null && v > 0 && batteryVoltageMillivolts == null) batteryVoltageMillivolts = v
+            }
+
+            // 2.7 温度
+            if (trimLine.contains("batteryTemperatureTenthsCelsius", ignoreCase = true) || trimLine.contains("batteryTemperature", ignoreCase = true) || trimLine.startsWith("temperature:", ignoreCase = true)) {
+                val v = extractFloatValue(trimLine)
+                if (v != null && v > 0 && batteryTemperatureTenthsCelsius == null) batteryTemperatureTenthsCelsius = v
+            }
+
+            // 2.8 循环次数
+            if (trimLine.contains("batteryCycleCount", ignoreCase = true) || 
+                trimLine.contains("battery_cycle_count", ignoreCase = true) || 
+                trimLine.contains("cycle count:", ignoreCase = true) || 
+                trimLine.contains("mCycleCount:", ignoreCase = true) || 
+                trimLine.contains("android.os.extra.CYCLE_COUNT=", ignoreCase = true)) {
+                val v = if (trimLine.contains("android.os.extra.CYCLE_COUNT=")) {
+                    Regex("(?i)android\\.os\\.extra\\.CYCLE_COUNT=(\\d+)").find(trimLine)?.groupValues?.get(1)?.toIntOrNull()
                 } else {
-                    rawLinesList.add(curLine)
+                    extractIntValue(trimLine)
+                }
+                if (v != null && v > 0) {
+                    if (batteryCycleCount == null || v > batteryCycleCount) batteryCycleCount = v
                 }
             }
 
-            if (inHealthInfoSection) {
-                if (trimLine.contains("chargerAcOnline", ignoreCase = true)) {
-                    val pres = extractStringValue(trimLine).lowercase()
-                    if (chargerAcOnline == null) chargerAcOnline = (pres == "true" || pres == "1")
-                }
-                if (trimLine.contains("chargerUsbOnline", ignoreCase = true)) {
-                    val pres = extractStringValue(trimLine).lowercase()
-                    if (chargerUsbOnline == null) chargerUsbOnline = (pres == "true" || pres == "1")
-                }
-                if (trimLine.contains("chargerWirelessOnline", ignoreCase = true)) {
-                    val pres = extractStringValue(trimLine).lowercase()
-                    if (chargerWirelessOnline == null) chargerWirelessOnline = (pres == "true" || pres == "1")
-                }
-                if (trimLine.contains("chargerDockOnline", ignoreCase = true)) {
-                    val pres = extractStringValue(trimLine).lowercase()
-                    if (chargerDockOnline == null) chargerDockOnline = (pres == "true" || pres == "1")
-                }
-                if (trimLine.contains("maxChargingCurrentMicroamps", ignoreCase = true) || trimLine.contains("maxChargingCurrent", ignoreCase = true)) {
-                    val v = extractLongValue(trimLine)
-                    if (v != null && v > 0 && maxChargingCurrentMicroamps == null) maxChargingCurrentMicroamps = v
-                }
-                if (trimLine.contains("maxChargingVoltageMicrovolts", ignoreCase = true) || trimLine.contains("maxChargingVoltage", ignoreCase = true)) {
-                    val v = extractLongValue(trimLine)
-                    if (v != null && v > 0 && maxChargingVoltageMicrovolts == null) maxChargingVoltageMicrovolts = v
-                }
-                if (trimLine.contains("batteryStatus", ignoreCase = true) || trimLine.contains("battery_status", ignoreCase = true)) {
-                    if (batteryStatus == null) batteryStatus = extractStringValue(trimLine)
-                }
-                if (trimLine.contains("batteryHealth", ignoreCase = true) || trimLine.contains("battery_health", ignoreCase = true)) {
-                    if (batteryHealth == null) batteryHealth = extractStringValue(trimLine)
-                }
-                if (trimLine.contains("batteryLevel", ignoreCase = true) || trimLine.contains("battery_level", ignoreCase = true)) {
-                    val v = extractIntValue(trimLine)
-                    if (v != null && v in 0..100 && batteryLevel == null) batteryLevel = v
-                }
-                if (trimLine.contains("batteryTechnology", ignoreCase = true) || trimLine.contains("battery_technology", ignoreCase = true)) {
-                    val tech = extractStringValue(trimLine)
-                    if (tech.isNotEmpty() && batteryTechnology == null) batteryTechnology = tech
-                }
-                if (trimLine.contains("batteryVoltageMillivolts", ignoreCase = true) || trimLine.contains("batteryVoltage", ignoreCase = true) || trimLine.contains("battery_voltage", ignoreCase = true)) {
-                    val v = extractLongValue(trimLine)
-                    if (v != null && batteryVoltageMillivolts == null) batteryVoltageMillivolts = v
-                }
-                if (trimLine.contains("batteryTemperatureTenthsCelsius", ignoreCase = true) || trimLine.contains("batteryTemperature", ignoreCase = true) || trimLine.contains("battery_temperature", ignoreCase = true)) {
-                    val v = extractFloatValue(trimLine)
-                    if (v != null && v > 0 && batteryTemperatureTenthsCelsius == null) batteryTemperatureTenthsCelsius = v
-                }
-                if (trimLine.contains("batteryCycleCount", ignoreCase = true) || trimLine.contains("battery_cycle_count", ignoreCase = true)) {
-                    val v = extractIntValue(trimLine)
-                    if (v != null && v > 0 && batteryCycleCount == null) batteryCycleCount = v
-                }
-                if (trimLine.contains("batteryFullChargeUah", ignoreCase = true) || trimLine.contains("batteryFullChargeCapacityUah", ignoreCase = true) || trimLine.contains("batteryFullCharge", ignoreCase = true) || trimLine.contains("battery_full_charge", ignoreCase = true)) {
-                    val v = extractLongValue(trimLine)
-                    if (v != null && v > 0 && batteryFullChargeUah == null) batteryFullChargeUah = v
-                }
-                if (trimLine.contains("batteryChargeTimeToFullNowSeconds", ignoreCase = true) || trimLine.contains("batteryChargeTimeToFullNow", ignoreCase = true)) {
-                    val v = extractLongValue(trimLine)
-                    if (v != null && batteryChargeTimeToFullNowSeconds == null) batteryChargeTimeToFullNowSeconds = v
-                }
-                if (trimLine.contains("batteryFullChargeDesignCapacityUah", ignoreCase = true) || trimLine.contains("battery_design_capacity", ignoreCase = true) || trimLine.contains("batteryFullChargeDesign", ignoreCase = true)) {
-                    val v = extractLongValue(trimLine)
-                    if (v != null && v > 0 && batteryFullChargeDesignCapacityUah == null) batteryFullChargeDesignCapacityUah = v
+            // 2.9 充满电容量 (FCC)
+            if (trimLine.contains("batteryFullChargeUah", ignoreCase = true) || 
+                trimLine.contains("batteryFullChargeCapacityUah", ignoreCase = true) || 
+                trimLine.contains("batteryFullCharge", ignoreCase = true) || 
+                trimLine.contains("battery_full_charge", ignoreCase = true) || 
+                trimLine.startsWith("Learned battery capacity:", ignoreCase = true) || 
+                trimLine.startsWith("mLearnedCap:", ignoreCase = true) || 
+                trimLine.startsWith("Min learned battery capacity:", ignoreCase = true)) {
+                val v = extractLongValue(trimLine)
+                if (v != null && v > 0 && batteryFullChargeUah == null) {
+                    batteryFullChargeUah = if (v < 100000) v * 1000 else v
                 }
             }
 
-            // 2. DUMP OF SERVICE battery 段落补充
-            if (trimLine.startsWith("DUMP OF SERVICE battery:")) {
-                currentSection = "battery"
-                hasFoundBatterySection = true
-                if (rawLinesList.isEmpty()) rawLinesList.add(curLine)
-            } else if (trimLine.startsWith("DUMP OF SERVICE batterystats:")) {
-                currentSection = "batterystats"
-            } else if (trimLine.startsWith("DUMP OF SERVICE") || trimLine.startsWith("------ ")) {
-                if (!trimLine.contains("battery") && !trimLine.contains("Health")) {
-                    currentSection = ""
+            // 2.10 设计容量
+            if (trimLine.contains("batteryFullChargeDesignCapacityUah", ignoreCase = true) || 
+                trimLine.contains("battery_design_capacity", ignoreCase = true) || 
+                trimLine.contains("batteryFullChargeDesign", ignoreCase = true) || 
+                trimLine.startsWith("Estimated battery capacity:", ignoreCase = true) || 
+                (trimLine.startsWith("Capacity:", ignoreCase = true) && !trimLine.contains("level", ignoreCase = true))) {
+                val v = extractLongValue(trimLine)
+                if (v != null && v > 0 && batteryFullChargeDesignCapacityUah == null) {
+                    batteryFullChargeDesignCapacityUah = if (v < 100000) v * 1000 else v
                 }
             }
 
-            if (currentSection == "battery") {
-                if (rawLinesList.size < 40) rawLinesList.add(curLine)
-                if (trimLine.startsWith("AC powered:") && chargerAcOnline == null) chargerAcOnline = trimLine.substringAfter(":").trim().toBooleanStrictOrNull()
-                if (trimLine.startsWith("USB powered:") && chargerUsbOnline == null) chargerUsbOnline = trimLine.substringAfter(":").trim().toBooleanStrictOrNull()
-                if (trimLine.startsWith("Wireless powered:") && chargerWirelessOnline == null) chargerWirelessOnline = trimLine.substringAfter(":").trim().toBooleanStrictOrNull()
-                if (trimLine.startsWith("Dock powered:") && chargerDockOnline == null) chargerDockOnline = trimLine.substringAfter(":").trim().toBooleanStrictOrNull()
-                if (trimLine.startsWith("Max charging current:") && maxChargingCurrentMicroamps == null) maxChargingCurrentMicroamps = trimLine.substringAfter(":").trim().toLongOrNull()
-                if (trimLine.startsWith("Max charging voltage:") && maxChargingVoltageMicrovolts == null) maxChargingVoltageMicrovolts = trimLine.substringAfter(":").trim().toLongOrNull()
-                if (trimLine.startsWith("level:") && batteryLevel == null) batteryLevel = trimLine.substringAfter(":").trim().toIntOrNull()
-                if (trimLine.startsWith("voltage:") && batteryVoltageMillivolts == null) batteryVoltageMillivolts = trimLine.substringAfter(":").trim().toLongOrNull()
-                if (trimLine.startsWith("temperature:") && batteryTemperatureTenthsCelsius == null) batteryTemperatureTenthsCelsius = trimLine.substringAfter(":").trim().toFloatOrNull()
-                if (trimLine.startsWith("status:") && batteryStatus == null) batteryStatus = trimLine.substringAfter(":").trim()
-                if (trimLine.startsWith("health:") && batteryHealth == null) batteryHealth = trimLine.substringAfter(":").trim()
-                if (trimLine.startsWith("technology:") && batteryTechnology == null) batteryTechnology = trimLine.substringAfter(":").trim()
-                if ((trimLine.contains("cycle count:") || trimLine.contains("mCycleCount:")) && batteryCycleCount == null) batteryCycleCount = trimLine.substringAfter(":").trim().toIntOrNull()
-            }
-
-            if (currentSection == "batterystats") {
-                if ((trimLine.startsWith("Estimated battery capacity:") || trimLine.startsWith("Capacity:")) && batteryFullChargeDesignCapacityUah == null) {
-                    val raw = trimLine.substringAfter(":").replace("mAh", "").trim().toLongOrNull()
-                    if (raw != null && raw > 0) batteryFullChargeDesignCapacityUah = if (raw < 100000) raw * 1000 else raw
-                }
-                if ((trimLine.startsWith("Learned battery capacity:") || trimLine.startsWith("mLearnedCap:")) && batteryFullChargeUah == null) {
-                    val raw = trimLine.substringAfter(":").replace("mAh", "").trim().toLongOrNull()
-                    if (raw != null && raw > 0) batteryFullChargeUah = if (raw < 100000) raw * 1000 else raw
-                }
-            }
-
-            if (trimLine.contains("android.os.extra.CYCLE_COUNT=") && batteryCycleCount == null) {
-                val match = Regex("(?i)android\\.os\\.extra\\.CYCLE_COUNT=(\\d+)").find(trimLine)
-                if (match != null) batteryCycleCount = match.groupValues[1].toIntOrNull()
+            // 2.11 预计充满时间
+            if (trimLine.contains("batteryChargeTimeToFullNowSeconds", ignoreCase = true) || 
+                trimLine.contains("batteryChargeTimeToFullNow", ignoreCase = true) || 
+                trimLine.contains("chargeTimeToFullNow", ignoreCase = true)) {
+                val v = extractLongValue(trimLine)
+                if (v != null && batteryChargeTimeToFullNowSeconds == null) batteryChargeTimeToFullNowSeconds = v
             }
         }
 
-        // 3. 构建用户指定的精确精简表格条目列表
+        // 3. 构建用户指定的 14 项完整表格条目
         val tableItems = mutableListOf<HealthInfoItem>()
 
         // 1. 🔌 充电方式
@@ -360,7 +337,7 @@ class BugreportParser {
             chargerWirelessOnline == true -> "无线充电"
             chargerAcOnline == true -> "AC 适配器"
             chargerDockOnline == true -> "Dock 底座"
-            else -> "未连接"
+            else -> if (batteryStatus?.contains("CHARGING", ignoreCase = true) == true || batteryStatus == "2") "USB" else "未连接"
         }
         val chargeMethodDesc = when (chargeMethod) {
             "USB" -> "USB 充电"
@@ -378,7 +355,8 @@ class BugreportParser {
             batteryStatus?.contains("NOT_CHARGING", ignoreCase = true) == true || batteryStatus == "4" -> "Not Charging"
             batteryStatus?.contains("FULL", ignoreCase = true) == true || batteryStatus == "5" -> "Full"
             batteryStatus == "2" -> "Charging"
-            else -> batteryStatus ?: "未知"
+            chargerUsbOnline == true || chargerAcOnline == true -> "Charging"
+            else -> "Discharging"
         }
         val statusDesc = when (statusVal) {
             "Charging" -> "正在充电"
@@ -390,63 +368,68 @@ class BugreportParser {
         tableItems.add(HealthInfoItem("⚡ 充电状态", statusVal, statusDesc))
 
         // 3. 🔋 电量
-        if (batteryLevel != null) {
-            tableItems.add(HealthInfoItem("🔋 电量", "$batteryLevel%", "当前剩余电量"))
-        }
+        val levelDisplay = if (batteryLevel != null) "$batteryLevel%" else "未知"
+        tableItems.add(HealthInfoItem("🔋 电量", levelDisplay, "当前剩余电量"))
 
         // 4. 🔋 电池电压
-        if (batteryVoltageMillivolts != null) {
+        val voltDisplay = if (batteryVoltageMillivolts != null) {
             val mv = when {
                 batteryVoltageMillivolts in 2500..9500 -> batteryVoltageMillivolts.toFloat()
                 batteryVoltageMillivolts in 2500000..9500000 -> batteryVoltageMillivolts / 1000f
                 batteryVoltageMillivolts > 9500 -> batteryVoltageMillivolts / 1000f
                 else -> batteryVoltageMillivolts.toFloat()
             }
-            tableItems.add(HealthInfoItem("🔋 电池电压", String.format("%.3f V", mv / 1000f), "当前电池端电压"))
-        }
+            String.format("%.3f V", mv / 1000f)
+        } else "未知"
+        tableItems.add(HealthInfoItem("🔋 电池电压", voltDisplay, "当前电池端电压"))
 
         // 5. 🌡️ 电池温度
-        if (batteryTemperatureTenthsCelsius != null) {
+        val tempDisplay = if (batteryTemperatureTenthsCelsius != null) {
             val degC = if (batteryTemperatureTenthsCelsius > 200) batteryTemperatureTenthsCelsius / 10f else batteryTemperatureTenthsCelsius
-            tableItems.add(HealthInfoItem("🌡️ 电池温度", String.format("%.1f℃", degC), "当前温度"))
-        }
+            String.format("%.1f℃", degC)
+        } else "未知"
+        tableItems.add(HealthInfoItem("🌡️ 电池温度", tempDisplay, "当前温度"))
 
         // 6. 🔄 循环次数
-        if (batteryCycleCount != null) {
-            tableItems.add(HealthInfoItem("🔄 循环次数", "$batteryCycleCount", "等效完整循环"))
-        }
+        val cycleDisplay = if (batteryCycleCount != null) "$batteryCycleCount" else "未知"
+        tableItems.add(HealthInfoItem("🔄 循环次数", cycleDisplay, "等效完整循环"))
 
         // 7. 🔋 设计容量
-        if (batteryFullChargeDesignCapacityUah != null) {
-            val mah = if (batteryFullChargeDesignCapacityUah < 100000) batteryFullChargeDesignCapacityUah else batteryFullChargeDesignCapacityUah / 1000
-            tableItems.add(HealthInfoItem("🔋 设计容量", "$mah mAh", "出厂设计容量"))
-        }
+        val designDisplay = if (batteryFullChargeDesignCapacityUah != null) {
+            val mah = batteryFullChargeDesignCapacityUah / 1000
+            "$mah mAh"
+        } else "未知"
+        tableItems.add(HealthInfoItem("🔋 设计容量", designDisplay, "出厂设计容量"))
 
         // 8. 🔋 当前满充容量
-        if (batteryFullChargeUah != null) {
-            val mah = if (batteryFullChargeUah < 100000) batteryFullChargeUah else batteryFullChargeUah / 1000
-            tableItems.add(HealthInfoItem("🔋 当前满充容量", "$mah mAh", "电量计估算 FCC"))
-        }
+        val fccDisplay = if (batteryFullChargeUah != null) {
+            val mah = batteryFullChargeUah / 1000
+            "$mah mAh"
+        } else "未知"
+        tableItems.add(HealthInfoItem("🔋 当前满充容量", fccDisplay, "电量计估算 FCC"))
 
         // 9. ❤️ 理论容量健康度
-        if (batteryFullChargeUah != null && batteryFullChargeDesignCapacityUah != null && batteryFullChargeDesignCapacityUah > 0) {
-            val fMah = if (batteryFullChargeUah < 100000) batteryFullChargeUah.toFloat() else batteryFullChargeUah / 1000f
-            val dMah = if (batteryFullChargeDesignCapacityUah < 100000) batteryFullChargeDesignCapacityUah.toFloat() else batteryFullChargeDesignCapacityUah / 1000f
+        val healthDisplay = if (batteryFullChargeUah != null && batteryFullChargeDesignCapacityUah != null && batteryFullChargeDesignCapacityUah > 0) {
+            val fMah = batteryFullChargeUah / 1000f
+            val dMah = batteryFullChargeDesignCapacityUah / 1000f
             val healthPercent = (fMah / dMah) * 100f
-            tableItems.add(HealthInfoItem("❤️ 理论容量健康度", String.format("%.1f%%", healthPercent), "FCC / Design Capacity"))
-        }
+            String.format("%.1f%%", healthPercent)
+        } else "未知"
+        tableItems.add(HealthInfoItem("❤️ 理论容量健康度", healthDisplay, "FCC / Design Capacity"))
 
         // 10. ⚡ 最大充电电流
-        if (maxChargingCurrentMicroamps != null) {
-            val ma = maxChargingCurrentMicroamps / 1000
-            tableItems.add(HealthInfoItem("⚡ 最大充电电流", "$ma mA", "系统报告值"))
-        }
+        val maxCurDisplay = if (maxChargingCurrentMicroamps != null) {
+            val ma = if (maxChargingCurrentMicroamps >= 1000) maxChargingCurrentMicroamps / 1000 else maxChargingCurrentMicroamps
+            "$ma mA"
+        } else "未知"
+        tableItems.add(HealthInfoItem("⚡ 最大充电电流", maxCurDisplay, "系统报告值"))
 
         // 11. ⚡ 最大充电电压
-        if (maxChargingVoltageMicrovolts != null) {
-            val v = (maxChargingVoltageMicrovolts / 1000000f).toInt()
-            tableItems.add(HealthInfoItem("⚡ 最大充电电压", "$v V", "系统报告值"))
-        }
+        val maxVoltDisplay = if (maxChargingVoltageMicrovolts != null) {
+            val v = if (maxChargingVoltageMicrovolts >= 1000000) (maxChargingVoltageMicrovolts / 1000000f).toInt() else if (maxChargingVoltageMicrovolts >= 1000) (maxChargingVoltageMicrovolts / 1000f).toInt() else maxChargingVoltageMicrovolts.toInt()
+            "$v V"
+        } else "未知"
+        tableItems.add(HealthInfoItem("⚡ 最大充电电压", maxVoltDisplay, "系统报告值"))
 
         // 12. ⏱️ 预计充满时间
         val timeDisplay = if (batteryChargeTimeToFullNowSeconds == null || batteryChargeTimeToFullNowSeconds < 0) {
@@ -459,41 +442,68 @@ class BugreportParser {
         tableItems.add(HealthInfoItem("⏱️ 预计充满时间", timeDisplay, timeDesc))
 
         // 13. 🔋 电池类型
-        if (batteryTechnology != null) {
-            tableItems.add(HealthInfoItem("🔋 电池类型", batteryTechnology, "锂离子"))
-        }
+        val techDisplay = batteryTechnology ?: "Li-ion"
+        tableItems.add(HealthInfoItem("🔋 电池类型", techDisplay, "锂离子"))
 
         // 14. 🩺 电池健康
-        if (batteryHealth != null) {
-            val hVal = if (batteryHealth.contains("GOOD", ignoreCase = true) || batteryHealth == "2") "GOOD" else batteryHealth
-            tableItems.add(HealthInfoItem("🩺 电池健康", hVal, "Android 判断正常"))
+        val healthStatusVal = when {
+            batteryHealth?.contains("GOOD", ignoreCase = true) == true || batteryHealth == "2" -> "GOOD"
+            batteryHealth?.contains("OVERHEAT", ignoreCase = true) == true || batteryHealth == "3" -> "OVERHEAT (过热)"
+            batteryHealth?.contains("DEAD", ignoreCase = true) == true || batteryHealth == "4" -> "DEAD (损坏)"
+            batteryHealth?.contains("OVER_VOLTAGE", ignoreCase = true) == true || batteryHealth == "5" -> "OVER_VOLTAGE (电压过高)"
+            batteryHealth?.contains("COLD", ignoreCase = true) == true || batteryHealth == "7" -> "COLD (过冷)"
+            else -> batteryHealth ?: "GOOD"
+        }
+        tableItems.add(HealthInfoItem("🩺 电池健康", healthStatusVal, "Android 判断正常"))
+
+        val rawText = if (rawLinesList.isNotEmpty()) {
+            rawLinesList.joinToString("\n").trim()
+        } else {
+            buildSynthesizedRawLog(tableItems)
         }
 
-        val rawText = rawLinesList.joinToString("\n").trim()
-
-        Log.d(TAG, "===> 目标表格项数量: ${tableItems.size}, 原始数据文本行数: ${rawLinesList.size}")
+        Log.d(TAG, "===> 全量 14 项表格数据构建完毕，原始文本行数: ${rawLinesList.size}")
 
         return BugreportResult(tableItems, rawText)
+    }
+
+    private fun buildSynthesizedRawLog(items: List<HealthInfoItem>): String {
+        val sb = StringBuilder()
+        sb.append("Health HAL - getHealthInfo (Parsed Snapshot):\n")
+        for (item in items) {
+            sb.append("  ").append(item.itemTitle).append(": ").append(item.currentValue).append(" (").append(item.description).append(")\n")
+        }
+        return sb.toString().trim()
+    }
+
+    private fun parseBooleanValue(line: String): Boolean? {
+        val clean = line.replace(",", "").replace(";", "").lowercase()
+        val raw = if (clean.contains("=")) clean.substringAfter("=").trim() else clean.substringAfter(":").trim()
+        return when {
+            raw.startsWith("true") || raw.startsWith("1") -> true
+            raw.startsWith("false") || raw.startsWith("0") -> false
+            else -> null
+        }
     }
 
     private fun extractLongValue(line: String): Long? {
         val clean = line.replace(",", "").replace(";", "")
         val raw = if (clean.contains("=")) clean.substringAfter("=").trim() else clean.substringAfter(":").trim()
-        val numStr = raw.split(" ")[0].trim()
+        val numStr = raw.replace("mAh", "").replace("uAh", "").replace("mV", "").trim().split(" ")[0].trim()
         return numStr.toLongOrNull()
     }
 
     private fun extractIntValue(line: String): Int? {
         val clean = line.replace(",", "").replace(";", "")
         val raw = if (clean.contains("=")) clean.substringAfter("=").trim() else clean.substringAfter(":").trim()
-        val numStr = raw.split(" ")[0].trim()
+        val numStr = raw.replace("%", "").trim().split(" ")[0].trim()
         return numStr.toIntOrNull()
     }
 
     private fun extractFloatValue(line: String): Float? {
         val clean = line.replace(",", "").replace(";", "")
         val raw = if (clean.contains("=")) clean.substringAfter("=").trim() else clean.substringAfter(":").trim()
-        val numStr = raw.split(" ")[0].trim()
+        val numStr = raw.replace("C", "").trim().split(" ")[0].trim()
         return numStr.toFloatOrNull()
     }
 

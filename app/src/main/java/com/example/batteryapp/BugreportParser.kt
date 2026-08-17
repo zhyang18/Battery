@@ -249,6 +249,7 @@ class BugreportParser {
         var batteryTemperature: Float? = null
 
         var batteryCycleCount: Int? = null
+        var batteryChargeCounter: Long? = null
         var batteryFullCharge: Long? = null
         var batteryFullChargeDesign: Long? = null
         var batteryChargeTimeToFullNow: Long? = null
@@ -293,6 +294,7 @@ class BugreportParser {
                 map["batteryTemperatureTenthsCelsius"]?.toFloatOrNull()?.let { batteryTemperature = it }
 
                 map["batteryCycleCount"]?.toIntOrNull()?.let { batteryCycleCount = it }
+                map["batteryChargeCounterUah"]?.toLongOrNull()?.let { batteryChargeCounter = it }
                 map["batteryFullChargeUah"]?.toLongOrNull()?.let { batteryFullCharge = it }
                 map["batteryFullChargeDesignCapacityUah"]?.toLongOrNull()?.let { batteryFullChargeDesign = it }
                 map["batteryChargeTimeToFullNowSeconds"]?.toLongOrNull()?.let { batteryChargeTimeToFullNow = it }
@@ -343,6 +345,10 @@ class BugreportParser {
                 val longV = v?.toLongOrNull() ?: extractLongValue(trimLine)
                 if (longV != null && batteryCurrent == null) batteryCurrent = longV
             }
+            if (trimLine.contains("charge counter:", ignoreCase = true) || trimLine.contains("batteryChargeCounter", ignoreCase = true)) {
+                val v = extractInlineValue(trimLine, "charge counter:")?.toLongOrNull() ?: extractLongValue(trimLine)
+                if (v != null && batteryChargeCounter == null) batteryChargeCounter = v
+            }
             if (trimLine.contains("temp:", ignoreCase = true) || trimLine.contains("temperature", ignoreCase = true)) {
                 val v = extractInlineValue(trimLine, "temp:")?.toFloatOrNull() ?: extractFloatValue(trimLine)
                 if (v != null && v > 0 && batteryTemperature == null) batteryTemperature = v
@@ -362,7 +368,7 @@ class BugreportParser {
             }
         }
 
-        // 3. 构建 12 项表格
+        // 3. 构建 13 项表格
         val tableItems = mutableListOf<HealthInfoItem>()
 
         // 1. ⚡ 充电状态
@@ -385,7 +391,8 @@ class BugreportParser {
         tableItems.add(HealthInfoItem("⚡ 充电状态", statusVal, statusDesc))
 
         // 2. 🔋 电量
-        val levelDisplay = if (batteryLevel != null) "$batteryLevel%" else "未知"
+        val levelVal = batteryLevel
+        val levelDisplay = if (levelVal != null) "$levelVal%" else "未知"
         tableItems.add(HealthInfoItem("🔋 电量", levelDisplay, "当前剩余电量"))
 
         // 3. 🔋 电池电压
@@ -423,7 +430,7 @@ class BugreportParser {
         } else "未知"
         tableItems.add(HealthInfoItem("⚡ 电池功率", powerDisplay, "电池瞬时工作功率"))
 
-        // 4. 🌡️ 电池温度
+        // 6. 🌡️ 电池温度
         val tempVal = batteryTemperature
         val tempDisplay = if (tempVal != null) {
             val degC = if (tempVal > 200f) tempVal / 10f else tempVal
@@ -431,11 +438,11 @@ class BugreportParser {
         } else "未知"
         tableItems.add(HealthInfoItem("🌡️ 电池温度", tempDisplay, "当前温度"))
 
-        // 5. 🔄 循环次数
+        // 7. 🔄 循环次数
         val cycleDisplay = if (batteryCycleCount != null) "$batteryCycleCount" else "未知"
         tableItems.add(HealthInfoItem("🔄 循环次数", cycleDisplay, "等效完整循环"))
 
-        // 6. 🔋 设计容量
+        // 8. 🔋 设计容量
         val designVal = batteryFullChargeDesign
         val designDisplay = if (designVal != null) {
             val mah = if (designVal < 100000L) designVal else designVal / 1000L
@@ -443,15 +450,31 @@ class BugreportParser {
         } else "未知"
         tableItems.add(HealthInfoItem("🔋 设计容量", designDisplay, "出厂设计容量"))
 
-        // 7. 🔋 当前满充容量
+        // 9. 🔋 当前容量
+        val chargeVal = batteryChargeCounter
         val fccVal = batteryFullCharge
+        val chargeDisplay = when {
+            chargeVal != null -> {
+                val mah = if (chargeVal >= 100000L) chargeVal / 1000L else chargeVal
+                "$mah mAh"
+            }
+            fccVal != null && levelVal != null -> {
+                val fMah = if (fccVal < 100000L) fccVal else fccVal / 1000L
+                val mah = (fMah * levelVal) / 100L
+                "$mah mAh"
+            }
+            else -> "未知"
+        }
+        tableItems.add(HealthInfoItem("🔋 当前容量", chargeDisplay, "当前剩余容量"))
+
+        // 10. 🔋 当前满充容量
         val fccDisplay = if (fccVal != null) {
             val mah = if (fccVal < 100000L) fccVal else fccVal / 1000L
             "$mah mAh"
         } else "未知"
         tableItems.add(HealthInfoItem("🔋 当前满充容量", fccDisplay, "电量计估算 FCC"))
 
-        // 8. ❤️ 理论容量健康度
+        // 11. ❤️ 理论容量健康度
         val healthDisplay = if (fccVal != null && designVal != null && designVal > 0L) {
             val fMah = if (fccVal < 100000L) fccVal.toFloat() else fccVal / 1000f
             val dMah = if (designVal < 100000L) designVal.toFloat() else designVal / 1000f

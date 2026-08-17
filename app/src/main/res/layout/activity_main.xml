@@ -140,7 +140,7 @@
                     android:layout_marginVertical="16dp"
                     android:background="#33888888" />
 
-                <!-- 2. 下部：错误报告数据模块 (Bugreport) -->
+                <!-- 2. 下部：错误报告数据模块 (getHealthInfo 表格解析) -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -158,7 +158,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="【错误报告数据 (Bugreport)】"
+                            android:text="【错误报告 getHealthInfo 解析】"
                             android:textColor="#FF9800"
                             android:textSize="14sp"
                             android:textStyle="bold" />
@@ -174,13 +174,29 @@
                     </LinearLayout>
 
                     <TextView
-                        android:id="@+id/tv_bugreport_info"
+                        android:id="@+id/tv_bugreport_status"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:lineSpacingExtra="4dp"
-                        android:text="未导入错误报告日志。点击上方【导入报告】选择 bugreport.zip 或 .txt 文件进行离线解析。"
+                        android:layout_marginBottom="8dp"
+                        android:text="未导入错误报告日志。点击上方【导入报告】选择 bugreport.zip 或 .txt 解析底层 getHealthInfo 数据。"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="13sp" />
+
+                    <!-- 三列表格展示容器（支持横向滑动以防小屏幕挤压） -->
+                    <HorizontalScrollView
+                        android:id="@+id/scroll_health_table"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone">
+
+                        <TableLayout
+                            android:id="@+id/table_health_info"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingVertical="4dp">
+                            <!-- 代码动态渲染表格行 -->
+                        </TableLayout>
+                    </HorizontalScrollView>
                 </LinearLayout>
 
             </LinearLayout>

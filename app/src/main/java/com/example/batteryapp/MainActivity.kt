@@ -394,28 +394,112 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 异步导入并解析用户选中的系统错误报告（Bugreport）日志。
+     * 异步导入并解析用户选中的系统错误报告（Bugreport）日志中的 getHealthInfo 结构体。
      *
      * @param uri 选中的错误报告文件 URI
      */
     private fun importAndParseBugreport(uri: Uri) {
-        binding.tvBugreportInfo.text = "正在流式解析错误报告...\n请稍候..."
+        binding.tvBugreportStatus.visibility = android.view.View.VISIBLE
+        binding.tvBugreportStatus.text = "正在流式解析 getHealthInfo 数据，请稍候..."
+        binding.scrollHealthTable.visibility = android.view.View.GONE
+
         lifecycleScope.launch(Dispatchers.IO) {
-            val bugreportInfo = BugreportParser().parseFromUri(this@MainActivity, uri)
+            val healthItems = BugreportParser().parseHealthInfoTable(this@MainActivity, uri)
             withContext(Dispatchers.Main) {
-                if (bugreportInfo != null) {
-                    val displayText = bugreportInfo.formatToString()
-                        .lines()
-                        .filterNot { it.startsWith("数据来源:") }
-                        .joinToString("\n")
-                    binding.tvBugreportInfo.text = displayText
+                if (healthItems.isNotEmpty()) {
+                    renderHealthInfoTable(healthItems)
                     binding.btnImportBugreport.text = "重新导入"
-                    Toast.makeText(this@MainActivity, "错误报告解析成功", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "成功解析 getHealthInfo 结构体", Toast.LENGTH_SHORT).show()
                 } else {
-                    binding.tvBugreportInfo.text = "未能从该文件中提取到电池数据\n请确保导入的是完整的 bugreport 日志"
-                    Toast.makeText(this@MainActivity, "解析失败，未找到电池数据", Toast.LENGTH_SHORT).show()
+                    binding.tvBugreportStatus.visibility = android.view.View.VISIBLE
+                    binding.tvBugreportStatus.text = "未能从该错误报告中解析出 getHealthInfo 数据，请确保是完整的 bugreport 日志"
+                    binding.scrollHealthTable.visibility = android.view.View.GONE
+                    Toast.makeText(this@MainActivity, "解析失败，未找到 getHealthInfo", Toast.LENGTH_SHORT).show()
                 }
             }
         }
+    }
+
+    /**
+     * 将解析出的 getHealthInfo 列表动态渲染为三列表格（原始字段、字段映射展示、含义）。
+     *
+     * @param items 解析出的 HealthInfoItem 列表
+     */
+    private fun renderHealthInfoTable(items: List<HealthInfoItem>) {
+        binding.tableHealthInfo.removeAllViews()
+
+        if (items.isEmpty()) {
+            binding.scrollHealthTable.visibility = android.view.View.GONE
+            binding.tvBugreportStatus.visibility = android.view.View.VISIBLE
+            binding.tvBugreportStatus.text = "未能解析出 getHealthInfo 字段"
+            return
+        }
+
+        binding.tvBugreportStatus.visibility = android.view.View.GONE
+        binding.scrollHealthTable.visibility = android.view.View.VISIBLE
+
+        // 1. 添加三列表头行（原始字段、字段映射展示、含义）
+        val headerRow = android.widget.TableRow(this)
+        headerRow.setBackgroundColor(android.graphics.Color.parseColor("#25888888"))
+        headerRow.setPadding(4, 8, 4, 8)
+
+        val thRaw = createTableCell("原始字段", isHeader = true, textColor = android.graphics.Color.parseColor("#FF9800"))
+        val thVal = createTableCell("字段映射展示", isHeader = true, textColor = android.graphics.Color.parseColor("#4CAF50"))
+        val thMean = createTableCell("含义", isHeader = true, textColor = android.graphics.Color.parseColor("#2196F3"))
+
+        headerRow.addView(thRaw)
+        headerRow.addView(thVal)
+        headerRow.addView(thMean)
+        binding.tableHealthInfo.addView(headerRow)
+
+        // 2. 逐项添加数据行
+        for ((index, item) in items.withIndex()) {
+            val row = android.widget.TableRow(this)
+            if (index % 2 == 1) {
+                row.setBackgroundColor(android.graphics.Color.parseColor("#15888888"))
+            }
+            row.setPadding(4, 6, 4, 6)
+
+            val tdRaw = createTableCell(item.rawField, isHeader = false)
+            val tdVal = createTableCell(item.displayValue, isHeader = false, isBold = true)
+            val tdMean = createTableCell(item.meaning, isHeader = false)
+
+            row.addView(tdRaw)
+            row.addView(tdVal)
+            row.addView(tdMean)
+            binding.tableHealthInfo.addView(row)
+        }
+    }
+
+    /**
+     * 创建表格单元格 TextView 视图。
+     *
+     * @param text 单元格显示的文本
+     * @param isHeader 是否为表头
+     * @param textColor 自定义文字颜色（可选）
+     * @param isBold 是否加粗展示
+     * @return 格式化后的 TextView 视图组件
+     */
+    private fun createTableCell(
+        text: String,
+        isHeader: Boolean = false,
+        textColor: Int? = null,
+        isBold: Boolean = false
+    ): android.widget.TextView {
+        val tv = android.widget.TextView(this)
+        tv.text = text
+        tv.setPadding(14, 12, 14, 12)
+        tv.textSize = if (isHeader) 13f else 12f
+        if (textColor != null) {
+            tv.setTextColor(textColor)
+        } else {
+            val typedValue = android.util.TypedValue()
+            theme.resolveAttribute(android.R.attr.textColorPrimary, typedValue, true)
+            tv.setTextColor(typedValue.data)
+        }
+        if (isHeader || isBold) {
+            tv.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
+        return tv
     }
 }

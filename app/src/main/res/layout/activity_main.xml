@@ -10,13 +10,13 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:padding="12dp">
 
         <!-- 自定义顶部标题栏（替代原生 Toolbar） -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
+            android:layout_marginBottom="8dp"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
@@ -54,7 +54,7 @@
                 android:src="@drawable/ic_settings" />
         </LinearLayout>
 
-        <!-- 主体双列数据展示区 -->
+        <!-- 主体三列数据展示区 -->
         <ScrollView
             android:layout_width="match_parent"
             android:layout_height="match_parent"
@@ -65,64 +65,109 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal">
 
-                <!-- 左列：系统基础 API 数据 -->
+                <!-- 第 1 列：系统基础 API 数据 -->
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:orientation="vertical"
-                    android:paddingEnd="6dp">
+                    android:paddingEnd="4dp">
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginBottom="8dp"
+                        android:layout_marginBottom="6dp"
                         android:gravity="center"
-                        android:text="【系统 API 数据】"
+                        android:text="【系统 API】"
                         android:textColor="#2196F3"
-                        android:textSize="14sp"
+                        android:textSize="13sp"
                         android:textStyle="bold" />
 
                     <TextView
                         android:id="@+id/tv_normal_info"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:lineSpacingExtra="4dp"
+                        android:lineSpacingExtra="3dp"
                         android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="13sp" />
+                        android:textSize="12sp" />
                 </LinearLayout>
 
-                <!-- 中间分割线 -->
+                <!-- 中间分割线 1 -->
                 <View
                     android:layout_width="1dp"
                     android:layout_height="match_parent"
                     android:background="#33888888" />
 
-                <!-- 右列：底层 Shizuku 数据 -->
+                <!-- 第 2 列：底层 Shizuku 数据 -->
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:orientation="vertical"
-                    android:paddingStart="6dp">
+                    android:paddingHorizontal="4dp">
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginBottom="8dp"
+                        android:layout_marginBottom="6dp"
                         android:gravity="center"
-                        android:text="【Shizuku 数据】"
+                        android:text="【Shizuku】"
                         android:textColor="#4CAF50"
-                        android:textSize="14sp"
+                        android:textSize="13sp"
                         android:textStyle="bold" />
 
                     <TextView
                         android:id="@+id/tv_shizuku_info"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:lineSpacingExtra="4dp"
+                        android:lineSpacingExtra="3dp"
                         android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="13sp" />
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <!-- 中间分割线 2 -->
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="match_parent"
+                    android:background="#33888888" />
+
+                <!-- 第 3 列：错误报告数据 (Bugreport) -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingStart="4dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="6dp"
+                        android:gravity="center"
+                        android:text="【错误报告】"
+                        android:textColor="#FF9800"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <!-- 导入错误报告日志按钮 -->
+                    <Button
+                        android:id="@+id/btn_import_bugreport"
+                        style="@style/Widget.AppCompat.Button.Colored"
+                        android:layout_width="match_parent"
+                        android:layout_height="36dp"
+                        android:layout_marginBottom="6dp"
+                        android:padding="0dp"
+                        android:text="导入报告"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/tv_bugreport_info"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:lineSpacingExtra="3dp"
+                        android:text="未导入日志\n点击上方按钮选择 bugreport.zip 或 .txt 文件"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12sp" />
                 </LinearLayout>
 
             </LinearLayout>

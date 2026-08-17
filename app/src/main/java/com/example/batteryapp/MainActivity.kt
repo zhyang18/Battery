@@ -3,9 +3,11 @@ package com.example.batteryapp
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
@@ -25,13 +27,22 @@ import rikka.shizuku.Shizuku
 
 /**
  * 应用程序的主活动界面。
- * 负责展示顶部沉浸式标题栏、双列电池数据对比、管理右侧抽屉式设置面板（主题/深色模式、Shizuku授权、实时刷新）及生命周期。
+ * 负责展示顶部沉浸式标题栏、三列电池数据对比（系统API、Shizuku、错误报告导入）、管理右侧抽屉设置及生命周期。
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var prefs: SharedPreferences
     private val SHIZUKU_REQUEST_CODE = 1
+
+    /**
+     * 错误报告文件选择器启动器。
+     */
+    private val openBugreportLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            importAndParseBugreport(uri)
+        }
+    }
 
     /**
      * 实时刷新的后台任务协程引用。
@@ -159,6 +170,11 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+
+        // 错误报告导入按钮事件
+        binding.btnImportBugreport.setOnClickListener {
+            openBugreportLauncher.launch(arrayOf("*/*", "application/zip", "text/plain"))
+        }
 
         // 初始化右侧抽屉设置面板各个功能组件
         setupDrawerSettings()
@@ -373,6 +389,32 @@ class MainActivity : AppCompatActivity() {
                     .lines()
                     .filterNot { it.startsWith("数据来源:") }
                     .joinToString("\n")
+            }
+        }
+    }
+
+    /**
+     * 异步导入并解析用户选中的系统错误报告（Bugreport）日志。
+     *
+     * @param uri 选中的错误报告文件 URI
+     */
+    private fun importAndParseBugreport(uri: Uri) {
+        binding.tvBugreportInfo.text = "正在流式解析错误报告...\n请稍候..."
+        lifecycleScope.launch(Dispatchers.IO) {
+            val bugreportInfo = BugreportParser().parseFromUri(this@MainActivity, uri)
+            withContext(Dispatchers.Main) {
+                if (bugreportInfo != null) {
+                    val displayText = bugreportInfo.formatToString()
+                        .lines()
+                        .filterNot { it.startsWith("数据来源:") }
+                        .joinToString("\n")
+                    binding.tvBugreportInfo.text = displayText
+                    binding.btnImportBugreport.text = "重新导入"
+                    Toast.makeText(this@MainActivity, "错误报告解析成功", Toast.LENGTH_SHORT).show()
+                } else {
+                    binding.tvBugreportInfo.text = "未能从该文件中提取到电池数据\n请确保导入的是完整的 bugreport 日志"
+                    Toast.makeText(this@MainActivity, "解析失败，未找到电池数据", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }

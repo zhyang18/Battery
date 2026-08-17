@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="0.9"
+        android:scaleY="0.9"
+        android:pivotX="54"
+        android:pivotY="54">
+        
+        <!-- 电池顶部电极极耳 -->
+        <path
+            android:pathData="M48,27 h12 a2,2 0 0,1 2,2 v3 h-16 v-3 a2,2 0 0,1 2,-2 z"
+            android:fillColor="#80D8FF" />
+
+        <!-- 电池主体外框 -->
+        <path
+            android:pathData="M38,32 h32 a6,6 0 0,1 6,6 v40 a6,6 0 0,1 -6,6 h-32 a6,6 0 0,1 -6,-6 v-40 a6,6 0 0,1 6,-6 z"
+            android:strokeWidth="3.5"
+            android:strokeColor="#FFFFFF"
+            android:fillColor="#3300E5FF" />
+
+        <!-- 电池内部能量渐变波纹 -->
+        <path
+            android:pathData="M37,50 h34 v27 a4,4 0 0,1 -4,4 h-26 a4,4 0 0,1 -4,-4 z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:startX="54"
+                    android:startY="50"
+                    android:endX="54"
+                    android:endY="81"
+                    android:type="linear">
+                    <item android:offset="0.0" android:color="#00E676" />
+                    <item android:offset="1.0" android:color="#00B0FF" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- 电池中间的闪电符号 -->
+        <path
+            android:pathData="M56,38 L44,56 L53,56 L50,72 L64,52 L55,52 Z"
+            android:fillColor="#FFD600"
+            android:strokeWidth="1.5"
+            android:strokeColor="#FFF9C4" />
+    </group>
+</vector>

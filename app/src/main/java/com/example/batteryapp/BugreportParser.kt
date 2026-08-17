@@ -50,7 +50,7 @@ class CountingInputStream(
     private fun notifyProgressThrottled() {
         if (totalBytes > 0) {
             val now = System.currentTimeMillis()
-            if (now - lastReportTime > 120L) {
+            if (now - lastReportTime > 150L) {
                 lastReportTime = now
                 val percent = ((bytesRead * 100) / totalBytes).toInt().coerceIn(0, 99)
                 if (percent != lastPercent) {
@@ -67,7 +67,7 @@ class CountingInputStream(
 }
 
 /**
- * 负责解析安卓错误报告（Bugreport）中 getHealthInfo 结构体并输出精简表格与原始数据的解析器。
+ * 负责极速、深度解析安卓错误报告（Bugreport）中 getHealthInfo 结构体的解析器。
  */
 class BugreportParser {
 
@@ -76,7 +76,7 @@ class BugreportParser {
     }
 
     /**
-     * 从选定的文件 URI 流式解析错误报告日志并提取精简表格与原始数据。
+     * 从选定的文件 URI 流式极速解析错误报告日志并提取精简表格与原始数据。
      *
      * @param context 应用程序上下文
      * @param uri 用户选中的错误报告文件 URI
@@ -117,7 +117,7 @@ class BugreportParser {
     }
 
     /**
-     * 从 ZIP 压缩流中寻找并流式解析真正的主错误报告文本文件（过滤 version.txt、metadata.txt 等小文件）。
+     * 从 ZIP 压缩流中寻找并流式解析真正的主错误报告文本文件。
      *
      * @param inputStream 带有进度统计的输入流
      * @return 解析出的 [BugreportResult]
@@ -129,14 +129,14 @@ class BugreportParser {
 
         while (entry != null && coroutineContext.isActive) {
             val name = entry.name.lowercase()
-            val isIgnored = name == "version.txt" || name == "metadata.txt" || name.endsWith(".png") || name.endsWith(".proto") || name.endsWith(".bin") || name.endsWith(".xml")
+            val isIgnored = name == "version.txt" || name == "metadata.txt" || name.endsWith(".png") || name.endsWith(".proto") || name.endsWith(".bin") || name.endsWith(".xml") || name.startsWith("fs/")
 
             if (!entry.isDirectory && !isIgnored && name.endsWith(".txt")) {
-                Log.d(TAG, "检查日志条目: ${entry.name} ...")
+                Log.d(TAG, "正在快速扫描主日志条目: ${entry.name} ...")
                 val reader = BufferedReader(InputStreamReader(zipIn, StandardCharsets.UTF_8), 65536)
                 val result = parseFromReader(reader)
                 if (result.hasRealData) {
-                    Log.d(TAG, "在条目 ${entry.name} 中成功匹配到电池真实数据！")
+                    Log.d(TAG, "在条目 ${entry.name} 中成功匹配到电池真实数据，极速返回！")
                     zipIn.closeEntry()
                     zipIn.close()
                     return result
@@ -202,7 +202,33 @@ class BugreportParser {
                 return BugreportResult(emptyList(), "", false)
             }
             val curLine = line!!
+
+            // 极速跳过 99% 的无关长日志（如 logcat/event/radio/meminfo 等）
+            if (curLine.length > 250) continue
             val trimLine = curLine.trim()
+            if (trimLine.isEmpty()) continue
+
+            // 智能早停检查（Early Termination）：在读完核心电池段落（已收集到电压、电量和容量/循环），且进入了后续服务或日志时立即早停退出
+            if (batteryVoltageMillivolts != null && (batteryFullChargeUah != null || batteryLevel != null)) {
+                if (trimLine.startsWith("DUMP OF SERVICE package:") ||
+                    trimLine.startsWith("DUMP OF SERVICE window:") ||
+                    trimLine.startsWith("DUMP OF SERVICE activity:") ||
+                    trimLine.startsWith("DUMP OF SERVICE meminfo:") ||
+                    trimLine.startsWith("------ SYSTEM LOG") ||
+                    trimLine.startsWith("------ LOGCAT")) {
+                    Log.d(TAG, "智能早停触发：已在第 $totalLineCount 行捕获全部关键指标，跳过后续数百万行日志！")
+                    break
+                }
+            }
+
+            // 快速行首特征判定（纳秒级跳过非特征行）
+            val firstChar = trimLine[0]
+            val isPotentialKey = firstChar == 'c' || firstChar == 'm' || firstChar == 'b' || firstChar == 'l' ||
+                    firstChar == 's' || firstChar == 'h' || firstChar == 'v' || firstChar == 't' || firstChar == 'p' ||
+                    firstChar == 'U' || firstChar == 'A' || firstChar == 'W' || firstChar == 'D' || firstChar == 'M' ||
+                    firstChar == 'C' || firstChar == 'E' || firstChar == 'a' || firstChar == 'H' || firstChar == 'L'
+
+            if (!isPotentialKey) continue
 
             // 1. 判断是否进入关键日志段落（getHealthInfo / Health HAL / DUMP OF SERVICE battery / batterystats）
             if (trimLine.contains("getHealthInfo", ignoreCase = true) ||
@@ -222,7 +248,7 @@ class BugreportParser {
                 rawLinesList.add(curLine)
             }
 
-            // 2. 字段模式全量匹配（兼容所有厂商 dumpsys / Health HAL / AIDL / HIDL 格式）
+            // 2. 字段模式全量匹配
 
             // 2.1 充电方式相关
             if (trimLine.contains("chargerUsbOnline", ignoreCase = true) || trimLine.startsWith("USB powered:", ignoreCase = true)) {

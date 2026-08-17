@@ -10,8 +10,8 @@ import java.io.InputStreamReader
 import java.util.zip.ZipInputStream
 
 /**
- * 负责解析安卓系统错误报告（Bugreport）压缩包 (.zip) 或纯文本 (.txt) 的解析器。
- * 采用流式按行扫描机制，防止大文件 OOM，精准提取 dumpsys battery、batterystats 及广播中的电池指标。
+ * 负责解析安卓系统错误报告（Bugreport）中 getHealthInfo 结构体及相关电池日志的解析器。
+ * 采用流式逐行解析机制，深度提取 Health HAL getHealthInfo 核心字段（容量、健康度、循环、电流、电压、温度等）。
  */
 class BugreportParser {
 
@@ -81,7 +81,7 @@ class BugreportParser {
     }
 
     /**
-     * 逐行读取 BufferedReader 流并提取电池相关参数。
+     * 逐行读取 BufferedReader 流并深度解析 getHealthInfo 结构及 dumpsys 服务段。
      *
      * @param reader 缓冲字符读取流
      * @return 组装后的 [BatteryInfo] 对象
@@ -99,13 +99,119 @@ class BugreportParser {
         var currentNow: Float? = null
         var technology: String? = null
 
+        var inHealthInfoSection = false
         var currentSection = ""
         var line: String?
 
         while (reader.readLine().also { line = it } != null) {
             val trimLine = line!!.trim()
 
-            // 监听段落切换
+            // 1. 优先捕获 getHealthInfo / HealthInfo 硬件抽象层段落
+            if (trimLine.contains("getHealthInfo", ignoreCase = true) || 
+                trimLine.startsWith("HealthInfo_2_") || 
+                trimLine.startsWith("HealthInfo:") ||
+                trimLine.contains("Health HAL - getHealthInfo") ||
+                trimLine.contains("Health HAL:")) {
+                inHealthInfoSection = true
+            }
+
+            if (inHealthInfoSection) {
+                // 解析 getHealthInfo 中的核心硬件字段
+                // 1.1 满电设计容量 (batteryFullChargeDesignCapacityUah / battery_design_capacity)
+                if (trimLine.contains("batteryFullChargeDesignCapacityUah", ignoreCase = true) || 
+                    trimLine.contains("battery_design_capacity", ignoreCase = true) ||
+                    trimLine.contains("batteryFullChargeDesign", ignoreCase = true)) {
+                    val raw = extractLongValue(trimLine)
+                    if (raw != null && raw > 0) {
+                        designCapacity = if (raw < 100000) raw.toFloat() else raw / 1000f
+                    }
+                }
+
+                // 1.2 满电学习容量 (batteryFullCharge / batteryFullChargeCapacityUah / battery_full_charge)
+                if (trimLine.contains("batteryFullChargeCapacityUah", ignoreCase = true) || 
+                    trimLine.contains("batteryFullCharge", ignoreCase = true) || 
+                    trimLine.contains("battery_full_charge", ignoreCase = true)) {
+                    val raw = extractLongValue(trimLine)
+                    if (raw != null && raw > 0) {
+                        fullChargeCapacity = if (raw < 100000) raw.toFloat() else raw / 1000f
+                    }
+                }
+
+                // 1.3 循环次数 (batteryCycleCount / battery_cycle_count)
+                if (trimLine.contains("batteryCycleCount", ignoreCase = true) || 
+                    trimLine.contains("battery_cycle_count", ignoreCase = true)) {
+                    val raw = extractIntValue(trimLine)
+                    if (raw != null && raw > 0) {
+                        if (cycleCount == null || raw > cycleCount) cycleCount = raw
+                    }
+                }
+
+                // 1.4 电量百分比 (batteryLevel / battery_level)
+                if (trimLine.contains("batteryLevel", ignoreCase = true) || trimLine.contains("battery_level", ignoreCase = true)) {
+                    val raw = extractIntValue(trimLine)
+                    if (raw != null && raw in 0..100 && level == null) {
+                        level = raw
+                    }
+                }
+
+                // 1.5 电池电压 (batteryVoltage / battery_voltage)
+                if (trimLine.contains("batteryVoltage", ignoreCase = true) || trimLine.contains("battery_voltage", ignoreCase = true)) {
+                    val raw = extractLongValue(trimLine)
+                    if (raw != null) {
+                        val norm = normalizeVoltage(raw)
+                        if (norm != null && voltage == null) voltage = norm
+                    }
+                }
+
+                // 1.6 电池瞬时电流 (batteryCurrent / battery_current / batteryCurrentAverage)
+                if (trimLine.contains("batteryCurrent", ignoreCase = true) || trimLine.contains("battery_current", ignoreCase = true)) {
+                    val raw = extractLongValue(trimLine)
+                    if (raw != null) {
+                        val norm = normalizeCurrent(raw)
+                        if (norm != null && (currentNow == null || currentNow == 0f)) currentNow = norm
+                    }
+                }
+
+                // 1.7 电池温度 (batteryTemperature / battery_temperature)
+                if (trimLine.contains("batteryTemperature", ignoreCase = true) || trimLine.contains("battery_temperature", ignoreCase = true)) {
+                    val raw = extractFloatValue(trimLine)
+                    if (raw != null && raw > 0 && temperature == null) {
+                        temperature = if (raw > 200) raw / 10f else raw
+                    }
+                }
+
+                // 1.8 电池状态 (batteryStatus / battery_status)
+                if (trimLine.contains("batteryStatus", ignoreCase = true) || trimLine.contains("battery_status", ignoreCase = true)) {
+                    if (statusStr == null) {
+                        statusStr = parseStatus(trimLine)
+                    }
+                }
+
+                // 1.9 电池健康度描述 (batteryHealth / battery_health)
+                if (trimLine.contains("batteryHealth", ignoreCase = true) || trimLine.contains("battery_health", ignoreCase = true)) {
+                    if (healthStatusStr == null) {
+                        healthStatusStr = parseHealth(trimLine)
+                    }
+                }
+
+                // 1.10 当前剩余电量 (batteryChargeCounter / battery_charge_counter)
+                if (trimLine.contains("batteryChargeCounter", ignoreCase = true) || trimLine.contains("battery_charge_counter", ignoreCase = true)) {
+                    val raw = extractLongValue(trimLine)
+                    if (raw != null && raw > 0 && currentCapacity == null) {
+                        currentCapacity = if (raw < 100000) raw.toFloat() else raw / 1000f
+                    }
+                }
+
+                // 1.11 电池技术类型 (batteryTechnology / battery_technology)
+                if (trimLine.contains("batteryTechnology", ignoreCase = true) || trimLine.contains("battery_technology", ignoreCase = true)) {
+                    val tech = extractStringValue(trimLine)
+                    if (tech.isNotEmpty() && technology == null) {
+                        technology = tech
+                    }
+                }
+            }
+
+            // 2. 监听段落切换 (DUMP OF SERVICE)
             if (trimLine.startsWith("DUMP OF SERVICE battery:") || (trimLine.contains("DUMP OF SERVICE") && trimLine.contains("battery"))) {
                 currentSection = "battery"
             } else if (trimLine.startsWith("DUMP OF SERVICE batterystats:")) {
@@ -113,12 +219,12 @@ class BugreportParser {
             } else if (trimLine.startsWith("DUMP OF SERVICE activity:")) {
                 currentSection = "activity"
             } else if (trimLine.startsWith("DUMP OF SERVICE") || trimLine.startsWith("------ ")) {
-                if (!trimLine.contains("battery") && !trimLine.contains("activity")) {
+                if (!trimLine.contains("battery") && !trimLine.contains("activity") && !trimLine.contains("Health")) {
                     currentSection = ""
                 }
             }
 
-            // 1. 解析 battery 服务段
+            // 2.1 解析 dumpsys battery 服务段
             if (currentSection == "battery") {
                 if (trimLine.startsWith("level:") && level == null) {
                     level = trimLine.substringAfter("level:").trim().toIntOrNull()
@@ -126,12 +232,7 @@ class BugreportParser {
                 if (trimLine.startsWith("voltage:") && voltage == null) {
                     val raw = trimLine.substringAfter("voltage:").trim().toLongOrNull()
                     if (raw != null) {
-                        voltage = when {
-                            raw in 2500..9500 -> raw.toFloat()
-                            raw in 2500000..9500000 -> raw / 1000f
-                            raw > 9500 -> raw / 1000f
-                            else -> raw.toFloat()
-                        }
+                        voltage = normalizeVoltage(raw)
                     }
                 }
                 if (trimLine.startsWith("temperature:") && temperature == null) {
@@ -178,7 +279,7 @@ class BugreportParser {
                 }
             }
 
-            // 2. 解析 batterystats 服务段
+            // 2.2 解析 dumpsys batterystats 服务段
             if (currentSection == "batterystats") {
                 if ((trimLine.startsWith("Estimated battery capacity:") || trimLine.startsWith("Capacity:")) && designCapacity == null) {
                     val raw = trimLine.substringAfter(":").replace("mAh", "").trim().toFloatOrNull()
@@ -194,7 +295,7 @@ class BugreportParser {
                 }
             }
 
-            // 3. 解析广播中或全局行中的循环次数
+            // 2.3 解析粘性广播中的循环次数
             if (trimLine.contains("android.os.extra.CYCLE_COUNT=")) {
                 val match = Regex("(?i)android\\.os\\.extra\\.CYCLE_COUNT=(\\d+)").find(trimLine)
                 if (match != null) {
@@ -231,8 +332,109 @@ class BugreportParser {
             currentNow = currentNow,
             powerWatts = powerWatts,
             technology = technology,
-            source = "错误报告 (Bugreport)"
+            source = "错误报告 (getHealthInfo)"
         )
+    }
+
+    /**
+     * 从形如 "key = value" 或 "key: value" 的文本行中提取长整数。
+     */
+    private fun extractLongValue(line: String): Long? {
+        val clean = line.replace(",", "").replace(";", "")
+        val raw = if (clean.contains("=")) clean.substringAfter("=").trim() else clean.substringAfter(":").trim()
+        val numStr = raw.split(" ")[0].trim()
+        return numStr.toLongOrNull()
+    }
+
+    /**
+     * 从文本行中提取整数。
+     */
+    private fun extractIntValue(line: String): Int? {
+        val clean = line.replace(",", "").replace(";", "")
+        val raw = if (clean.contains("=")) clean.substringAfter("=").trim() else clean.substringAfter(":").trim()
+        val numStr = raw.split(" ")[0].trim()
+        return numStr.toIntOrNull()
+    }
+
+    /**
+     * 从文本行中提取浮点数。
+     */
+    private fun extractFloatValue(line: String): Float? {
+        val clean = line.replace(",", "").replace(";", "")
+        val raw = if (clean.contains("=")) clean.substringAfter("=").trim() else clean.substringAfter(":").trim()
+        val numStr = raw.split(" ")[0].trim()
+        return numStr.toFloatOrNull()
+    }
+
+    /**
+     * 从文本行中提取字符串。
+     */
+    private fun extractStringValue(line: String): String {
+        val clean = line.replace(",", "").replace(";", "")
+        val raw = if (clean.contains("=")) clean.substringAfter("=").trim() else clean.substringAfter(":").trim()
+        return raw.split(" ")[0].trim()
+    }
+
+    /**
+     * 解析状态枚举值或文本。
+     */
+    private fun parseStatus(line: String): String? {
+        val upper = line.uppercase()
+        return when {
+            upper.contains("CHARGING") && !upper.contains("NOT_CHARGING") && !upper.contains("DISCHARGING") -> "充电中"
+            upper.contains("DISCHARGING") -> "放电中"
+            upper.contains("NOT_CHARGING") -> "未充电"
+            upper.contains("FULL") -> "已充满"
+            upper.contains("2") -> "充电中"
+            upper.contains("3") -> "放电中"
+            upper.contains("4") -> "未充电"
+            upper.contains("5") -> "已充满"
+            else -> null
+        }
+    }
+
+    /**
+     * 解析健康状态枚举值或文本。
+     */
+    private fun parseHealth(line: String): String? {
+        val upper = line.uppercase()
+        return when {
+            upper.contains("GOOD") || upper.contains("2") -> "良好"
+            upper.contains("OVERHEAT") || upper.contains("3") -> "过热"
+            upper.contains("DEAD") || upper.contains("4") -> "损坏"
+            upper.contains("OVER_VOLTAGE") || upper.contains("5") -> "电压过高"
+            upper.contains("COLD") || upper.contains("7") -> "过冷"
+            upper.contains("UNSPECIFIED_FAILURE") || upper.contains("6") -> "未知故障"
+            else -> null
+        }
+    }
+
+    /**
+     * 将原始电压数值规范化为毫伏（mV）。
+     */
+    private fun normalizeVoltage(rawVolt: Long): Float? {
+        if (rawVolt <= 0) return null
+        return when {
+            rawVolt in 2500..9500 -> rawVolt.toFloat()
+            rawVolt in 25000..95000 -> rawVolt / 10f
+            rawVolt in 2500000..9500000 -> rawVolt / 1000f
+            rawVolt > 9500000 -> rawVolt / 1000f
+            else -> null
+        }
+    }
+
+    /**
+     * 将原始电流数值规范化为毫安（mA）。
+     */
+    private fun normalizeCurrent(rawCur: Long): Float? {
+        if (rawCur == 0L) return null
+        val abs = Math.abs(rawCur)
+        return when {
+            abs in 1..9999 -> rawCur.toFloat()
+            abs in 10000..99999 -> rawCur / 10f
+            abs >= 100000 -> rawCur / 1000f
+            else -> rawCur.toFloat()
+        }
     }
 
     /**

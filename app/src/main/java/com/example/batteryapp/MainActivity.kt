@@ -60,6 +60,16 @@ class MainActivity : AppCompatActivity() {
     private var isAutoRefreshEnabled: Boolean = false
 
     /**
+     * 当前是否正在解析错误报告。
+     */
+    private var isParsingBugreport: Boolean = false
+
+    /**
+     * 错误报告解析的后台协程任务引用。
+     */
+    private var bugreportJob: Job? = null
+
+    /**
      * Shizuku 权限请求回调监听器。
      */
     private val requestPermissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
@@ -171,9 +181,20 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        // 错误报告导入按钮事件
+        // 错误报告导入与取消按钮事件
         binding.btnImportBugreport.setOnClickListener {
-            openBugreportLauncher.launch(arrayOf("*/*", "application/zip", "text/plain"))
+            if (isParsingBugreport) {
+                // 用户点击取消当前解析任务
+                bugreportJob?.cancel()
+                bugreportJob = null
+                isParsingBugreport = false
+                binding.btnImportBugreport.text = "导入报告"
+                binding.tvBugreportStatus.visibility = android.view.View.VISIBLE
+                binding.tvBugreportStatus.text = "已取消错误报告解析"
+                Toast.makeText(this, "已取消解析", Toast.LENGTH_SHORT).show()
+            } else {
+                openBugreportLauncher.launch(arrayOf("*/*", "application/zip", "text/plain"))
+            }
         }
 
         // 初始化右侧抽屉设置面板各个功能组件
@@ -394,27 +415,42 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 异步导入并解析用户选中的系统错误报告（Bugreport）日志中的 getHealthInfo 结构体。
+     * 异步导入并流式解析用户选中的系统错误报告（Bugreport）日志中的 getHealthInfo 结构体。
+     * 支持实时进度百分比更新与中途取消。
      *
      * @param uri 选中的错误报告文件 URI
      */
     private fun importAndParseBugreport(uri: Uri) {
+        isParsingBugreport = true
+        binding.btnImportBugreport.text = "取消 (0%)"
         binding.tvBugreportStatus.visibility = android.view.View.VISIBLE
-        binding.tvBugreportStatus.text = "正在流式解析 getHealthInfo 数据，请稍候..."
+        binding.tvBugreportStatus.text = "正在流式解析 getHealthInfo 数据 (0%)... 点击按钮可随时取消"
         binding.scrollHealthTable.visibility = android.view.View.GONE
 
-        lifecycleScope.launch(Dispatchers.IO) {
-            val healthItems = BugreportParser().parseHealthInfoTable(this@MainActivity, uri)
+        bugreportJob?.cancel()
+        bugreportJob = lifecycleScope.launch(Dispatchers.IO) {
+            val healthItems = BugreportParser().parseHealthInfoTable(this@MainActivity, uri) { percent ->
+                lifecycleScope.launch(Dispatchers.Main) {
+                    if (isParsingBugreport) {
+                        binding.btnImportBugreport.text = "取消 ($percent%)"
+                        binding.tvBugreportStatus.text = "正在流式解析 getHealthInfo 数据 ($percent%)... 点击按钮可随时取消"
+                    }
+                }
+            }
+
             withContext(Dispatchers.Main) {
+                if (!isParsingBugreport) return@withContext
+                isParsingBugreport = false
                 if (healthItems.isNotEmpty()) {
-                    renderHealthInfoTable(healthItems)
                     binding.btnImportBugreport.text = "重新导入"
+                    renderHealthInfoTable(healthItems)
                     Toast.makeText(this@MainActivity, "成功解析 getHealthInfo 结构体", Toast.LENGTH_SHORT).show()
                 } else {
+                    binding.btnImportBugreport.text = "导入报告"
                     binding.tvBugreportStatus.visibility = android.view.View.VISIBLE
                     binding.tvBugreportStatus.text = "未能从该错误报告中解析出 getHealthInfo 数据，请确保是完整的 bugreport 日志"
                     binding.scrollHealthTable.visibility = android.view.View.GONE
-                    Toast.makeText(this@MainActivity, "解析失败，未找到 getHealthInfo", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "解析未找到数据或已被取消", Toast.LENGTH_SHORT).show()
                 }
             }
         }

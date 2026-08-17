@@ -3,15 +3,65 @@ package com.example.batteryapp
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.util.zip.ZipInputStream
+import kotlin.coroutines.coroutineContext
+
+/**
+ * 包装输入流以统计读取进度并回调百分比。
+ *
+ * @property wrapped 被包装的原始输入流
+ * @property totalBytes 文件总字节数
+ * @property onProgress 进度百分比变化时的回调
+ */
+class CountingInputStream(
+    private val wrapped: InputStream,
+    private val totalBytes: Long,
+    private val onProgress: (Int) -> Unit
+) : InputStream() {
+    private var bytesRead: Long = 0
+    private var lastPercent = -1
+
+    override fun read(): Int {
+        val b = wrapped.read()
+        if (b != -1) {
+            bytesRead++
+            notifyProgress()
+        }
+        return b
+    }
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int {
+        val count = wrapped.read(b, off, len)
+        if (count > 0) {
+            bytesRead += count
+            notifyProgress()
+        }
+        return count
+    }
+
+    private fun notifyProgress() {
+        if (totalBytes > 0) {
+            val percent = ((bytesRead * 100) / totalBytes).toInt().coerceIn(0, 99)
+            if (percent != lastPercent) {
+                lastPercent = percent
+                onProgress(percent)
+            }
+        }
+    }
+
+    override fun close() {
+        wrapped.close()
+    }
+}
 
 /**
  * 负责解析安卓系统错误报告（Bugreport）中 getHealthInfo 结构体并输出三列表格数据的解析器。
- * 提取原始字段名、格式化映射展示值以及底层物理含义说明。
+ * 支持带取消功能的协程以及流式进度百分比回调。
  */
 class BugreportParser {
 
@@ -20,18 +70,30 @@ class BugreportParser {
      *
      * @param context 应用程序上下文
      * @param uri 用户选中的错误报告文件 URI
-     * @return 解析得到的 [HealthInfoItem] 列表，解析失败或无数据时返回空列表
+     * @param onProgress 进度百分比回调 (0~99)
+     * @return 解析得到的 [HealthInfoItem] 列表，解析失败或被取消时返回空列表
      */
-    suspend fun parseHealthInfoTable(context: Context, uri: Uri): List<HealthInfoItem> = withContext(Dispatchers.IO) {
+    suspend fun parseHealthInfoTable(
+        context: Context,
+        uri: Uri,
+        onProgress: (Int) -> Unit = {}
+    ): List<HealthInfoItem> = withContext(Dispatchers.IO) {
         try {
             val contentResolver = context.contentResolver
-            val inputStream = contentResolver.openInputStream(uri) ?: return@withContext emptyList()
-            
+            val totalBytes = try {
+                contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize } ?: 0L
+            } catch (e: Exception) {
+                0L
+            }
+
+            val rawStream = contentResolver.openInputStream(uri) ?: return@withContext emptyList()
+            val countingStream = CountingInputStream(rawStream, totalBytes, onProgress)
+
             val fileName = getFileName(context, uri).lowercase()
             if (fileName.endsWith(".zip")) {
-                parseZipStream(inputStream)
+                parseZipStream(countingStream)
             } else {
-                parseTextStream(inputStream)
+                parseTextStream(countingStream)
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -42,13 +104,13 @@ class BugreportParser {
     /**
      * 从 ZIP 压缩流中寻找并流式解析主错误报告文本文件。
      *
-     * @param inputStream ZIP 文件的输入流
+     * @param inputStream 带有进度统计的输入流
      * @return 解析出的 [HealthInfoItem] 列表
      */
-    private fun parseZipStream(inputStream: InputStream): List<HealthInfoItem> {
+    private suspend fun parseZipStream(inputStream: InputStream): List<HealthInfoItem> {
         val zipIn = ZipInputStream(inputStream)
         var entry = zipIn.nextEntry
-        while (entry != null) {
+        while (entry != null && coroutineContext.isActive) {
             val name = entry.name.lowercase()
             if (!entry.isDirectory && (name.startsWith("bugreport-") && name.endsWith(".txt") || name.endsWith(".txt"))) {
                 val reader = BufferedReader(InputStreamReader(zipIn))
@@ -69,10 +131,10 @@ class BugreportParser {
     /**
      * 流式解析纯文本错误报告。
      *
-     * @param inputStream 文本文件的输入流
+     * @param inputStream 带有进度统计的输入流
      * @return 解析出的 [HealthInfoItem] 列表
      */
-    private fun parseTextStream(inputStream: InputStream): List<HealthInfoItem> {
+    private suspend fun parseTextStream(inputStream: InputStream): List<HealthInfoItem> {
         val reader = BufferedReader(InputStreamReader(inputStream))
         val items = parseFromReader(reader)
         reader.close()
@@ -86,7 +148,7 @@ class BugreportParser {
      * @param reader 缓冲字符读取流
      * @return 包含三列字段信息的 [HealthInfoItem] 列表
      */
-    private fun parseFromReader(reader: BufferedReader): List<HealthInfoItem> {
+    private suspend fun parseFromReader(reader: BufferedReader): List<HealthInfoItem> {
         var rawDesignCap: Long? = null
         var rawFullCharge: Long? = null
         var rawChargeCounter: Long? = null
@@ -107,6 +169,9 @@ class BugreportParser {
         var line: String?
 
         while (reader.readLine().also { line = it } != null) {
+            if (!coroutineContext.isActive) {
+                return emptyList()
+            }
             val trimLine = line!!.trim()
 
             // 1. 优先捕获 getHealthInfo / HealthInfo 硬件抽象层段落

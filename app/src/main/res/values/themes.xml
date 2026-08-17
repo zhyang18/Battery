@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.BatteryApp" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="colorPrimary">#1976D2</item>
+        <item name="colorPrimaryDark">#0D47A1</item>
+        <item name="colorAccent">#00E676</item>
+    </style>
+</resources>

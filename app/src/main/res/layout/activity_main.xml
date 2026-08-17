@@ -5,39 +5,7 @@
     android:orientation="vertical"
     android:padding="16dp">
 
-    <TextView
-        android:id="@+id/tv_shizuku_status"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:textSize="14sp"
-        android:textColor="@android:color/holo_red_dark"
-        android:text="Shizuku 状态: 未知" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/btn_refresh"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="刷新数据" />
-
-        <Space
-            android:layout_width="12dp"
-            android:layout_height="wrap_content" />
-
-        <Button
-            android:id="@+id/btn_auth_shizuku"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="授权 Shizuku" />
-    </LinearLayout>
-
-    <!-- 实时刷新控制栏 -->
+    <!-- 自定义顶部标题栏（替代原生 Toolbar） -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -45,26 +13,41 @@
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <androidx.appcompat.widget.SwitchCompat
-            android:id="@+id/switch_auto_refresh"
-            android:layout_width="wrap_content"
+        <TextView
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="实时刷新"
-            android:textSize="14sp" />
+            android:layout_weight="1"
+            android:text="@string/app_name"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <!-- 刷新按钮 -->
+        <ImageButton
+            android:id="@+id/btn_refresh"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="刷新数据"
+            android:padding="8dp"
+            android:src="@drawable/ic_refresh" />
 
         <Space
-            android:layout_width="16dp"
+            android:layout_width="8dp"
             android:layout_height="wrap_content" />
 
-        <Button
-            android:id="@+id/btn_interval"
-            style="@style/Widget.AppCompat.Button.Borderless.Colored"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="刷新间隔: 2秒"
-            android:textSize="13sp" />
+        <!-- 右上角设置按钮 -->
+        <ImageButton
+            android:id="@+id/btn_settings"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="设置"
+            android:padding="8dp"
+            android:src="@drawable/ic_settings" />
     </LinearLayout>
 
+    <!-- 主体双列数据展示区 -->
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -90,15 +73,15 @@
                     android:gravity="center"
                     android:text="【系统 API 数据】"
                     android:textColor="#2196F3"
-                    android:textStyle="bold"
-                    android:textSize="14sp" />
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
 
                 <TextView
                     android:id="@+id/tv_normal_info"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:lineSpacingExtra="4dp"
-                    android:textColor="#333333"
+                    android:textColor="?android:attr/textColorPrimary"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -106,7 +89,7 @@
             <View
                 android:layout_width="1dp"
                 android:layout_height="match_parent"
-                android:background="#CCCCCC" />
+                android:background="#33888888" />
 
             <!-- 右列：底层 Shizuku 数据 -->
             <LinearLayout
@@ -123,15 +106,15 @@
                     android:gravity="center"
                     android:text="【Shizuku 数据】"
                     android:textColor="#4CAF50"
-                    android:textStyle="bold"
-                    android:textSize="14sp" />
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
 
                 <TextView
                     android:id="@+id/tv_shizuku_info"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:lineSpacingExtra="4dp"
-                    android:textColor="#333333"
+                    android:textColor="?android:attr/textColorPrimary"
                     android:textSize="13sp" />
             </LinearLayout>
 

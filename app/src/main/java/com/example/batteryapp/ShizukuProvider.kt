@@ -48,13 +48,41 @@ class ShizukuProvider : BatteryDataProvider {
         val status = sysfsInfo.status ?: dumpsysInfo.status ?: vendorInfo.status
         val healthStatus = sysfsInfo.healthStatus ?: dumpsysInfo.healthStatus ?: vendorInfo.healthStatus
         val temperature = sysfsInfo.temperature ?: dumpsysInfo.temperature ?: vendorInfo.temperature
-        val voltage = sysfsInfo.voltage ?: dumpsysInfo.voltage ?: vendorInfo.voltage
-        val currentNow = sysfsInfo.currentNow ?: dumpsysInfo.currentNow ?: vendorInfo.currentNow
-        val powerWatts = if (voltage != null && currentNow != null) {
-            Math.abs(voltage * currentNow) / 1000000f
-        } else null
+        var voltage = sysfsInfo.voltage ?: dumpsysInfo.voltage ?: vendorInfo.voltage
+        var currentNow = sysfsInfo.currentNow ?: dumpsysInfo.currentNow ?: vendorInfo.currentNow
         val technology = sysfsInfo.technology ?: dumpsysInfo.technology ?: vendorInfo.technology
         val isDualCell = sysfsInfo.isDualCell ?: dumpsysInfo.isDualCell ?: vendorInfo.isDualCell ?: false
+
+        // 如果底层未直接解析到电流，尝试从 BatteryManager 读取底层瞬时电流
+        if (currentNow == null) {
+            try {
+                val bm = context.getSystemService(Context.BATTERY_SERVICE) as? android.os.BatteryManager
+                val rawCur = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+                if (rawCur != null && rawCur != Int.MIN_VALUE && rawCur != 0) {
+                    currentNow = if (Math.abs(rawCur) < 100000) rawCur.toFloat() else rawCur / 1000f
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // 如果底层未直接解析到电压，尝试从系统粘性广播读取当前电压
+        if (voltage == null) {
+            try {
+                val intent = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+                val rawVolt = intent?.getIntExtra(android.os.BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
+                if (rawVolt > 0) {
+                    voltage = rawVolt.toFloat()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // 实时电池功率计算（支持直接读取功率节点或通过电压与电流计算：P = U * I / 10^6）
+        val powerWatts = sysfsInfo.powerWatts ?: if (voltage != null && currentNow != null) {
+            Math.abs(voltage * currentNow) / 1000000f
+        } else null
 
         var health: Float? = sysfsInfo.batteryHealth ?: dumpsysInfo.batteryHealth ?: vendorInfo.batteryHealth
         if (health == null && fullCap != null && designCap != null && designCap > 0) {
@@ -83,7 +111,7 @@ class ShizukuProvider : BatteryDataProvider {
 
     /**
      * 从 sysfs 节点读取电池信息。
-     * 涵盖系统通用节点、uevent 以及部分常见驱动路径。
+     * 涵盖系统通用节点、uevent 以及全路径直接遍历节点。
      *
      * @return 解析 sysfs 节点得到的电池信息
      */
@@ -95,11 +123,13 @@ class ShizukuProvider : BatteryDataProvider {
         var temperature: Float? = null
         var voltage: Float? = null
         var currentNow: Float? = null
+        var powerWatts: Float? = null
         var status: String? = null
         var healthStatus: String? = null
         var technology: String? = null
         var isDualCell: Boolean? = null
 
+        // 1. 读取常见 power_supply 下的 uevent 文件
         val sysfsCmd = "cat /sys/class/power_supply/battery/uevent /sys/class/power_supply/bms/uevent /sys/class/power_supply/main/uevent /sys/class/qcom-battery/uevent /sys/class/power_supply/*/uevent 2>/dev/null"
         val ueventRes = executeCommand(sysfsCmd)
 
@@ -145,10 +175,17 @@ class ShizukuProvider : BatteryDataProvider {
                     voltage = if (rawVolt < 10000) rawVolt.toFloat() else rawVolt / 1000f
                 }
             }
-            if (trimLine.contains("POWER_SUPPLY_CURRENT_NOW=")) {
+            if (trimLine.contains("POWER_SUPPLY_CURRENT_NOW=") || trimLine.contains("POWER_SUPPLY_CURRENT_AVG=")) {
                 val rawCur = trimLine.substringAfter("=").toLongOrNull()
                 if (rawCur != null && rawCur != 0L) {
-                    currentNow = if (Math.abs(rawCur) < 100000) rawCur.toFloat() else rawCur / 1000f
+                    val cur = if (Math.abs(rawCur) < 100000) rawCur.toFloat() else rawCur / 1000f
+                    if (currentNow == null || currentNow == 0f) currentNow = cur
+                }
+            }
+            if (trimLine.contains("POWER_SUPPLY_POWER_NOW=")) {
+                val rawPwr = trimLine.substringAfter("=").toLongOrNull()
+                if (rawPwr != null && rawPwr > 0) {
+                    powerWatts = if (rawPwr < 100000) rawPwr / 1000f else rawPwr / 1000000f
                 }
             }
             if (trimLine.contains("POWER_SUPPLY_STATUS=")) {
@@ -165,6 +202,44 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
+        // 2. 深度扫描各个单独驱动文件节点 (防止某些厂商未写入 uevent)
+        val directNodesCmd = """
+            for node in /sys/class/power_supply/battery /sys/class/power_supply/bms /sys/class/power_supply/main /sys/class/qcom-battery /sys/class/power_supply/usb; do
+                if [ -d "${'$'}node" ]; then
+                    for f in current_now batt_current battery_current current_avg power_now batt_power voltage_now batt_vol; do
+                        if [ -f "${'$'}node/${'$'}f" ]; then
+                            echo "${'$'}f=$(cat ${'$'}node/${'$'}f 2>/dev/null)"
+                        fi
+                    done
+                fi
+            done
+        """.trimIndent()
+        val directRes = executeCommand(directNodesCmd)
+        for (line in directRes.split('\n')) {
+            val trimLine = line.trim()
+            if (trimLine.startsWith("current_now=") || trimLine.startsWith("batt_current=") || trimLine.startsWith("battery_current=") || trimLine.startsWith("current_avg=")) {
+                val raw = trimLine.substringAfter("=").toLongOrNull()
+                if (raw != null && raw != 0L) {
+                    val cur = if (Math.abs(raw) < 100000) raw.toFloat() else raw / 1000f
+                    if (currentNow == null || currentNow == 0f) currentNow = cur
+                }
+            }
+            if (trimLine.startsWith("voltage_now=") || trimLine.startsWith("batt_vol=")) {
+                val raw = trimLine.substringAfter("=").toLongOrNull()
+                if (raw != null && raw > 0) {
+                    val mv = if (raw < 10000) raw.toFloat() else raw / 1000f
+                    if (voltage == null) voltage = mv
+                }
+            }
+            if (trimLine.startsWith("power_now=") || trimLine.startsWith("batt_power=")) {
+                val raw = trimLine.substringAfter("=").toLongOrNull()
+                if (raw != null && raw > 0) {
+                    val w = if (raw < 100000) raw / 1000f else raw / 1000000f
+                    if (powerWatts == null) powerWatts = w
+                }
+            }
+        }
+
         return BatteryInfo(
             designCapacity = designCapacity,
             fullChargeCapacity = fullChargeCapacity,
@@ -173,6 +248,7 @@ class ShizukuProvider : BatteryDataProvider {
             temperature = temperature,
             voltage = voltage,
             currentNow = currentNow,
+            powerWatts = powerWatts,
             status = status,
             healthStatus = healthStatus,
             technology = technology,

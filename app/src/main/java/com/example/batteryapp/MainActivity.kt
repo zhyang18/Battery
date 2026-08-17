@@ -426,10 +426,11 @@ class MainActivity : AppCompatActivity() {
         binding.tvBugreportStatus.visibility = android.view.View.VISIBLE
         binding.tvBugreportStatus.text = "正在流式解析 getHealthInfo 数据 (0%)... 点击按钮可随时取消"
         binding.scrollHealthTable.visibility = android.view.View.GONE
+        binding.layoutRawHealthInfo.visibility = android.view.View.GONE
 
         bugreportJob?.cancel()
         bugreportJob = lifecycleScope.launch(Dispatchers.IO) {
-            val healthItems = BugreportParser().parseHealthInfoTable(this@MainActivity, uri) { percent ->
+            val result = BugreportParser().parseHealthInfo(this@MainActivity, uri) { percent ->
                 lifecycleScope.launch(Dispatchers.Main) {
                     if (isParsingBugreport) {
                         binding.btnImportBugreport.text = "取消 ($percent%)"
@@ -441,15 +442,24 @@ class MainActivity : AppCompatActivity() {
             withContext(Dispatchers.Main) {
                 if (!isParsingBugreport) return@withContext
                 isParsingBugreport = false
-                if (healthItems.isNotEmpty()) {
+                if (result != null && result.tableItems.isNotEmpty()) {
                     binding.btnImportBugreport.text = "重新导入"
-                    renderHealthInfoTable(healthItems)
+                    renderHealthInfoTable(result.tableItems)
+
+                    if (result.rawHealthInfoText.isNotEmpty()) {
+                        binding.tvRawHealthInfo.text = result.rawHealthInfoText
+                        binding.layoutRawHealthInfo.visibility = android.view.View.VISIBLE
+                    } else {
+                        binding.layoutRawHealthInfo.visibility = android.view.View.GONE
+                    }
+
                     Toast.makeText(this@MainActivity, "成功解析 getHealthInfo 结构体", Toast.LENGTH_SHORT).show()
                 } else {
                     binding.btnImportBugreport.text = "导入报告"
                     binding.tvBugreportStatus.visibility = android.view.View.VISIBLE
                     binding.tvBugreportStatus.text = "未能从该错误报告中解析出 getHealthInfo 数据，请确保是完整的 bugreport 日志"
                     binding.scrollHealthTable.visibility = android.view.View.GONE
+                    binding.layoutRawHealthInfo.visibility = android.view.View.GONE
                     Toast.makeText(this@MainActivity, "解析未找到数据或已被取消", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -457,7 +467,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 将解析出的 getHealthInfo 列表动态渲染为三列表格（原始字段、字段映射展示、含义）。
+     * 将解析出的精简指标动态渲染为三列表格（项目、当前值、说明）。
      *
      * @param items 解析出的 HealthInfoItem 列表
      */
@@ -474,18 +484,18 @@ class MainActivity : AppCompatActivity() {
         binding.tvBugreportStatus.visibility = android.view.View.GONE
         binding.scrollHealthTable.visibility = android.view.View.VISIBLE
 
-        // 1. 添加三列表头行（原始字段、字段映射展示、含义）
+        // 1. 添加三列表头行（项目、当前值、说明）
         val headerRow = android.widget.TableRow(this)
         headerRow.setBackgroundColor(android.graphics.Color.parseColor("#25888888"))
         headerRow.setPadding(4, 10, 4, 10)
 
-        val thRaw = createTableCell("原始字段", isHeader = true, textColor = android.graphics.Color.parseColor("#FF9800"), minWidthDp = 180)
-        val thVal = createTableCell("字段映射展示", isHeader = true, textColor = android.graphics.Color.parseColor("#4CAF50"), minWidthDp = 160)
-        val thMean = createTableCell("含义", isHeader = true, textColor = android.graphics.Color.parseColor("#2196F3"), minWidthDp = 220)
+        val thItem = createTableCell("项目", isHeader = true, textColor = android.graphics.Color.parseColor("#FF9800"), minWidthDp = 140)
+        val thVal = createTableCell("当前值", isHeader = true, textColor = android.graphics.Color.parseColor("#4CAF50"), minWidthDp = 130)
+        val thDesc = createTableCell("说明", isHeader = true, textColor = android.graphics.Color.parseColor("#2196F3"), minWidthDp = 180)
 
-        headerRow.addView(thRaw)
+        headerRow.addView(thItem)
         headerRow.addView(thVal)
-        headerRow.addView(thMean)
+        headerRow.addView(thDesc)
         binding.tableHealthInfo.addView(headerRow)
 
         // 2. 逐项添加数据行
@@ -496,13 +506,13 @@ class MainActivity : AppCompatActivity() {
             }
             row.setPadding(4, 8, 4, 8)
 
-            val tdRaw = createTableCell(item.rawField, isHeader = false, minWidthDp = 180)
-            val tdVal = createTableCell(item.displayValue, isHeader = false, isBold = true, minWidthDp = 160)
-            val tdMean = createTableCell(item.meaning, isHeader = false, minWidthDp = 220)
+            val tdItem = createTableCell(item.itemTitle, isHeader = false, minWidthDp = 140)
+            val tdVal = createTableCell(item.currentValue, isHeader = false, isBold = true, minWidthDp = 130)
+            val tdDesc = createTableCell(item.description, isHeader = false, minWidthDp = 180)
 
-            row.addView(tdRaw)
+            row.addView(tdItem)
             row.addView(tdVal)
-            row.addView(tdMean)
+            row.addView(tdDesc)
             binding.tableHealthInfo.addView(row)
         }
     }

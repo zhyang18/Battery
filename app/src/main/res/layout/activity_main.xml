@@ -197,6 +197,37 @@
                             <!-- 代码动态渲染表格行 -->
                         </TableLayout>
                     </HorizontalScrollView>
+
+                    <!-- getHealthInfo 原始数据展示区域 -->
+                    <LinearLayout
+                        android:id="@+id/layout_raw_health_info"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginBottom="6dp"
+                            android:text="【getHealthInfo 原始数据】"
+                            android:textColor="#FF9800"
+                            android:textSize="13sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tv_raw_health_info"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:background="#15888888"
+                            android:lineSpacingExtra="3dp"
+                            android:padding="12dp"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textIsSelectable="true"
+                            android:textSize="11sp"
+                            android:typeface="monospace" />
+                    </LinearLayout>
                 </LinearLayout>
 
             </LinearLayout>

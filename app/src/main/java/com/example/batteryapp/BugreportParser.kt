@@ -2,6 +2,7 @@ package com.example.batteryapp
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -67,9 +68,13 @@ class CountingInputStream(
 
 /**
  * 负责高性能、极速解析安卓系统错误报告（Bugreport）中 getHealthInfo 结构体的解析器。
- * 具备 64KB 大缓冲区、快速行过滤与提前早停（Early Termination）机制，实现秒级解析。
+ * 具备 64KB 大缓冲区、快速行过滤与提前早停（Early Termination）机制，并输出详细调试日志。
  */
 class BugreportParser {
+
+    companion object {
+        private const val TAG = "BugreportParser"
+    }
 
     /**
      * 从选定的文件 URI 流式极速解析错误报告日志并提取 getHealthInfo 表格条目列表。
@@ -92,17 +97,23 @@ class BugreportParser {
                 0L
             }
 
-            val rawStream = contentResolver.openInputStream(uri) ?: return@withContext emptyList()
+            Log.d(TAG, "===> 开始解析错误报告: URI = $uri, 文件总大小 = ${totalBytes / 1024} KB")
+
+            val rawStream = contentResolver.openInputStream(uri) ?: run {
+                Log.e(TAG, "打开输入流失败: $uri")
+                return@withContext emptyList()
+            }
             val countingStream = CountingInputStream(rawStream, totalBytes, onProgress)
 
             val fileName = getFileName(context, uri).lowercase()
+            Log.d(TAG, "目标文件名: $fileName")
             if (fileName.endsWith(".zip")) {
                 parseZipStream(countingStream)
             } else {
                 parseTextStream(countingStream)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "解析错误报告发生异常", e)
             emptyList()
         }
     }
@@ -120,12 +131,13 @@ class BugreportParser {
             val name = entry.name.lowercase()
             // 过滤：仅提取主 bugreport 文本，跳过无用子目录与非目标日志
             if (!entry.isDirectory && (name.startsWith("bugreport-") && name.endsWith(".txt") || (!name.contains("/") && name.endsWith(".txt")))) {
-                // 使用 64KB 高性能缓冲读取
+                Log.d(TAG, "找到主日志条目: ${entry.name}, 开始流式解析...")
                 val reader = BufferedReader(InputStreamReader(zipIn, StandardCharsets.UTF_8), 65536)
                 val items = parseFromReader(reader)
                 if (items.isNotEmpty()) {
                     zipIn.closeEntry()
                     zipIn.close()
+                    Log.d(TAG, "成功解析到 ${items.size} 个有效电池字段！")
                     return items
                 }
             }
@@ -133,6 +145,7 @@ class BugreportParser {
             entry = zipIn.nextEntry
         }
         zipIn.close()
+        Log.w(TAG, "ZIP 遍历完成，未找到有效数据")
         return emptyList()
     }
 
@@ -143,10 +156,12 @@ class BugreportParser {
      * @return 解析出的 [HealthInfoItem] 列表
      */
     private suspend fun parseTextStream(inputStream: InputStream): List<HealthInfoItem> {
+        Log.d(TAG, "开始解析纯文本日志...")
         val reader = BufferedReader(InputStreamReader(inputStream, StandardCharsets.UTF_8), 65536)
         val items = parseFromReader(reader)
         reader.close()
         inputStream.close()
+        Log.d(TAG, "文本日志解析完成，获取到 ${items.size} 个字段")
         return items
     }
 
@@ -178,9 +193,12 @@ class BugreportParser {
         var hasFoundBatterySection = false
         var hasFoundBatteryStatsSection = false
         var line: String?
+        var totalLineCount = 0
 
         while (reader.readLine().also { line = it } != null) {
+            totalLineCount++
             if (!coroutineContext.isActive) {
+                Log.d(TAG, "协程被取消，终止解析 (已读取 $totalLineCount 行)")
                 return emptyList()
             }
             val curLine = line!!
@@ -191,13 +209,13 @@ class BugreportParser {
                 trimLine.startsWith("DUMP OF SERVICE") && 
                 !trimLine.contains("battery") && 
                 !trimLine.contains("Health")) {
-                // 如果已经获得了关键容量和电压等数据，无需继续扫描剩余的几百兆 logcat / radio 日志！
                 if (rawDesignCap != null || rawFullCharge != null || rawVoltage != null || rawLevel != null) {
+                    Log.d(TAG, "触发早停机制（Early Termination）：已获取关键数据并在第 $totalLineCount 行退出！")
                     break
                 }
             }
 
-            // 极速行过滤：如果不在关注段落且非特征行，跳过后续匹配（纳米级过滤）
+            // 极速行过滤：如果不在关注段落且非特征行，跳过后续匹配
             if (!inHealthInfoSection && currentSection.isEmpty()) {
                 val startsWithDump = trimLine.startsWith("DUMP OF SERVICE")
                 val isHealthHeader = trimLine.startsWith("HealthInfo") || trimLine.startsWith("Health HAL") || trimLine.contains("getHealthInfo")
@@ -216,6 +234,7 @@ class BugreportParser {
                 trimLine.contains("Health HAL:")) {
                 inHealthInfoSection = true
                 hasFoundHealthInfoData = true
+                Log.d(TAG, "进入 getHealthInfo / Health HAL 段落: $trimLine")
             }
 
             if (inHealthInfoSection) {
@@ -223,43 +242,67 @@ class BugreportParser {
                     trimLine.contains("battery_design_capacity", ignoreCase = true) ||
                     trimLine.contains("batteryFullChargeDesign", ignoreCase = true)) {
                     val v = extractLongValue(trimLine)
-                    if (v != null && v > 0 && rawDesignCap == null) rawDesignCap = v
+                    if (v != null && v > 0 && rawDesignCap == null) {
+                        rawDesignCap = v
+                        Log.d(TAG, "  -> 捕获设计容量: $v")
+                    }
                 }
                 if (trimLine.contains("batteryFullChargeCapacityUah", ignoreCase = true) || 
                     trimLine.contains("batteryFullCharge", ignoreCase = true) || 
                     trimLine.contains("battery_full_charge", ignoreCase = true)) {
                     val v = extractLongValue(trimLine)
-                    if (v != null && v > 0 && rawFullCharge == null) rawFullCharge = v
+                    if (v != null && v > 0 && rawFullCharge == null) {
+                        rawFullCharge = v
+                        Log.d(TAG, "  -> 捕获充满电容量: $v")
+                    }
                 }
                 if (trimLine.contains("batteryCycleCount", ignoreCase = true) || 
                     trimLine.contains("battery_cycle_count", ignoreCase = true)) {
                     val v = extractIntValue(trimLine)
-                    if (v != null && v > 0 && rawCycleCount == null) rawCycleCount = v
+                    if (v != null && v > 0 && rawCycleCount == null) {
+                        rawCycleCount = v
+                        Log.d(TAG, "  -> 捕获循环次数: $v")
+                    }
                 }
                 if (trimLine.contains("batteryChargeCounter", ignoreCase = true) || 
                     trimLine.contains("battery_charge_counter", ignoreCase = true)) {
                     val v = extractLongValue(trimLine)
-                    if (v != null && v > 0 && rawChargeCounter == null) rawChargeCounter = v
+                    if (v != null && v > 0 && rawChargeCounter == null) {
+                        rawChargeCounter = v
+                        Log.d(TAG, "  -> 捕获剩余容量: $v")
+                    }
                 }
                 if (trimLine.contains("batteryLevel", ignoreCase = true) || 
                     trimLine.contains("battery_level", ignoreCase = true)) {
                     val v = extractIntValue(trimLine)
-                    if (v != null && v in 0..100 && rawLevel == null) rawLevel = v
+                    if (v != null && v in 0..100 && rawLevel == null) {
+                        rawLevel = v
+                        Log.d(TAG, "  -> 捕获电量: $v%")
+                    }
                 }
                 if (trimLine.contains("batteryVoltage", ignoreCase = true) || 
                     trimLine.contains("battery_voltage", ignoreCase = true)) {
                     val v = extractLongValue(trimLine)
-                    if (v != null && rawVoltage == null) rawVoltage = v
+                    if (v != null && rawVoltage == null) {
+                        rawVoltage = v
+                        Log.d(TAG, "  -> 捕获电压: $v")
+                    }
                 }
                 if (trimLine.contains("batteryCurrent", ignoreCase = true) || 
                     trimLine.contains("battery_current", ignoreCase = true)) {
                     val v = extractLongValue(trimLine)
-                    if (v != null && rawCurrent == null) rawCurrent = v
+                    if (v != null && rawCurrent == null) {
+                        rawCurrent = v
+                        Log.d(TAG, "  -> 捕获电流: $v")
+                    }
                 }
                 if (trimLine.contains("batteryTemperature", ignoreCase = true) || 
                     trimLine.contains("battery_temperature", ignoreCase = true)) {
                     val v = extractFloatValue(trimLine)
-                    if (v != null && v > 0 && rawTemp == null) rawTemp = v
+                    if (v != null && v > 0 && rawTemp == null) {
+                        rawTemp = v
+                        Log.d(TAG, "  -> 捕获温度: $v")
+                    }
                 }
                 if (trimLine.contains("batteryStatus", ignoreCase = true) || 
                     trimLine.contains("battery_status", ignoreCase = true)) {
@@ -294,9 +337,11 @@ class BugreportParser {
             if (trimLine.startsWith("DUMP OF SERVICE battery:")) {
                 currentSection = "battery"
                 hasFoundBatterySection = true
+                Log.d(TAG, "进入 DUMP OF SERVICE battery 段落")
             } else if (trimLine.startsWith("DUMP OF SERVICE batterystats:")) {
                 currentSection = "batterystats"
                 hasFoundBatteryStatsSection = true
+                Log.d(TAG, "进入 DUMP OF SERVICE batterystats 段落")
             } else if (trimLine.startsWith("DUMP OF SERVICE") || trimLine.startsWith("------ ")) {
                 if (!trimLine.contains("battery") && !trimLine.contains("Health")) {
                     currentSection = ""
@@ -550,6 +595,11 @@ class BugreportParser {
                     meaning = "物理电池是否正常连接在位"
                 )
             )
+        }
+
+        Log.d(TAG, "===> 解析完成，共提取到 ${resultList.size} 项表格数据:")
+        for ((idx, item) in resultList.withIndex()) {
+            Log.d(TAG, "  [#${idx + 1}] 原始: ${item.rawField} | 展示: ${item.displayValue} | 含义: ${item.meaning}")
         }
 
         return resultList

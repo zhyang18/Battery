@@ -477,11 +477,11 @@ class MainActivity : AppCompatActivity() {
         // 1. 添加三列表头行（原始字段、字段映射展示、含义）
         val headerRow = android.widget.TableRow(this)
         headerRow.setBackgroundColor(android.graphics.Color.parseColor("#25888888"))
-        headerRow.setPadding(4, 8, 4, 8)
+        headerRow.setPadding(4, 10, 4, 10)
 
-        val thRaw = createTableCell("原始字段", isHeader = true, textColor = android.graphics.Color.parseColor("#FF9800"))
-        val thVal = createTableCell("字段映射展示", isHeader = true, textColor = android.graphics.Color.parseColor("#4CAF50"))
-        val thMean = createTableCell("含义", isHeader = true, textColor = android.graphics.Color.parseColor("#2196F3"))
+        val thRaw = createTableCell("原始字段", isHeader = true, textColor = android.graphics.Color.parseColor("#FF9800"), minWidthDp = 180)
+        val thVal = createTableCell("字段映射展示", isHeader = true, textColor = android.graphics.Color.parseColor("#4CAF50"), minWidthDp = 160)
+        val thMean = createTableCell("含义", isHeader = true, textColor = android.graphics.Color.parseColor("#2196F3"), minWidthDp = 220)
 
         headerRow.addView(thRaw)
         headerRow.addView(thVal)
@@ -494,11 +494,11 @@ class MainActivity : AppCompatActivity() {
             if (index % 2 == 1) {
                 row.setBackgroundColor(android.graphics.Color.parseColor("#15888888"))
             }
-            row.setPadding(4, 6, 4, 6)
+            row.setPadding(4, 8, 4, 8)
 
-            val tdRaw = createTableCell(item.rawField, isHeader = false)
-            val tdVal = createTableCell(item.displayValue, isHeader = false, isBold = true)
-            val tdMean = createTableCell(item.meaning, isHeader = false)
+            val tdRaw = createTableCell(item.rawField, isHeader = false, minWidthDp = 180)
+            val tdVal = createTableCell(item.displayValue, isHeader = false, isBold = true, minWidthDp = 160)
+            val tdMean = createTableCell(item.meaning, isHeader = false, minWidthDp = 220)
 
             row.addView(tdRaw)
             row.addView(tdVal)
@@ -514,24 +514,41 @@ class MainActivity : AppCompatActivity() {
      * @param isHeader 是否为表头
      * @param textColor 自定义文字颜色（可选）
      * @param isBold 是否加粗展示
+     * @param minWidthDp 单元格最小宽度（dp）
      * @return 格式化后的 TextView 视图组件
      */
     private fun createTableCell(
         text: String,
         isHeader: Boolean = false,
         textColor: Int? = null,
-        isBold: Boolean = false
+        isBold: Boolean = false,
+        minWidthDp: Int = 120
     ): android.widget.TextView {
         val tv = android.widget.TextView(this)
         tv.text = text
-        tv.setPadding(14, 12, 14, 12)
+        tv.setPadding(16, 12, 16, 12)
         tv.textSize = if (isHeader) 13f else 12f
+
+        val density = resources.displayMetrics.density
+        tv.minWidth = (minWidthDp * density).toInt()
+
         if (textColor != null) {
             tv.setTextColor(textColor)
         } else {
             val typedValue = android.util.TypedValue()
-            theme.resolveAttribute(android.R.attr.textColorPrimary, typedValue, true)
-            tv.setTextColor(typedValue.data)
+            if (theme.resolveAttribute(android.R.attr.textColorPrimary, typedValue, true)) {
+                if (typedValue.resourceId != 0) {
+                    tv.setTextColor(androidx.core.content.ContextCompat.getColor(this, typedValue.resourceId))
+                } else if (typedValue.data != 0) {
+                    tv.setTextColor(typedValue.data)
+                } else {
+                    val isNight = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+                    tv.setTextColor(if (isNight) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#212121"))
+                }
+            } else {
+                val isNight = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
+                tv.setTextColor(if (isNight) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#212121"))
+            }
         }
         if (isHeader || isBold) {
             tv.typeface = android.graphics.Typeface.DEFAULT_BOLD

@@ -467,7 +467,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 将解析出的精简指标动态渲染为三列表格（项目、当前值、说明）。
+     * 将解析出的精简指标动态渲染为双列表格（项目、当前值）。
      *
      * @param items 解析出的 HealthInfoItem 列表
      */
@@ -484,18 +484,16 @@ class MainActivity : AppCompatActivity() {
         binding.tvBugreportStatus.visibility = android.view.View.GONE
         binding.scrollHealthTable.visibility = android.view.View.VISIBLE
 
-        // 1. 添加三列表头行（项目、当前值、说明）
+        // 1. 添加双列表头行（项目、当前值）
         val headerRow = android.widget.TableRow(this)
         headerRow.setBackgroundColor(android.graphics.Color.parseColor("#25888888"))
         headerRow.setPadding(4, 10, 4, 10)
 
-        val thItem = createTableCell("项目", isHeader = true, textColor = android.graphics.Color.parseColor("#FF9800"), minWidthDp = 140)
-        val thVal = createTableCell("当前值", isHeader = true, textColor = android.graphics.Color.parseColor("#4CAF50"), minWidthDp = 130)
-        val thDesc = createTableCell("说明", isHeader = true, textColor = android.graphics.Color.parseColor("#2196F3"), minWidthDp = 180)
+        val thItem = createTableCell("项目", isHeader = true, textColor = android.graphics.Color.parseColor("#FF9800"), minWidthDp = 160)
+        val thVal = createTableCell("当前值", isHeader = true, textColor = android.graphics.Color.parseColor("#4CAF50"), minWidthDp = 160)
 
         headerRow.addView(thItem)
         headerRow.addView(thVal)
-        headerRow.addView(thDesc)
         binding.tableHealthInfo.addView(headerRow)
 
         // 2. 逐项添加数据行
@@ -506,13 +504,11 @@ class MainActivity : AppCompatActivity() {
             }
             row.setPadding(4, 8, 4, 8)
 
-            val tdItem = createTableCell(item.itemTitle, isHeader = false, minWidthDp = 140)
-            val tdVal = createTableCell(item.currentValue, isHeader = false, isBold = true, minWidthDp = 130)
-            val tdDesc = createTableCell(item.description, isHeader = false, minWidthDp = 180)
+            val tdItem = createTableCell(item.itemTitle, isHeader = false, minWidthDp = 160)
+            val tdVal = createTableCell(item.currentValue, isHeader = false, isBold = true, minWidthDp = 160)
 
             row.addView(tdItem)
             row.addView(tdVal)
-            row.addView(tdDesc)
             binding.tableHealthInfo.addView(row)
         }
     }

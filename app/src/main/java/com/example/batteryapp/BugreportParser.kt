@@ -245,6 +245,7 @@ class BugreportParser {
         var batteryLevel: Int? = null
         var batteryTechnology: String? = null
         var batteryVoltage: Long? = null
+        var batteryCurrent: Long? = null
         var batteryTemperature: Float? = null
 
         var batteryCycleCount: Int? = null
@@ -288,6 +289,7 @@ class BugreportParser {
                 map["batteryTechnology"]?.let { batteryTechnology = it }
 
                 map["batteryVoltageMillivolts"]?.toLongOrNull()?.let { batteryVoltage = it }
+                map["batteryCurrentMicroamps"]?.toLongOrNull()?.let { batteryCurrent = it }
                 map["batteryTemperatureTenthsCelsius"]?.toFloatOrNull()?.let { batteryTemperature = it }
 
                 map["batteryCycleCount"]?.toIntOrNull()?.let { batteryCycleCount = it }
@@ -336,6 +338,11 @@ class BugreportParser {
                 val v = extractInlineValue(trimLine, "voltage:")?.toLongOrNull() ?: extractLongValue(trimLine)
                 if (v != null && v > 0 && batteryVoltage == null) batteryVoltage = v
             }
+            if (trimLine.contains("current now:", ignoreCase = true) || trimLine.contains("current_now:", ignoreCase = true) || trimLine.contains("batteryCurrent", ignoreCase = true)) {
+                val v = extractInlineValue(trimLine, "current now:") ?: extractInlineValue(trimLine, "current_now:")
+                val longV = v?.toLongOrNull() ?: extractLongValue(trimLine)
+                if (longV != null && batteryCurrent == null) batteryCurrent = longV
+            }
             if (trimLine.contains("temp:", ignoreCase = true) || trimLine.contains("temperature", ignoreCase = true)) {
                 val v = extractInlineValue(trimLine, "temp:")?.toFloatOrNull() ?: extractFloatValue(trimLine)
                 if (v != null && v > 0 && batteryTemperature == null) batteryTemperature = v
@@ -355,7 +362,7 @@ class BugreportParser {
             }
         }
 
-        // 3. 构建 14 项表格
+        // 3. 构建 12 项表格
         val tableItems = mutableListOf<HealthInfoItem>()
 
         // 1. ⚡ 充电状态
@@ -393,6 +400,28 @@ class BugreportParser {
             String.format("%.3f V", mv / 1000f)
         } else "未知"
         tableItems.add(HealthInfoItem("🔋 电池电压", voltDisplay, "当前电池端电压"))
+
+        // 4. ⚡ 电流
+        val curVal = batteryCurrent
+        val curDisplay = if (curVal != null) {
+            val ma = if (Math.abs(curVal) >= 10000L) curVal / 1000f else curVal.toFloat()
+            String.format("%.0f mA", ma)
+        } else "未知"
+        tableItems.add(HealthInfoItem("⚡ 电流", curDisplay, "当前电池电流"))
+
+        // 5. ⚡ 电池功率
+        val powerDisplay = if (voltVal != null && curVal != null) {
+            val mv = when {
+                voltVal in 2500L..9500L -> voltVal.toFloat()
+                voltVal in 2500000L..9500000L -> voltVal / 1000f
+                voltVal > 9500L -> voltVal / 1000f
+                else -> voltVal.toFloat()
+            }
+            val ma = if (Math.abs(curVal) >= 10000L) Math.abs(curVal) / 1000f else Math.abs(curVal).toFloat()
+            val w = (mv / 1000f) * (ma / 1000f)
+            String.format("%.2f W", w)
+        } else "未知"
+        tableItems.add(HealthInfoItem("⚡ 电池功率", powerDisplay, "电池瞬时工作功率"))
 
         // 4. 🌡️ 电池温度
         val tempVal = batteryTemperature

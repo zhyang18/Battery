@@ -16,8 +16,7 @@ import java.util.zip.ZipFile
 import kotlin.coroutines.coroutineContext
 
 /**
- * 负责瞬时秒级、100% 精准解析安卓错误报告（Bugreport）中 getHealthInfo 结构体的解析器。
- * 采用本地随机访问与精准流式截断技术，耗时在 0.2 秒以内。
+ * 负责瞬时秒级、100% 精准解析安卓错误报告（Bugreport）中 getHealthInfo -> HealthInfo{...} 结构体的解析器。
  */
 class BugreportParser {
 
@@ -55,7 +54,7 @@ class BugreportParser {
             }
 
             val costTime = System.currentTimeMillis() - startTime
-            Log.d(TAG, "===> 错误报告解析全部完成，总耗时仅: $costTime 毫秒！")
+            Log.d(TAG, "===> 错误报告解析完成，耗时: $costTime ms, 获取到有效数据: ${result?.hasRealData}")
             result
         } catch (e: Exception) {
             Log.e(TAG, "解析错误报告发生异常", e)
@@ -64,7 +63,7 @@ class BugreportParser {
     }
 
     /**
-     * 利用 ZipFile 随机访问索引直接秒级定位主 bugreport-*.txt，无需顺序解压其他几十个无关文件。
+     * 利用 ZipFile 随机访问索引直接秒级定位主 bugreport-*.txt。
      *
      * @param context 应用程序上下文
      * @param uri 错误报告 ZIP 的 URI
@@ -78,10 +77,10 @@ class BugreportParser {
     ): BugreportResult? {
         val tempZip = File(context.cacheDir, "temp_bugreport_${System.currentTimeMillis()}.zip")
         try {
-            // 1. 极速将 ZIP 复制到缓存目录以便使用 ZipFile 随机索引
+            // 1. 极速将 ZIP 复制到缓存目录
             val inputStream = context.contentResolver.openInputStream(uri) ?: return null
             val outputStream = FileOutputStream(tempZip)
-            val buffer = ByteArray(262144) // 256KB 极速复制
+            val buffer = ByteArray(262144) // 256KB 复制
             var bytesCopied = 0L
             var read: Int
             val totalBytes = try {
@@ -108,13 +107,11 @@ class BugreportParser {
             inputStream.close()
 
             if (!coroutineContext.isActive) return null
-
             onProgress(75)
 
             // 2. 利用 ZipFile 目录索引直接定位主日志
             val zipFile = ZipFile(tempZip)
-            val entries = zipFile.entries()
-            var targetEntry = entries.asSequence().firstOrNull {
+            var targetEntry = zipFile.entries().asSequence().firstOrNull {
                 val name = it.name.lowercase()
                 !it.isDirectory && (name.startsWith("bugreport-") && name.endsWith(".txt") || name == "bugreport.txt")
             }
@@ -151,7 +148,7 @@ class BugreportParser {
     }
 
     /**
-     * 逐行流式读取，精准提取 getHealthInfo / dumpsys battery 全量字段并在读取完毕后立即截断。
+     * 逐行流式读取，精准提取 getHealthInfo -> HealthInfo{...} 单行及多行结构体。
      *
      * @param reader 缓冲字符读取流
      * @return 组装好的 [BugreportResult]
@@ -177,7 +174,7 @@ class BugreportParser {
         var batteryChargeTimeToFullNow: Long? = null
 
         val healthInfoRawLines = mutableListOf<String>()
-        var inHealthInfoBlock = false
+        var inHealthSection = false
         var line: String?
         var totalLineCount = 0
 
@@ -190,137 +187,139 @@ class BugreportParser {
             val trimLine = curLine.trim()
             if (trimLine.isEmpty()) continue
 
-            // 1. 识别 getHealthInfo / HealthInfo / DUMP OF SERVICE battery 入口
-            if (trimLine.contains("getHealthInfo", ignoreCase = true) ||
-                trimLine.startsWith("HealthInfo_2_") ||
-                trimLine.startsWith("HealthInfo_1_") ||
-                trimLine.startsWith("HealthInfo:") ||
+            // 1. 进入 IHealth / Health HAL / getHealthInfo 服务段落
+            if (trimLine.contains("android.hardware.health", ignoreCase = true) ||
+                trimLine.contains("getHealthInfo", ignoreCase = true) ||
+                trimLine.startsWith("HealthInfo") ||
                 trimLine.startsWith("mHealthInfo") ||
-                trimLine.contains("Health HAL - getHealthInfo") ||
-                trimLine.contains("android.hardware.health") ||
                 trimLine.startsWith("DUMP OF SERVICE battery:")) {
-                inHealthInfoBlock = true
-                Log.d(TAG, "进入核心电池段落: $trimLine (第 $totalLineCount 行)")
+                inHealthSection = true
+                Log.d(TAG, "命中 Health 关键服务段落: $trimLine (第 $totalLineCount 行)")
             }
 
-            // 2. 录入 getHealthInfo 原始代码块（保留前 45 行原始结构体）
-            if (inHealthInfoBlock) {
+            if (inHealthSection) {
                 if (trimLine.startsWith("DUMP OF SERVICE") && !trimLine.contains("health") && !trimLine.contains("battery")) {
-                    inHealthInfoBlock = false
-                } else if (trimLine.startsWith("------ ") && healthInfoRawLines.size > 5) {
-                    inHealthInfoBlock = false
-                } else if (healthInfoRawLines.size < 45) {
+                    inHealthSection = false
+                } else if (trimLine.startsWith("---------") && healthInfoRawLines.size > 3) {
+                    inHealthSection = false
+                } else if (healthInfoRawLines.size < 40) {
                     healthInfoRawLines.add(curLine)
                 }
             }
 
-            // 3. 字段匹配（支持 AIDL/HIDL 格式以及 dumpsys battery 格式）
-            if (trimLine.contains("chargerUsbOnline", ignoreCase = true) || trimLine.startsWith("USB powered:", ignoreCase = true)) {
-                val v = parseBooleanValue(trimLine)
-                if (v != null && chargerUsbOnline == null) chargerUsbOnline = v
-            }
-            if (trimLine.contains("chargerAcOnline", ignoreCase = true) || trimLine.startsWith("AC powered:", ignoreCase = true)) {
-                val v = parseBooleanValue(trimLine)
-                if (v != null && chargerAcOnline == null) chargerAcOnline = v
-            }
-            if (trimLine.contains("chargerWirelessOnline", ignoreCase = true) || trimLine.startsWith("Wireless powered:", ignoreCase = true)) {
-                val v = parseBooleanValue(trimLine)
-                if (v != null && chargerWirelessOnline == null) chargerWirelessOnline = v
-            }
-            if (trimLine.contains("chargerDockOnline", ignoreCase = true) || trimLine.startsWith("Dock powered:", ignoreCase = true)) {
-                val v = parseBooleanValue(trimLine)
-                if (v != null && chargerDockOnline == null) chargerDockOnline = v
+            // 2. 核心匹配 1：如果是单行 getHealthInfo -> HealthInfo{...}
+            if (trimLine.contains("getHealthInfo", ignoreCase = true) && trimLine.contains("{") && trimLine.contains("}")) {
+                Log.d(TAG, "命中单行 getHealthInfo -> HealthInfo{...} 完整结构体！")
+                if (!healthInfoRawLines.contains(curLine)) {
+                    healthInfoRawLines.add(curLine)
+                }
+
+                // 提取大括号内部的键值对
+                val insideBraces = trimLine.substringAfter("{").substringBeforeLast("}")
+                val map = Regex("(\\w+):\\s*([^,}]+)").findAll(insideBraces).associate {
+                    it.groupValues[1].trim() to it.groupValues[2].trim()
+                }
+
+                map["chargerAcOnline"]?.let { chargerAcOnline = it.equals("true", true) || it == "1" }
+                map["chargerUsbOnline"]?.let { chargerUsbOnline = it.equals("true", true) || it == "1" }
+                map["chargerWirelessOnline"]?.let { chargerWirelessOnline = it.equals("true", true) || it == "1" }
+                map["chargerDockOnline"]?.let { chargerDockOnline = it.equals("true", true) || it == "1" }
+
+                map["maxChargingCurrentMicroamps"]?.toLongOrNull()?.let { maxChargingCurrent = it }
+                map["maxChargingVoltageMicrovolts"]?.toLongOrNull()?.let { maxChargingVoltage = it }
+
+                map["batteryStatus"]?.let { batteryStatus = it }
+                map["batteryHealth"]?.let { batteryHealth = it }
+                map["batteryLevel"]?.toIntOrNull()?.let { batteryLevel = it }
+                map["batteryTechnology"]?.let { batteryTechnology = it }
+
+                map["batteryVoltageMillivolts"]?.toLongOrNull()?.let { batteryVoltage = it }
+                map["batteryTemperatureTenthsCelsius"]?.toFloatOrNull()?.let { batteryTemperature = it }
+
+                map["batteryCycleCount"]?.toIntOrNull()?.let { batteryCycleCount = it }
+                map["batteryFullChargeUah"]?.toLongOrNull()?.let { batteryFullCharge = it }
+                map["batteryFullChargeDesignCapacityUah"]?.toLongOrNull()?.let { batteryFullChargeDesign = it }
+                map["batteryChargeTimeToFullNowSeconds"]?.toLongOrNull()?.let { batteryChargeTimeToFullNow = it }
+
+                // 单行已捕获全部 100% 数据，直接瞬时早停！
+                Log.d(TAG, "已从单行结构体中完整获取全部电池核心字段，第 $totalLineCount 行瞬时极速早停！")
+                break
             }
 
-            if (trimLine.contains("maxChargingCurrent", ignoreCase = true) || trimLine.startsWith("Max charging current:", ignoreCase = true)) {
-                val v = extractLongValue(trimLine)
+            // 3. 核心匹配 2：兼容多行键值对匹配（ac: 0 usb: 1 / level: 73 voltage: 4192 等格式）
+            if (trimLine.contains("usb:", ignoreCase = true) || trimLine.contains("chargerUsbOnline", ignoreCase = true)) {
+                if (chargerUsbOnline == null) {
+                    chargerUsbOnline = parseBooleanValue(trimLine) ?: (extractInlineValue(trimLine, "usb:")?.toIntOrNull() == 1)
+                }
+            }
+            if (trimLine.contains("ac:", ignoreCase = true) || trimLine.contains("chargerAcOnline", ignoreCase = true)) {
+                if (chargerAcOnline == null) {
+                    chargerAcOnline = parseBooleanValue(trimLine) ?: (extractInlineValue(trimLine, "ac:")?.toIntOrNull() == 1)
+                }
+            }
+            if (trimLine.contains("wireless:", ignoreCase = true) || trimLine.contains("chargerWirelessOnline", ignoreCase = true)) {
+                if (chargerWirelessOnline == null) {
+                    chargerWirelessOnline = parseBooleanValue(trimLine) ?: (extractInlineValue(trimLine, "wireless:")?.toIntOrNull() == 1)
+                }
+            }
+            if (trimLine.contains("dock:", ignoreCase = true) || trimLine.contains("chargerDockOnline", ignoreCase = true)) {
+                if (chargerDockOnline == null) {
+                    chargerDockOnline = parseBooleanValue(trimLine) ?: (extractInlineValue(trimLine, "dock:")?.toIntOrNull() == 1)
+                }
+            }
+
+            if (trimLine.contains("current_max:", ignoreCase = true) || trimLine.contains("maxChargingCurrent", ignoreCase = true)) {
+                val v = extractInlineValue(trimLine, "current_max:")?.toLongOrNull() ?: extractLongValue(trimLine)
                 if (v != null && v > 0 && maxChargingCurrent == null) maxChargingCurrent = v
             }
-            if (trimLine.contains("maxChargingVoltage", ignoreCase = true) || trimLine.startsWith("Max charging voltage:", ignoreCase = true)) {
-                val v = extractLongValue(trimLine)
+            if (trimLine.contains("voltage_max:", ignoreCase = true) || trimLine.contains("maxChargingVoltage", ignoreCase = true)) {
+                val v = extractInlineValue(trimLine, "voltage_max:")?.toLongOrNull() ?: extractLongValue(trimLine)
                 if (v != null && v > 0 && maxChargingVoltage == null) maxChargingVoltage = v
             }
 
-            if (trimLine.contains("batteryStatus", ignoreCase = true) || trimLine.startsWith("status:", ignoreCase = true) || trimLine.startsWith("mBatteryStatus:", ignoreCase = true)) {
-                if (batteryStatus == null) batteryStatus = extractStringValue(trimLine)
+            if (trimLine.contains("status:", ignoreCase = true) || trimLine.contains("batteryStatus", ignoreCase = true)) {
+                if (batteryStatus == null) batteryStatus = extractInlineValue(trimLine, "status:") ?: extractStringValue(trimLine)
             }
-            if (trimLine.contains("batteryHealth", ignoreCase = true) || trimLine.startsWith("health:", ignoreCase = true) || trimLine.startsWith("mBatteryHealth:", ignoreCase = true)) {
-                if (batteryHealth == null) batteryHealth = extractStringValue(trimLine)
+            if (trimLine.contains("health:", ignoreCase = true) || trimLine.contains("batteryHealth", ignoreCase = true)) {
+                if (batteryHealth == null) batteryHealth = extractInlineValue(trimLine, "health:") ?: extractStringValue(trimLine)
             }
 
-            if (trimLine.contains("batteryLevel", ignoreCase = true) || trimLine.startsWith("level:", ignoreCase = true) || trimLine.startsWith("mBatteryLevel:", ignoreCase = true)) {
-                val v = extractIntValue(trimLine)
+            if (trimLine.contains("level:", ignoreCase = true) || trimLine.contains("batteryLevel", ignoreCase = true)) {
+                val v = extractInlineValue(trimLine, "level:")?.toIntOrNull() ?: extractIntValue(trimLine)
                 if (v != null && v in 0..100 && batteryLevel == null) batteryLevel = v
             }
-
-            if (trimLine.contains("batteryTechnology", ignoreCase = true) || trimLine.startsWith("technology:", ignoreCase = true)) {
-                val tech = extractStringValue(trimLine)
-                if (tech.isNotEmpty() && batteryTechnology == null) batteryTechnology = tech
-            }
-
-            if (trimLine.contains("batteryVoltage", ignoreCase = true) || trimLine.startsWith("voltage:", ignoreCase = true)) {
-                val v = extractLongValue(trimLine)
+            if (trimLine.contains("voltage:", ignoreCase = true) || trimLine.contains("batteryVoltage", ignoreCase = true)) {
+                val v = extractInlineValue(trimLine, "voltage:")?.toLongOrNull() ?: extractLongValue(trimLine)
                 if (v != null && v > 0 && batteryVoltage == null) batteryVoltage = v
             }
-
-            if (trimLine.contains("batteryTemperature", ignoreCase = true) || trimLine.startsWith("temperature:", ignoreCase = true)) {
-                val v = extractFloatValue(trimLine)
+            if (trimLine.contains("temp:", ignoreCase = true) || trimLine.contains("temperature", ignoreCase = true)) {
+                val v = extractInlineValue(trimLine, "temp:")?.toFloatOrNull() ?: extractFloatValue(trimLine)
                 if (v != null && v > 0 && batteryTemperature == null) batteryTemperature = v
             }
 
-            if (trimLine.contains("batteryCycleCount", ignoreCase = true) || 
-                trimLine.contains("cycle count:", ignoreCase = true) || 
-                trimLine.contains("mCycleCount:", ignoreCase = true) || 
-                trimLine.contains("android.os.extra.CYCLE_COUNT=", ignoreCase = true)) {
-                val v = if (trimLine.contains("android.os.extra.CYCLE_COUNT=")) {
-                    Regex("(?i)android\\.os\\.extra\\.CYCLE_COUNT=(\\d+)").find(trimLine)?.groupValues?.get(1)?.toIntOrNull()
-                } else {
-                    extractIntValue(trimLine)
-                }
-                if (v != null && v > 0) {
-                    if (batteryCycleCount == null || v > batteryCycleCount) batteryCycleCount = v
-                }
+            if (trimLine.contains("cycle count:", ignoreCase = true) || trimLine.contains("batteryCycleCount", ignoreCase = true)) {
+                val v = extractInlineValue(trimLine, "cycle count:")?.toIntOrNull() ?: extractIntValue(trimLine)
+                if (v != null && v > 0 && batteryCycleCount == null) batteryCycleCount = v
             }
-
-            if (trimLine.contains("batteryFullCharge", ignoreCase = true) || 
-                trimLine.startsWith("Learned battery capacity:", ignoreCase = true) || 
-                trimLine.startsWith("mLearnedCap:", ignoreCase = true) || 
-                trimLine.startsWith("Min learned battery capacity:", ignoreCase = true)) {
+            if (trimLine.contains("Full charge:", ignoreCase = true) || trimLine.contains("batteryFullCharge", ignoreCase = true)) {
+                val v = extractInlineValue(trimLine, "Full charge:")?.toLongOrNull() ?: extractLongValue(trimLine)
+                if (v != null && v > 0 && batteryFullCharge == null) batteryFullCharge = v
+            }
+            if (trimLine.contains("batteryFullChargeDesign", ignoreCase = true) || trimLine.contains("Estimated battery capacity:", ignoreCase = true)) {
                 val v = extractLongValue(trimLine)
-                if (v != null && v > 0 && batteryFullCharge == null) {
-                    batteryFullCharge = if (v < 100000) v * 1000 else v
-                }
+                if (v != null && v > 0 && batteryFullChargeDesign == null) batteryFullChargeDesign = v
             }
 
-            if (trimLine.contains("batteryFullChargeDesign", ignoreCase = true) || 
-                trimLine.contains("battery_design_capacity", ignoreCase = true) || 
-                trimLine.startsWith("Estimated battery capacity:", ignoreCase = true) || 
-                (trimLine.startsWith("Capacity:", ignoreCase = true) && !trimLine.contains("level", ignoreCase = true))) {
-                val v = extractLongValue(trimLine)
-                if (v != null && v > 0 && batteryFullChargeDesign == null) {
-                    batteryFullChargeDesign = if (v < 100000) v * 1000 else v
-                }
-            }
-
-            if (trimLine.contains("batteryChargeTimeToFullNow", ignoreCase = true) || trimLine.contains("chargeTimeToFullNow", ignoreCase = true)) {
-                val v = extractLongValue(trimLine)
-                if (v != null && batteryChargeTimeToFullNow == null) batteryChargeTimeToFullNow = v
-            }
-
-            // 4. 智能早停：已捕获电压、电量和容量数据，且进入后续模块，立即结束
-            if (batteryVoltage != null && (batteryFullCharge != null || batteryLevel != null)) {
-                if (trimLine.startsWith("DUMP OF SERVICE package:") ||
-                    trimLine.startsWith("DUMP OF SERVICE window:") ||
-                    trimLine.startsWith("DUMP OF SERVICE activity:") ||
-                    trimLine.startsWith("------ SYSTEM LOG") ||
-                    trimLine.startsWith("------ LOGCAT")) {
-                    Log.d(TAG, "关键电池数据已全部抓齐，在第 $totalLineCount 行早停退出！")
+            // 4. 多行兜底早停
+            if (batteryVoltage != null && batteryLevel != null && batteryFullCharge != null && batteryCycleCount != null) {
+                if (trimLine.startsWith("---------") || trimLine.startsWith("DUMP OF SERVICE")) {
+                    Log.d(TAG, "多行日志已收集齐关键电池参数，第 $totalLineCount 行早停退出！")
                     break
                 }
             }
         }
 
-        // 5. 构建 14 项表格数据
+        // 5. 组装 14 项精简表格
         val tableItems = mutableListOf<HealthInfoItem>()
 
         // 1. 🔌 充电方式
@@ -364,20 +363,22 @@ class BugreportParser {
         tableItems.add(HealthInfoItem("🔋 电量", levelDisplay, "当前剩余电量"))
 
         // 4. 🔋 电池电压
-        val voltDisplay = if (batteryVoltage != null) {
+        val voltVal = batteryVoltage
+        val voltDisplay = if (voltVal != null) {
             val mv = when {
-                batteryVoltage in 2500..9500 -> batteryVoltage.toFloat()
-                batteryVoltage in 2500000..9500000 -> batteryVoltage / 1000f
-                batteryVoltage > 9500 -> batteryVoltage / 1000f
-                else -> batteryVoltage.toFloat()
+                voltVal in 2500L..9500L -> voltVal.toFloat()
+                voltVal in 2500000L..9500000L -> voltVal / 1000f
+                voltVal > 9500L -> voltVal / 1000f
+                else -> voltVal.toFloat()
             }
             String.format("%.3f V", mv / 1000f)
         } else "未知"
         tableItems.add(HealthInfoItem("🔋 电池电压", voltDisplay, "当前电池端电压"))
 
         // 5. 🌡️ 电池温度
-        val tempDisplay = if (batteryTemperature != null) {
-            val degC = if (batteryTemperature > 200) batteryTemperature / 10f else batteryTemperature
+        val tempVal = batteryTemperature
+        val tempDisplay = if (tempVal != null) {
+            val degC = if (tempVal > 200f) tempVal / 10f else tempVal
             String.format("%.1f℃", degC)
         } else "未知"
         tableItems.add(HealthInfoItem("🌡️ 电池温度", tempDisplay, "当前温度"))
@@ -387,50 +388,55 @@ class BugreportParser {
         tableItems.add(HealthInfoItem("🔄 循环次数", cycleDisplay, "等效完整循环"))
 
         // 7. 🔋 设计容量
-        val designDisplay = if (batteryFullChargeDesign != null) {
-            val mah = batteryFullChargeDesign / 1000
+        val designVal = batteryFullChargeDesign
+        val designDisplay = if (designVal != null) {
+            val mah = if (designVal < 100000L) designVal else designVal / 1000L
             "$mah mAh"
         } else "未知"
         tableItems.add(HealthInfoItem("🔋 设计容量", designDisplay, "出厂设计容量"))
 
         // 8. 🔋 当前满充容量
-        val fccDisplay = if (batteryFullCharge != null) {
-            val mah = batteryFullCharge / 1000
+        val fccVal = batteryFullCharge
+        val fccDisplay = if (fccVal != null) {
+            val mah = if (fccVal < 100000L) fccVal else fccVal / 1000L
             "$mah mAh"
         } else "未知"
         tableItems.add(HealthInfoItem("🔋 当前满充容量", fccDisplay, "电量计估算 FCC"))
 
         // 9. ❤️ 理论容量健康度
-        val healthDisplay = if (batteryFullCharge != null && batteryFullChargeDesign != null && batteryFullChargeDesign > 0) {
-            val fMah = batteryFullCharge / 1000f
-            val dMah = batteryFullChargeDesign / 1000f
+        val healthDisplay = if (fccVal != null && designVal != null && designVal > 0L) {
+            val fMah = if (fccVal < 100000L) fccVal.toFloat() else fccVal / 1000f
+            val dMah = if (designVal < 100000L) designVal.toFloat() else designVal / 1000f
             val healthPercent = (fMah / dMah) * 100f
             String.format("%.1f%%", healthPercent)
         } else "未知"
         tableItems.add(HealthInfoItem("❤️ 理论容量健康度", healthDisplay, "FCC / Design Capacity"))
 
         // 10. ⚡ 最大充电电流
-        val maxCurDisplay = if (maxChargingCurrent != null) {
-            val ma = if (maxChargingCurrent >= 1000) maxChargingCurrent / 1000 else maxChargingCurrent
+        val curVal = maxChargingCurrent
+        val maxCurDisplay = if (curVal != null) {
+            val ma = if (curVal >= 1000L) curVal / 1000L else curVal
             "$ma mA"
         } else "未知"
         tableItems.add(HealthInfoItem("⚡ 最大充电电流", maxCurDisplay, "系统报告值"))
 
         // 11. ⚡ 最大充电电压
-        val maxVoltDisplay = if (maxChargingVoltage != null) {
-            val v = if (maxChargingVoltage >= 1000000) (maxChargingVoltage / 1000000f).toInt() else if (maxChargingVoltage >= 1000) (maxChargingVoltage / 1000f).toInt() else maxChargingVoltage.toInt()
+        val voltMaxVal = maxChargingVoltage
+        val maxVoltDisplay = if (voltMaxVal != null) {
+            val v = if (voltMaxVal >= 1000000L) (voltMaxVal / 1000000f).toInt() else if (voltMaxVal >= 1000L) (voltMaxVal / 1000f).toInt() else voltMaxVal.toInt()
             "$v V"
         } else "未知"
         tableItems.add(HealthInfoItem("⚡ 最大充电电压", maxVoltDisplay, "系统报告值"))
 
         // 12. ⏱️ 预计充满时间
-        val timeDisplay = if (batteryChargeTimeToFullNow == null || batteryChargeTimeToFullNow < 0) {
+        val timeVal = batteryChargeTimeToFullNow
+        val timeDisplay = if (timeVal == null || timeVal < 0L) {
             "未知"
         } else {
-            val mins = batteryChargeTimeToFullNow / 60
+            val mins = timeVal / 60L
             "$mins 分钟"
         }
-        val timeDesc = if (batteryChargeTimeToFullNow == null || batteryChargeTimeToFullNow < 0) "返回 -1" else "预计充满时间"
+        val timeDesc = if (timeVal == null || timeVal < 0L) "返回 -1" else "预计充满时间"
         tableItems.add(HealthInfoItem("⏱️ 预计充满时间", timeDisplay, timeDesc))
 
         // 13. 🔋 电池类型
@@ -456,9 +462,14 @@ class BugreportParser {
             buildSynthesizedRawLog(tableItems)
         }
 
-        Log.d(TAG, "===> getHealthInfo 解析完成: 行数 = $totalLineCount, 是否捕获有效数据 = $hasRealData, 原始行数 = ${healthInfoRawLines.size}")
-
         return BugreportResult(tableItems, rawText, hasRealData)
+    }
+
+    private fun extractInlineValue(line: String, key: String): String? {
+        val idx = line.indexOf(key, ignoreCase = true)
+        if (idx == -1) return null
+        val sub = line.substring(idx + key.length).trim()
+        return sub.split(" ")[0].trim()
     }
 
     private fun buildSynthesizedRawLog(items: List<HealthInfoItem>): String {

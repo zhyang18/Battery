@@ -8,11 +8,12 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
+import java.nio.charset.StandardCharsets
 import java.util.zip.ZipInputStream
 import kotlin.coroutines.coroutineContext
 
 /**
- * 包装输入流以统计读取进度并回调百分比。
+ * 包装输入流以统计读取进度并按时间节流回调百分比。
  *
  * @property wrapped 被包装的原始输入流
  * @property totalBytes 文件总字节数
@@ -24,13 +25,14 @@ class CountingInputStream(
     private val onProgress: (Int) -> Unit
 ) : InputStream() {
     private var bytesRead: Long = 0
+    private var lastReportTime: Long = 0
     private var lastPercent = -1
 
     override fun read(): Int {
         val b = wrapped.read()
         if (b != -1) {
             bytesRead++
-            notifyProgress()
+            notifyProgressThrottled()
         }
         return b
     }
@@ -39,17 +41,21 @@ class CountingInputStream(
         val count = wrapped.read(b, off, len)
         if (count > 0) {
             bytesRead += count
-            notifyProgress()
+            notifyProgressThrottled()
         }
         return count
     }
 
-    private fun notifyProgress() {
+    private fun notifyProgressThrottled() {
         if (totalBytes > 0) {
-            val percent = ((bytesRead * 100) / totalBytes).toInt().coerceIn(0, 99)
-            if (percent != lastPercent) {
-                lastPercent = percent
-                onProgress(percent)
+            val now = System.currentTimeMillis()
+            if (now - lastReportTime > 120L) {
+                lastReportTime = now
+                val percent = ((bytesRead * 100) / totalBytes).toInt().coerceIn(0, 99)
+                if (percent != lastPercent) {
+                    lastPercent = percent
+                    onProgress(percent)
+                }
             }
         }
     }
@@ -60,13 +66,13 @@ class CountingInputStream(
 }
 
 /**
- * 负责解析安卓系统错误报告（Bugreport）中 getHealthInfo 结构体并输出三列表格数据的解析器。
- * 支持带取消功能的协程以及流式进度百分比回调。
+ * 负责高性能、极速解析安卓系统错误报告（Bugreport）中 getHealthInfo 结构体的解析器。
+ * 具备 64KB 大缓冲区、快速行过滤与提前早停（Early Termination）机制，实现秒级解析。
  */
 class BugreportParser {
 
     /**
-     * 从选定的文件 URI 流式解析错误报告日志并提取 getHealthInfo 表格条目列表。
+     * 从选定的文件 URI 流式极速解析错误报告日志并提取 getHealthInfo 表格条目列表。
      *
      * @param context 应用程序上下文
      * @param uri 用户选中的错误报告文件 URI
@@ -102,7 +108,7 @@ class BugreportParser {
     }
 
     /**
-     * 从 ZIP 压缩流中寻找并流式解析主错误报告文本文件。
+     * 从 ZIP 压缩流中寻找并极速解析主错误报告文本文件。
      *
      * @param inputStream 带有进度统计的输入流
      * @return 解析出的 [HealthInfoItem] 列表
@@ -112,8 +118,10 @@ class BugreportParser {
         var entry = zipIn.nextEntry
         while (entry != null && coroutineContext.isActive) {
             val name = entry.name.lowercase()
-            if (!entry.isDirectory && (name.startsWith("bugreport-") && name.endsWith(".txt") || name.endsWith(".txt"))) {
-                val reader = BufferedReader(InputStreamReader(zipIn))
+            // 过滤：仅提取主 bugreport 文本，跳过无用子目录与非目标日志
+            if (!entry.isDirectory && (name.startsWith("bugreport-") && name.endsWith(".txt") || (!name.contains("/") && name.endsWith(".txt")))) {
+                // 使用 64KB 高性能缓冲读取
+                val reader = BufferedReader(InputStreamReader(zipIn, StandardCharsets.UTF_8), 65536)
                 val items = parseFromReader(reader)
                 if (items.isNotEmpty()) {
                     zipIn.closeEntry()
@@ -129,13 +137,13 @@ class BugreportParser {
     }
 
     /**
-     * 流式解析纯文本错误报告。
+     * 极速流式解析纯文本错误报告。
      *
      * @param inputStream 带有进度统计的输入流
      * @return 解析出的 [HealthInfoItem] 列表
      */
     private suspend fun parseTextStream(inputStream: InputStream): List<HealthInfoItem> {
-        val reader = BufferedReader(InputStreamReader(inputStream))
+        val reader = BufferedReader(InputStreamReader(inputStream, StandardCharsets.UTF_8), 65536)
         val items = parseFromReader(reader)
         reader.close()
         inputStream.close()
@@ -143,7 +151,7 @@ class BugreportParser {
     }
 
     /**
-     * 逐行读取流并深度解析 getHealthInfo 结构体与 dumpsys battery 相关指标。
+     * 逐行读取流并深度解析 getHealthInfo 结构体，配备快速行过滤与提前早停机制。
      *
      * @param reader 缓冲字符读取流
      * @return 包含三列字段信息的 [HealthInfoItem] 列表
@@ -166,13 +174,39 @@ class BugreportParser {
 
         var inHealthInfoSection = false
         var currentSection = ""
+        var hasFoundHealthInfoData = false
+        var hasFoundBatterySection = false
+        var hasFoundBatteryStatsSection = false
         var line: String?
 
         while (reader.readLine().also { line = it } != null) {
             if (!coroutineContext.isActive) {
                 return emptyList()
             }
-            val trimLine = line!!.trim()
+            val curLine = line!!
+            val trimLine = curLine.trim()
+
+            // 早停检查（Early Termination）：若核心 getHealthInfo / 电池服务段已经完整读取且进入了不相关的后续服务（如 Activity/Window/Meminfo），立即返回！
+            if ((hasFoundHealthInfoData || (hasFoundBatterySection && hasFoundBatteryStatsSection)) && 
+                trimLine.startsWith("DUMP OF SERVICE") && 
+                !trimLine.contains("battery") && 
+                !trimLine.contains("Health")) {
+                // 如果已经获得了关键容量和电压等数据，无需继续扫描剩余的几百兆 logcat / radio 日志！
+                if (rawDesignCap != null || rawFullCharge != null || rawVoltage != null || rawLevel != null) {
+                    break
+                }
+            }
+
+            // 极速行过滤：如果不在关注段落且非特征行，跳过后续匹配（纳米级过滤）
+            if (!inHealthInfoSection && currentSection.isEmpty()) {
+                val startsWithDump = trimLine.startsWith("DUMP OF SERVICE")
+                val isHealthHeader = trimLine.startsWith("HealthInfo") || trimLine.startsWith("Health HAL") || trimLine.contains("getHealthInfo")
+                val isCycleBroadcast = trimLine.contains("android.os.extra.CYCLE_COUNT")
+
+                if (!startsWithDump && !isHealthHeader && !isCycleBroadcast) {
+                    continue
+                }
+            }
 
             // 1. 优先捕获 getHealthInfo / HealthInfo 硬件抽象层段落
             if (trimLine.contains("getHealthInfo", ignoreCase = true) || 
@@ -181,6 +215,7 @@ class BugreportParser {
                 trimLine.contains("Health HAL - getHealthInfo") ||
                 trimLine.contains("Health HAL:")) {
                 inHealthInfoSection = true
+                hasFoundHealthInfoData = true
             }
 
             if (inHealthInfoSection) {
@@ -255,14 +290,17 @@ class BugreportParser {
                 }
             }
 
-            // 2. 结合 dumpsys battery 与 batterystats 兜底
+            // 2. 监听段落切换 (DUMP OF SERVICE)
             if (trimLine.startsWith("DUMP OF SERVICE battery:")) {
                 currentSection = "battery"
+                hasFoundBatterySection = true
             } else if (trimLine.startsWith("DUMP OF SERVICE batterystats:")) {
                 currentSection = "batterystats"
+                hasFoundBatteryStatsSection = true
             } else if (trimLine.startsWith("DUMP OF SERVICE") || trimLine.startsWith("------ ")) {
                 if (!trimLine.contains("battery") && !trimLine.contains("Health")) {
                     currentSection = ""
+                    inHealthInfoSection = false
                 }
             }
 

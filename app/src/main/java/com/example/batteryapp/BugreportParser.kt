@@ -358,24 +358,7 @@ class BugreportParser {
         // 3. 构建 14 项表格
         val tableItems = mutableListOf<HealthInfoItem>()
 
-        // 1. 🔌 充电方式
-        val chargeMethod = when {
-            chargerUsbOnline == true -> "USB"
-            chargerWirelessOnline == true -> "无线充电"
-            chargerAcOnline == true -> "AC 适配器"
-            chargerDockOnline == true -> "Dock 底座"
-            else -> if (batteryStatus?.contains("CHARGING", ignoreCase = true) == true || batteryStatus == "2") "USB" else "未连接"
-        }
-        val chargeMethodDesc = when (chargeMethod) {
-            "USB" -> "USB 充电"
-            "无线充电" -> "无线充电中"
-            "AC 适配器" -> "交流适配器供电"
-            "Dock 底座" -> "底座充电中"
-            else -> "未充电/电池供电"
-        }
-        tableItems.add(HealthInfoItem("🔌 充电方式", chargeMethod, chargeMethodDesc))
-
-        // 2. ⚡ 充电状态
+        // 1. ⚡ 充电状态
         val statusVal = when {
             batteryStatus?.contains("CHARGING", ignoreCase = true) == true && !batteryStatus!!.contains("NOT_CHARGING", ignoreCase = true) && !batteryStatus!!.contains("DISCHARGING", ignoreCase = true) -> "Charging"
             batteryStatus?.contains("DISCHARGING", ignoreCase = true) == true || batteryStatus == "3" -> "Discharging"
@@ -394,11 +377,11 @@ class BugreportParser {
         }
         tableItems.add(HealthInfoItem("⚡ 充电状态", statusVal, statusDesc))
 
-        // 3. 🔋 电量
+        // 2. 🔋 电量
         val levelDisplay = if (batteryLevel != null) "$batteryLevel%" else "未知"
         tableItems.add(HealthInfoItem("🔋 电量", levelDisplay, "当前剩余电量"))
 
-        // 4. 🔋 电池电压
+        // 3. 🔋 电池电压
         val voltVal = batteryVoltage
         val voltDisplay = if (voltVal != null) {
             val mv = when {
@@ -411,7 +394,7 @@ class BugreportParser {
         } else "未知"
         tableItems.add(HealthInfoItem("🔋 电池电压", voltDisplay, "当前电池端电压"))
 
-        // 5. 🌡️ 电池温度
+        // 4. 🌡️ 电池温度
         val tempVal = batteryTemperature
         val tempDisplay = if (tempVal != null) {
             val degC = if (tempVal > 200f) tempVal / 10f else tempVal
@@ -419,11 +402,11 @@ class BugreportParser {
         } else "未知"
         tableItems.add(HealthInfoItem("🌡️ 电池温度", tempDisplay, "当前温度"))
 
-        // 6. 🔄 循环次数
+        // 5. 🔄 循环次数
         val cycleDisplay = if (batteryCycleCount != null) "$batteryCycleCount" else "未知"
         tableItems.add(HealthInfoItem("🔄 循环次数", cycleDisplay, "等效完整循环"))
 
-        // 7. 🔋 设计容量
+        // 6. 🔋 设计容量
         val designVal = batteryFullChargeDesign
         val designDisplay = if (designVal != null) {
             val mah = if (designVal < 100000L) designVal else designVal / 1000L
@@ -431,7 +414,7 @@ class BugreportParser {
         } else "未知"
         tableItems.add(HealthInfoItem("🔋 设计容量", designDisplay, "出厂设计容量"))
 
-        // 8. 🔋 当前满充容量
+        // 7. 🔋 当前满充容量
         val fccVal = batteryFullCharge
         val fccDisplay = if (fccVal != null) {
             val mah = if (fccVal < 100000L) fccVal else fccVal / 1000L
@@ -439,7 +422,7 @@ class BugreportParser {
         } else "未知"
         tableItems.add(HealthInfoItem("🔋 当前满充容量", fccDisplay, "电量计估算 FCC"))
 
-        // 9. ❤️ 理论容量健康度
+        // 8. ❤️ 理论容量健康度
         val healthDisplay = if (fccVal != null && designVal != null && designVal > 0L) {
             val fMah = if (fccVal < 100000L) fccVal.toFloat() else fccVal / 1000f
             val dMah = if (designVal < 100000L) designVal.toFloat() else designVal / 1000f
@@ -448,38 +431,11 @@ class BugreportParser {
         } else "未知"
         tableItems.add(HealthInfoItem("❤️ 理论容量健康度", healthDisplay, "FCC / Design Capacity"))
 
-        // 10. ⚡ 最大充电电流
-        val curVal = maxChargingCurrent
-        val maxCurDisplay = if (curVal != null) {
-            val ma = if (curVal >= 1000L) curVal / 1000L else curVal
-            "$ma mA"
-        } else "未知"
-        tableItems.add(HealthInfoItem("⚡ 最大充电电流", maxCurDisplay, "系统报告值"))
-
-        // 11. ⚡ 最大充电电压
-        val voltMaxVal = maxChargingVoltage
-        val maxVoltDisplay = if (voltMaxVal != null) {
-            val v = if (voltMaxVal >= 1000000L) (voltMaxVal / 1000000f).toInt() else if (voltMaxVal >= 1000L) (voltMaxVal / 1000f).toInt() else voltMaxVal.toInt()
-            "$v V"
-        } else "未知"
-        tableItems.add(HealthInfoItem("⚡ 最大充电电压", maxVoltDisplay, "系统报告值"))
-
-        // 12. ⏱️ 预计充满时间
-        val timeVal = batteryChargeTimeToFullNow
-        val timeDisplay = if (timeVal == null || timeVal < 0L) {
-            "未知"
-        } else {
-            val mins = timeVal / 60L
-            "$mins 分钟"
-        }
-        val timeDesc = if (timeVal == null || timeVal < 0L) "返回 -1" else "预计充满时间"
-        tableItems.add(HealthInfoItem("⏱️ 预计充满时间", timeDisplay, timeDesc))
-
-        // 13. 🔋 电池类型
+        // 9. 🔋 电池类型
         val techDisplay = batteryTechnology ?: "Li-ion"
         tableItems.add(HealthInfoItem("🔋 电池类型", techDisplay, "锂离子"))
 
-        // 14. 🩺 电池健康
+        // 10. 🩺 电池健康
         val healthStatusVal = when {
             batteryHealth?.contains("GOOD", ignoreCase = true) == true || batteryHealth == "2" -> "GOOD"
             batteryHealth?.contains("OVERHEAT", ignoreCase = true) == true || batteryHealth == "3" -> "OVERHEAT (过热)"

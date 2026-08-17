@@ -14,6 +14,9 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.appcompat.widget.SwitchCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.batteryapp.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
@@ -26,7 +29,7 @@ import rikka.shizuku.Shizuku
 
 /**
  * 应用程序的主活动界面。
- * 负责展示顶部精简标题栏、双列电池数据对比、管理全局设置（主题/深色模式、Shizuku授权、实时刷新）及生命周期。
+ * 负责展示顶部沉浸式标题栏、双列电池数据对比、管理全局设置（主题/深色模式、Shizuku授权、实时刷新）及生命周期。
  */
 class MainActivity : AppCompatActivity() {
 
@@ -86,7 +89,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 活动创建时调用，加载保存的主题配置、初始化界面并加载电池信息。
+     * 活动创建时调用，开启沉浸式状态栏、处理系统栏边距、加载保存的主题配置并初始化界面。
      *
      * @param savedInstanceState 包含活动先前保存状态的包
      */
@@ -96,8 +99,27 @@ class MainActivity : AppCompatActivity() {
         AppCompatDelegate.setDefaultNightMode(savedThemeMode)
 
         super.onCreate(savedInstanceState)
+
+        // 开启沉浸式状态栏与全面屏边到边布局
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // 自动适配顶部状态栏与底部导航栏避让间距
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
+            val statusBarInsets = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+            val navBarInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            view.setPadding(
+                view.paddingLeft,
+                statusBarInsets.top + 16,
+                view.paddingRight,
+                navBarInsets.bottom + 16
+            )
+            insets
+        }
+
+        updateSystemBarAppearance()
 
         isAutoRefreshEnabled = prefs.getBoolean("auto_refresh_enabled", false)
         refreshIntervalMs = prefs.getLong("refresh_interval_ms", 2000L)
@@ -117,6 +139,16 @@ class MainActivity : AppCompatActivity() {
         }
 
         refreshBatteryInfo()
+    }
+
+    /**
+     * 根据当前日夜间模式与主题，自动调整状态栏及导航栏图标的明暗颜色。
+     */
+    private fun updateSystemBarAppearance() {
+        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+        val isNight = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        insetsController.isAppearanceLightStatusBars = !isNight
+        insetsController.isAppearanceLightNavigationBars = !isNight
     }
 
     /**

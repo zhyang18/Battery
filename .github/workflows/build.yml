@@ -29,7 +29,13 @@ jobs:
           cache: "gradle"
 
       - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+        run: |
+          if [ -f "gradlew" ]; then
+            chmod +x gradlew
+          else
+            gradle wrapper
+            chmod +x gradlew
+          fi
 
       - name: Build Release APK with Gradle
         run: ./gradlew assembleRelease --stacktrace

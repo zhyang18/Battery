@@ -51,12 +51,13 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:minHeight="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="16dp"
-                android:paddingVertical="12dp">
+                android:paddingVertical="14dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -85,12 +86,13 @@
                 android:id="@+id/layout_dark_mode"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:minHeight="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="16dp"
-                android:paddingVertical="12dp">
+                android:paddingVertical="14dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -130,12 +132,13 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:minHeight="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="16dp"
-                android:paddingVertical="12dp">
+                android:paddingVertical="14dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -164,6 +167,7 @@
                 android:id="@+id/layout_interval_setting"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:minHeight="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:clickable="true"
@@ -223,6 +227,7 @@
                 android:id="@+id/layout_shizuku_auth"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:minHeight="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:clickable="true"
@@ -297,6 +302,7 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:minHeight="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:gravity="center_vertical"

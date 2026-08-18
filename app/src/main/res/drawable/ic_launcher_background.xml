@@ -13,15 +13,10 @@
                 android:endX="108"
                 android:endY="108"
                 android:type="linear">
-                <item android:offset="0.0" android:color="#1A237E" />
-                <item android:offset="0.5" android:color="#0D47A1" />
-                <item android:offset="1.0" android:color="#00695C" />
+                <item android:offset="0.0" android:color="#0F172A" />
+                <item android:offset="0.5" android:color="#1E293B" />
+                <item android:offset="1.0" android:color="#0F766E" />
             </gradient>
         </aapt:attr>
     </path>
-    <!-- 科技装饰光圈 -->
-    <path
-        android:pathData="M54,18 A36,36 0 1,0 54,90 A36,36 0 1,0 54,18"
-        android:strokeWidth="1.5"
-        android:strokeColor="#2000E676" />
 </vector>

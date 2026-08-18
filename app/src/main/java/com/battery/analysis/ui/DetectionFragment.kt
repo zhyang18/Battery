@@ -1,5 +1,6 @@
 package com.battery.analysis.ui
 
+import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -7,13 +8,16 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
+import androidx.lifecycle.lifecycleScope
 import com.battery.analysis.databinding.FragmentDetectionBinding
 import com.battery.analysis.viewmodel.BatteryViewModel
 import com.google.android.material.tabs.TabLayoutMediator
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * 电池检测顶级页面 Fragment。
- * 承载上方三大子页签（系统api、Shizuku、错误报告）与 ViewPager2 左右滑动手势容器，并提供快速刷新按钮。
+ * 承载上方三大子页签（系统api、Shizuku、错误报告）与 ViewPager2 左右滑动手势容器，并支持下拉刷新数据。
  */
 class DetectionFragment : Fragment() {
 
@@ -40,7 +44,7 @@ class DetectionFragment : Fragment() {
     }
 
     /**
-     * 视图创建完毕后的生命周期回调，配置 ViewPager2 与 TabLayout 联动及刷新事件。
+     * 视图创建完毕后的生命周期回调，配置 ViewPager2、TabLayout 联动及 SwipeRefreshLayout 下拉刷新事件。
      *
      * @param view 创建完成的根视图
      * @param savedInstanceState 状态保存 Bundle
@@ -59,11 +63,18 @@ class DetectionFragment : Fragment() {
             tab.text = tabTitles.getOrElse(position) { "" }
         }.attach()
 
-        // 2. 刷新按钮点击事件
-        binding.btnRefresh.setOnClickListener {
+        // 2. 初始化 SwipeRefreshLayout 下拉刷新
+        binding.swipeRefreshLayout.setColorSchemeColors(Color.parseColor("#2196F3"))
+        binding.swipeRefreshLayout.setOnRefreshListener {
             context?.let { ctx ->
                 viewModel.refreshData(ctx)
-                Toast.makeText(ctx, "数据已刷新", Toast.LENGTH_SHORT).show()
+            }
+            viewLifecycleOwner.lifecycleScope.launch {
+                delay(600)
+                if (_binding != null) {
+                    binding.swipeRefreshLayout.isRefreshing = false
+                    Toast.makeText(requireContext(), "数据已刷新", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }

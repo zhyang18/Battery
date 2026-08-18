@@ -44,7 +44,7 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == SHIZUKU_REQUEST_CODE) {
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(this, "Shizuku 授权成功！", Toast.LENGTH_SHORT).show()
-                viewModel.refreshData(this)
+                viewModel.refreshShizuku(this)
             } else {
                 Toast.makeText(this, "Shizuku 授权被拒绝", Toast.LENGTH_SHORT).show()
             }
@@ -57,7 +57,7 @@ class MainActivity : AppCompatActivity() {
      */
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         updateShizukuStatusState()
-        viewModel.refreshData(this)
+        viewModel.refreshShizuku(this)
     }
 
     /**
@@ -65,7 +65,7 @@ class MainActivity : AppCompatActivity() {
      */
     private val binderDeadListener = Shizuku.OnBinderDeadListener {
         updateShizukuStatusState()
-        viewModel.refreshData(this)
+        viewModel.refreshShizuku(this)
     }
 
     /**
@@ -96,9 +96,9 @@ class MainActivity : AppCompatActivity() {
         Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
         Shizuku.addBinderDeadListener(binderDeadListener)
 
-        // 3. 初始刷新数据与状态
+        // 3. 初始只刷新系统普通 API（因为默认处于系统 API 视图）
         updateShizukuStatusState()
-        viewModel.refreshData(this)
+        viewModel.refreshNormalApi(this)
     }
 
     /**
@@ -246,13 +246,30 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 启动实时自动刷新的后台协程。
+     * 根据当前用户正处于的顶级页面及子 Tab，精准且独立地刷新对应的数据源。
+     */
+    private fun refreshCurrentActiveTab() {
+        if (binding.mainViewPager.currentItem == 0) {
+            val navHostFragment = supportFragmentManager.findFragmentByTag("f0") as? com.battery.analysis.ui.DetectionFragment
+                ?: supportFragmentManager.fragments.firstOrNull { it is com.battery.analysis.ui.DetectionFragment } as? com.battery.analysis.ui.DetectionFragment
+            val currentChildTab = navHostFragment?.getCurrentTabPosition() ?: 0
+            when (currentChildTab) {
+                0 -> viewModel.refreshNormalApi(this)
+                1 -> viewModel.refreshShizuku(this)
+            }
+        }
+    }
+
+    /**
+     * 启动实时自动刷新的后台协程，按当前活跃 Tab 独立轮询刷新。
      */
     private fun startAutoRefresh() {
         autoRefreshJob?.cancel()
         autoRefreshJob = lifecycleScope.launch(Dispatchers.IO) {
             while (isActive) {
-                viewModel.refreshData(this@MainActivity)
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    refreshCurrentActiveTab()
+                }
                 delay(refreshIntervalMs)
             }
         }

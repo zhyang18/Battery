@@ -19,7 +19,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * 电池数据共享与业务状态管理的 ViewModel。
- * 统一管理系统 API、Shizuku 底层节点及错误报告解析等三源数据流，供各 Tab 页面协同观察与更新。
+ * 负责将系统原生 API、Shizuku 底层驱动节点与错误报告流式解析彻底解耦，提供独立并发且互不干扰的刷新管道与状态流。
  */
 class BatteryViewModel : ViewModel() {
 
@@ -27,15 +27,23 @@ class BatteryViewModel : ViewModel() {
     private val shizukuProvider = ShizukuProvider()
     private val bugreportParser = BugreportParser()
 
+    private var normalApiJob: Job? = null
+    private var shizukuJob: Job? = null
     private var bugreportJob: Job? = null
 
-    // 1. 系统 API 电池数据流
+    // 1. 系统 API 电池数据流与刷新状态
     private val _normalBatteryInfo = MutableStateFlow<BatteryInfo?>(null)
     val normalBatteryInfo: StateFlow<BatteryInfo?> = _normalBatteryInfo.asStateFlow()
 
-    // 2. Shizuku 电池数据流
+    private val _isNormalRefreshing = MutableStateFlow(false)
+    val isNormalRefreshing: StateFlow<Boolean> = _isNormalRefreshing.asStateFlow()
+
+    // 2. Shizuku 电池数据流与刷新状态
     private val _shizukuBatteryInfo = MutableStateFlow<BatteryInfo?>(null)
     val shizukuBatteryInfo: StateFlow<BatteryInfo?> = _shizukuBatteryInfo.asStateFlow()
+
+    private val _isShizukuRefreshing = MutableStateFlow(false)
+    val isShizukuRefreshing: StateFlow<Boolean> = _isShizukuRefreshing.asStateFlow()
 
     // 3. 错误报告解析结果流
     private val _bugreportResult = MutableStateFlow<BugreportResult?>(null)
@@ -59,20 +67,53 @@ class BatteryViewModel : ViewModel() {
     val isShizukuGranted: StateFlow<Boolean> = _isShizukuGranted.asStateFlow()
 
     /**
-     * 刷新普通系统 API 与 Shizuku 底层电池数据。
+     * 独立刷新系统普通 API 电池数据。
+     * 完全解耦，极速读取 (< 5ms)，绝不阻塞任何其他后台任务。
+     *
+     * @param context 应用程序上下文
+     */
+    fun refreshNormalApi(context: Context) {
+        val appCtx = context.applicationContext
+        normalApiJob?.cancel()
+        _isNormalRefreshing.value = true
+
+        normalApiJob = viewModelScope.launch(Dispatchers.IO) {
+            val normal = normalApiProvider.getBatteryInfo(appCtx)
+            withContext(Dispatchers.Main) {
+                _normalBatteryInfo.value = normal
+                _isNormalRefreshing.value = false
+            }
+        }
+    }
+
+    /**
+     * 独立刷新 Shizuku 底层驱动节点电池数据。
+     * 完全解耦，在独立后台协程中运行，绝不干扰系统 API 的刷新与展示。
+     *
+     * @param context 应用程序上下文
+     */
+    fun refreshShizuku(context: Context) {
+        val appCtx = context.applicationContext
+        shizukuJob?.cancel()
+        _isShizukuRefreshing.value = true
+
+        shizukuJob = viewModelScope.launch(Dispatchers.IO) {
+            val shizuku = shizukuProvider.getBatteryInfo(appCtx)
+            withContext(Dispatchers.Main) {
+                _shizukuBatteryInfo.value = shizuku
+                _isShizukuRefreshing.value = false
+            }
+        }
+    }
+
+    /**
+     * 同时触发系统 API 与 Shizuku 数据的刷新（两个任务完全独立并发执行）。
      *
      * @param context 应用程序上下文
      */
     fun refreshData(context: Context) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val normal = normalApiProvider.getBatteryInfo(context)
-            val shizuku = shizukuProvider.getBatteryInfo(context)
-
-            withContext(Dispatchers.Main) {
-                _normalBatteryInfo.value = normal
-                _shizukuBatteryInfo.value = shizuku
-            }
-        }
+        refreshNormalApi(context)
+        refreshShizuku(context)
     }
 
     /**

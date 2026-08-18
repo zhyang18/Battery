@@ -1,8 +1,4 @@
-# 🔋 Battery (电池检测与健康分析)
-
-<p align="center">
-  <img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="96" height="96" alt="Battery App Icon" />
-</p>
+<h1 align="center">🔋 Battery (电池检测与健康分析)</h1>
 
 <p align="center">
   <strong>一款专为 Android 设计的轻量、精准、现代的电池健康与硬件参数分析工具。</strong>

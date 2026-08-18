@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
+import androidx.viewpager2.widget.ViewPager2
 import com.battery.analysis.databinding.FragmentDetectionBinding
 import com.battery.analysis.viewmodel.BatteryViewModel
 import com.google.android.material.tabs.TabLayoutMediator
@@ -17,7 +18,7 @@ import kotlinx.coroutines.launch
 
 /**
  * 电池检测顶级页面 Fragment。
- * 承载上方三大子页签（系统api、Shizuku、错误报告）与 ViewPager2 左右滑动手势容器，并支持下拉刷新数据。
+ * 承载上方三大子页签（系统api、Shizuku、错误报告）与 ViewPager2 左右滑动手势容器，并支持下拉解耦独立刷新数据。
  */
 class DetectionFragment : Fragment() {
 
@@ -44,7 +45,7 @@ class DetectionFragment : Fragment() {
     }
 
     /**
-     * 视图创建完毕后的生命周期回调，配置 ViewPager2、TabLayout 联动及 SwipeRefreshLayout 下拉刷新事件。
+     * 视图创建完毕后的生命周期回调，配置 ViewPager2、TabLayout 联动及解耦独立下拉刷新。
      *
      * @param view 创建完成的根视图
      * @param savedInstanceState 状态保存 Bundle
@@ -63,20 +64,59 @@ class DetectionFragment : Fragment() {
             tab.text = tabTitles.getOrElse(position) { "" }
         }.attach()
 
-        // 2. 初始化 SwipeRefreshLayout 下拉刷新
+
+
+        // 3. 初始化 SwipeRefreshLayout 下拉刷新：根据当前选中的 Tab 精准触发对应独立刷新
         binding.swipeRefreshLayout.setColorSchemeColors(Color.parseColor("#2196F3"))
         binding.swipeRefreshLayout.setOnRefreshListener {
-            context?.let { ctx ->
-                viewModel.refreshData(ctx)
+            val ctx = context
+            if (ctx == null) {
+                binding.swipeRefreshLayout.isRefreshing = false
+                return@setOnRefreshListener
             }
-            viewLifecycleOwner.lifecycleScope.launch {
-                delay(600)
-                if (_binding != null) {
-                    binding.swipeRefreshLayout.isRefreshing = false
-                    Toast.makeText(requireContext(), "数据已刷新", Toast.LENGTH_SHORT).show()
+
+            val currentTab = binding.detectionViewPager.currentItem
+            when (currentTab) {
+                0 -> {
+                    viewModel.refreshNormalApi(ctx)
+                    viewLifecycleOwner.lifecycleScope.launch {
+                        delay(200)
+                        if (_binding != null) {
+                            binding.swipeRefreshLayout.isRefreshing = false
+                            Toast.makeText(requireContext(), "系统 API 数据已更新", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+                1 -> {
+                    viewModel.refreshShizuku(ctx)
+                    viewLifecycleOwner.lifecycleScope.launch {
+                        delay(500)
+                        if (_binding != null) {
+                            binding.swipeRefreshLayout.isRefreshing = false
+                            Toast.makeText(requireContext(), "Shizuku 数据已更新", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+                else -> {
+                    viewLifecycleOwner.lifecycleScope.launch {
+                        delay(200)
+                        if (_binding != null) {
+                            binding.swipeRefreshLayout.isRefreshing = false
+                            Toast.makeText(requireContext(), "错误报告请点击卡片重新导入", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * 获取当前处于活跃展示状态的子 Tab 索引位置（0: 系统api, 1: Shizuku, 2: 错误报告）。
+     *
+     * @return 当前子 Tab 的索引数值
+     */
+    fun getCurrentTabPosition(): Int {
+        return _binding?.detectionViewPager?.currentItem ?: 0
     }
 
     /**

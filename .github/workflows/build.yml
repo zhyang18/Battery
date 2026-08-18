@@ -127,19 +127,38 @@ jobs:
           path: output_apks/*.apk
           retention-days: 30
 
+      - name: Generate Release Tag & Info
+        id: release_info
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG_NAME="${{ github.ref_name }}"
+            RELEASE_NAME="${{ github.ref_name }}"
+            IS_PRERELEASE="false"
+          else
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+            TAG_NAME="v1.0-build.${{ github.run_number }}-${SHORT_SHA}"
+            RELEASE_NAME="Battery v1.0 (Build #${{ github.run_number }}-${SHORT_SHA})"
+            IS_PRERELEASE="true"
+          fi
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "release_name=$RELEASE_NAME" >> $GITHUB_OUTPUT
+          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+
       - name: Release APK to GitHub Releases
         if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
-          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'Latest Continuous Build' }}
+          tag_name: ${{ steps.release_info.outputs.tag_name }}
+          name: ${{ steps.release_info.outputs.release_name }}
           body: |
-            ## 电池检测 (Battery App) 自动构建发布
-            - **提交哈希**: `${{ github.sha }}`
-            - **包含文件**:
-              - `Battery-release-signed.apk`: 经由 apksigner (V2+V3) 签名的正式发布版 APK
-              - `Battery-debug.apk`: 调试版 APK
-          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+            ## 🔋 电池检测 (Battery App) 自动构建发布
+            - **构建编号**: `Build #${{ github.run_number }}`
+            - **提交代码**: [`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+            - **构建分支**: `${{ github.ref_name }}`
+            - **包含安装包**:
+              - 🚀 `Battery-release-signed.apk`: 经由 apksigner (V2+V3) 签名的正式发布版 APK（推荐安装）
+              - 🛠️ `Battery-debug.apk`: 调试版 APK
+          prerelease: ${{ steps.release_info.outputs.is_prerelease == 'true' }}
           files: |
             output_apks/Battery-release-signed.apk
             output_apks/Battery-debug.apk

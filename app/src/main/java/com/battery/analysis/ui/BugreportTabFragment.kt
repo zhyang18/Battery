@@ -1,4 +1,4 @@
-package com.battery.analysis
+package com.battery.analysis.ui
 
 import android.net.Uri
 import android.os.Bundle
@@ -13,11 +13,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.battery.analysis.databinding.FragmentBugreportBinding
+import com.battery.analysis.viewmodel.BatteryViewModel
 import kotlinx.coroutines.launch
 
 /**
  * 错误报告 (Bugreport) 解析展示 Tab 页面 Fragment。
- * 提供错误报告日志文件的选择导入、秒级快速流式解析进度提示、结构化电池参数展示及原始数据折叠视图。
+ * 提供错误报告日志文件的选择导入、流式解析进度提示、结构化电池参数展示及原始数据折叠视图。
  */
 class BugreportTabFragment : Fragment() {
 

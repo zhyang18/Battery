@@ -15,6 +15,8 @@ import androidx.core.view.GravityCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.battery.analysis.databinding.ActivityMainBinding
+import com.battery.analysis.ui.MainPagerAdapter
+import com.battery.analysis.viewmodel.BatteryViewModel
 import com.google.android.material.tabs.TabLayoutMediator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

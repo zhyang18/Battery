@@ -1,9 +1,14 @@
-package com.battery.analysis
+package com.battery.analysis.viewmodel
 
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.battery.analysis.model.BatteryInfo
+import com.battery.analysis.model.BugreportResult
+import com.battery.analysis.provider.BugreportParser
+import com.battery.analysis.provider.NormalApiProvider
+import com.battery.analysis.provider.ShizukuProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,7 +48,7 @@ class BatteryViewModel : ViewModel() {
     private val _bugreportProgress = MutableStateFlow(0)
     val bugreportProgress: StateFlow<Int> = _bugreportProgress.asStateFlow()
 
-    private val _bugreportStatus = MutableStateFlow("未导入错误报告日志。点击上方按钮选择 bugreport.zip 或 txt 提取底层数据。")
+    private val _bugreportStatus = MutableStateFlow("未导入错误报告日志。点击下方按钮选择 bugreport.zip 或 txt 提取底层数据。")
     val bugreportStatus: StateFlow<String> = _bugreportStatus.asStateFlow()
 
     // 5. Shizuku 连接与权限状态

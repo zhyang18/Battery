@@ -1,7 +1,10 @@
-package com.battery.analysis
+package com.battery.analysis.provider
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.BatteryManager
+import com.battery.analysis.model.BatteryInfo
 
 /**
  * 电池数据提供者接口。
@@ -18,7 +21,7 @@ interface BatteryDataProvider {
 }
 
 /**
- * 使用普通 API (BatteryManager) 获取电池信息的实现类。
+ * 使用 Android 系统普通 API (BatteryManager 及电池广播) 获取电池信息的实现类。
  */
 class NormalApiProvider : BatteryDataProvider {
     /**
@@ -31,7 +34,7 @@ class NormalApiProvider : BatteryDataProvider {
         val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         
         // 注册接收一次粘性广播以获取温度、电压、状态等
-        val intentFilter = android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED)
+        val intentFilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
         val batteryStatus = context.registerReceiver(null, intentFilter)
 
         // 1. 获取当前电量百分比
@@ -113,7 +116,7 @@ class NormalApiProvider : BatteryDataProvider {
         // 尝试通过反射获取系统内部的电池容量 profile（设计容量）
         val designCapacityMah = getDesignCapacity(context)
 
-        // 计算健康度百分比
+        // 计算健康度百分比（精确浮点计算）
         var healthPercent: Float? = null
         if (fullChargeCapacityMah != null && designCapacityMah != null && designCapacityMah > 0) {
             healthPercent = (fullChargeCapacityMah / designCapacityMah) * 100f

@@ -1,6 +1,10 @@
-package com.battery.analysis
+package com.battery.analysis.provider
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
+import com.battery.analysis.model.BatteryInfo
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -56,8 +60,8 @@ class ShizukuProvider : BatteryDataProvider {
         // 如果底层未直接解析到电流，尝试从 BatteryManager 读取底层瞬时电流
         if (currentNow == null) {
             try {
-                val bm = context.getSystemService(Context.BATTERY_SERVICE) as? android.os.BatteryManager
-                val rawCur = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+                val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                val rawCur = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
                 if (rawCur != null && rawCur != Int.MIN_VALUE && rawCur != 0) {
                     currentNow = if (Math.abs(rawCur) < 100000) rawCur.toFloat() else rawCur / 1000f
                 }
@@ -66,11 +70,11 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        // 如果底层未直接解析到电压或电压超出正常电池物理范围(2.5V-9.5V)，尝试从系统粘性广播读取当前电压
+        // 如果底层未直接解析到电压或电压超出正常范围(2.5V-9.5V)，尝试从系统粘性广播读取当前电压
         if (voltage == null || voltage < 2500f || voltage > 9500f) {
             try {
-                val intent = context.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
-                val rawVolt = intent?.getIntExtra(android.os.BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
+                val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                val rawVolt = intent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
                 if (rawVolt in 2500..9500) {
                     voltage = rawVolt.toFloat()
                 }
@@ -84,6 +88,7 @@ class ShizukuProvider : BatteryDataProvider {
             Math.abs(voltage * currentNow) / 1000000f
         } else null
 
+        // 计算健康度（支持大于 100% 的精确数值计算）
         var health: Float? = sysfsInfo.batteryHealth ?: dumpsysInfo.batteryHealth ?: vendorInfo.batteryHealth
         if (health == null && fullCap != null && designCap != null && designCap > 0) {
             health = (fullCap / designCap) * 100f
@@ -163,7 +168,7 @@ class ShizukuProvider : BatteryDataProvider {
         var technology: String? = null
         var isDualCell: Boolean? = null
 
-        // 1. 读取专属电池 power_supply 下的 uevent 文件（避免混入 usb/charger 充电头高电压）
+        // 1. 读取专属电池 power_supply 下的 uevent 文件
         val sysfsCmd = "cat /sys/class/power_supply/battery/uevent /sys/class/power_supply/bms/uevent /sys/class/qcom-battery/uevent /sys/class/power_supply/battery_gauge/uevent 2>/dev/null"
         val ueventRes = executeCommand(sysfsCmd)
 
@@ -376,7 +381,6 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        // 精确匹配行首的 voltage（防止误匹配 Max charging voltage: 5000000）
         val regexVolt = Regex("(?m)^\\s*voltage:\\s*(\\d+)")
         val matchVolt = regexVolt.find(batteryOutput)
         if (matchVolt != null) {

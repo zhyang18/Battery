@@ -1,8 +1,11 @@
-package com.battery.analysis
+package com.battery.analysis.provider
 
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import com.battery.analysis.model.BatteryInfo
+import com.battery.analysis.model.BugreportResult
+import com.battery.analysis.model.HealthInfoItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -14,8 +17,8 @@ import java.util.zip.ZipFile
 import kotlin.coroutines.coroutineContext
 
 /**
- * 负责瞬时秒级、100% 精准解析安卓错误报告（Bugreport）中 getHealthInfo 结构体的解析器。
- * 采用零内存分配的原生字节流快扫技术，在 0.2 秒内极速完成数十兆解压并精准捕获所有核心参数。
+ * 负责瞬时秒级解析安卓错误报告（Bugreport）中 getHealthInfo 结构体的解析器。
+ * 采用原生字节流快扫技术，在短时间内完成解压并捕获所有核心电池参数。
  */
 class BugreportParser {
 
@@ -53,7 +56,7 @@ class BugreportParser {
             }
 
             val costTime = System.currentTimeMillis() - startTime
-            Log.d(TAG, "===> 错误报告解析全部完成，总耗时仅: $costTime ms！")
+            Log.d(TAG, "===> 错误报告解析全部完成，总耗时: $costTime ms！")
             result
         } catch (e: Exception) {
             Log.e(TAG, "解析错误报告发生异常", e)
@@ -76,10 +79,9 @@ class BugreportParser {
     ): BugreportResult? {
         val tempZip = File(context.cacheDir, "temp_bugreport_${System.currentTimeMillis()}.zip")
         try {
-            // 1. 极速将 ZIP 复制到缓存目录
             val inputStream = context.contentResolver.openInputStream(uri) ?: return null
             val outputStream = FileOutputStream(tempZip)
-            val buffer = ByteArray(524288) // 512KB 复制
+            val buffer = ByteArray(524288)
             var bytesCopied = 0L
             var read: Int
             val totalBytes = try {
@@ -108,7 +110,6 @@ class BugreportParser {
             if (!coroutineContext.isActive) return null
             onProgress(60)
 
-            // 2. 利用 ZipFile 目录索引直接定位主日志
             val zipFile = ZipFile(tempZip)
             var targetEntry = zipFile.entries().asSequence().firstOrNull {
                 val name = it.name.lowercase()
@@ -128,7 +129,7 @@ class BugreportParser {
                 return null
             }
 
-            Log.d(TAG, "命中主日志条目: ${targetEntry.name}, 启动 1MB 原生字节级零开销快扫...")
+            Log.d(TAG, "命中主日志条目: ${targetEntry.name}, 启动字节级扫描...")
             onProgress(75)
 
             val entryStream = zipFile.getInputStream(targetEntry)
@@ -147,7 +148,7 @@ class BugreportParser {
     }
 
     /**
-     * 采用 1MB 原生字节数组快扫输入流，避免数百万次 String 分配和 GC 停顿，瞬时定位 getHealthInfo。
+     * 采用原生字节数组快扫输入流，定位 getHealthInfo 数据。
      *
      * @param stream 输入流
      * @return 解析结果
@@ -171,7 +172,7 @@ class BugreportParser {
             // 1. 优先搜索 getHealthInfo 模式
             val idxHealth = indexOfPattern(buffer, totalInChunk, patternGetHealthInfo)
             if (idxHealth != -1) {
-                Log.d(TAG, "在字节偏移 $totalBytesRead 处极速命中 getHealthInfo 模式！")
+                Log.d(TAG, "在字节偏移 $totalBytesRead 处命中 getHealthInfo 模式！")
                 val textSlice = String(buffer, idxHealth, minOf(8192, totalInChunk - idxHealth), StandardCharsets.UTF_8)
                 return parseHealthInfoText(textSlice)
             }
@@ -179,7 +180,7 @@ class BugreportParser {
             // 2. 次级搜索 IHealth 服务
             val idxIHealth = indexOfPattern(buffer, totalInChunk, patternIHealth)
             if (idxIHealth != -1) {
-                Log.d(TAG, "在字节偏移 $totalBytesRead 处极速命中 IHealth 服务！")
+                Log.d(TAG, "在字节偏移 $totalBytesRead 处命中 IHealth 服务！")
                 val textSlice = String(buffer, idxIHealth, minOf(8192, totalInChunk - idxIHealth), StandardCharsets.UTF_8)
                 return parseHealthInfoText(textSlice)
             }
@@ -187,12 +188,12 @@ class BugreportParser {
             // 3. 兜底搜索 battery 服务
             val idxBattery = indexOfPattern(buffer, totalInChunk, patternBatteryDump)
             if (idxBattery != -1) {
-                Log.d(TAG, "在字节偏移 $totalBytesRead 处极速命中 DUMP OF SERVICE battery！")
+                Log.d(TAG, "在字节偏移 $totalBytesRead 处命中 DUMP OF SERVICE battery！")
                 val textSlice = String(buffer, idxBattery, minOf(8192, totalInChunk - idxBattery), StandardCharsets.UTF_8)
                 return parseHealthInfoText(textSlice)
             }
 
-            // 将尾部 OVERLAP_SIZE 字节复制到头部防止跨块丢失
+            // 防跨块复制
             if (totalInChunk > OVERLAP_SIZE) {
                 System.arraycopy(buffer, totalInChunk - OVERLAP_SIZE, buffer, 0, OVERLAP_SIZE)
                 overlapLen = OVERLAP_SIZE
@@ -205,7 +206,7 @@ class BugreportParser {
     }
 
     /**
-     * 纳秒级在字节数组中查找目标 ASCII 字节模式。
+     * 在字节数组中查找目标 ASCII 字节模式。
      */
     private fun indexOfPattern(data: ByteArray, length: Int, pattern: ByteArray): Int {
         if (pattern.isEmpty() || length < pattern.size) return -1
@@ -227,7 +228,7 @@ class BugreportParser {
     }
 
     /**
-     * 精准解析提取出的纯文本切片（包含 getHealthInfo -> HealthInfo{...} 或多行格式）。
+     * 精准解析提取出的纯文本切片。
      *
      * @param text 包含 HealthInfo 的切片文本
      * @return 结构化结果
@@ -366,10 +367,9 @@ class BugreportParser {
             }
         }
 
-        // 3. 构建 13 项表格
+        // 3. 构建表格项
         val tableItems = mutableListOf<HealthInfoItem>()
 
-        // 1. ⚡ 充电状态
         val statusVal = when {
             batteryStatus?.contains("CHARGING", ignoreCase = true) == true && !batteryStatus!!.contains("NOT_CHARGING", ignoreCase = true) && !batteryStatus!!.contains("DISCHARGING", ignoreCase = true) -> "Charging"
             batteryStatus?.contains("DISCHARGING", ignoreCase = true) == true || batteryStatus == "3" -> "Discharging"
@@ -388,12 +388,10 @@ class BugreportParser {
         }
         tableItems.add(HealthInfoItem("⚡ 充电状态", statusVal, statusDesc))
 
-        // 2. 🔋 电量
         val levelVal = batteryLevel
         val levelDisplay = if (levelVal != null) "$levelVal%" else "未知"
         tableItems.add(HealthInfoItem("🔋 电量", levelDisplay, "当前剩余电量"))
 
-        // 3. 🔋 电池电压
         val voltVal = batteryVoltage
         val voltDisplay = if (voltVal != null) {
             val mv = when {
@@ -406,7 +404,6 @@ class BugreportParser {
         } else "未知"
         tableItems.add(HealthInfoItem("🔋 电池电压", voltDisplay, "当前电池端电压"))
 
-        // 4. ⚡ 电流
         val curVal = batteryCurrent
         val curDisplay = if (curVal != null) {
             val ma = if (Math.abs(curVal) >= 10000L) curVal / 1000f else curVal.toFloat()
@@ -414,7 +411,6 @@ class BugreportParser {
         } else "未知"
         tableItems.add(HealthInfoItem("⚡ 电流", curDisplay, "当前电池电流"))
 
-        // 5. ⚡ 电池功率
         val powerDisplay = if (voltVal != null && curVal != null) {
             val mv = when {
                 voltVal in 2500L..9500L -> voltVal.toFloat()
@@ -428,7 +424,6 @@ class BugreportParser {
         } else "未知"
         tableItems.add(HealthInfoItem("⚡ 电池功率", powerDisplay, "电池瞬时工作功率"))
 
-        // 6. 🌡️ 电池温度
         val tempVal = batteryTemperature
         val tempDisplay = if (tempVal != null) {
             val degC = if (tempVal > 200f) tempVal / 10f else tempVal
@@ -436,11 +431,9 @@ class BugreportParser {
         } else "未知"
         tableItems.add(HealthInfoItem("🌡️ 电池温度", tempDisplay, "当前温度"))
 
-        // 7. 🔄 循环次数
         val cycleDisplay = if (batteryCycleCount != null) "$batteryCycleCount" else "未知"
         tableItems.add(HealthInfoItem("🔄 循环次数", cycleDisplay, "等效完整循环"))
 
-        // 8. 🔋 设计容量
         val designVal = batteryFullChargeDesign
         val designDisplay = if (designVal != null) {
             val mah = if (designVal < 100000L) designVal else designVal / 1000L
@@ -448,9 +441,14 @@ class BugreportParser {
         } else "未知"
         tableItems.add(HealthInfoItem("🔋 设计容量", designDisplay, "出厂设计容量"))
 
-        // 9. 🔋 当前容量
-        val chargeVal = batteryChargeCounter
         val fccVal = batteryFullCharge
+        val fccDisplay = if (fccVal != null) {
+            val mah = if (fccVal < 100000L) fccVal else fccVal / 1000L
+            "$mah mAh"
+        } else "未知"
+        tableItems.add(HealthInfoItem("🔋 充满容量", fccDisplay, "电量计估算 FCC"))
+
+        val chargeVal = batteryChargeCounter
         val chargeDisplay = when {
             chargeVal != null -> {
                 val mah = if (chargeVal >= 100000L) chargeVal / 1000L else chargeVal
@@ -465,27 +463,17 @@ class BugreportParser {
         }
         tableItems.add(HealthInfoItem("🔋 当前容量", chargeDisplay, "当前剩余容量"))
 
-        // 10. 🔋 当前满充容量
-        val fccDisplay = if (fccVal != null) {
-            val mah = if (fccVal < 100000L) fccVal else fccVal / 1000L
-            "$mah mAh"
-        } else "未知"
-        tableItems.add(HealthInfoItem("🔋 当前满充容量", fccDisplay, "电量计估算 FCC"))
-
-        // 11. ❤️ 理论容量健康度
         val healthDisplay = if (fccVal != null && designVal != null && designVal > 0L) {
             val fMah = if (fccVal < 100000L) fccVal.toFloat() else fccVal / 1000f
             val dMah = if (designVal < 100000L) designVal.toFloat() else designVal / 1000f
             val healthPercent = (fMah / dMah) * 100f
-            String.format("%.1f%%", healthPercent)
+            String.format("%.2f%%", healthPercent)
         } else "未知"
-        tableItems.add(HealthInfoItem("❤️ 理论容量健康度", healthDisplay, "FCC / Design Capacity"))
+        tableItems.add(HealthInfoItem("❤️ 健康度", healthDisplay, "FCC / Design Capacity"))
 
-        // 9. 🔋 电池类型
         val techDisplay = batteryTechnology ?: "Li-ion"
         tableItems.add(HealthInfoItem("🔋 电池类型", techDisplay, "锂离子"))
 
-        // 10. 🩺 电池健康
         val healthStatusVal = when {
             batteryHealth?.contains("GOOD", ignoreCase = true) == true || batteryHealth == "2" -> "GOOD"
             batteryHealth?.contains("OVERHEAT", ignoreCase = true) == true || batteryHealth == "3" -> "OVERHEAT (过热)"

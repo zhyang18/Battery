@@ -1,12 +1,12 @@
-package com.battery.analysis
+package com.battery.analysis.model
 
 /**
- * 电池信息数据类。
- * 用于存储从不同渠道获取或融合后的电池状态数据。
+ * 电池信息数据实体类。
+ * 用于存储从不同渠道获取或融合后的电池状态数据，涵盖电量、健康度、电压、电流等各项运行与设计参数。
  */
 data class BatteryInfo(
     /**
-     * 电池健康度，通常为百分比（例如 95 表示 95%）。
+     * 电池健康度，通常为百分比（例如 95.50 表示 95.50%，可大于 100%）。
      */
     val batteryHealth: Float? = null,
     
@@ -83,7 +83,7 @@ data class BatteryInfo(
     /**
      * 将电池信息格式化为包含键名与键值的多行字符串。
      *
-     * @return 包含 14 项完整参数的格式化字符串
+     * @return 包含各项参数的格式化字符串
      */
     fun formatToString(): String {
         return """
@@ -107,7 +107,7 @@ data class BatteryInfo(
     /**
      * 仅将电池信息的数据值格式化为多行字符串（用于多列对齐展示）。
      *
-     * @return 仅包含 14 项数据值的多行文本
+     * @return 仅包含数据值的多行文本
      */
     fun formatValuesOnly(): String {
         return """

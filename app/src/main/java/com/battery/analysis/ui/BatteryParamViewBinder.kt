@@ -1,6 +1,7 @@
-package com.battery.analysis
+package com.battery.analysis.ui
 
 import com.battery.analysis.databinding.LayoutBatteryParamItemsBinding
+import com.battery.analysis.model.BatteryInfo
 
 /**
  * 电池详细参数视图绑定辅助工具类。
@@ -26,8 +27,8 @@ object BatteryParamViewBinder {
             binding.tvValCurrent.text = "—"
             binding.tvValPower.text = "—"
             binding.tvValDesignCapacity.text = "—"
-            binding.tvValCurrentCapacity.text = "—"
             binding.tvValFullCapacity.text = "—"
+            binding.tvValCurrentCapacity.text = "—"
             binding.tvValDualCell.text = "—"
             binding.tvValTechnology.text = "—"
             return
@@ -44,8 +45,8 @@ object BatteryParamViewBinder {
         binding.tvValCurrent.text = info.currentNow?.let { String.format("%.0f mA", it) } ?: "未知"
         binding.tvValPower.text = info.powerWatts?.let { String.format("%.2f W", it) } ?: "未知"
         binding.tvValDesignCapacity.text = info.designCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"
-        binding.tvValCurrentCapacity.text = info.currentCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"
         binding.tvValFullCapacity.text = info.fullChargeCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"
+        binding.tvValCurrentCapacity.text = info.currentCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"
         binding.tvValDualCell.text = info.isDualCell?.let { if (it) "是" else "否" } ?: "未知"
         binding.tvValTechnology.text = info.technology ?: "未知"
     }

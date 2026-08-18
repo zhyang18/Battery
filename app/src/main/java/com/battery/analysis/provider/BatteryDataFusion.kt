@@ -1,7 +1,7 @@
-package com.battery.analysis
+package com.battery.analysis.provider
 
 import android.content.Context
-import kotlin.math.abs
+import com.battery.analysis.model.BatteryInfo
 
 /**
  * 电池数据融合类。
@@ -23,7 +23,7 @@ class BatteryDataFusion {
         val shizukuInfo = shizukuProvider.getBatteryInfo(context)
 
         // 1. 数据融合：优先使用 Shizuku 获取的底层 sysfs 数据，如果缺失则退化为普通 API 数据
-        var fusedDesignCapacity = shizukuInfo.designCapacity ?: normalInfo.designCapacity
+        val fusedDesignCapacity = shizukuInfo.designCapacity ?: normalInfo.designCapacity
         var fusedFullChargeCapacity = shizukuInfo.fullChargeCapacity ?: normalInfo.fullChargeCapacity
         var fusedCurrentCapacity = shizukuInfo.currentCapacity ?: normalInfo.currentCapacity
         val shizukuCycle = shizukuInfo.cycleCount ?: 0
@@ -32,10 +32,8 @@ class BatteryDataFusion {
         if (fusedCycleCount == 0) fusedCycleCount = null
 
         // 2. 可信度判断 (Trustworthiness Judgment)
-        // 例如：如果实际满电容量 > 设计容量的 1.5 倍，通常是数据读取错误或单位问题，将判定为不可信并舍弃
         if (fusedFullChargeCapacity != null && fusedDesignCapacity != null) {
             if (fusedFullChargeCapacity > fusedDesignCapacity * 1.5f || fusedFullChargeCapacity < fusedDesignCapacity * 0.1f) {
-                // 数据异常，尝试使用普通 API 降级
                 fusedFullChargeCapacity = normalInfo.fullChargeCapacity
             }
         }

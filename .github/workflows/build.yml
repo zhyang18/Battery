@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -37,8 +39,8 @@ jobs:
             chmod +x gradlew
           fi
 
-      - name: Build Release APK with Gradle
-        run: ./gradlew assembleRelease --stacktrace
+      - name: Build APKs with Gradle
+        run: ./gradlew assembleRelease assembleDebug --stacktrace
 
       - name: Sign Release APK
         id: sign_apk
@@ -49,7 +51,9 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           set -e
-          # 查找构建生成的未签名 release apk
+          mkdir -p output_apks
+
+          # 1. 查找生成的 Release APK
           UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           if [ -z "$UNSIGNED_APK" ]; then
             echo "Error: Release APK not found!"
@@ -57,7 +61,7 @@ jobs:
           fi
           echo "Found release apk: $UNSIGNED_APK"
 
-          SIGNED_APK="app/build/outputs/apk/release/Battery-release-signed.apk"
+          SIGNED_APK="output_apks/Battery-release-signed.apk"
           KEYSTORE_FILE="release.keystore"
 
           if [ -n "$KEYSTORE_BASE64" ]; then
@@ -67,7 +71,7 @@ jobs:
             KS_PASS="${KEYSTORE_PASSWORD:-123456}"
             KEY_PASS="${KEY_PASSWORD:-$KS_PASS}"
           else
-            echo "No custom Keystore provided, generating a temporary release key for signing..."
+            echo "Generating a release keystore for signing..."
             ALIAS="battery"
             KS_PASS="android123"
             KEY_PASS="android123"
@@ -82,7 +86,7 @@ jobs:
               -dname "CN=BatteryApp, OU=App, O=Battery, L=City, ST=State, C=CN"
           fi
 
-          # 定位 Android SDK 中的 apksigner
+          # 定位 Android SDK 中的 apksigner 和 zipalign
           BUILD_TOOLS_DIR=$(ls -d $ANDROID_SDK_ROOT/build-tools/* | sort -V | tail -n 1)
           APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
           ZIPALIGN="$BUILD_TOOLS_DIR/zipalign"
@@ -104,24 +108,40 @@ jobs:
           # 验证签名有效性
           $APKSIGNER verify -v "$SIGNED_APK"
 
-          # 清理临时 keystore 文件
+          # 2. 拷贝 Debug APK 作为备用安装包
+          DEBUG_APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          if [ -n "$DEBUG_APK" ]; then
+            cp "$DEBUG_APK" "output_apks/Battery-debug.apk"
+          fi
+
+          # 清理临时 keystore
           rm -f "$KEYSTORE_FILE" "$ALIGNED_APK"
 
-          echo "SIGNED_APK_PATH=$SIGNED_APK" >> $GITHUB_OUTPUT
-          echo "Successfully signed: $SIGNED_APK"
+          echo "APK 构建与签名全部完成！"
+          ls -la output_apks/
 
-      - name: Upload Signed APK to Artifacts
+      - name: Upload APKs to GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Battery-Release-APK
-          path: app/build/outputs/apk/release/*.apk
+          name: Battery-APK
+          path: output_apks/*.apk
           retention-days: 30
 
-      - name: Create GitHub Release on Tag
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Release APK to GitHub Releases
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/release/Battery-release-signed.apk
-          generate_release_notes: true
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'Latest Continuous Build' }}
+          body: |
+            ## 电池检测 (Battery App) 自动构建发布
+            - **提交哈希**: `${{ github.sha }}`
+            - **包含文件**:
+              - `Battery-release-signed.apk`: 经由 apksigner (V2+V3) 签名的正式发布版 APK
+              - `Battery-debug.apk`: 调试版 APK
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+          files: |
+            output_apks/Battery-release-signed.apk
+            output_apks/Battery-debug.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

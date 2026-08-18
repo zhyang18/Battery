@@ -1,4 +1,4 @@
-package com.example.batteryapp
+package com.battery.analysis
 
 import android.content.Context
 import rikka.shizuku.Shizuku

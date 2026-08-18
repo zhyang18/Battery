@@ -1,4 +1,4 @@
-package com.example.batteryapp
+package com.battery.analysis
 
 import android.net.Uri
 import android.os.Bundle
@@ -12,7 +12,7 @@ import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import com.example.batteryapp.databinding.FragmentBugreportBinding
+import com.battery.analysis.databinding.FragmentBugreportBinding
 import kotlinx.coroutines.launch
 
 /**

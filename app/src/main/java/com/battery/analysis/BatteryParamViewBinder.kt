@@ -1,6 +1,6 @@
-package com.example.batteryapp
+package com.battery.analysis
 
-import com.example.batteryapp.databinding.LayoutBatteryParamItemsBinding
+import com.battery.analysis.databinding.LayoutBatteryParamItemsBinding
 
 /**
  * 电池详细参数视图绑定辅助工具类。

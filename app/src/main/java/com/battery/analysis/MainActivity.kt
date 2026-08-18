@@ -1,4 +1,4 @@
-package com.example.batteryapp
+package com.battery.analysis
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -14,7 +14,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.GravityCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
-import com.example.batteryapp.databinding.ActivityMainBinding
+import com.battery.analysis.databinding.ActivityMainBinding
 import com.google.android.material.tabs.TabLayoutMediator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

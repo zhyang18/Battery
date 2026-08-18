@@ -1,4 +1,4 @@
-package com.example.batteryapp
+package com.battery.analysis
 
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -9,7 +9,7 @@ import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import com.example.batteryapp.databinding.FragmentSystemApiBinding
+import com.battery.analysis.databinding.FragmentSystemApiBinding
 import kotlinx.coroutines.launch
 
 /**

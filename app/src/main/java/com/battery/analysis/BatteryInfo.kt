@@ -1,4 +1,4 @@
-package com.example.batteryapp
+package com.battery.analysis
 
 /**
  * 电池信息数据类。

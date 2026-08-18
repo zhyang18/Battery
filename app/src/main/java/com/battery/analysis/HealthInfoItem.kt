@@ -1,4 +1,4 @@
-package com.example.batteryapp
+package com.battery.analysis
 
 /**
  * 存储从错误报告中解析出的精简表格项。

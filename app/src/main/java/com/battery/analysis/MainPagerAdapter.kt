@@ -1,4 +1,4 @@
-package com.example.batteryapp
+package com.battery.analysis
 
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity

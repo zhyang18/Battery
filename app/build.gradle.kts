@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.batteryapp"
+    namespace = "com.battery.analysis"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.batteryapp"
+        applicationId = "com.battery.analysis"
         minSdk = 24
         targetSdk = 34
         versionCode = 1

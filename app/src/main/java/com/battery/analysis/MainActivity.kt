@@ -250,10 +250,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun refreshCurrentActiveTab() {
         if (binding.mainViewPager.currentItem == 0) {
-            val navHostFragment = supportFragmentManager.findFragmentByTag("f0") as? com.battery.analysis.ui.DetectionFragment
-                ?: supportFragmentManager.fragments.firstOrNull { it is com.battery.analysis.ui.DetectionFragment } as? com.battery.analysis.ui.DetectionFragment
-            val currentChildTab = navHostFragment?.getCurrentTabPosition() ?: 0
-            when (currentChildTab) {
+            when (viewModel.activeTabPosition.value) {
                 0 -> viewModel.refreshNormalApi(this)
                 1 -> viewModel.refreshShizuku(this)
             }

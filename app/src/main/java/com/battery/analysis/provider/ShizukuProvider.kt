@@ -10,16 +10,15 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 
 /**
- * 负责通过 Shizuku 执行 root/shell 权限命令，从 sysfs、dumpsys 和厂商服务中深度读取电池信息的提供者。
- * 采用单次 Shell 批处理执行技术，在 100% 保留全部深层数据采集源与解析精度的前提下，显著降低进程创建开销与加载耗时。
+ * 负责通过 Shizuku 执行 root/shell 权限命令，从 sysfs、dumpsys 和厂商服务中读取电池信息的提供者。
  */
 class ShizukuProvider : BatteryDataProvider {
 
     /**
-     * 获取全量电池底层信息，内部通过一次性合并 Shell 命令同时采集 sysfs、dumpsys、广播与厂商数据。
+     * 获取电池信息，内部会分别从 sysfs、dumpsys 和厂商扩展服务中读取并融合数据。
      *
      * @param context 应用程序的上下文
-     * @return 获取到的电池信息对象 [BatteryInfo]
+     * @return 获取到的电池信息对象
      */
     override fun getBatteryInfo(context: Context): BatteryInfo {
         if (!Shizuku.pingBinder()) {
@@ -29,65 +28,14 @@ class ShizukuProvider : BatteryDataProvider {
             return BatteryInfo(source = "Shizuku (无权限)")
         }
 
-        // 一次性单进程执行批处理聚合命令，通过 grep 精准截流，避免大体积 dumpsys 导致 OOM
-        val batchCommand = """
-            cat /sys/class/power_supply/battery/uevent /sys/class/power_supply/bms/uevent /sys/class/qcom-battery/uevent /sys/class/power_supply/battery_gauge/uevent 2>/dev/null
-            echo "===SPLIT_SYSFS_DIRECT==="
-            for node in /sys/class/power_supply/battery /sys/class/power_supply/bms /sys/class/qcom-battery /sys/class/power_supply/battery_gauge; do
-                if [ -d "${'$'}node" ]; then
-                    for f in current_now batt_current battery_current current_avg power_now batt_power voltage_now batt_vol; do
-                        if [ -f "${'$'}node/${'$'}f" ]; then
-                            echo "${'$'}f=$(cat ${'$'}node/${'$'}f 2>/dev/null)"
-                        fi
-                    done
-                fi
-            done
-            echo "===SPLIT_DUMPSYS_BATTERY==="
-            dumpsys battery 2>/dev/null
-            echo "===SPLIT_DUMPSYS_STATS==="
-            dumpsys batterystats 2>/dev/null | grep -iE 'capacity|learned'
-            echo "===SPLIT_DUMPSYS_BROADCASTS==="
-            dumpsys activity broadcasts 2>/dev/null | grep -i 'CYCLE_COUNT'
-            echo "===SPLIT_GETPROP==="
-            getprop 2>/dev/null | grep -iE 'charge_full|charge_now|cycle'
-            echo "===SPLIT_MIUI_BATTERY==="
-            dumpsys miui.battery 2>/dev/null
-        """.trimIndent()
-
-        val fullOutput = executeCommand(batchCommand)
-
-        // 提取各部分原始输出
-        val ueventRes = fullOutput.substringBefore("===SPLIT_SYSFS_DIRECT===").trim()
-        val afterSysfs = fullOutput.substringAfter("===SPLIT_SYSFS_DIRECT===", "")
-
-        val directRes = afterSysfs.substringBefore("===SPLIT_DUMPSYS_BATTERY===").trim()
-        val afterDirect = afterSysfs.substringAfter("===SPLIT_DUMPSYS_BATTERY===", "")
-
-        val batteryOutput = afterDirect.substringBefore("===SPLIT_DUMPSYS_STATS===").trim()
-        val afterBattery = afterDirect.substringAfter("===SPLIT_DUMPSYS_STATS===", "")
-
-        val statsOutput = afterBattery.substringBefore("===SPLIT_DUMPSYS_BROADCASTS===").trim()
-        val afterStats = afterBattery.substringAfter("===SPLIT_DUMPSYS_BROADCASTS===", "")
-
-        val broadcastsOutput = afterStats.substringBefore("===SPLIT_GETPROP===").trim()
-        val afterBroadcasts = afterStats.substringAfter("===SPLIT_GETPROP===", "")
-
-        val propsRes = afterBroadcasts.substringBefore("===SPLIT_MIUI_BATTERY===").trim()
-        val miuiBattery = afterBroadcasts.substringAfter("===SPLIT_MIUI_BATTERY===", "").trim()
-
-        val sysfsInfo = parseSysfs(ueventRes, directRes)
-        val dumpsysInfo = parseDumpsys(batteryOutput, statsOutput, broadcastsOutput)
-        val vendorInfo = parseVendor(propsRes, miuiBattery)
+        val sysfsInfo = readFromSysfs()
+        val dumpsysInfo = readFromDumpsys()
+        val vendorInfo = readFromVendor()
 
         // 优先层级与数据聚合
-        var designCap = sysfsInfo.designCapacity
+        val designCap = sysfsInfo.designCapacity
             ?: dumpsysInfo.designCapacity
             ?: vendorInfo.designCapacity
-
-        // 若各底层未暴露设计容量，智能通过系统 PowerProfile 反射补齐
-        if (designCap == null || designCap <= 0f) {
-            designCap = getDesignCapacity(context)
-        }
 
         val currentCap = sysfsInfo.currentCapacity
             ?: dumpsysInfo.currentCapacity
@@ -98,7 +46,7 @@ class ShizukuProvider : BatteryDataProvider {
             ?: vendorInfo.fullChargeCapacity
 
         val allCycles = listOfNotNull(sysfsInfo.cycleCount, dumpsysInfo.cycleCount, vendorInfo.cycleCount)
-        var cycleCount = if (allCycles.isNotEmpty()) allCycles.maxOrNull() else null
+        val cycleCount = if (allCycles.isNotEmpty()) allCycles.maxOrNull() else null
 
         val level = sysfsInfo.level ?: dumpsysInfo.level ?: vendorInfo.level
         val status = sysfsInfo.status ?: dumpsysInfo.status ?: vendorInfo.status
@@ -129,10 +77,6 @@ class ShizukuProvider : BatteryDataProvider {
                 val rawVolt = intent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
                 if (rawVolt in 2500..9500) {
                     voltage = rawVolt.toFloat()
-                }
-                if (cycleCount == null) {
-                    val cycleFromExtra = intent?.getIntExtra("android.os.extra.CYCLE_COUNT", -1) ?: -1
-                    if (cycleFromExtra > 0) cycleCount = cycleFromExtra
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -181,9 +125,9 @@ class ShizukuProvider : BatteryDataProvider {
     private fun normalizeVoltage(rawVolt: Long): Float? {
         if (rawVolt <= 0) return null
         return when {
-            rawVolt in 2500..9500 -> rawVolt.toFloat()
-            rawVolt in 25000..95000 -> rawVolt / 10f
-            rawVolt in 2500000..9500000 -> rawVolt / 1000f
+            rawVolt in 2500..9500 -> rawVolt.toFloat() // 已经为 mV（单电芯 3.0-4.5V，双电芯串联 6.0-9.0V）
+            rawVolt in 25000..95000 -> rawVolt / 10f // 0.1 mV
+            rawVolt in 2500000..9500000 -> rawVolt / 1000f // uV 微伏转换为 mV
             rawVolt > 9500000 -> rawVolt / 1000f
             else -> null
         }
@@ -199,21 +143,20 @@ class ShizukuProvider : BatteryDataProvider {
         if (rawCur == 0L) return null
         val abs = Math.abs(rawCur)
         return when {
-            abs in 1..9999 -> rawCur.toFloat()
-            abs in 10000..99999 -> rawCur / 10f
-            abs >= 100000 -> rawCur / 1000f
+            abs in 1..9999 -> rawCur.toFloat() // 已经为 mA
+            abs in 10000..99999 -> rawCur / 10f // 0.1 mA
+            abs >= 100000 -> rawCur / 1000f // uA 微安转换为 mA
             else -> rawCur.toFloat()
         }
     }
 
     /**
-     * 解析 sysfs uevent 和散列驱动节点文本。
+     * 从 sysfs 节点读取电池信息。
+     * 涵盖系统通用节点、uevent 以及全路径直接遍历节点。
      *
-     * @param ueventRes uevent 命令输出文本
-     * @param directRes directNodesCmd 命令输出文本
-     * @return 解析 sysfs 得到的 [BatteryInfo]
+     * @return 解析 sysfs 节点得到的电池信息
      */
-    private fun parseSysfs(ueventRes: String, directRes: String): BatteryInfo {
+    private fun readFromSysfs(): BatteryInfo {
         var designCapacity: Float? = null
         var fullChargeCapacity: Float? = null
         var currentCapacity: Float? = null
@@ -227,6 +170,10 @@ class ShizukuProvider : BatteryDataProvider {
         var healthStatus: String? = null
         var technology: String? = null
         var isDualCell: Boolean? = null
+
+        // 1. 读取专属电池 power_supply 下的 uevent 文件
+        val sysfsCmd = "cat /sys/class/power_supply/battery/uevent /sys/class/power_supply/bms/uevent /sys/class/qcom-battery/uevent /sys/class/power_supply/battery_gauge/uevent 2>/dev/null"
+        val ueventRes = executeCommand(sysfsCmd)
 
         val lines = ueventRes.split('\n')
         for (line in lines) {
@@ -308,7 +255,19 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        // 深度扫描直接文件节点
+        // 2. 深度扫描 battery/bms 驱动文件节点
+        val directNodesCmd = """
+            for node in /sys/class/power_supply/battery /sys/class/power_supply/bms /sys/class/qcom-battery /sys/class/power_supply/battery_gauge; do
+                if [ -d "${'$'}node" ]; then
+                    for f in current_now batt_current battery_current current_avg power_now batt_power voltage_now batt_vol; do
+                        if [ -f "${'$'}node/${'$'}f" ]; then
+                            echo "${'$'}f=$(cat ${'$'}node/${'$'}f 2>/dev/null)"
+                        fi
+                    done
+                fi
+            done
+        """.trimIndent()
+        val directRes = executeCommand(directNodesCmd)
         for (line in directRes.split('\n')) {
             val trimLine = line.trim()
             if (trimLine.startsWith("current_now=") || trimLine.startsWith("batt_current=") || trimLine.startsWith("battery_current=") || trimLine.startsWith("current_avg=")) {
@@ -356,14 +315,11 @@ class ShizukuProvider : BatteryDataProvider {
     }
 
     /**
-     * 解析 dumpsys 命令输出内容。
+     * 通过执行 dumpsys (battery, batterystats, broadcasts) 命令读取电池信息。
      *
-     * @param batteryOutput dumpsys battery 命令输出
-     * @param statsOutput dumpsys batterystats 命令输出
-     * @param broadcastsOutput dumpsys activity broadcasts 命令输出
-     * @return 解析 dumpsys 得到的 [BatteryInfo]
+     * @return 解析 dumpsys 得到的电池信息
      */
-    private fun parseDumpsys(batteryOutput: String, statsOutput: String, broadcastsOutput: String): BatteryInfo {
+    private fun readFromDumpsys(): BatteryInfo {
         var designCapacity: Float? = null
         var fullChargeCapacity: Float? = null
         var currentCapacity: Float? = null
@@ -377,6 +333,7 @@ class ShizukuProvider : BatteryDataProvider {
         var technology: String? = null
 
         // 1. 获取 dumpsys battery 信息
+        val batteryOutput = executeCommand("dumpsys battery")
         val regexChargeCounter = Regex("(?m)^\\s*Charge counter:\\s*(\\d+)")
         val matchCharge = regexChargeCounter.find(batteryOutput)
         if (matchCharge != null) {
@@ -449,6 +406,7 @@ class ShizukuProvider : BatteryDataProvider {
         }
 
         // 2. 获取 dumpsys batterystats 信息
+        val statsOutput = executeCommand("dumpsys batterystats")
         val regexCapacity = Regex("(?i)(?:Estimated battery capacity|Capacity):\\s*(\\d+)\\s*(?:mAh)?")
         val matchCapacity = regexCapacity.find(statsOutput)
         if (matchCapacity != null) {
@@ -465,6 +423,7 @@ class ShizukuProvider : BatteryDataProvider {
         }
 
         // 3. 从 dumpsys activity broadcasts 中提取系统电池粘性广播里的循环次数
+        val broadcastsOutput = executeCommand("dumpsys activity broadcasts")
         val regexBroadcastCycle = Regex("(?i)android\\.os\\.extra\\.CYCLE_COUNT=(\\d+)")
         val matchBroadcastCycle = regexBroadcastCycle.find(broadcastsOutput)
         if (matchBroadcastCycle != null) {
@@ -497,18 +456,17 @@ class ShizukuProvider : BatteryDataProvider {
     }
 
     /**
-     * 解析厂商特定服务和系统属性。
+     * 通过执行厂商特定服务和系统属性（getprop、dumpsys miui.battery 等）读取电池信息。
      *
-     * @param propsRes getprop 输出文本
-     * @param miuiBattery dumpsys miui.battery 输出文本
-     * @return 解析厂商服务得到的 [BatteryInfo]
+     * @return 解析厂商服务得到的电池信息
      */
-    private fun parseVendor(propsRes: String, miuiBattery: String): BatteryInfo {
+    private fun readFromVendor(): BatteryInfo {
         var designCapacity: Float? = null
         var fullChargeCapacity: Float? = null
         var currentCapacity: Float? = null
         var cycleCount: Int? = null
 
+        val propsRes = executeCommand("getprop")
         for (line in propsRes.split('\n')) {
             val trimLine = line.trim()
             if (trimLine.contains("[") && trimLine.contains("]")) {
@@ -545,7 +503,8 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        // 小米/澎湃专属电池服务
+        // 尝试执行小米/澎湃专属电池调试服务
+        val miuiBattery = executeCommand("dumpsys miui.battery 2>/dev/null")
         if (miuiBattery.isNotEmpty()) {
             val regexMiuiCycle = Regex("(?i)(?:cycle|cycle_count|mf_02):\\s*(\\d+)")
             val match = regexMiuiCycle.find(miuiBattery)
@@ -563,25 +522,6 @@ class ShizukuProvider : BatteryDataProvider {
             currentCapacity = currentCapacity,
             cycleCount = cycleCount
         )
-    }
-
-    /**
-     * 通过反射调用 PowerProfile 获取系统硬件定义的电池设计容量。
-     *
-     * @param context 应用程序的上下文
-     * @return 电池设计容量（mAh），如果获取失败则返回 null
-     */
-    private fun getDesignCapacity(context: Context): Float? {
-        return try {
-            val powerProfileClass = Class.forName("com.android.internal.os.PowerProfile")
-            val powerProfile = powerProfileClass.getConstructor(Context::class.java).newInstance(context)
-            val getBatteryCapacityMethod = powerProfileClass.getMethod("getBatteryCapacity")
-            val capacity = getBatteryCapacityMethod.invoke(powerProfile) as Double
-            if (capacity > 0) capacity.toFloat() else null
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
     }
 
     /**

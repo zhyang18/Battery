@@ -66,6 +66,19 @@ class BatteryViewModel : ViewModel() {
     private val _isShizukuGranted = MutableStateFlow(false)
     val isShizukuGranted: StateFlow<Boolean> = _isShizukuGranted.asStateFlow()
 
+    // 6. 当前正展示的活跃子 Tab 索引（0: 系统api, 1: Shizuku, 2: 错误报告）
+    private val _activeTabPosition = MutableStateFlow(0)
+    val activeTabPosition: StateFlow<Int> = _activeTabPosition.asStateFlow()
+
+    /**
+     * 更新当前处于活跃展示状态的子 Tab 索引。
+     *
+     * @param position 当前选中的子 Tab 索引
+     */
+    fun updateActiveTab(position: Int) {
+        _activeTabPosition.value = position
+    }
+
     /**
      * 独立刷新系统普通 API 电池数据。
      * 完全解耦，极速读取 (< 5ms)，绝不阻塞任何其他后台任务。
@@ -74,34 +87,48 @@ class BatteryViewModel : ViewModel() {
      */
     fun refreshNormalApi(context: Context) {
         val appCtx = context.applicationContext
-        normalApiJob?.cancel()
+        if (normalApiJob?.isActive == true) {
+            return
+        }
         _isNormalRefreshing.value = true
 
         normalApiJob = viewModelScope.launch(Dispatchers.IO) {
-            val normal = normalApiProvider.getBatteryInfo(appCtx)
-            withContext(Dispatchers.Main) {
-                _normalBatteryInfo.value = normal
-                _isNormalRefreshing.value = false
+            try {
+                val normal = normalApiProvider.getBatteryInfo(appCtx)
+                withContext(Dispatchers.Main) {
+                    _normalBatteryInfo.value = normal
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    _isNormalRefreshing.value = false
+                }
             }
         }
     }
 
     /**
      * 独立刷新 Shizuku 底层驱动节点电池数据。
-     * 完全解耦，在独立后台协程中运行，绝不干扰系统 API 的刷新与展示。
+     * 完全解耦，非打断式异步后台执行，确保每一次读取都能稳定更新至 UI。
      *
      * @param context 应用程序上下文
      */
     fun refreshShizuku(context: Context) {
         val appCtx = context.applicationContext
-        shizukuJob?.cancel()
+        if (shizukuJob?.isActive == true) {
+            return
+        }
         _isShizukuRefreshing.value = true
 
         shizukuJob = viewModelScope.launch(Dispatchers.IO) {
-            val shizuku = shizukuProvider.getBatteryInfo(appCtx)
-            withContext(Dispatchers.Main) {
-                _shizukuBatteryInfo.value = shizuku
-                _isShizukuRefreshing.value = false
+            try {
+                val shizuku = shizukuProvider.getBatteryInfo(appCtx)
+                withContext(Dispatchers.Main) {
+                    _shizukuBatteryInfo.value = shizuku
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    _isShizukuRefreshing.value = false
+                }
             }
         }
     }

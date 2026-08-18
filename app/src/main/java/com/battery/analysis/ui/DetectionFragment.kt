@@ -64,7 +64,13 @@ class DetectionFragment : Fragment() {
             tab.text = tabTitles.getOrElse(position) { "" }
         }.attach()
 
-
+        // 2. 页面切换监听：仅同步当前活跃 Tab 索引至 ViewModel，供自动定时刷新精准感知
+        binding.detectionViewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) {
+                super.onPageSelected(position)
+                viewModel.updateActiveTab(position)
+            }
+        })
 
         // 3. 初始化 SwipeRefreshLayout 下拉刷新：根据当前选中的 Tab 精准触发对应独立刷新
         binding.swipeRefreshLayout.setColorSchemeColors(Color.parseColor("#2196F3"))

@@ -64,6 +64,7 @@ class SettingsFragment : Fragment() {
         setupThemeSettings()
         setupRefreshSettings()
         setupShizukuSettings()
+        setupAboutSection()
     }
 
     /**
@@ -218,6 +219,20 @@ class SettingsFragment : Fragment() {
                 }
             }
         }
+    }
+
+    /**
+     * 初始化关于信息与应用版本号展示。
+     * 动态读取 PackageManager 中的 versionName 字段进行展示。
+     */
+    private fun setupAboutSection() {
+        val versionName = try {
+            val pInfo = requireContext().packageManager.getPackageInfo(requireContext().packageName, 0)
+            pInfo.versionName ?: "1.0.0"
+        } catch (e: Exception) {
+            "1.0.0"
+        }
+        binding.tvAppVersion.text = "v$versionName"
     }
 
     /**

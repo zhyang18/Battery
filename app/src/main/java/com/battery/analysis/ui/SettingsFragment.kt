@@ -136,59 +136,58 @@ class SettingsFragment : Fragment() {
         binding.layoutIntervalSetting.setOnClickListener { _ ->
             val intervals = arrayOf("1 秒", "2 秒", "3 秒", "5 秒", "10 秒")
             val intervalValues = arrayOf(1000L, 2000L, 3000L, 5000L, 10000L)
-
-            val listPopupWindow = androidx.appcompat.widget.ListPopupWindow(requireContext())
-            listPopupWindow.anchorView = binding.layoutIntervalSetting
-            listPopupWindow.setDropDownGravity(android.view.Gravity.END)
-
-            // 紧凑小巧宽度 (110dp)
-            val density = resources.displayMetrics.density
-            listPopupWindow.width = (110 * density).toInt()
-            listPopupWindow.isModal = true
-
-            // 定制精致圆角背景
-            androidx.core.content.ContextCompat.getDrawable(requireContext(), R.drawable.bg_popup_dropdown)?.let {
-                listPopupWindow.setBackgroundDrawable(it)
-            }
-
-            // 右对齐与垂直偏移微调
-            listPopupWindow.horizontalOffset = 0
-            listPopupWindow.verticalOffset = (4 * density).toInt()
-
-            // 设置从右上角展开的弹出动画
-            listPopupWindow.animationStyle = R.style.Animation_PopupTopRight
-
             val currentVal = prefs.getLong("refresh_interval_ms", 2000L)
-            val adapter = object : android.widget.ArrayAdapter<String>(
-                requireContext(),
-                R.layout.item_dropdown_interval,
-                R.id.tv_interval_item,
-                intervals
-            ) {
-                override fun getView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup): android.view.View {
-                    val view = super.getView(position, convertView, parent)
-                    val tv = view.findViewById<android.widget.TextView>(R.id.tv_interval_item)
-                    if (intervalValues.getOrNull(position) == currentVal) {
-                        tv.setTextColor(android.graphics.Color.parseColor("#2196F3"))
-                    } else {
-                        tv.setTextColor(androidx.core.content.ContextCompat.getColor(context, R.color.popup_item_text))
-                    }
-                    return view
+
+            val popupView = layoutInflater.inflate(R.layout.popup_interval_picker, null)
+            val density = resources.displayMetrics.density
+            val popupWidth = (120 * density).toInt()
+
+            val popupWindow = android.widget.PopupWindow(
+                popupView,
+                popupWidth,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                true
+            )
+
+            // 支持外部点击收起与右上角展开动画
+            popupWindow.isOutsideTouchable = true
+            popupWindow.isFocusable = true
+            popupWindow.animationStyle = R.style.Animation_PopupTopRight
+
+            // 获取全部选项并绑定高对比度文字与选中态
+            val optionViews = listOf(
+                popupView.findViewById<android.widget.TextView>(R.id.tv_opt_1s),
+                popupView.findViewById<android.widget.TextView>(R.id.tv_opt_2s),
+                popupView.findViewById<android.widget.TextView>(R.id.tv_opt_3s),
+                popupView.findViewById<android.widget.TextView>(R.id.tv_opt_5s),
+                popupView.findViewById<android.widget.TextView>(R.id.tv_opt_10s)
+            )
+
+            val normalColor = androidx.core.content.ContextCompat.getColor(requireContext(), R.color.popup_item_text)
+            val activeColor = android.graphics.Color.parseColor("#2196F3")
+
+            optionViews.forEachIndexed { index, textView ->
+                val intervalVal = intervalValues[index]
+                if (intervalVal == currentVal) {
+                    textView.setTextColor(activeColor)
+                } else {
+                    textView.setTextColor(normalColor)
+                }
+
+                textView.setOnClickListener {
+                    prefs.edit().putLong("refresh_interval_ms", intervalVal).apply()
+                    binding.tvCurrentInterval.text = intervals[index]
+                    mainActivity?.updateRefreshInterval(intervalVal)
+                    popupWindow.dismiss()
                 }
             }
-            listPopupWindow.setAdapter(adapter)
 
-            listPopupWindow.setOnItemClickListener { _, _, position, _ ->
-                if (position in intervalValues.indices) {
-                    val selectedInterval = intervalValues[position]
-                    prefs.edit().putLong("refresh_interval_ms", selectedInterval).apply()
-                    binding.tvCurrentInterval.text = intervals[position]
-                    mainActivity?.updateRefreshInterval(selectedInterval)
-                }
-                listPopupWindow.dismiss()
-            }
-
-            listPopupWindow.show()
+            popupWindow.showAsDropDown(
+                binding.layoutIntervalSetting,
+                0,
+                (4 * density).toInt(),
+                android.view.Gravity.END
+            )
         }
     }
 

@@ -6,7 +6,7 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <!-- 顶部大标题 -->
+    <!-- 顶部统一大标题栏 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -19,7 +19,7 @@
             android:layout_height="wrap_content"
             android:text="设置"
             android:textColor="?android:attr/textColorPrimary"
-            android:textSize="24sp"
+            android:textSize="20sp"
             android:textStyle="bold" />
     </LinearLayout>
 

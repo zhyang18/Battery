@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="120dp"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_popup_dropdown"
+    android:clipToOutline="true"
+    android:elevation="8dp"
+    android:orientation="vertical"
+    android:paddingVertical="6dp">
+
+    <!-- 1 秒 -->
+    <TextView
+        android:id="@+id/tv_opt_1s"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:gravity="center"
+        android:text="1 秒"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- 2 秒 -->
+    <TextView
+        android:id="@+id/tv_opt_2s"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:gravity="center"
+        android:text="2 秒"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- 3 秒 -->
+    <TextView
+        android:id="@+id/tv_opt_3s"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:gravity="center"
+        android:text="3 秒"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- 5 秒 -->
+    <TextView
+        android:id="@+id/tv_opt_5s"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:gravity="center"
+        android:text="5 秒"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- 10 秒 -->
+    <TextView
+        android:id="@+id/tv_opt_10s"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:gravity="center"
+        android:text="10 秒"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+</LinearLayout>

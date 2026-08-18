@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Switch 打开（白色背景）时：呈现精致清晰的科技蓝边框 -->
+    <item android:state_checked="true" android:color="#2196F3" />
+    <!-- Switch 关闭时：呈现低调的深灰边框 -->
+    <item android:state_checked="false" android:color="#4B5563" />
+    <item android:color="#4B5563" />
+</selector>

@@ -252,7 +252,6 @@ class BugreportParser {
         var batteryChargeCounter: Long? = null
         var batteryFullCharge: Long? = null
         var batteryFullChargeDesign: Long? = null
-        var batteryChargeTimeToFullNow: Long? = null
 
         val healthInfoRawLines = mutableListOf<String>()
         val lines = text.lines()
@@ -297,7 +296,6 @@ class BugreportParser {
                 map["batteryChargeCounterUah"]?.toLongOrNull()?.let { batteryChargeCounter = it }
                 map["batteryFullChargeUah"]?.toLongOrNull()?.let { batteryFullCharge = it }
                 map["batteryFullChargeDesignCapacityUah"]?.toLongOrNull()?.let { batteryFullChargeDesign = it }
-                map["batteryChargeTimeToFullNowSeconds"]?.toLongOrNull()?.let { batteryChargeTimeToFullNow = it }
 
                 break
             }
@@ -501,7 +499,48 @@ class BugreportParser {
         val hasRealData = (batteryLevel != null || batteryVoltage != null || batteryFullCharge != null || batteryCycleCount != null || batteryTemperature != null)
         val rawText = healthInfoRawLines.joinToString("\n").trim()
 
-        return BugreportResult(tableItems, rawText, hasRealData)
+        val parsedBatteryInfo = BatteryInfo(
+            batteryHealth = if (fccVal != null && designVal != null && designVal > 0L) {
+                val fMah = if (fccVal < 100000L) fccVal.toFloat() else fccVal / 1000f
+                val dMah = if (designVal < 100000L) designVal.toFloat() else designVal / 1000f
+                (fMah / dMah) * 100f
+            } else null,
+            healthStatus = healthStatusVal,
+            level = levelVal,
+            status = statusVal,
+            designCapacity = designVal?.let { if (it < 100000L) it.toFloat() else it / 1000f },
+            currentCapacity = chargeVal?.let { if (it < 100000L) it.toFloat() else it / 1000f } ?: (if (fccVal != null && levelVal != null) {
+                val fMah = if (fccVal < 100000L) fccVal.toFloat() else fccVal / 1000f
+                (fMah * levelVal) / 100f
+            } else null),
+            fullChargeCapacity = fccVal?.let { if (it < 100000L) it.toFloat() else it / 1000f },
+            cycleCount = batteryCycleCount,
+            temperature = tempVal?.let { if (it > 200f) it / 10f else it },
+            voltage = voltVal?.let {
+                when {
+                    it in 2500L..9500L -> it.toFloat()
+                    it in 2500000L..9500000L -> it / 1000f
+                    it > 9500L -> it / 1000f
+                    else -> it.toFloat()
+                }
+            },
+            currentNow = curVal?.let { if (Math.abs(it) >= 10000L) it / 1000f else it.toFloat() },
+            powerWatts = if (voltVal != null && curVal != null) {
+                val mv = when {
+                    voltVal in 2500L..9500L -> voltVal.toFloat()
+                    voltVal in 2500000L..9500000L -> voltVal / 1000f
+                    voltVal > 9500L -> voltVal / 1000f
+                    else -> voltVal.toFloat()
+                }
+                val ma = if (Math.abs(curVal) >= 10000L) Math.abs(curVal) / 1000f else Math.abs(curVal).toFloat()
+                (mv / 1000f) * (ma / 1000f)
+            } else null,
+            isDualCell = null,
+            technology = techDisplay,
+            source = "getHealthInfo"
+        )
+
+        return BugreportResult(tableItems, rawText, hasRealData, parsedBatteryInfo)
     }
 
     private fun rawLinesListShouldStop(line: String, count: Int): Boolean {

@@ -1,30 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.drawerlayout.widget.DrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/drawer_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <!-- 1. 主界面内容区域 -->
+    <!-- 1. 主界面内容区域 (顶部标题 + TabLayout + ViewPager2 支持左右滑动) -->
     <LinearLayout
         android:id="@+id/main_content"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:orientation="vertical">
 
-        <!-- 自定义顶部标题栏（替代原生 Toolbar） -->
+        <!-- 顶部操作栏 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
             android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="8dp">
 
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="@string/app_name"
+                android:text="电池检测"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="20sp"
                 android:textStyle="bold" />
@@ -32,206 +34,54 @@
             <!-- 刷新按钮 -->
             <ImageButton
                 android:id="@+id/btn_refresh"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:layout_marginStart="4dp"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:contentDescription="刷新数据"
                 android:padding="8dp"
                 android:src="@drawable/ic_refresh" />
 
-            <Space
-                android:layout_width="8dp"
-                android:layout_height="wrap_content" />
-
-            <!-- 右上角设置抽屉按钮 -->
+            <!-- 设置抽屉按钮 -->
             <ImageButton
                 android:id="@+id/btn_settings"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:layout_marginStart="2dp"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
                 android:contentDescription="打开设置抽屉"
                 android:padding="8dp"
                 android:src="@drawable/ic_settings" />
         </LinearLayout>
 
-        <!-- 主体上下滚动区域 -->
-        <ScrollView
+        <!-- 顶部三大 Tab 页签：系统api、Shizuku、错误报告 -->
+        <com.google.android.material.tabs.TabLayout
+            android:id="@+id/tab_layout"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:fillViewport="true">
+            android:layout_height="44dp"
+            android:background="?android:attr/colorBackground"
+            app:tabGravity="fill"
+            app:tabIndicatorColor="?attr/colorPrimary"
+            app:tabIndicatorFullWidth="false"
+            app:tabIndicatorHeight="3dp"
+            app:tabMode="fixed"
+            app:tabRippleColor="@null"
+            app:tabSelectedTextColor="?attr/colorPrimary"
+            app:tabTextAppearance="@style/TextAppearance.TabTitle"
+            app:tabTextColor="?android:attr/textColorSecondary" />
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
+        <!-- 分割线 -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#1A888888" />
 
-                <!-- 1. 上部：双列对比（系统 API 数据 vs Shizuku 底层数据） -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <!-- 左列：系统基础 API 数据 -->
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:paddingEnd="6dp">
-
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:gravity="center"
-                            android:text="【系统 API 数据】"
-                            android:textColor="#2196F3"
-                            android:textSize="14sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/tv_normal_info"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:lineSpacingExtra="4dp"
-                            android:textColor="?android:attr/textColorPrimary"
-                            android:textSize="13sp" />
-                    </LinearLayout>
-
-                    <!-- 中间垂直分割线 -->
-                    <View
-                        android:layout_width="1dp"
-                        android:layout_height="match_parent"
-                        android:background="#33888888" />
-
-                    <!-- 右列：底层 Shizuku 数据 -->
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical"
-                        android:paddingStart="6dp">
-
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="8dp"
-                            android:gravity="center"
-                            android:text="【Shizuku 数据】"
-                            android:textColor="#4CAF50"
-                            android:textSize="14sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/tv_shizuku_info"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:lineSpacingExtra="4dp"
-                            android:textColor="?android:attr/textColorPrimary"
-                            android:textSize="13sp" />
-                    </LinearLayout>
-
-                </LinearLayout>
-
-                <!-- 上下区域横向分割线 -->
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginVertical="16dp"
-                    android:background="#33888888" />
-
-                <!-- 2. 下部：错误报告数据模块 (getHealthInfo 表格解析) -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:paddingBottom="24dp">
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:layout_marginBottom="8dp"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="【错误报告 getHealthInfo 解析】"
-                            android:textColor="#FF9800"
-                            android:textSize="14sp"
-                            android:textStyle="bold" />
-
-                        <!-- 导入错误报告日志按钮 -->
-                        <Button
-                            android:id="@+id/btn_import_bugreport"
-                            style="@style/Widget.AppCompat.Button.Colored"
-                            android:layout_width="wrap_content"
-                            android:layout_height="36dp"
-                            android:text="导入报告"
-                            android:textSize="12sp" />
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/tv_bugreport_status"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="8dp"
-                        android:text="未导入错误报告日志。点击上方【导入报告】选择 bugreport.zip 或 .txt 解析底层 getHealthInfo 数据。"
-                        android:textColor="?android:attr/textColorSecondary"
-                        android:textSize="13sp" />
-
-                    <!-- 三列表格展示容器（支持横向滑动以防小屏幕挤压） -->
-                    <HorizontalScrollView
-                        android:id="@+id/scroll_health_table"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:visibility="gone">
-
-                        <TableLayout
-                            android:id="@+id/table_health_info"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:paddingVertical="4dp">
-                            <!-- 代码动态渲染表格行 -->
-                        </TableLayout>
-                    </HorizontalScrollView>
-
-                    <!-- getHealthInfo 原始数据展示区域 -->
-                    <LinearLayout
-                        android:id="@+id/layout_raw_health_info"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        android:orientation="vertical"
-                        android:visibility="gone">
-
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginBottom="6dp"
-                            android:text="【getHealthInfo 原始数据】"
-                            android:textColor="#FF9800"
-                            android:textSize="13sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/tv_raw_health_info"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:background="#15888888"
-                            android:lineSpacingExtra="3dp"
-                            android:padding="12dp"
-                            android:textColor="?android:attr/textColorPrimary"
-                            android:textIsSelectable="true"
-                            android:textSize="11sp"
-                            android:typeface="monospace" />
-                    </LinearLayout>
-                </LinearLayout>
-
-            </LinearLayout>
-        </ScrollView>
+        <!-- ViewPager2 容器：承载三 Tab 页面并支持左右滑动 -->
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/view_pager"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
 
     </LinearLayout>
 

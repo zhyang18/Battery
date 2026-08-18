@@ -117,7 +117,6 @@ class NormalApiProvider : BatteryDataProvider {
         var healthPercent: Float? = null
         if (fullChargeCapacityMah != null && designCapacityMah != null && designCapacityMah > 0) {
             healthPercent = (fullChargeCapacityMah / designCapacityMah) * 100f
-            if (healthPercent > 100f) healthPercent = 100f
         }
 
         return BatteryInfo(

@@ -51,8 +51,6 @@ class BatteryDataFusion {
         var health: Float? = null
         if (fusedFullChargeCapacity != null && fusedDesignCapacity != null && fusedDesignCapacity > 0) {
             health = (fusedFullChargeCapacity / fusedDesignCapacity) * 100f
-            // 限制健康度最高为 100%
-            if (health > 100f) health = 100f
         }
 
         return BatteryInfo(

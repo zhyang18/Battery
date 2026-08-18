@@ -81,27 +81,50 @@ data class BatteryInfo(
     val source: String = ""
 ) {
     /**
-     * 将电池信息格式化为可读字符串。
+     * 将电池信息格式化为包含键名与键值的多行字符串。
      *
-     * @return 包含电池各参数的格式化字符串
+     * @return 包含 14 项完整参数的格式化字符串
      */
     fun formatToString(): String {
         return """
-            数据来源: $source
             电量: ${level?.let { "$it%" } ?: "未知"}
             电池状态: ${status ?: "未知"}
             电池健康: ${healthStatus ?: "未知"}
-            电池健康度: ${batteryHealth?.let { String.format("%.2f%%", it) } ?: "未知"}
+            健康度: ${batteryHealth?.let { String.format("%.2f%%", it) } ?: "未知"}
             循环计数: ${cycleCount ?: "未知"}
             电池温度: ${temperature?.let { String.format("%.1f℃", it) } ?: "未知"}
             电池电压: ${voltage?.let { String.format("%.0f mV", it) } ?: "未知"}
             电流: ${currentNow?.let { String.format("%.0f mA", it) } ?: "未知"}
             双电芯: ${isDualCell?.let { if (it) "是" else "否" } ?: "否"}
             电池功率: ${powerWatts?.let { String.format("%.2f W", it) } ?: "未知"}
-            设计容量: ${designCapacity?.let { "${it} mAh" } ?: "未知"}
-            当前容量: ${currentCapacity?.let { "${it} mAh" } ?: "未知"}
-            充满电容量: ${fullChargeCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
+            设计容量: ${designCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
+            充满容量: ${fullChargeCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
+            当前容量: ${currentCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
             电池技术: ${technology ?: "未知"}
+        """.trimIndent()
+    }
+
+    /**
+     * 仅将电池信息的数据值格式化为多行字符串（用于多列对齐展示）。
+     *
+     * @return 仅包含 14 项数据值的多行文本
+     */
+    fun formatValuesOnly(): String {
+        return """
+            ${level?.let { "$it%" } ?: "未知"}
+            ${status ?: "未知"}
+            ${healthStatus ?: "未知"}
+            ${batteryHealth?.let { String.format("%.2f%%", it) } ?: "未知"}
+            ${cycleCount ?: "未知"}
+            ${temperature?.let { String.format("%.1f℃", it) } ?: "未知"}
+            ${voltage?.let { String.format("%.0f mV", it) } ?: "未知"}
+            ${currentNow?.let { String.format("%.0f mA", it) } ?: "未知"}
+            ${isDualCell?.let { if (it) "是" else "否" } ?: "否"}
+            ${powerWatts?.let { String.format("%.2f W", it) } ?: "未知"}
+            ${designCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
+            ${fullChargeCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
+            ${currentCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
+            ${technology ?: "未知"}
         """.trimIndent()
     }
 }

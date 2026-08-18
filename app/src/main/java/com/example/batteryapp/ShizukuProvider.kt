@@ -87,7 +87,6 @@ class ShizukuProvider : BatteryDataProvider {
         var health: Float? = sysfsInfo.batteryHealth ?: dumpsysInfo.batteryHealth ?: vendorInfo.batteryHealth
         if (health == null && fullCap != null && designCap != null && designCap > 0) {
             health = (fullCap / designCap) * 100f
-            if (health > 100f) health = 100f
         }
 
         return BatteryInfo(
@@ -158,6 +157,7 @@ class ShizukuProvider : BatteryDataProvider {
         var voltage: Float? = null
         var currentNow: Float? = null
         var powerWatts: Float? = null
+        var batteryHealth: Float? = null
         var status: String? = null
         var healthStatus: String? = null
         var technology: String? = null
@@ -235,6 +235,12 @@ class ShizukuProvider : BatteryDataProvider {
                 val h = trimLine.substringAfter("=").trim()
                 if (h.isNotEmpty()) healthStatus = h
             }
+            if (trimLine.contains("POWER_SUPPLY_SOH=") || trimLine.contains("POWER_SUPPLY_HEALTH_PERCENT=")) {
+                val soh = trimLine.substringAfter("=").toFloatOrNull()
+                if (soh != null && soh > 0) {
+                    if (batteryHealth == null) batteryHealth = soh
+                }
+            }
             if (trimLine.contains("POWER_SUPPLY_TECHNOLOGY=")) {
                 val t = trimLine.substringAfter("=").trim()
                 if (t.isNotEmpty()) technology = t
@@ -284,6 +290,7 @@ class ShizukuProvider : BatteryDataProvider {
         }
 
         return BatteryInfo(
+            batteryHealth = batteryHealth,
             designCapacity = designCapacity,
             fullChargeCapacity = fullChargeCapacity,
             currentCapacity = currentCapacity,

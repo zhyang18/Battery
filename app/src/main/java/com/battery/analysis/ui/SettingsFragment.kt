@@ -16,7 +16,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.battery.analysis.MainActivity
-import com.battery.analysis.R
 import com.battery.analysis.databinding.FragmentSettingsBinding
 import com.battery.analysis.viewmodel.BatteryViewModel
 import kotlinx.coroutines.launch
@@ -67,25 +66,43 @@ class SettingsFragment : Fragment() {
     }
 
     /**
-     * 初始化主题与深色模式设置。
+     * 初始化主题与深色模式开关设置。
      */
     private fun setupThemeSettings() {
-        binding.rgThemeMode.setOnCheckedChangeListener(null)
         val currentThemeMode = prefs.getInt("theme_mode", AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
-        when (currentThemeMode) {
-            AppCompatDelegate.MODE_NIGHT_NO -> binding.rbThemeLight.isChecked = true
-            AppCompatDelegate.MODE_NIGHT_YES -> binding.rbThemeDark.isChecked = true
-            else -> binding.rbThemeSystem.isChecked = true
+        val isFollowSystem = currentThemeMode == AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+        val isDarkMode = currentThemeMode == AppCompatDelegate.MODE_NIGHT_YES
+
+        // 避免初次绑定回调触发重建
+        binding.switchFollowSystem.setOnCheckedChangeListener(null)
+        binding.switchDarkMode.setOnCheckedChangeListener(null)
+
+        binding.switchFollowSystem.isChecked = isFollowSystem
+        binding.switchDarkMode.isChecked = isDarkMode
+        binding.switchDarkMode.isEnabled = !isFollowSystem
+        binding.layoutDarkMode.alpha = if (isFollowSystem) 0.5f else 1.0f
+
+        binding.switchFollowSystem.setOnCheckedChangeListener { _, isChecked ->
+            binding.switchDarkMode.isEnabled = !isChecked
+            binding.layoutDarkMode.alpha = if (isChecked) 0.5f else 1.0f
+
+            val newMode = if (isChecked) {
+                AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+            } else {
+                if (binding.switchDarkMode.isChecked) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
+            }
+
+            val saved = prefs.getInt("theme_mode", AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
+            if (newMode != saved) {
+                prefs.edit().putInt("theme_mode", newMode).apply()
+                AppCompatDelegate.setDefaultNightMode(newMode)
+            }
         }
 
-        binding.rgThemeMode.setOnCheckedChangeListener { _, checkedId ->
-            val newMode = when (checkedId) {
-                R.id.rb_theme_light -> AppCompatDelegate.MODE_NIGHT_NO
-                R.id.rb_theme_dark -> AppCompatDelegate.MODE_NIGHT_YES
-                else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
-            }
-            val currentSaved = prefs.getInt("theme_mode", AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
-            if (newMode != currentSaved) {
+        binding.switchDarkMode.setOnCheckedChangeListener { _, isChecked ->
+            val newMode = if (isChecked) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO
+            val saved = prefs.getInt("theme_mode", AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
+            if (newMode != saved) {
                 prefs.edit().putInt("theme_mode", newMode).apply()
                 AppCompatDelegate.setDefaultNightMode(newMode)
             }
@@ -109,9 +126,9 @@ class SettingsFragment : Fragment() {
             mainActivity?.setAutoRefreshEnabled(isChecked)
             if (isChecked) {
                 val currentInterval = prefs.getLong("refresh_interval_ms", 2000L)
-                Toast.makeText(requireContext(), "已开启实时刷新 (${currentInterval / 1000}秒)", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "已开启实时自动刷新 (${currentInterval / 1000}秒)", Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(requireContext(), "已关闭实时刷新", Toast.LENGTH_SHORT).show()
+                Toast.makeText(requireContext(), "已关闭实时自动刷新", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -141,7 +158,7 @@ class SettingsFragment : Fragment() {
     private fun setupShizukuSettings() {
         val mainActivity = activity as? MainActivity
 
-        binding.btnAuthShizuku.setOnClickListener {
+        binding.layoutShizukuAuth.setOnClickListener {
             mainActivity?.requestShizukuAuth()
         }
 
@@ -151,13 +168,13 @@ class SettingsFragment : Fragment() {
                     binding.tvShizukuStatus.text = status
                     val isGranted = viewModel.isShizukuGranted.value
                     if (isGranted) {
-                        binding.tvShizukuStatus.setTextColor(Color.GREEN)
-                        binding.btnAuthShizuku.text = "已授权"
-                        binding.btnAuthShizuku.isEnabled = false
+                        binding.tvShizukuStatus.setTextColor(Color.parseColor("#10B981"))
+                        binding.tvShizukuAction.text = "已授权"
+                        binding.tvShizukuAction.setTextColor(Color.parseColor("#10B981"))
                     } else {
-                        binding.tvShizukuStatus.setTextColor(if (status.contains("未运行")) Color.RED else Color.parseColor("#FFA500"))
-                        binding.btnAuthShizuku.text = "请求授权"
-                        binding.btnAuthShizuku.isEnabled = true
+                        binding.tvShizukuStatus.setTextColor(if (status.contains("未运行")) Color.parseColor("#EF4444") else Color.parseColor("#F59E0B"))
+                        binding.tvShizukuAction.text = "去授权"
+                        binding.tvShizukuAction.setTextColor(Color.parseColor("#818CF8"))
                     }
                 }
             }

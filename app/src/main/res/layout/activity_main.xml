@@ -1,278 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.drawerlayout.widget.DrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:id="@+id/drawer_layout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical">
 
-    <!-- 1. 主界面内容区域 (顶部标题 + TabLayout + ViewPager2 支持左右滑动) -->
-    <LinearLayout
-        android:id="@+id/main_content"
+    <!-- 顶级 ViewPager2 容器：承载“检测”、“记录”、“设置”三大顶级页面 -->
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/main_view_pager"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical">
+        android:layout_height="0dp"
+        android:layout_weight="1" />
 
-        <!-- 顶部操作栏 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingHorizontal="16dp"
-            android:paddingTop="12dp"
-            android:paddingBottom="8dp">
+    <!-- 底部分割线 -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#14888888" />
 
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="电池检测"
-                android:textColor="?android:attr/textColorPrimary"
-                android:textSize="20sp"
-                android:textStyle="bold" />
-
-            <!-- 刷新按钮 -->
-            <ImageButton
-                android:id="@+id/btn_refresh"
-                android:layout_width="38dp"
-                android:layout_height="38dp"
-                android:layout_marginStart="4dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:contentDescription="刷新数据"
-                android:padding="8dp"
-                android:src="@drawable/ic_refresh" />
-
-            <!-- 设置抽屉按钮 -->
-            <ImageButton
-                android:id="@+id/btn_settings"
-                android:layout_width="38dp"
-                android:layout_height="38dp"
-                android:layout_marginStart="2dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:contentDescription="打开设置抽屉"
-                android:padding="8dp"
-                android:src="@drawable/ic_settings" />
-        </LinearLayout>
-
-        <!-- 顶部三大 Tab 页签：系统api、Shizuku、错误报告 -->
-        <com.google.android.material.tabs.TabLayout
-            android:id="@+id/tab_layout"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:background="?android:attr/colorBackground"
-            app:tabGravity="fill"
-            app:tabIndicatorColor="?attr/colorPrimary"
-            app:tabIndicatorFullWidth="false"
-            app:tabIndicatorHeight="3dp"
-            app:tabMode="fixed"
-            app:tabRippleColor="@null"
-            app:tabSelectedTextColor="?attr/colorPrimary"
-            app:tabTextAppearance="@style/TextAppearance.TabTitle"
-            app:tabTextColor="?android:attr/textColorSecondary" />
-
-        <!-- 分割线 -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#1A888888" />
-
-        <!-- ViewPager2 容器：承载三 Tab 页面并支持左右滑动 -->
-        <androidx.viewpager2.widget.ViewPager2
-            android:id="@+id/view_pager"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
-    </LinearLayout>
-
-    <!-- 2. 右侧抽屉式设置面板 (Slide from right) -->
-    <ScrollView
-        android:id="@+id/drawer_settings"
-        android:layout_width="320dp"
-        android:layout_height="match_parent"
-        android:layout_gravity="end"
+    <!-- 底部 Material 3 导航栏 -->
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottom_navigation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
         android:background="?android:attr/colorBackground"
-        android:clickable="true"
-        android:elevation="16dp"
-        android:focusable="true">
+        app:elevation="8dp"
+        app:itemIconTint="@color/selector_nav_item_color"
+        app:itemTextColor="@color/selector_nav_item_color"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/bottom_nav_menu" />
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="20dp">
-
-            <!-- 抽屉顶部标题与关闭按钮 -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="16dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="设置"
-                    android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="20sp"
-                    android:textStyle="bold" />
-
-                <ImageButton
-                    android:id="@+id/btn_close_drawer"
-                    android:layout_width="36dp"
-                    android:layout_height="36dp"
-                    android:background="?android:attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="关闭抽屉"
-                    android:padding="6dp"
-                    android:src="@drawable/ic_close" />
-            </LinearLayout>
-
-            <!-- 1. 主题与深色模式设置板块 -->
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:layout_marginBottom="8dp"
-                android:text="主题与深色模式"
-                android:textColor="?attr/colorPrimary"
-                android:textSize="14sp"
-                android:textStyle="bold" />
-
-            <RadioGroup
-                android:id="@+id/rg_theme_mode"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
-
-                <RadioButton
-                    android:id="@+id/rb_theme_system"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="跟随系统主题"
-                    android:textSize="14sp" />
-
-                <RadioButton
-                    android:id="@+id/rb_theme_light"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="浅色模式"
-                    android:textSize="14sp" />
-
-                <RadioButton
-                    android:id="@+id/rb_theme_dark"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="深色模式 (AMOLED 纯黑)"
-                    android:textSize="14sp" />
-            </RadioGroup>
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginVertical="16dp"
-                android:background="#33888888" />
-
-            <!-- 2. 实时刷新设置板块 -->
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="8dp"
-                android:text="实时刷新设置"
-                android:textColor="?attr/colorPrimary"
-                android:textSize="14sp"
-                android:textStyle="bold" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="开启实时自动刷新"
-                    android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="15sp" />
-
-                <androidx.appcompat.widget.SwitchCompat
-                    android:id="@+id/switch_auto_refresh_drawer"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/layout_interval_setting_drawer"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:background="?android:attr/selectableItemBackground"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingVertical="8dp">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="刷新时间间隔"
-                    android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="15sp" />
-
-                <TextView
-                    android:id="@+id/tv_current_interval_drawer"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="2 秒"
-                    android:textColor="?attr/colorPrimary"
-                    android:textSize="14sp" />
-            </LinearLayout>
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginVertical="16dp"
-                android:background="#33888888" />
-
-            <!-- 3. Shizuku 权限与状态板块 -->
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="8dp"
-                android:text="Shizuku 权限与连接"
-                android:textColor="?attr/colorPrimary"
-                android:textSize="14sp"
-                android:textStyle="bold" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:id="@+id/tv_shizuku_status_drawer"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Shizuku: 检查中..."
-                    android:textSize="14sp" />
-
-                <Button
-                    android:id="@+id/btn_auth_shizuku_drawer"
-                    style="@style/Widget.AppCompat.Button.Colored"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="请求授权"
-                    android:textSize="13sp" />
-            </LinearLayout>
-
-        </LinearLayout>
-    </ScrollView>
-
-</androidx.drawerlayout.widget.DrawerLayout>
+</LinearLayout>

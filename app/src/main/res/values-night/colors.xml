@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色模式下的下拉弹窗文字：纯白高亮，确保在深灰背景上清晰可见 -->
+    <color name="popup_item_text">#FFFFFF</color>
+</resources>

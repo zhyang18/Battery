@@ -17,6 +17,8 @@
     <color name="text_secondary_light">#64748B</color>
     <color name="text_secondary_dark">#B0BEC5</color>
     
+    <color name="popup_item_text">#1E293B</color>
+    
     <color name="nav_item_selected">#2196F3</color>
     <color name="nav_item_unselected">#8E8E93</color>
     <color name="nav_indicator_color">#262196F3</color>

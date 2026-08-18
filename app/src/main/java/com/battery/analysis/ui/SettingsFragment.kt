@@ -158,12 +158,24 @@ class SettingsFragment : Fragment() {
             // 设置从右上角展开的弹出动画
             listPopupWindow.animationStyle = R.style.Animation_PopupTopRight
 
-            val adapter = android.widget.ArrayAdapter(
+            val currentVal = prefs.getLong("refresh_interval_ms", 2000L)
+            val adapter = object : android.widget.ArrayAdapter<String>(
                 requireContext(),
                 R.layout.item_dropdown_interval,
                 R.id.tv_interval_item,
                 intervals
-            )
+            ) {
+                override fun getView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup): android.view.View {
+                    val view = super.getView(position, convertView, parent)
+                    val tv = view.findViewById<android.widget.TextView>(R.id.tv_interval_item)
+                    if (intervalValues.getOrNull(position) == currentVal) {
+                        tv.setTextColor(android.graphics.Color.parseColor("#2196F3"))
+                    } else {
+                        tv.setTextColor(androidx.core.content.ContextCompat.getColor(context, R.color.popup_item_text))
+                    }
+                    return view
+                }
+            }
             listPopupWindow.setAdapter(adapter)
 
             listPopupWindow.setOnItemClickListener { _, _, position, _ ->

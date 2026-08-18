@@ -132,23 +132,26 @@ class SettingsFragment : Fragment() {
             }
         }
 
-        binding.layoutIntervalSetting.setOnClickListener {
+        binding.layoutIntervalSetting.setOnClickListener { _ ->
+            val popup = androidx.appcompat.widget.PopupMenu(requireContext(), binding.tvCurrentInterval)
             val intervals = arrayOf("1 秒", "2 秒", "3 秒", "5 秒", "10 秒")
             val intervalValues = arrayOf(1000L, 2000L, 3000L, 5000L, 10000L)
-            val currentVal = prefs.getLong("refresh_interval_ms", 2000L)
-            val currentIndex = intervalValues.indexOf(currentVal).coerceAtLeast(0)
 
-            AlertDialog.Builder(requireContext())
-                .setTitle("选择刷新时间间隔")
-                .setSingleChoiceItems(intervals, currentIndex) { dialog, which ->
+            intervals.forEachIndexed { index, title ->
+                popup.menu.add(0, index, index, title)
+            }
+
+            popup.setOnMenuItemClickListener { menuItem ->
+                val which = menuItem.itemId
+                if (which in intervalValues.indices) {
                     val selectedInterval = intervalValues[which]
                     prefs.edit().putLong("refresh_interval_ms", selectedInterval).apply()
                     binding.tvCurrentInterval.text = intervals[which]
                     mainActivity?.updateRefreshInterval(selectedInterval)
-                    dialog.dismiss()
                 }
-                .setNegativeButton("取消", null)
-                .show()
+                true
+            }
+            popup.show()
         }
     }
 

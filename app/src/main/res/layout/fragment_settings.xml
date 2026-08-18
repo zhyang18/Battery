@@ -200,9 +200,9 @@
                     tools:text="2 秒" />
 
                 <ImageView
-                    android:layout_width="18dp"
-                    android:layout_height="18dp"
-                    android:src="@drawable/ic_chevron_right"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_arrow_drop_down"
                     app:tint="?android:attr/textColorSecondary" />
             </LinearLayout>
 

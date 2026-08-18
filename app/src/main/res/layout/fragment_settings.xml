@@ -50,15 +50,13 @@
             <!-- 条目 1: 跟随系统主题 -->
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="56dp"
+                android:layout_height="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp"
-                android:paddingVertical="14dp">
+                android:paddingHorizontal="16dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -90,15 +88,13 @@
             <LinearLayout
                 android:id="@+id/layout_dark_mode"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="56dp"
+                android:layout_height="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp"
-                android:paddingVertical="14dp">
+                android:paddingHorizontal="16dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -141,15 +137,13 @@
             <!-- 条目 3: 开启实时自动刷新 -->
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="56dp"
+                android:layout_height="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp"
-                android:paddingVertical="14dp">
+                android:paddingHorizontal="16dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -181,8 +175,7 @@
             <LinearLayout
                 android:id="@+id/layout_interval_setting"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="56dp"
+                android:layout_height="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:clickable="true"
@@ -190,8 +183,7 @@
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp"
-                android:paddingVertical="14dp">
+                android:paddingHorizontal="16dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -241,8 +233,7 @@
             <LinearLayout
                 android:id="@+id/layout_shizuku_auth"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="56dp"
+                android:layout_height="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:clickable="true"
@@ -250,8 +241,7 @@
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp"
-                android:paddingVertical="14dp">
+                android:paddingHorizontal="16dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -278,10 +268,10 @@
                         android:id="@+id/tv_shizuku_status"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
+                        android:layout_marginTop="1dp"
                         android:text="检查中..."
                         android:textColor="?android:attr/textColorSecondary"
-                        android:textSize="12sp" />
+                        android:textSize="11.5sp" />
                 </LinearLayout>
 
                 <TextView
@@ -316,15 +306,13 @@
             <!-- 条目 6: 应用版本 -->
             <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="56dp"
+                android:layout_height="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp"
-                android:paddingVertical="14dp">
+                android:paddingHorizontal="16dp">
 
                 <ImageView
                     android:layout_width="22dp"

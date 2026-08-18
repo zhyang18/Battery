@@ -78,7 +78,9 @@
                 <com.google.android.material.materialswitch.MaterialSwitch
                     android:id="@+id/switch_follow_system"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
+                    android:layout_height="wrap_content"
+                    app:thumbTint="@color/selector_switch_thumb"
+                    app:trackTint="@color/selector_switch_track" />
             </LinearLayout>
 
             <!-- 条目 2: 开启暗黑模式 -->
@@ -113,7 +115,9 @@
                 <com.google.android.material.materialswitch.MaterialSwitch
                     android:id="@+id/switch_dark_mode"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
+                    android:layout_height="wrap_content"
+                    app:thumbTint="@color/selector_switch_thumb"
+                    app:trackTint="@color/selector_switch_track" />
             </LinearLayout>
 
             <!-- 2. 数据与刷新 分类 -->
@@ -159,7 +163,9 @@
                 <com.google.android.material.materialswitch.MaterialSwitch
                     android:id="@+id/switch_auto_refresh"
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
+                    android:layout_height="wrap_content"
+                    app:thumbTint="@color/selector_switch_thumb"
+                    app:trackTint="@color/selector_switch_track" />
             </LinearLayout>
 
             <!-- 条目 4: 刷新时间间隔 -->

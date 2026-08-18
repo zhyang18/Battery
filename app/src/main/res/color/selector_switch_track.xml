@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Switch 打开时的背景轨道颜色改为纯白/浅白类 -->
+    <item android:state_checked="true" android:color="#FFFFFF" />
+    <!-- 关闭时的背景轨道颜色为深灰 -->
+    <item android:state_checked="false" android:color="#3F3F46" />
+    <item android:color="#3F3F46" />
+</selector>

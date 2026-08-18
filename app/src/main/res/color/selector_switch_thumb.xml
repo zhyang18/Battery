@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Switch 打开时滑块为深色，与白色轨道高对比度 -->
+    <item android:state_checked="true" android:color="#18181B" />
+    <!-- 关闭时滑块为中灰 -->
+    <item android:state_checked="false" android:color="#9CA3AF" />
+    <item android:color="#9CA3AF" />
+</selector>

@@ -138,7 +138,7 @@ class SettingsFragment : Fragment() {
             val intervalValues = arrayOf(1000L, 2000L, 3000L, 5000L, 10000L)
 
             val listPopupWindow = androidx.appcompat.widget.ListPopupWindow(requireContext())
-            listPopupWindow.anchorView = binding.tvCurrentInterval
+            listPopupWindow.anchorView = binding.layoutIntervalSetting
             listPopupWindow.setDropDownGravity(android.view.Gravity.END)
 
             // 紧凑小巧宽度 (110dp)
@@ -151,7 +151,8 @@ class SettingsFragment : Fragment() {
                 listPopupWindow.setBackgroundDrawable(it)
             }
 
-            // 垂直微调偏移量
+            // 右对齐与垂直偏移微调
+            listPopupWindow.horizontalOffset = 0
             listPopupWindow.verticalOffset = (4 * density).toInt()
 
             val adapter = android.widget.ArrayAdapter(

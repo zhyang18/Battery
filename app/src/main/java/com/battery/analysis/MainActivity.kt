@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity() {
     private var autoRefreshJob: Job? = null
     private var isAutoRefreshEnabled: Boolean = false
     private var refreshIntervalMs: Long = 2000L
+    private var lastBackPressedTime: Long = 0L
 
     /**
      * Shizuku 权限请求结果监听器。
@@ -91,14 +92,51 @@ class MainActivity : AppCompatActivity() {
         // 1. 初始化顶级 ViewPager2 与底部 NavigationBar 联动
         setupBottomNavigation()
 
-        // 2. 注册 Shizuku 监听器
+        // 2. 初始化双击返回退出应用监听
+        setupBackPressHandler()
+
+        // 3. 注册 Shizuku 监听器
         Shizuku.addRequestPermissionResultListener(requestPermissionResultListener)
         Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
         Shizuku.addBinderDeadListener(binderDeadListener)
 
-        // 3. 初始只刷新系统普通 API（因为默认处于系统 API 视图）
+        // 4. 初始只刷新系统普通 API（因为默认处于系统 API 视图）
         updateShizukuStatusState()
         viewModel.refreshNormalApi(this)
+    }
+
+    /**
+     * 配置系统返回手势/物理返回键监听，支持连续双击（2秒内）返回彻底退出 App。
+     */
+    private fun setupBackPressHandler() {
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                val currentTime = System.currentTimeMillis()
+                if (currentTime - lastBackPressedTime < 2000L) {
+                    exitAppAndKillProcess()
+                } else {
+                    lastBackPressedTime = currentTime
+                    Toast.makeText(this@MainActivity, "再按一次退出应用", Toast.LENGTH_SHORT).show()
+                }
+            }
+        })
+    }
+
+    /**
+     * 彻底退出应用：停止后台轮询、解绑所有监听、销毁 Activity 栈并安全终止当前应用进程，释放所有资源。
+     */
+    private fun exitAppAndKillProcess() {
+        stopAutoRefresh()
+        try {
+            Shizuku.removeRequestPermissionResultListener(requestPermissionResultListener)
+            Shizuku.removeBinderReceivedListener(binderReceivedListener)
+            Shizuku.removeBinderDeadListener(binderDeadListener)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        finishAffinity()
+        android.os.Process.killProcess(android.os.Process.myPid())
+        kotlin.system.exitProcess(0)
     }
 
     /**

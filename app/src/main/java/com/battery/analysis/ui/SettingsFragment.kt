@@ -16,6 +16,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.battery.analysis.MainActivity
+import com.battery.analysis.R
 import com.battery.analysis.databinding.FragmentSettingsBinding
 import com.battery.analysis.viewmodel.BatteryViewModel
 import kotlinx.coroutines.launch
@@ -133,25 +134,45 @@ class SettingsFragment : Fragment() {
         }
 
         binding.layoutIntervalSetting.setOnClickListener { _ ->
-            val popup = androidx.appcompat.widget.PopupMenu(requireContext(), binding.tvCurrentInterval)
             val intervals = arrayOf("1 秒", "2 秒", "3 秒", "5 秒", "10 秒")
             val intervalValues = arrayOf(1000L, 2000L, 3000L, 5000L, 10000L)
 
-            intervals.forEachIndexed { index, title ->
-                popup.menu.add(0, index, index, title)
+            val listPopupWindow = androidx.appcompat.widget.ListPopupWindow(requireContext())
+            listPopupWindow.anchorView = binding.tvCurrentInterval
+            listPopupWindow.setDropDownGravity(android.view.Gravity.END)
+
+            // 紧凑小巧宽度 (110dp)
+            val density = resources.displayMetrics.density
+            listPopupWindow.width = (110 * density).toInt()
+            listPopupWindow.isModal = true
+
+            // 定制精致圆角背景
+            androidx.core.content.ContextCompat.getDrawable(requireContext(), R.drawable.bg_popup_dropdown)?.let {
+                listPopupWindow.setBackgroundDrawable(it)
             }
 
-            popup.setOnMenuItemClickListener { menuItem ->
-                val which = menuItem.itemId
-                if (which in intervalValues.indices) {
-                    val selectedInterval = intervalValues[which]
+            // 垂直微调偏移量
+            listPopupWindow.verticalOffset = (4 * density).toInt()
+
+            val adapter = android.widget.ArrayAdapter(
+                requireContext(),
+                R.layout.item_dropdown_interval,
+                R.id.tv_interval_item,
+                intervals
+            )
+            listPopupWindow.setAdapter(adapter)
+
+            listPopupWindow.setOnItemClickListener { _, _, position, _ ->
+                if (position in intervalValues.indices) {
+                    val selectedInterval = intervalValues[position]
                     prefs.edit().putLong("refresh_interval_ms", selectedInterval).apply()
-                    binding.tvCurrentInterval.text = intervals[which]
+                    binding.tvCurrentInterval.text = intervals[position]
                     mainActivity?.updateRefreshInterval(selectedInterval)
                 }
-                true
+                listPopupWindow.dismiss()
             }
-            popup.show()
+
+            listPopupWindow.show()
         }
     }
 

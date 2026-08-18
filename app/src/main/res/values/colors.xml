@@ -9,6 +9,8 @@
     
     <color name="surface_light">#F8FAFC</color>
     <color name="surface_dark">#000000</color>
+    <color name="popup_bg_light">#FFFFFF</color>
+    <color name="popup_bg_dark">#27272A</color>
     
     <color name="text_primary_light">#1E293B</color>
     <color name="text_primary_dark">#FFFFFF</color>

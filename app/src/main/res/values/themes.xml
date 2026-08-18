@@ -1,12 +1,12 @@
 <resources>
-    <!-- 主题继承自 Material3，支持 BottomNavigationView 胶囊指示器与现代 Material 控件 -->
+    <!-- 主题继承自 Material3，全部属性使用 @color/... 资源引用，确保 resourceId 有效 -->
     <style name="Theme.BatteryApp" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">#1976D2</item>
-        <item name="colorPrimaryDark">#0D47A1</item>
-        <item name="colorAccent">#00E676</item>
-        <item name="colorSurface">?android:attr/colorBackground</item>
-        <item name="colorOnSurface">?android:attr/textColorPrimary</item>
-        <item name="colorOnSurfaceVariant">?android:attr/textColorSecondary</item>
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryDark">@color/primary_dark</item>
+        <item name="colorAccent">@color/color_accent</item>
+        <item name="colorSurface">@color/surface_light</item>
+        <item name="colorOnSurface">@color/text_primary_light</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary_light</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>

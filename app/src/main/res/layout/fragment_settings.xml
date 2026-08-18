@@ -303,6 +303,43 @@
                 android:textSize="13sp"
                 android:textStyle="bold" />
 
+            <!-- 条目 6: 电池健康度计算方式说明 -->
+            <LinearLayout
+                android:id="@+id/layout_health_calc_info"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/bg_setting_card_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:clipToOutline="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:src="@drawable/ic_nav_detection"
+                    app:tint="?android:attr/textColorPrimary" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:layout_weight="1"
+                    android:text="电池健康度计算方式说明"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <ImageView
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:src="@drawable/ic_chevron_right"
+                    app:tint="?android:attr/textColorSecondary" />
+            </LinearLayout>
+
             <!-- 条目 6: 应用版本 -->
             <LinearLayout
                 android:layout_width="match_parent"

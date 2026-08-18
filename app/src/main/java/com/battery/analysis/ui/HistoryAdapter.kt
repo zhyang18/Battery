@@ -1,0 +1,130 @@
+package com.battery.analysis.ui
+
+import android.graphics.Color
+import android.view.LayoutInflater
+import android.view.ViewGroup
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
+import androidx.recyclerview.widget.RecyclerView
+import com.battery.analysis.databinding.ItemHistoryRecordBinding
+import com.battery.analysis.model.HistoryRecord
+
+/**
+ * 电池检测历史记录单行列表适配器。
+ * 负责展示紧凑美观的单行历史快照条目，支持 DiffUtil 局部刷新与点击查看 14 项完整指标详情。
+ *
+ * @param onItemClick 点击条目回调，用于弹出全量指标详情对话框
+ */
+class HistoryAdapter(
+    private val onItemClick: (HistoryRecord) -> Unit
+) : ListAdapter<HistoryRecord, HistoryAdapter.ViewHolder>(HistoryDiffCallback()) {
+
+    /**
+     * 创建 ViewHolder 视图持有者。
+     *
+     * @param parent 父视图容器
+     * @param viewType 视图类型
+     * @return 构建成功的 [ViewHolder] 实例
+     */
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+        val binding = ItemHistoryRecordBinding.inflate(
+            LayoutInflater.from(parent.context),
+            parent,
+            false
+        )
+        return ViewHolder(binding)
+    }
+
+    /**
+     * 绑定指定位置的历史记录数据到 ViewHolder。
+     *
+     * @param holder 视图持有者
+     * @param position 列表位置索引
+     */
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        val record = getItem(position)
+        holder.bind(record)
+    }
+
+    /**
+     * 历史记录单行列表 ViewHolder。
+     *
+     * @param binding 视图绑定对象
+     */
+    inner class ViewHolder(
+        private val binding: ItemHistoryRecordBinding
+    ) : RecyclerView.ViewHolder(binding.root) {
+
+        /**
+         * 将历史记录实体数据绑定到单行条目控件。
+         *
+         * @param record 待展示的历史记录对象
+         */
+        fun bind(record: HistoryRecord) {
+            // 1. 数据来源彩色徽章与时间戳
+            binding.tvHistorySource.text = record.category
+            when {
+                record.category.contains("Shizuku", ignoreCase = true) -> {
+                    binding.tvHistorySource.setTextColor(Color.parseColor("#818CF8"))
+                }
+                record.category.contains("错误报告", ignoreCase = true) -> {
+                    binding.tvHistorySource.setTextColor(Color.parseColor("#10B981"))
+                }
+                else -> {
+                    binding.tvHistorySource.setTextColor(Color.parseColor("#2196F3"))
+                }
+            }
+            binding.tvHistoryTime.text = record.captureTime
+
+            // 2. 充满容量 / 设计容量展示
+            val fullCapStr = record.fullChargeCapacity?.let { String.format("%.0f", it) } ?: "-"
+            val designCapStr = record.designCapacity?.let { String.format("%.0f", it) } ?: "-"
+            val capacityDisplay = if (fullCapStr != "-" || designCapStr != "-") {
+                "$fullCapStr / $designCapStr mAh"
+            } else {
+                val levelStr = record.level?.let { "$it%" } ?: "未知"
+                val statusStr = record.status?.let { " ($it)" } ?: ""
+                "$levelStr$statusStr"
+            }
+            binding.tvHistoryCapacity.text = capacityDisplay
+
+            // 3. 电池健康度
+            binding.tvHistoryHealth.text = record.batteryHealth?.let { String.format("%.2f%%", it) } ?: "--"
+
+            // 4. 循环次数
+            binding.tvHistoryCycle.text = record.cycleCount?.let { "循环 $it 次" } ?: "循环未知"
+
+            // 5. 点击事件监听
+            binding.root.setOnClickListener {
+                onItemClick(record)
+            }
+        }
+    }
+
+    /**
+     * 历史记录数据项差异比对回调，用于高效局部刷新。
+     */
+    class HistoryDiffCallback : DiffUtil.ItemCallback<HistoryRecord>() {
+        /**
+         * 判断两个条目是否代表同一条记录。
+         *
+         * @param oldItem 旧记录项
+         * @param newItem 新记录项
+         * @return 是否为同一实体
+         */
+        override fun areItemsTheSame(oldItem: HistoryRecord, newItem: HistoryRecord): Boolean {
+            return oldItem.id == newItem.id
+        }
+
+        /**
+         * 判断两个条目的内容是否完全相同。
+         *
+         * @param oldItem 旧记录项
+         * @param newItem 新记录项
+         * @return 内容是否完全一致
+         */
+        override fun areContentsTheSame(oldItem: HistoryRecord, newItem: HistoryRecord): Boolean {
+            return oldItem == newItem
+        }
+    }
+}

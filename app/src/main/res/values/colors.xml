@@ -20,4 +20,12 @@
     <color name="nav_item_selected">#2196F3</color>
     <color name="nav_item_unselected">#8E8E93</color>
     <color name="nav_indicator_color">#262196F3</color>
+
+    <!-- 弹窗分层色彩体系（浅色模式） -->
+    <color name="dialog_surface_bg">#FFFFFF</color>
+    <color name="dialog_surface_stroke">#E2E8F0</color>
+    <color name="dialog_card_bg">#F8FAFC</color>
+    <color name="dialog_card_stroke">#EDF2F7</color>
+    <color name="dialog_badge_bg">#EFF6FF</color>
+    <color name="dialog_badge_stroke">#DBEAFE</color>
 </resources>

@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 深色模式下的下拉弹窗背景（精致深灰）与文字（纯白高亮，确保清晰可见） -->
+    <!-- 深色模式下的下拉弹窗背景（精致深灰）与文字（纯白高亮） -->
     <color name="popup_bg">#27272A</color>
     <color name="popup_item_text">#FFFFFF</color>
+
+    <!-- 弹窗分层色彩体系（深色模式：分层明显，质感细腻） -->
+    <color name="dialog_surface_bg">#1E1E22</color>
+    <color name="dialog_surface_stroke">#33333C</color>
+    <color name="dialog_card_bg">#28282E</color>
+    <color name="dialog_card_stroke">#3C3C46</color>
+    <color name="dialog_badge_bg">#172A40</color>
+    <color name="dialog_badge_stroke">#25456A</color>
 </resources>

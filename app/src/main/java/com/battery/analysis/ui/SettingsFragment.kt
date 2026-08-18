@@ -64,7 +64,44 @@ class SettingsFragment : Fragment() {
         setupThemeSettings()
         setupRefreshSettings()
         setupShizukuSettings()
+        setupHelpSection()
         setupAboutSection()
+    }
+
+    /**
+     * 初始化帮助与说明板块，包含电池健康度计算原理与评级标准弹窗展示。
+     */
+    private fun setupHelpSection() {
+        binding.layoutHealthCalcInfo.setOnClickListener {
+            showHealthCalculationGuideDialog()
+        }
+    }
+
+    /**
+     * 弹出高颜值现代化电池健康度计算方式与数据源原理解析对话框。
+     */
+    private fun showHealthCalculationGuideDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_health_calculation_guide, null)
+        val btnClose = dialogView.findViewById<View>(R.id.btn_dialog_guide_close)
+
+        val dialog = AlertDialog.Builder(requireContext())
+            .setView(dialogView)
+            .create()
+
+        btnClose.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        dialog.show()
+
+        dialog.window?.let { window ->
+            window.setBackgroundDrawableResource(android.R.color.transparent)
+            val width = (resources.displayMetrics.widthPixels * 0.92).toInt()
+//            val height = (resources.displayMetrics.heightPixels * 0.92).toInt()
+//            window.setLayout(width, height)
+            window.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            window.setGravity(android.view.Gravity.CENTER)
+        }
     }
 
     /**

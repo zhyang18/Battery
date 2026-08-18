@@ -68,6 +68,11 @@ class BugreportTabFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        // 初始自动从历史快照中加载最新一条错误报告数据
+        context?.let { ctx ->
+            viewModel.loadLatestBugreportFromHistory(ctx)
+        }
+
         // 导入错误报告 / 取消解析按钮点击事件
         binding.btnImportBugreport.setOnClickListener {
             if (viewModel.isParsingBugreport.value) {
@@ -82,7 +87,7 @@ class BugreportTabFragment : Fragment() {
         binding.rawToggleHeader.setOnClickListener {
             isRawLogExpanded = !isRawLogExpanded
             binding.rawContentContainer.visibility = if (isRawLogExpanded) View.VISIBLE else View.GONE
-            binding.tvToggleIcon.text = if (isRawLogExpanded) "▾" else "▸"
+            binding.ivToggleIcon.animate().rotation(if (isRawLogExpanded) 0f else -90f).setDuration(200).start()
         }
 
         // 监听 ViewModel 中的状态与数据流

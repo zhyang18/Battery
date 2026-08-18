@@ -12,6 +12,8 @@ local.properties
 scratch.kt
 Shizuku.java
 app/build/
+app/release/
+*.apk
 *.jks
 *.keystore
 release.keystore

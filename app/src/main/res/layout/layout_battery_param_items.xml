@@ -336,6 +336,36 @@
                 tools:text="Li-ion" />
         </LinearLayout>
 
+        <!-- 15. 抓取/报告日期时间 (有值时动态显示) -->
+        <View
+            android:id="@+id/divider_capture_time"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#14888888"
+            android:visibility="gone" />
+        <LinearLayout
+            android:id="@+id/layout_row_capture_time"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingVertical="7dp"
+            android:visibility="gone">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="📅 检测时间"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="13sp" />
+            <TextView
+                android:id="@+id/tv_val_capture_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                tools:text="2024-05-18 15:30:22" />
+        </LinearLayout>
+
     </LinearLayout>
 
 </LinearLayout>

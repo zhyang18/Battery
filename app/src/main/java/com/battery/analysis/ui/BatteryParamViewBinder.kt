@@ -31,6 +31,8 @@ object BatteryParamViewBinder {
             binding.tvValCurrentCapacity.text = "—"
             binding.tvValDualCell.text = "—"
             binding.tvValTechnology.text = "—"
+            binding.dividerCaptureTime.visibility = android.view.View.GONE
+            binding.layoutRowCaptureTime.visibility = android.view.View.GONE
             return
         }
 
@@ -49,5 +51,15 @@ object BatteryParamViewBinder {
         binding.tvValCurrentCapacity.text = info.currentCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"
         binding.tvValDualCell.text = info.isDualCell?.let { if (it) "是" else "否" } ?: "未知"
         binding.tvValTechnology.text = info.technology ?: "未知"
+
+        // 抓取/报告时间展示 (仅在错误报告或有采集时间时展示)
+        if (!info.captureTime.isNullOrBlank()) {
+            binding.dividerCaptureTime.visibility = android.view.View.VISIBLE
+            binding.layoutRowCaptureTime.visibility = android.view.View.VISIBLE
+            binding.tvValCaptureTime.text = info.captureTime
+        } else {
+            binding.dividerCaptureTime.visibility = android.view.View.GONE
+            binding.layoutRowCaptureTime.visibility = android.view.View.GONE
+        }
     }
 }

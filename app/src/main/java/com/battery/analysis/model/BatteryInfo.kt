@@ -78,7 +78,12 @@ data class BatteryInfo(
     /**
      * 获取数据的方法/来源（例如 "BatteryManager", "sysfs", "dumpsys", "Fusion"）。
      */
-    val source: String = ""
+    val source: String = "",
+
+    /**
+     * 抓取/采集报告的日期时间（如 "2024-05-18 15:30:22"）。
+     */
+    val captureTime: String? = null
 ) {
     /**
      * 将电池信息格式化为包含键名与键值的多行字符串。
@@ -87,6 +92,7 @@ data class BatteryInfo(
      */
     fun formatToString(): String {
         return """
+            报告时间: ${captureTime ?: "实时"}
             电量: ${level?.let { "$it%" } ?: "未知"}
             电池状态: ${status ?: "未知"}
             电池健康: ${healthStatus ?: "未知"}
@@ -111,6 +117,7 @@ data class BatteryInfo(
      */
     fun formatValuesOnly(): String {
         return """
+            ${captureTime ?: "实时"}
             ${level?.let { "$it%" } ?: "未知"}
             ${status ?: "未知"}
             ${healthStatus ?: "未知"}

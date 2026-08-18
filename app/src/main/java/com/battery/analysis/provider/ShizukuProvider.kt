@@ -94,6 +94,8 @@ class ShizukuProvider : BatteryDataProvider {
             health = (fullCap / designCap) * 100f
         }
 
+        val currentTimeStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+
         return BatteryInfo(
             batteryHealth = health,
             healthStatus = healthStatus,
@@ -109,7 +111,8 @@ class ShizukuProvider : BatteryDataProvider {
             powerWatts = powerWatts,
             isDualCell = isDualCell,
             technology = technology,
-            source = "Shizuku (sysfs + dumpsys + 厂商)"
+            source = "Shizuku (sysfs + dumpsys + 厂商)",
+            captureTime = currentTimeStr
         )
     }
 

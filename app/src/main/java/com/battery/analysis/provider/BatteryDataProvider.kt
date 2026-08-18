@@ -122,6 +122,8 @@ class NormalApiProvider : BatteryDataProvider {
             healthPercent = (fullChargeCapacityMah / designCapacityMah) * 100f
         }
 
+        val currentTimeStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+
         return BatteryInfo(
             batteryHealth = healthPercent,
             healthStatus = healthStatusStr,
@@ -137,7 +139,8 @@ class NormalApiProvider : BatteryDataProvider {
             powerWatts = powerWatts,
             isDualCell = false,
             technology = technology,
-            source = "普通 API (BatteryManager)"
+            source = "普通 API (BatteryManager)",
+            captureTime = currentTimeStr
         )
     }
 

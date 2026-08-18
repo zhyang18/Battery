@@ -44,13 +44,14 @@ class BugreportParser {
         val startTime = System.currentTimeMillis()
         try {
             val fileName = getFileName(context, uri).lowercase()
-            Log.d(TAG, "===> 开始极速字节扫描: URI = $uri, 文件名 = $fileName")
+            val initialCaptureTime = extractCaptureTime(fileName)
+            Log.d(TAG, "===> 开始极速字节扫描: URI = $uri, 文件名 = $fileName, 初始抓取时间 = $initialCaptureTime")
 
             val result = if (fileName.endsWith(".zip")) {
-                parseZipViaZipFile(context, uri, onProgress)
+                parseZipViaZipFile(context, uri, initialCaptureTime, onProgress)
             } else {
                 val rawStream = context.contentResolver.openInputStream(uri) ?: return@withContext null
-                val res = scanStreamForHealthInfo(rawStream)
+                val res = scanStreamForHealthInfo(rawStream, initialCaptureTime)
                 rawStream.close()
                 res
             }
@@ -75,6 +76,7 @@ class BugreportParser {
     private suspend fun parseZipViaZipFile(
         context: Context,
         uri: Uri,
+        initialCaptureTime: String,
         onProgress: (Int) -> Unit
     ): BugreportResult? {
         val tempZip = File(context.cacheDir, "temp_bugreport_${System.currentTimeMillis()}.zip")
@@ -129,11 +131,18 @@ class BugreportParser {
                 return null
             }
 
-            Log.d(TAG, "命中主日志条目: ${targetEntry.name}, 启动字节级扫描...")
+            // 从内部主日志条目名称尝试提取更精准的抓取时间
+            val preciseTime = if (targetEntry.name.contains("202") || targetEntry.name.contains("203")) {
+                extractCaptureTime(targetEntry.name, targetEntry.time.takeIf { it > 0 } ?: System.currentTimeMillis())
+            } else {
+                initialCaptureTime
+            }
+
+            Log.d(TAG, "命中主日志条目: ${targetEntry.name}, 抓取时间 = $preciseTime, 启动字节级扫描...")
             onProgress(75)
 
             val entryStream = zipFile.getInputStream(targetEntry)
-            val result = scanStreamForHealthInfo(entryStream)
+            val result = scanStreamForHealthInfo(entryStream, preciseTime)
 
             entryStream.close()
             zipFile.close()
@@ -151,9 +160,10 @@ class BugreportParser {
      * 采用原生字节数组快扫输入流，定位 getHealthInfo 数据。
      *
      * @param stream 输入流
+     * @param captureTime 报告抓取日期时间
      * @return 解析结果
      */
-    private suspend fun scanStreamForHealthInfo(stream: InputStream): BugreportResult {
+    private suspend fun scanStreamForHealthInfo(stream: InputStream, captureTime: String): BugreportResult {
         val buffer = ByteArray(BUFFER_SIZE)
         val patternGetHealthInfo = "getHealthInfo".toByteArray(StandardCharsets.US_ASCII)
         val patternIHealth = "android.hardware.health.IHealth".toByteArray(StandardCharsets.US_ASCII)
@@ -174,7 +184,7 @@ class BugreportParser {
             if (idxHealth != -1) {
                 Log.d(TAG, "在字节偏移 $totalBytesRead 处命中 getHealthInfo 模式！")
                 val textSlice = String(buffer, idxHealth, minOf(8192, totalInChunk - idxHealth), StandardCharsets.UTF_8)
-                return parseHealthInfoText(textSlice)
+                return parseHealthInfoText(textSlice, captureTime)
             }
 
             // 2. 次级搜索 IHealth 服务
@@ -182,7 +192,7 @@ class BugreportParser {
             if (idxIHealth != -1) {
                 Log.d(TAG, "在字节偏移 $totalBytesRead 处命中 IHealth 服务！")
                 val textSlice = String(buffer, idxIHealth, minOf(8192, totalInChunk - idxIHealth), StandardCharsets.UTF_8)
-                return parseHealthInfoText(textSlice)
+                return parseHealthInfoText(textSlice, captureTime)
             }
 
             // 3. 兜底搜索 battery 服务
@@ -190,7 +200,7 @@ class BugreportParser {
             if (idxBattery != -1) {
                 Log.d(TAG, "在字节偏移 $totalBytesRead 处命中 DUMP OF SERVICE battery！")
                 val textSlice = String(buffer, idxBattery, minOf(8192, totalInChunk - idxBattery), StandardCharsets.UTF_8)
-                return parseHealthInfoText(textSlice)
+                return parseHealthInfoText(textSlice, captureTime)
             }
 
             // 防跨块复制
@@ -231,9 +241,10 @@ class BugreportParser {
      * 精准解析提取出的纯文本切片。
      *
      * @param text 包含 HealthInfo 的切片文本
+     * @param captureTime 报告抓取日期时间
      * @return 结构化结果
      */
-    private fun parseHealthInfoText(text: String): BugreportResult {
+    private fun parseHealthInfoText(text: String, captureTime: String): BugreportResult {
         var chargerAcOnline: Boolean? = null
         var chargerUsbOnline: Boolean? = null
         var chargerWirelessOnline: Boolean? = null
@@ -484,6 +495,9 @@ class BugreportParser {
         }
         tableItems.add(HealthInfoItem("🩺 电池健康", healthStatusVal, "Android 判断正常"))
 
+        // 增加抓取/报告日期时间
+        tableItems.add(HealthInfoItem("📅 报告时间", captureTime, "错误报告生成/抓取时间"))
+
         val hasRealData = (batteryLevel != null || batteryVoltage != null || batteryFullCharge != null || batteryCycleCount != null || batteryTemperature != null)
         val rawText = healthInfoRawLines.joinToString("\n").trim()
 
@@ -525,10 +539,38 @@ class BugreportParser {
             } else null,
             isDualCell = null,
             technology = techDisplay,
-            source = "getHealthInfo"
+            source = "getHealthInfo",
+            captureTime = captureTime
         )
 
         return BugreportResult(tableItems, rawText, hasRealData, parsedBatteryInfo)
+    }
+
+    /**
+     * 从文件名或条目名称解析抓取时间，若未能提取到则使用已知时间戳或当前系统时间。
+     *
+     * @param fileName 文件名或条目名称
+     * @param fallbackTime 当前系统时间戳或已知修改时间
+     * @return 格式化后的日期时间字符串（如 "2024-05-18 15:30:22"）
+     */
+    private fun extractCaptureTime(fileName: String, fallbackTime: Long = System.currentTimeMillis()): String {
+        // 匹配 YYYY-MM-DD-HH-MM-SS 或 YYYY-MM-DD_HH-MM-SS 或 YYYYMMDD-HHMMSS
+        val regexFullDash = Regex("(\\d{4})[-_](\\d{2})[-_](\\d{2})[-_](\\d{2})[-_](\\d{2})[-_](\\d{2})")
+        val matchDash = regexFullDash.find(fileName)
+        if (matchDash != null) {
+            val (y, m, d, hh, mm, ss) = matchDash.destructured
+            return "$y-$m-$d $hh:$mm:$ss"
+        }
+
+        // 匹配 YYYY-MM-DD HH:MM:SS
+        val regexStandard = Regex("(\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2})")
+        val matchStd = regexStandard.find(fileName)
+        if (matchStd != null) {
+            return matchStd.value
+        }
+
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+        return sdf.format(java.util.Date(fallbackTime))
     }
 
     private fun rawLinesListShouldStop(line: String, count: Int): Boolean {

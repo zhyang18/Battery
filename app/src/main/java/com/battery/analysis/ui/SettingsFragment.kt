@@ -155,6 +155,9 @@ class SettingsFragment : Fragment() {
             listPopupWindow.horizontalOffset = 0
             listPopupWindow.verticalOffset = (4 * density).toInt()
 
+            // 设置从右上角展开的弹出动画
+            listPopupWindow.animationStyle = R.style.Animation_PopupTopRight
+
             val adapter = android.widget.ArrayAdapter(
                 requireContext(),
                 R.layout.item_dropdown_interval,

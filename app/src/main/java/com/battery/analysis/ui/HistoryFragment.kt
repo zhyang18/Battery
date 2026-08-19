@@ -269,6 +269,11 @@ class HistoryFragment : Fragment() {
                 }
             }
         }
+
+        // 5. 解决 AppBarLayout 与 SwipeRefreshLayout 嵌套滑动冲突引起的向下滑动高频闪烁
+        binding.appBarLayoutHistory.addOnOffsetChangedListener { _, verticalOffset ->
+            binding.swipeRefreshHistory.isEnabled = (verticalOffset == 0)
+        }
     }
 
     /**

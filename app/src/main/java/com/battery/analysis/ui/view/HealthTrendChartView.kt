@@ -104,6 +104,11 @@ class HealthTrendChartView @JvmOverloads constructor(
         color = Color.parseColor("#D1D5DB")
     }
 
+    // 复用 Path 对象降低滑动过程中的 GC 开销
+    private val linePath = Path()
+    private val fillPath = Path()
+    private val gridPath = Path()
+
     // 交互状态
     private var selectedIndex: Int = -1
     private var isTouching: Boolean = false
@@ -210,11 +215,10 @@ class HealthTrendChartView @JvmOverloads constructor(
             val value = minY + (maxY - minY) * ratio
 
             // 绘制横向网格虚线
-            val path = Path().apply {
-                moveTo(left, y)
-                lineTo(left + chartWidth, y)
-            }
-            canvas.drawPath(path, gridPaint)
+            gridPath.reset()
+            gridPath.moveTo(left, y)
+            gridPath.lineTo(left + chartWidth, y)
+            canvas.drawPath(gridPath, gridPaint)
 
             // 绘制左侧刻度文字
             val label = "${value.toInt()}%"
@@ -283,8 +287,8 @@ class HealthTrendChartView @JvmOverloads constructor(
             return
         }
 
-        val linePath = Path()
-        val fillPath = Path()
+        linePath.reset()
+        fillPath.reset()
 
         linePath.moveTo(coords[0].x, coords[0].y)
         fillPath.moveTo(coords[0].x, bottomY)
@@ -415,11 +419,16 @@ class HealthTrendChartView @JvmOverloads constructor(
         }
     }
 
+    private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+    private var initialTouchX = 0f
+    private var initialTouchY = 0f
+    private var isDraggingHorizontally = false
+
     /**
-     * 处理手势触控事件，支持手指滑动探查每个快照点的详细健康度参数。
+     * 处理手势触控事件，仅在用户明确横向滑动探查图表时拦截消费，垂直滑动完全放行给父容器以确保列表滚动丝滑不冲突。
      *
      * @param event 触摸事件
-     * @return 始终返回 true 消费手势
+     * @return 若消费横向手势返回 true，否则返回 false 放行给列表滚动
      */
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -430,41 +439,64 @@ class HealthTrendChartView @JvmOverloads constructor(
         val chartWidth = width - paddingLeft - paddingRight
 
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-                isTouching = true
-                parent?.requestDisallowInterceptTouchEvent(true)
-
-                val touchX = event.x
-                val coords = calculateCoordinates(paddingLeft, dpToPx(20f), chartWidth, height - dpToPx(48f))
-
-                // 寻找 X 轴距离最近的数据点
-                var closestIndex = 0
-                var minDistance = Float.MAX_VALUE
-                for (i in coords.indices) {
-                    val dist = abs(coords[i].x - touchX)
-                    if (dist < minDistance) {
-                        minDistance = dist
-                        closestIndex = i
-                    }
-                }
-
-                if (selectedIndex != closestIndex) {
-                    selectedIndex = closestIndex
-                    invalidate()
-                }
+            MotionEvent.ACTION_DOWN -> {
+                initialTouchX = event.x
+                initialTouchY = event.y
+                isDraggingHorizontally = false
                 return true
             }
 
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                isTouching = false
-                parent?.requestDisallowInterceptTouchEvent(false)
-                postDelayed({
-                    if (!isTouching) {
-                        selectedIndex = -1
+            MotionEvent.ACTION_MOVE -> {
+                val dx = abs(event.x - initialTouchX)
+                val dy = abs(event.y - initialTouchY)
+
+                if (!isDraggingHorizontally) {
+                    if (dx > touchSlop && dx > dy * 1.2f) {
+                        isDraggingHorizontally = true
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                    } else if (dy > touchSlop && dy > dx) {
+                        parent?.requestDisallowInterceptTouchEvent(false)
+                        return false
+                    }
+                }
+
+                if (isDraggingHorizontally) {
+                    isTouching = true
+                    val touchX = event.x
+                    val coords = calculateCoordinates(paddingLeft, dpToPx(20f), chartWidth, height - dpToPx(48f))
+
+                    var closestIndex = 0
+                    var minDistance = Float.MAX_VALUE
+                    for (i in coords.indices) {
+                        val dist = abs(coords[i].x - touchX)
+                        if (dist < minDistance) {
+                            minDistance = dist
+                            closestIndex = i
+                        }
+                    }
+
+                    if (selectedIndex != closestIndex) {
+                        selectedIndex = closestIndex
                         invalidate()
                     }
-                }, 1500)
-                return true
+                    return true
+                }
+            }
+
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (isDraggingHorizontally) {
+                    isDraggingHorizontally = false
+                    isTouching = false
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    postDelayed({
+                        if (!isTouching) {
+                            selectedIndex = -1
+                            invalidate()
+                        }
+                    }, 1500)
+                    return true
+                }
+                parent?.requestDisallowInterceptTouchEvent(false)
             }
         }
         return super.onTouchEvent(event)

@@ -163,10 +163,10 @@
             android:id="@+id/app_bar_layout_history"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@android:color/transparent"
+            android:background="?android:attr/colorBackground"
             app:elevation="0dp">
 
-            <!-- 电池健康度衰减趋势折线图卡片（原生 AppBarLayout 滑动折叠：上滑收起隐藏，下滑展开显示） -->
+            <!-- 电池健康度衰减趋势折线图卡片（原生 AppBarLayout 滑动折叠：仅当列表滑到第一项时向下滑才展开） -->
             <LinearLayout
                 android:id="@+id/layout_trend_chart_card"
                 android:layout_width="match_parent"
@@ -174,11 +174,10 @@
                 android:layout_marginHorizontal="16dp"
                 android:layout_marginTop="8dp"
                 android:layout_marginBottom="8dp"
-                android:background="@drawable/bg_setting_card_item"
-                android:clipToOutline="true"
+                android:background="@drawable/bg_chart_card"
                 android:orientation="vertical"
                 android:padding="12dp"
-                app:layout_scrollFlags="scroll|enterAlways">
+                app:layout_scrollFlags="scroll">
 
                 <!-- 图表卡片顶部栏 -->
                 <LinearLayout

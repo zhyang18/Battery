@@ -274,6 +274,20 @@ class HistoryFragment : Fragment() {
         binding.appBarLayoutHistory.addOnOffsetChangedListener { _, verticalOffset ->
             binding.swipeRefreshHistory.isEnabled = (verticalOffset == 0)
         }
+
+        // 6. 衰减速率统计卡片及明细按钮点击事件：弹出完整周期明细与算法说明弹窗
+        binding.btnViewDecayDetail.setOnClickListener {
+            showDecayStatisticsDialog(viewModel.decayStatistics.value, "DAY")
+        }
+        binding.cardDailyDecay.setOnClickListener {
+            showDecayStatisticsDialog(viewModel.decayStatistics.value, "DAY")
+        }
+        binding.cardMonthlyDecay.setOnClickListener {
+            showDecayStatisticsDialog(viewModel.decayStatistics.value, "MONTH")
+        }
+        binding.cardYearlyDecay.setOnClickListener {
+            showDecayStatisticsDialog(viewModel.decayStatistics.value, "YEAR")
+        }
     }
 
     /**
@@ -357,6 +371,237 @@ class HistoryFragment : Fragment() {
                     }
                 }
             }
+        }
+
+        // 5. 观察电池健康度衰减统计数据流，更新每日、每月、每年衰减小卡片
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.decayStatistics.collect { stats ->
+                    updateDecayStatCards(stats)
+                }
+            }
+        }
+    }
+
+    /**
+     * 更新趋势图下方的每日、每月、每年衰减速率卡片展示内容及文字色彩。
+     *
+     * @param stats 当前计算得出的衰减统计结果对象
+     */
+    private fun updateDecayStatCards(stats: com.battery.analysis.model.DecayStatistics) {
+        if (stats.hasSufficientData) {
+            // 每日平均
+            stats.dailyDecayRate?.let { rate ->
+                binding.tvStatDailyDecay.text = formatDecayValue(rate, 3)
+                binding.tvStatDailyDecay.setTextColor(getDecayTextColor(rate))
+            } ?: run {
+                binding.tvStatDailyDecay.text = "--"
+                binding.tvStatDailyDecay.setTextColor(Color.parseColor("#9CA3AF"))
+            }
+
+            // 每月平均
+            stats.monthlyDecayRate?.let { rate ->
+                binding.tvStatMonthlyDecay.text = formatDecayValue(rate, 2)
+                binding.tvStatMonthlyDecay.setTextColor(getDecayTextColor(rate))
+            } ?: run {
+                binding.tvStatMonthlyDecay.text = "--"
+                binding.tvStatMonthlyDecay.setTextColor(Color.parseColor("#9CA3AF"))
+            }
+
+            // 每年预估
+            stats.yearlyDecayRate?.let { rate ->
+                binding.tvStatYearlyDecay.text = formatDecayValue(rate, 2)
+                binding.tvStatYearlyDecay.setTextColor(getDecayTextColor(rate))
+            } ?: run {
+                binding.tvStatYearlyDecay.text = "--"
+                binding.tvStatYearlyDecay.setTextColor(Color.parseColor("#9CA3AF"))
+            }
+        } else {
+            binding.tvStatDailyDecay.text = "--"
+            binding.tvStatDailyDecay.setTextColor(Color.parseColor("#9CA3AF"))
+            binding.tvStatMonthlyDecay.text = "--"
+            binding.tvStatMonthlyDecay.setTextColor(Color.parseColor("#9CA3AF"))
+            binding.tvStatYearlyDecay.text = "--"
+            binding.tvStatYearlyDecay.setTextColor(Color.parseColor("#9CA3AF"))
+        }
+    }
+
+    /**
+     * 格式化衰减数值带符号（衰减显示为负号，增益显示为正号）。
+     *
+     * @param rate 衰减速率数值（正数代表健康度下降损耗）
+     * @param decimals 小数点保留位数
+     * @return 格式化后的带符号文本（如 "-0.02%"、"+0.01%" 或 "0.00%"）
+     */
+    private fun formatDecayValue(rate: Float, decimals: Int): String {
+        return if (rate > 0.0001f) {
+            String.format(java.util.Locale.getDefault(), "-%.${decimals}f%%", rate)
+        } else if (rate < -0.0001f) {
+            String.format(java.util.Locale.getDefault(), "+%.${decimals}f%%", -rate)
+        } else {
+            String.format(java.util.Locale.getDefault(), "%.${decimals}f%%", 0f)
+        }
+    }
+
+    /**
+     * 根据衰减速率的正负返回对应的高亮警示或平稳色彩。
+     *
+     * @param rate 衰减速率数值
+     * @return 颜色整数值 [Int]
+     */
+    private fun getDecayTextColor(rate: Float): Int {
+        return when {
+            rate > 0.0001f -> Color.parseColor("#EF4444") // 下降衰减标红
+            rate < -0.0001f -> Color.parseColor("#10B981") // 上升波动标绿
+            else -> Color.parseColor("#10B981") // 持平标绿
+        }
+    }
+
+    /**
+     * 弹出电池健康度衰减全量统计与按日/月/年周期明细对话框。
+     *
+     * @param stats 电池衰减统计数据对象
+     * @param initialTab 初始选中的周期分类 Tab（"DAY"、"MONTH" 或 "YEAR"）
+     */
+    private fun showDecayStatisticsDialog(
+        stats: com.battery.analysis.model.DecayStatistics,
+        initialTab: String = "DAY"
+    ) {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_decay_statistics, null)
+
+        val tvDailyVal = dialogView.findViewById<TextView>(R.id.tv_modal_daily_val)
+        val tvMonthlyVal = dialogView.findViewById<TextView>(R.id.tv_modal_monthly_val)
+        val tvYearlyVal = dialogView.findViewById<TextView>(R.id.tv_modal_yearly_val)
+        val tvStatDetails = dialogView.findViewById<TextView>(R.id.tv_modal_stat_details)
+
+        val btnTabDay = dialogView.findViewById<TextView>(R.id.btn_tab_day)
+        val btnTabMonth = dialogView.findViewById<TextView>(R.id.btn_tab_month)
+        val btnTabYear = dialogView.findViewById<TextView>(R.id.btn_tab_year)
+        val container = dialogView.findViewById<ViewGroup>(R.id.layout_periodic_items_container)
+        val tvEmptyHint = dialogView.findViewById<TextView>(R.id.tv_periodic_empty_hint)
+        val btnClose = dialogView.findViewById<TextView>(R.id.btn_dialog_decay_close)
+
+        // 1. 填充概览卡片数值
+        if (stats.hasSufficientData) {
+            stats.dailyDecayRate?.let {
+                tvDailyVal.text = formatDecayValue(it, 3)
+                tvDailyVal.setTextColor(getDecayTextColor(it))
+            }
+            stats.monthlyDecayRate?.let {
+                tvMonthlyVal.text = formatDecayValue(it, 2)
+                tvMonthlyVal.setTextColor(getDecayTextColor(it))
+            }
+            stats.yearlyDecayRate?.let {
+                tvYearlyVal.text = formatDecayValue(it, 2)
+                tvYearlyVal.setTextColor(getDecayTextColor(it))
+            }
+
+            val spanText = String.format(java.util.Locale.getDefault(), "%.1f", stats.spanDays)
+            val decayText = if (stats.totalDecay > 0.001f) {
+                String.format(java.util.Locale.getDefault(), "衰减 %.2f%%", stats.totalDecay)
+            } else if (stats.totalDecay < -0.001f) {
+                String.format(java.util.Locale.getDefault(), "上升 %.2f%%", -stats.totalDecay)
+            } else {
+                "持平 (0.00%)"
+            }
+            val startShort = if ((stats.firstTime?.length ?: 0) >= 10) stats.firstTime!!.substring(0, 10) else (stats.firstTime ?: "")
+            val lastShort = if ((stats.lastTime?.length ?: 0) >= 10) stats.lastTime!!.substring(0, 10) else (stats.lastTime ?: "")
+            tvStatDetails.text = "• 有效采样快照: ${stats.totalPoints} 次\n• 时间跨度: $spanText 天 ($startShort ~ $lastShort)\n• 累计健康度变化: $decayText"
+        } else {
+            tvDailyVal.text = "--"
+            tvDailyVal.setTextColor(Color.parseColor("#9CA3AF"))
+            tvMonthlyVal.text = "--"
+            tvMonthlyVal.setTextColor(Color.parseColor("#9CA3AF"))
+            tvYearlyVal.text = "--"
+            tvYearlyVal.setTextColor(Color.parseColor("#9CA3AF"))
+            tvStatDetails.text = "• 有效采样快照: ${stats.totalPoints} 次\n• 提示: 需至少保存 2 次以上不同时间的健康度快照方可测算日/月/年衰减速率。"
+        }
+
+        // 2. 动态渲染周期明细方法
+        fun renderPeriodicItems(items: List<com.battery.analysis.model.PeriodicDecayItem>) {
+            container.removeAllViews()
+            if (items.isEmpty()) {
+                tvEmptyHint.visibility = View.VISIBLE
+            } else {
+                tvEmptyHint.visibility = View.GONE
+                items.forEachIndexed { index, item ->
+                    val rowView = layoutInflater.inflate(R.layout.item_dialog_periodic_decay_row, container, false)
+                    val tvTitle = rowView.findViewById<TextView>(R.id.tv_periodic_title)
+                    val tvSubInfo = rowView.findViewById<TextView>(R.id.tv_periodic_sub_info)
+                    val tvDecayBadge = rowView.findViewById<TextView>(R.id.tv_periodic_decay_badge)
+                    val tvRangeText = rowView.findViewById<TextView>(R.id.tv_periodic_range_text)
+                    val divider = rowView.findViewById<View>(R.id.divider_periodic_row)
+
+                    tvTitle.text = item.periodLabel
+                    val cycleText = item.cycleChange?.let { if (it >= 0) " • 循环 +$it 次" else " • 循环 $it 次" } ?: ""
+                    tvSubInfo.text = "共 ${item.sampleCount} 次检测$cycleText"
+
+                    tvDecayBadge.text = item.formatDecay()
+                    tvDecayBadge.setTextColor(getDecayTextColor(item.decay))
+
+                    tvRangeText.text = String.format(java.util.Locale.getDefault(), "%.2f%% → %.2f%%", item.startHealth, item.endHealth)
+
+                    if (index == items.size - 1) {
+                        divider.visibility = View.GONE
+                    }
+
+                    container.addView(rowView)
+                }
+            }
+        }
+
+        // 3. Tab 切换状态处理（按日、按月、按年顺序排列）
+        fun updateTabUI(tab: String) {
+            val tabs = listOf(
+                Triple(btnTabDay, "DAY", stats.dailyItems),
+                Triple(btnTabMonth, "MONTH", stats.monthlyItems),
+                Triple(btnTabYear, "YEAR", stats.yearlyItems)
+            )
+
+            for ((button, t, items) in tabs) {
+                if (t == tab) {
+                    button.setBackgroundResource(R.drawable.bg_filter_chip_selected)
+                    button.setTextColor(Color.WHITE)
+                    button.setTypeface(null, android.graphics.Typeface.BOLD)
+                    renderPeriodicItems(items)
+                } else {
+                    button.setBackgroundResource(R.drawable.bg_filter_chip_normal)
+                    button.setTextColor(Color.parseColor("#9CA3AF"))
+                    button.setTypeface(null, android.graphics.Typeface.NORMAL)
+                }
+            }
+        }
+
+        btnTabDay.setOnClickListener { updateTabUI("DAY") }
+        btnTabMonth.setOnClickListener { updateTabUI("MONTH") }
+        btnTabYear.setOnClickListener { updateTabUI("YEAR") }
+
+        updateTabUI(initialTab)
+
+        val dialog = AlertDialog.Builder(requireContext())
+            .setView(dialogView)
+            .create()
+
+        btnClose.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        dialog.show()
+
+        dialog.window?.let { window ->
+            window.setBackgroundDrawableResource(android.R.color.transparent)
+            val displayMetrics = resources.displayMetrics
+            val width = (displayMetrics.widthPixels * 0.92).toInt()
+            val height = (displayMetrics.heightPixels * 0.95).toInt()
+            window.setLayout(width, height)
+            window.setGravity(android.view.Gravity.CENTER)
+
+            // 使用符合 FrameLayout 父容器要求的 FrameLayout.LayoutParams (支持 MarginLayoutParams)，彻底杜绝 ClassCastException 并锁定高度
+            dialogView.layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            dialogView.minimumHeight = height
         }
     }
 

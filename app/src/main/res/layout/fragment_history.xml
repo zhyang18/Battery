@@ -209,14 +209,162 @@
                 <com.battery.analysis.ui.view.HealthTrendChartView
                     android:id="@+id/chart_health_trend"
                     android:layout_width="match_parent"
-                    android:layout_height="170dp"
+                    android:layout_height="160dp"
                     android:layout_marginTop="4dp" />
+
+                <!-- 衰减速率统计区域（每日、每月、每年衰减值） -->
+                <LinearLayout
+                    android:id="@+id/layout_decay_stats_section"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="📉 衰减速率统计"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/btn_view_decay_detail"
+                            android:layout_width="wrap_content"
+                            android:layout_height="24dp"
+                            android:background="@drawable/bg_stat_chip_detail_btn"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:gravity="center"
+                            android:paddingHorizontal="8dp"
+                            android:text="明细 ❯"
+                            android:textColor="#2196F3"
+                            android:textSize="11sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <!-- 三个等宽并列的日/月/年衰减小卡片 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:orientation="horizontal">
+
+                        <!-- 每日衰减 -->
+                        <LinearLayout
+                            android:id="@+id/card_daily_decay"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="4dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_stat_chip"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:paddingVertical="7dp"
+                            android:paddingHorizontal="2dp">
+
+                            <TextView
+                                android:id="@+id/tv_stat_daily_decay"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:textColor="#EF4444"
+                                android:textSize="12.5sp"
+                                android:textStyle="bold"
+                                tools:text="-0.02%" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="1dp"
+                                android:text="📅 每日平均"
+                                android:textColor="?android:attr/textColorSecondary"
+                                android:textSize="10.5sp" />
+                        </LinearLayout>
+
+                        <!-- 每月衰减 -->
+                        <LinearLayout
+                            android:id="@+id/card_monthly_decay"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginHorizontal="2dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_stat_chip"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:paddingVertical="7dp"
+                            android:paddingHorizontal="2dp">
+
+                            <TextView
+                                android:id="@+id/tv_stat_monthly_decay"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:textColor="#EF4444"
+                                android:textSize="12.5sp"
+                                android:textStyle="bold"
+                                tools:text="-0.61%" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="1dp"
+                                android:text="📆 每月平均"
+                                android:textColor="?android:attr/textColorSecondary"
+                                android:textSize="10.5sp" />
+                        </LinearLayout>
+
+                        <!-- 每年衰减 -->
+                        <LinearLayout
+                            android:id="@+id/card_yearly_decay"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_stat_chip"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:paddingVertical="7dp"
+                            android:paddingHorizontal="2dp">
+
+                            <TextView
+                                android:id="@+id/tv_stat_yearly_decay"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:textColor="#EF4444"
+                                android:textSize="12.5sp"
+                                android:textStyle="bold"
+                                tools:text="-7.30%" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="1dp"
+                                android:text="🗓️ 每年预估"
+                                android:textColor="?android:attr/textColorSecondary"
+                                android:textSize="10.5sp" />
+                        </LinearLayout>
+
+                    </LinearLayout>
+
+                </LinearLayout>
 
                 <!-- 底部交互提示文案 -->
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
+                    android:layout_marginTop="6dp"
                     android:gravity="center"
                     android:text="💡 按住图表可左右滑动探查每个快照详情"
                     android:textColor="?android:attr/textColorSecondary"

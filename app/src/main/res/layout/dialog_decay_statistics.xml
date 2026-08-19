@@ -1,0 +1,321 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_dialog_surface"
+    android:clipToOutline="true"
+    android:gravity="center_horizontal"
+    android:orientation="vertical"
+    android:paddingHorizontal="10dp"
+    android:paddingVertical="10dp">
+
+    <!-- 弹窗标题与副标题 -->
+    <TextView
+        android:id="@+id/tv_dialog_decay_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="🔋 电池健康度衰减统计"
+        android:textColor="?android:attr/textColorPrimary"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tv_dialog_decay_subtitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="根据历史趋势数据分析每日、每月、每年衰减速率"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="12.5sp" />
+
+    <!-- 滚动内容区 -->
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="14dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:overScrollMode="never">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- 卡片 1: 衰减速率统计概览 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="10dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="📊 衰减速率统计（均值/预估）"
+                    android:textColor="#2196F3"
+                    android:textSize="13.5sp"
+                    android:textStyle="bold" />
+
+                <!-- 日、月、年三个等宽并列卡片 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal">
+
+                    <!-- 每日衰减 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="4dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_stat_chip"
+                        android:gravity="center"
+                        android:orientation="vertical"
+                        android:paddingVertical="10dp"
+                        android:paddingHorizontal="4dp">
+
+                        <TextView
+                            android:id="@+id/tv_modal_daily_val"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="#EF4444"
+                            android:textSize="13.5sp"
+                            android:textStyle="bold"
+                            tools:text="-0.02%" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="📅 每日平均"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+
+                    <!-- 每月衰减 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginHorizontal="2dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_stat_chip"
+                        android:gravity="center"
+                        android:orientation="vertical"
+                        android:paddingVertical="10dp"
+                        android:paddingHorizontal="4dp">
+
+                        <TextView
+                            android:id="@+id/tv_modal_monthly_val"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="#EF4444"
+                            android:textSize="13.5sp"
+                            android:textStyle="bold"
+                            tools:text="-0.61%" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="📆 每月平均"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+
+                    <!-- 每年衰减 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="4dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_stat_chip"
+                        android:gravity="center"
+                        android:orientation="vertical"
+                        android:paddingVertical="10dp"
+                        android:paddingHorizontal="4dp">
+
+                        <TextView
+                            android:id="@+id/tv_modal_yearly_val"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="#EF4444"
+                            android:textSize="13.5sp"
+                            android:textStyle="bold"
+                            tools:text="-7.30%" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="🗓️ 每年预估"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 采样与汇总辅助信息 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/bg_dialog_formula_badge"
+                    android:orientation="vertical"
+                    android:paddingHorizontal="10dp"
+                    android:paddingVertical="8dp">
+
+                    <TextView
+                        android:id="@+id/tv_modal_stat_details"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:lineSpacingExtra="3dp"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="11.5sp"
+                        tools:text="• 有效采样快照: 8 次\n• 采样时间跨度: 12.5 天 (08-06 ~ 08-18)\n• 累计健康度变化: 98.50% → 98.25% (衰减 0.25%)" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 卡片 2: 周期实际损耗明细 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="10dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="📋 周期衰减明细"
+                        android:textColor="#818CF8"
+                        android:textSize="13.5sp"
+                        android:textStyle="bold" />
+
+                    <!-- 周期切换筛选标签（按日、按月、按年顺序排列） -->
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/btn_tab_day"
+                            android:layout_width="wrap_content"
+                            android:layout_height="26dp"
+                            android:background="@drawable/bg_filter_chip_selected"
+                            android:gravity="center"
+                            android:paddingHorizontal="8dp"
+                            android:text="按日"
+                            android:textColor="@android:color/white"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/btn_tab_month"
+                            android:layout_width="wrap_content"
+                            android:layout_height="26dp"
+                            android:layout_marginStart="4dp"
+                            android:background="@drawable/bg_filter_chip_normal"
+                            android:gravity="center"
+                            android:paddingHorizontal="8dp"
+                            android:text="按月"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11.5sp" />
+
+                        <TextView
+                            android:id="@+id/btn_tab_year"
+                            android:layout_width="wrap_content"
+                            android:layout_height="26dp"
+                            android:layout_marginStart="4dp"
+                            android:background="@drawable/bg_filter_chip_normal"
+                            android:gravity="center"
+                            android:paddingHorizontal="8dp"
+                            android:text="按年"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11.5sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 周期列表动态容器 -->
+                <LinearLayout
+                    android:id="@+id/layout_periodic_items_container"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical" />
+
+                <!-- 明细为空时的占位提示 -->
+                <TextView
+                    android:id="@+id/tv_periodic_empty_hint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center"
+                    android:paddingVertical="12dp"
+                    android:text="暂无该周期的快照记录"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <!-- 卡片 3: 衰减计算算法说明 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="10dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="📐 衰减算法与科学建议"
+                    android:textColor="#10B981"
+                    android:textSize="13.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingExtra="3dp"
+                    android:text="• 日均衰减 = (首点健康度 - 末点健康度) ÷ 采样天数\n• 月均衰减 = 日均衰减 × 30.44 天\n• 年均预估 = 日均衰减 × 365.25 天\n• 正常锂电池通常在 300~500 次完整充放循环后健康度衰减至 80% 左右（年均损耗约 4%~8% 为正常水平）。"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- 底部确认关闭按钮 -->
+    <TextView
+        android:id="@+id/btn_dialog_decay_close"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/bg_dialog_btn_delete"
+        android:backgroundTint="#2196F3"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:text="我知道了"
+        android:textColor="@android:color/white"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+</LinearLayout>

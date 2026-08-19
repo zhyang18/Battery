@@ -126,6 +126,13 @@ class BatteryViewModel : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     /**
+     * 根据当前分类筛选下的健康度趋势数据点自动计算的衰减统计流（包含日/月/年衰减值与周期明细）。
+     */
+    val decayStatistics: StateFlow<com.battery.analysis.model.DecayStatistics> = healthTrendPoints.map { points ->
+        com.battery.analysis.util.BatteryDecayCalculator.calculate(points)
+    }.stateIn(viewModelScope, SharingStarted.Lazily, com.battery.analysis.model.DecayStatistics())
+
+    /**
      * 更新当前处于活跃展示状态的子 Tab 索引。
      *
      * @param position 当前选中的子 Tab 索引

@@ -3,11 +3,16 @@ package com.battery.analysis.ui
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.CheckBox
+import android.widget.RadioButton
+import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.fragment.app.Fragment
@@ -18,12 +23,16 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.battery.analysis.MainActivity
 import com.battery.analysis.R
 import com.battery.analysis.databinding.FragmentSettingsBinding
+import com.battery.analysis.model.BackupData
 import com.battery.analysis.viewmodel.BatteryViewModel
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * 设置顶级页面 Fragment。
- * 负责管理应用主题模式、实时数据刷新开关与间隔、Shizuku 提权状态与授权，以及应用关于信息。
+ * 负责管理应用主题模式、实时数据刷新开关与间隔、Shizuku 提权状态与授权、数据备份与恢复，以及应用关于信息。
  */
 class SettingsFragment : Fragment() {
 
@@ -32,6 +41,24 @@ class SettingsFragment : Fragment() {
 
     private val viewModel: BatteryViewModel by activityViewModels()
     private lateinit var prefs: SharedPreferences
+
+    /**
+     * SAF 导出备份文件选择保存器 Launcher。
+     */
+    private val exportBackupLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
+        if (uri != null) {
+            handleExportBackup(uri)
+        }
+    }
+
+    /**
+     * SAF 导入备份文件选择器 Launcher。
+     */
+    private val restoreBackupLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            handleRestoreBackupFileSelected(uri)
+        }
+    }
 
     /**
      * 创建 Fragment 的视图层级。
@@ -64,6 +91,7 @@ class SettingsFragment : Fragment() {
         setupThemeSettings()
         setupRefreshSettings()
         setupShizukuSettings()
+        setupBackupRestoreSettings()
         setupHelpSection()
         setupAboutSection()
     }
@@ -256,6 +284,159 @@ class SettingsFragment : Fragment() {
                 }
             }
         }
+    }
+
+    /**
+     * 初始化数据备份与恢复板块的点击事件。
+     */
+    private fun setupBackupRestoreSettings() {
+        // 导出数据备份
+        binding.layoutExportBackup.setOnClickListener {
+            val timeStr = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val defaultFileName = "battery_backup_$timeStr.json"
+            exportBackupLauncher.launch(defaultFileName)
+        }
+
+        // 导入并恢复数据
+        binding.layoutRestoreBackup.setOnClickListener {
+            restoreBackupLauncher.launch(arrayOf("application/json", "application/octet-stream", "text/plain", "*/*"))
+        }
+    }
+
+    /**
+     * 处理导出数据备份写入目标 URI。
+     *
+     * @param uri 用户选定的保存文件目标 URI
+     */
+    private fun handleExportBackup(uri: Uri) {
+        val ctx = context ?: return
+        viewModel.exportBackup(ctx, uri) { result ->
+            result.onSuccess { count ->
+                Toast.makeText(ctx, "备份成功！共导出 $count 条历史记录", Toast.LENGTH_LONG).show()
+            }.onFailure { exception ->
+                Toast.makeText(ctx, "导出备份失败: ${exception.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    /**
+     * 处理用户选择备份文件后的读取与预览。
+     *
+     * @param uri 用户选定的备份文件 URI
+     */
+    private fun handleRestoreBackupFileSelected(uri: Uri) {
+        val ctx = context ?: return
+        viewModel.readBackupPreview(ctx, uri) { result ->
+            result.onSuccess { backupData ->
+                showRestoreConfirmDialog(backupData)
+            }.onFailure { exception ->
+                Toast.makeText(ctx, "解析备份文件失败: ${exception.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    /**
+     * 弹出现代化数据恢复确认对话框，展示备份元信息并支持模式选择。
+     *
+     * @param backupData 待恢复的备份数据对象
+     */
+    private fun showRestoreConfirmDialog(backupData: BackupData) {
+        val ctx = context ?: return
+        val dialogView = layoutInflater.inflate(R.layout.dialog_restore_backup_confirm, null)
+
+        val tvTime = dialogView.findViewById<TextView>(R.id.tv_restore_backup_time)
+        val tvAppVersion = dialogView.findViewById<TextView>(R.id.tv_restore_app_version)
+        val tvRecordsCount = dialogView.findViewById<TextView>(R.id.tv_restore_records_count)
+        val tvSettingsInfo = dialogView.findViewById<TextView>(R.id.tv_restore_settings_info)
+        val rbOverwrite = dialogView.findViewById<RadioButton>(R.id.rb_restore_overwrite)
+        val cbRestoreSettings = dialogView.findViewById<CheckBox>(R.id.cb_restore_settings)
+        val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_restore_cancel)
+        val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_restore_confirm)
+
+        tvTime.text = backupData.backupTime.ifBlank { "未知时间" }
+        tvAppVersion.text = "v${backupData.appVersion}"
+        tvRecordsCount.text = "共 ${backupData.historyRecords.size} 条快照记录"
+
+        val settingsList = mutableListOf<String>()
+        if (backupData.settings.themeMode != null) settingsList.add("主题模式")
+        if (backupData.settings.autoRefreshEnabled != null) settingsList.add("自动刷新")
+        if (backupData.settings.refreshIntervalMs != null) settingsList.add("刷新间隔")
+
+        if (settingsList.isNotEmpty()) {
+            tvSettingsInfo.text = "包含 " + settingsList.joinToString("、")
+            cbRestoreSettings.isEnabled = true
+            cbRestoreSettings.isChecked = true
+        } else {
+            tvSettingsInfo.text = "未包含偏好设置"
+            cbRestoreSettings.isEnabled = false
+            cbRestoreSettings.isChecked = false
+        }
+
+        val dialog = AlertDialog.Builder(ctx)
+            .setView(dialogView)
+            .create()
+
+        btnCancel.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        btnConfirm.setOnClickListener {
+            val isOverwrite = rbOverwrite.isChecked
+            val restoreSettings = cbRestoreSettings.isChecked
+
+            viewModel.restoreBackup(ctx, backupData, isOverwrite, restoreSettings) { result ->
+                result.onSuccess { count ->
+                    if (restoreSettings) {
+                        syncSettingsUiState()
+                    }
+                    val modeText = if (isOverwrite) "覆盖" else "合并"
+                    Toast.makeText(ctx, "已成功${modeText}恢复 $count 条历史记录！", Toast.LENGTH_LONG).show()
+                    dialog.dismiss()
+                }.onFailure { exception ->
+                    Toast.makeText(ctx, "数据恢复失败: ${exception.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+
+        dialog.show()
+
+        dialog.window?.let { window ->
+            window.setBackgroundDrawableResource(android.R.color.transparent)
+            val width = (resources.displayMetrics.widthPixels * 0.92).toInt()
+            window.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            window.setGravity(android.view.Gravity.CENTER)
+        }
+    }
+
+    /**
+     * 在恢复偏好配置后同步刷新当前设置界面的 Switch 与文本等控件状态。
+     */
+    private fun syncSettingsUiState() {
+        val currentThemeMode = prefs.getInt("theme_mode", AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
+        val isFollowSystem = currentThemeMode == AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+        val isDarkMode = currentThemeMode == AppCompatDelegate.MODE_NIGHT_YES
+
+        binding.switchFollowSystem.setOnCheckedChangeListener(null)
+        binding.switchDarkMode.setOnCheckedChangeListener(null)
+        binding.switchAutoRefresh.setOnCheckedChangeListener(null)
+
+        binding.switchFollowSystem.isChecked = isFollowSystem
+        binding.switchDarkMode.isChecked = isDarkMode
+        binding.switchDarkMode.isEnabled = !isFollowSystem
+        binding.layoutDarkMode.alpha = if (isFollowSystem) 0.5f else 1.0f
+
+        val isAutoRefreshEnabled = prefs.getBoolean("auto_refresh_enabled", false)
+        val refreshIntervalMs = prefs.getLong("refresh_interval_ms", 2000L)
+        binding.switchAutoRefresh.isChecked = isAutoRefreshEnabled
+        binding.tvCurrentInterval.text = "${refreshIntervalMs / 1000} 秒"
+
+        setupThemeSettings()
+        setupRefreshSettings()
+
+        AppCompatDelegate.setDefaultNightMode(currentThemeMode)
+        val mainActivity = activity as? MainActivity
+        mainActivity?.setAutoRefreshEnabled(isAutoRefreshEnabled)
+        mainActivity?.updateRefreshInterval(refreshIntervalMs)
     }
 
     /**

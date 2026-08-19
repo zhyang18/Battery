@@ -103,6 +103,32 @@ class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
     }
 
     /**
+     * 在单个事务中清空现有历史记录并写入新的历史记录列表（用于覆盖式数据恢复）。
+     *
+     * @param records 待恢复的历史记录列表
+     * @return 成功写入的记录条数
+     */
+    fun replaceRecords(records: List<HistoryRecord>): Int {
+        val db = writableDatabase
+        var insertedCount = 0
+        db.beginTransaction()
+        try {
+            db.delete(TABLE_NAME, null, null)
+            for (record in records) {
+                val values = buildContentValues(record)
+                val rowId = db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+                if (rowId != -1L) {
+                    insertedCount++
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return insertedCount
+    }
+
+    /**
      * 获取全部历史记录，按时间倒序排列（最新记录在前）。
      *
      * @return 历史记录列表

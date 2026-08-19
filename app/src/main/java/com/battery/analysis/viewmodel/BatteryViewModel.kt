@@ -5,6 +5,8 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.battery.analysis.db.HistoryDbHelper
+import com.battery.analysis.manager.BackupManager
+import com.battery.analysis.model.BackupData
 import com.battery.analysis.model.BatteryInfo
 import com.battery.analysis.model.BugreportResult
 import com.battery.analysis.model.HealthTrendPoint
@@ -396,6 +398,70 @@ class BatteryViewModel : ViewModel() {
             dbHelper.clearAll()
             withContext(Dispatchers.Main) {
                 _historyRecords.value = emptyList()
+            }
+        }
+    }
+
+    /**
+     * 导出全量电池检测记录及应用设置至指定的 SAF 备份文件 URI。
+     *
+     * @param context 应用程序上下文
+     * @param uri 用户选定的目标保存文件 URI
+     * @param onResult 导出完成回调函数，包含成功导出的记录数或异常信息
+     */
+    fun exportBackup(context: Context, uri: Uri, onResult: (Result<Int>) -> Unit) {
+        val appCtx = context.applicationContext
+        viewModelScope.launch(Dispatchers.IO) {
+            val dbHelper = HistoryDbHelper.getInstance(appCtx)
+            val allRecords = dbHelper.getAllRecords()
+            val result = BackupManager.getInstance().exportBackupToUri(appCtx, uri, allRecords)
+            withContext(Dispatchers.Main) {
+                onResult(result)
+            }
+        }
+    }
+
+    /**
+     * 读取并解析指定 URI 中的备份文件元数据，供前端展示恢复预览与确认弹窗。
+     *
+     * @param context 应用程序上下文
+     * @param uri 用户选定的备份文件 URI
+     * @param onResult 读取解析完成回调函数，包含解析出的 [BackupData] 或异常信息
+     */
+    fun readBackupPreview(context: Context, uri: Uri, onResult: (Result<BackupData>) -> Unit) {
+        val appCtx = context.applicationContext
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = BackupManager.getInstance().importBackupPreview(appCtx, uri)
+            withContext(Dispatchers.Main) {
+                onResult(result)
+            }
+        }
+    }
+
+    /**
+     * 执行数据恢复：将备份数据写入本地数据库，按需同步设置，并即时刷新全量历史数据流。
+     *
+     * @param context 应用程序上下文
+     * @param backupData 待恢复的备份数据对象
+     * @param isOverwrite 是否覆盖现有数据（true 为清空后重写，false 为合并去重）
+     * @param restoreSettings 是否同步恢复应用偏好配置
+     * @param onResult 恢复完成回调函数，包含恢复成功的记录数或异常信息
+     */
+    fun restoreBackup(
+        context: Context,
+        backupData: BackupData,
+        isOverwrite: Boolean,
+        restoreSettings: Boolean,
+        onResult: (Result<Int>) -> Unit
+    ) {
+        val appCtx = context.applicationContext
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = BackupManager.getInstance().restoreBackup(appCtx, backupData, isOverwrite, restoreSettings)
+            val dbHelper = HistoryDbHelper.getInstance(appCtx)
+            val updatedList = dbHelper.getAllRecords()
+            withContext(Dispatchers.Main) {
+                _historyRecords.value = updatedList
+                onResult(result)
             }
         }
     }

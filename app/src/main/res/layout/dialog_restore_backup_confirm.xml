@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog_surface"
+    android:clipToOutline="true"
+    android:gravity="center_horizontal"
+    android:orientation="vertical"
+    android:paddingHorizontal="18dp"
+    android:paddingVertical="20dp">
+
+    <!-- 顶部蓝色圆形恢复图标 -->
+    <FrameLayout
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:background="@drawable/bg_restore_icon_circle">
+
+        <ImageView
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_backup_restore"
+            app:tint="#2196F3" />
+    </FrameLayout>
+
+    <!-- 弹窗标题 -->
+    <TextView
+        android:id="@+id/tv_dialog_restore_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:text="恢复电池数据备份"
+        android:textColor="?android:attr/textColorPrimary"
+        android:textSize="17sp"
+        android:textStyle="bold" />
+
+    <!-- 弹窗副标题 -->
+    <TextView
+        android:id="@+id/tv_dialog_restore_desc"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:gravity="center"
+        android:lineSpacingExtra="3dp"
+        android:text="已成功解析备份文件，请确认以下信息并选择恢复策略："
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="13sp" />
+
+    <!-- 备份信息预览卡片 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:background="@drawable/bg_dialog_card"
+        android:clipToOutline="true"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <!-- 备份时间与版本 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📅 备份时间:"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="12.5sp" />
+
+            <TextView
+                android:id="@+id/tv_restore_backup_time"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="12.5sp"
+                android:textStyle="bold"
+                tools:text="2026-08-19 13:30:00" />
+
+            <TextView
+                android:id="@+id/tv_restore_app_version"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#818CF8"
+                android:textSize="11.5sp"
+                tools:text="v1.2.1" />
+        </LinearLayout>
+
+        <!-- 记录数量 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔋 历史快照:"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="12.5sp" />
+
+            <TextView
+                android:id="@+id/tv_restore_records_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:textColor="#10B981"
+                android:textSize="12.5sp"
+                android:textStyle="bold"
+                tools:text="共 18 条记录" />
+        </LinearLayout>
+
+        <!-- 偏好设置包含说明 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⚙️ 应用配置:"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="12.5sp" />
+
+            <TextView
+                android:id="@+id/tv_restore_settings_info"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="12sp"
+                tools:text="包含主题模式、自动刷新及间隔配置" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- 恢复模式单选组 -->
+    <RadioGroup
+        android:id="@+id/rg_restore_mode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp">
+
+        <RadioButton
+            android:id="@+id/rb_restore_merge"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:checked="true"
+            android:paddingStart="4dp"
+            android:text="合并导入 (推荐，保留现有记录并追加)"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="13sp" />
+
+        <RadioButton
+            android:id="@+id/rb_restore_overwrite"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:paddingStart="4dp"
+            android:text="覆盖导入 (清空当前全部记录后重写)"
+            android:textColor="#EF4444"
+            android:textSize="13sp" />
+    </RadioGroup>
+
+    <!-- 同步恢复设置复选框 -->
+    <CheckBox
+        android:id="@+id/cb_restore_settings"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:checked="true"
+        android:paddingStart="4dp"
+        android:text="同步恢复应用偏好设置 (主题、自动刷新等)"
+        android:textColor="?android:attr/textColorPrimary"
+        android:textSize="13sp" />
+
+    <!-- 底部操作按钮 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/btn_dialog_restore_cancel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="6dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_dialog_btn_cancel"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="取消"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/btn_dialog_restore_confirm"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="6dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_dialog_btn_primary"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="确认恢复"
+            android:textColor="@android:color/white"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+</LinearLayout>

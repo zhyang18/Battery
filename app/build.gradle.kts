@@ -11,8 +11,8 @@ android {
         applicationId = "com.battery.analysis"
         minSdk = 24
         targetSdk = 34
-        val baseVersionName = "1.3.2"
-        val baseVersionCode = 7
+        val baseVersionName = "1.3.3"
+        val baseVersionCode = 8
         versionCode = baseVersionCode
         val buildProp = findProperty("buildNumber") as? String
         versionName = if (!buildProp.isNullOrBlank()) "$baseVersionName-$buildProp" else baseVersionName

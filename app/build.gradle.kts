@@ -12,8 +12,9 @@ android {
         minSdk = 24
         targetSdk = 34
         val baseVersionName = "1.3.1"
+        val baseVersionCode = 6
+        versionCode = baseVersionCode
         val buildProp = findProperty("buildNumber") as? String
-        versionCode = (findProperty("versionCode") as? String)?.toIntOrNull() ?: 6
         versionName = if (!buildProp.isNullOrBlank()) "$baseVersionName-$buildProp" else baseVersionName
     }
 

@@ -64,11 +64,26 @@ class DetectionFragment : Fragment() {
             tab.text = tabTitles.getOrElse(position) { "" }
         }.attach()
 
-        // 2. 页面切换监听：仅同步当前活跃 Tab 索引至 ViewModel，供自动定时刷新精准感知
+        // 2. 页面切换监听：同步当前活跃 Tab 索引至 ViewModel，并在滑动过程中动态锁定下拉刷新避免误触
         binding.detectionViewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            /**
+             * 页面选中事件回调。
+             *
+             * @param position 选中的页面索引
+             */
             override fun onPageSelected(position: Int) {
                 super.onPageSelected(position)
                 viewModel.updateActiveTab(position)
+            }
+
+            /**
+             * 页面滑动状态改变回调。在滑动进行中禁用下拉刷新，空闲时恢复。
+             *
+             * @param state 当前滑动状态 [ViewPager2.SCROLL_STATE_IDLE]、[ViewPager2.SCROLL_STATE_DRAGGING] 或 [ViewPager2.SCROLL_STATE_SETTLING]
+             */
+            override fun onPageScrollStateChanged(state: Int) {
+                super.onPageScrollStateChanged(state)
+                _binding?.swipeRefreshLayout?.isEnabled = (state == ViewPager2.SCROLL_STATE_IDLE)
             }
         })
 

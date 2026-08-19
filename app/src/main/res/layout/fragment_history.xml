@@ -146,10 +146,10 @@
             android:textSize="13sp" />
     </LinearLayout>
 
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="#1A888888" />
+<!--    <View-->
+<!--        android:layout_width="match_parent"-->
+<!--        android:layout_height="1dp"-->
+<!--        android:background="#1A888888" />-->
 
     <!-- 3. 原生 CoordinatorLayout 嵌套滑动联动容器 -->
     <androidx.coordinatorlayout.widget.CoordinatorLayout

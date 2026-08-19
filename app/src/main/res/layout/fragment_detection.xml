@@ -44,8 +44,8 @@
         android:layout_height="1dp"
         android:background="#1A888888" />
 
-    <!-- 下拉刷新容器：支持全屏任意位置向下拉动刷新 -->
-    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+    <!-- 下拉刷新容器：支持全屏任意位置向下拉动刷新，并自适应 ViewPager2 横滑防误触 -->
+    <com.battery.analysis.ui.view.ViewPagerSwipeRefreshLayout
         android:id="@+id/swipe_refresh_layout"
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -57,6 +57,6 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
-    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+    </com.battery.analysis.ui.view.ViewPagerSwipeRefreshLayout>
 
 </LinearLayout>

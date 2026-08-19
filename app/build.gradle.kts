@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -11,17 +13,64 @@ android {
         applicationId = "com.battery.analysis"
         minSdk = 24
         targetSdk = 34
-        val baseVersionName = "1.3.3"
-        val baseVersionCode = 8
+        val baseVersionName = "1.5.0"
+        val baseVersionCode = 9
         versionCode = baseVersionCode
         val buildProp = findProperty("buildNumber") as? String
         versionName = if (!buildProp.isNullOrBlank()) "$baseVersionName-$buildProp" else baseVersionName
     }
 
+    signingConfigs {
+        create("release") {
+            val localProperties = Properties()
+            val localPropertiesFile = rootProject.file("local.properties")
+            if (localPropertiesFile.exists()) {
+                localPropertiesFile.reader(Charsets.UTF_8).use { localProperties.load(it) }
+            }
+
+            val keystoreFile = file("app.jks")
+            if (keystoreFile.exists()) {
+                storeFile = keystoreFile
+                storePassword = localProperties.getProperty("KEYSTORE_PASSWORD")
+                    ?: (findProperty("KEYSTORE_PASSWORD") as? String)
+                    ?: System.getenv("KEYSTORE_PASSWORD")
+                    ?: ""
+                keyAlias = localProperties.getProperty("KEY_ALIAS")
+                    ?: (findProperty("KEY_ALIAS") as? String)
+                    ?: System.getenv("KEY_ALIAS")
+                    ?: ""
+                keyPassword = localProperties.getProperty("KEY_PASSWORD")
+                    ?: (findProperty("KEY_PASSWORD") as? String)
+                    ?: System.getenv("KEY_PASSWORD")
+                    ?: ""
+            }
+        }
+    }
+
     buildTypes {
         release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storeFile?.exists() == true && !releaseSigning.storePassword.isNullOrEmpty()) {
+                signingConfig = releaseSigning
+            }
+        }
+        debug {
             isMinifyEnabled = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            isShrinkResources = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storeFile?.exists() == true && !releaseSigning.storePassword.isNullOrEmpty()) {
+                signingConfig = releaseSigning
+            }
         }
     }
     compileOptions {

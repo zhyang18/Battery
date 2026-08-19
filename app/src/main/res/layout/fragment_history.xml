@@ -2,11 +2,12 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/layout_history_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <!-- 顶部操作与标题栏 -->
+    <!-- 1. 顶部操作与标题栏（固定常驻，不随滚动移动） -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -79,7 +80,7 @@
             app:tint="?android:attr/textColorSecondary" />
     </LinearLayout>
 
-    <!-- 等宽均分分类筛选栏（4个标签等宽占满整行） -->
+    <!-- 2. 等宽均分分类筛选栏（固定常驻，4个标签等宽占满整行） -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -150,78 +151,157 @@
         android:layout_height="1dp"
         android:background="#1A888888" />
 
-    <!-- 列表容器与下拉刷新 -->
-    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-        android:id="@+id/swipe_refresh_history"
+    <!-- 3. 原生 CoordinatorLayout 嵌套滑动联动容器 -->
+    <androidx.coordinatorlayout.widget.CoordinatorLayout
+        android:id="@+id/coordinator_history"
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
-        <FrameLayout
+        <!-- 顶部折叠容器：仅包含趋势图卡片 -->
+        <com.google.android.material.appbar.AppBarLayout
+            android:id="@+id/app_bar_layout_history"
             android:layout_width="match_parent"
-            android:layout_height="match_parent">
+            android:layout_height="wrap_content"
+            android:background="@android:color/transparent"
+            app:elevation="0dp">
 
-            <!-- 历史记录列表 -->
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/rv_history"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:clipToPadding="false"
-                android:paddingVertical="8dp"
-                tools:listitem="@layout/item_history_record" />
-
-            <!-- 空状态提示视图 -->
+            <!-- 电池健康度衰减趋势折线图卡片（原生 AppBarLayout 滑动折叠：上滑收起隐藏，下滑展开显示） -->
             <LinearLayout
-                android:id="@+id/layout_empty_history"
+                android:id="@+id/layout_trend_chart_card"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:gravity="center"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="16dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="8dp"
+                android:background="@drawable/bg_setting_card_item"
+                android:clipToOutline="true"
                 android:orientation="vertical"
-                android:padding="24dp"
-                android:visibility="gone"
-                tools:visibility="visible">
+                android:padding="12dp"
+                app:layout_scrollFlags="scroll|enterAlways">
 
-                <ImageView
-                    android:layout_width="72dp"
-                    android:layout_height="72dp"
-                    android:layout_marginBottom="16dp"
-                    android:alpha="0.4"
-                    android:src="@drawable/ic_nav_history"
-                    app:tint="?android:attr/textColorPrimary" />
-
-                <TextView
-                    android:id="@+id/tv_empty_title"
-                    android:layout_width="wrap_content"
+                <!-- 图表卡片顶部栏 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="暂无电池检测记录"
-                    android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
 
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="📈 电池健康度衰减趋势"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="13.5sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tv_trend_summary"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="#10B981"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        tools:text="最新 97.42% (衰减 -2.58%)" />
+                </LinearLayout>
+
+                <!-- 自定义 Canvas 贝塞尔健康度趋势图表 -->
+                <com.battery.analysis.ui.view.HealthTrendChartView
+                    android:id="@+id/chart_health_trend"
+                    android:layout_width="match_parent"
+                    android:layout_height="170dp"
+                    android:layout_marginTop="4dp" />
+
+                <!-- 底部交互提示文案 -->
                 <TextView
-                    android:id="@+id/tv_empty_desc"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="2dp"
                     android:gravity="center"
-                    android:lineSpacingExtra="4dp"
-                    android:text="点击右上角或下方按钮，可一次性同时保存【系统api、Shizuku、错误报告】的全部检测数据。"
+                    android:text="💡 按住图表可左右滑动探查每个快照详情"
                     android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="14sp" />
-
-                <Button
-                    android:id="@+id/btn_empty_save_snapshot"
-                    android:layout_width="wrap_content"
-                    android:layout_height="44dp"
-                    android:layout_marginTop="20dp"
-                    android:backgroundTint="#2196F3"
-                    android:text="立即保存当前快照"
-                    android:textColor="@android:color/white"
-                    android:textSize="14sp"
-                    app:cornerRadius="22dp" />
-
+                    android:textSize="11sp" />
             </LinearLayout>
 
-        </FrameLayout>
-    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+        </com.google.android.material.appbar.AppBarLayout>
+
+        <!-- 下方滚动列表容器：绑定 appbar_scrolling_view_behavior -->
+        <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+            android:id="@+id/swipe_refresh_history"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent">
+
+                <!-- 历史记录列表 -->
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/rv_history"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:clipToPadding="false"
+                    android:nestedScrollingEnabled="true"
+                    android:paddingVertical="4dp"
+                    tools:listitem="@layout/item_history_record" />
+
+                <!-- 空状态提示视图 -->
+                <LinearLayout
+                    android:id="@+id/layout_empty_history"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="24dp"
+                    android:visibility="gone"
+                    tools:visibility="visible">
+
+                    <ImageView
+                        android:layout_width="72dp"
+                        android:layout_height="72dp"
+                        android:layout_marginBottom="16dp"
+                        android:alpha="0.4"
+                        android:src="@drawable/ic_nav_history"
+                        app:tint="?android:attr/textColorPrimary" />
+
+                    <TextView
+                        android:id="@+id/tv_empty_title"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="暂无电池检测记录"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tv_empty_desc"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:gravity="center"
+                        android:lineSpacingExtra="4dp"
+                        android:text="点击右上角或下方按钮，可一次性同时保存【系统api、Shizuku、错误报告】的全部检测数据。"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="14sp" />
+
+                    <Button
+                        android:id="@+id/btn_empty_save_snapshot"
+                        android:layout_width="wrap_content"
+                        android:layout_height="44dp"
+                        android:layout_marginTop="20dp"
+                        android:backgroundTint="#2196F3"
+                        android:text="立即保存当前快照"
+                        android:textColor="@android:color/white"
+                        android:textSize="14sp"
+                        app:cornerRadius="22dp" />
+
+                </LinearLayout>
+
+            </FrameLayout>
+        </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+    </androidx.coordinatorlayout.widget.CoordinatorLayout>
 
 </LinearLayout>

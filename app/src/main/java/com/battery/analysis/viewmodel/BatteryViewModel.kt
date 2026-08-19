@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.battery.analysis.db.HistoryDbHelper
 import com.battery.analysis.model.BatteryInfo
 import com.battery.analysis.model.BugreportResult
+import com.battery.analysis.model.HealthTrendPoint
 import com.battery.analysis.model.HistoryRecord
 import com.battery.analysis.provider.BugreportParser
 import com.battery.analysis.provider.NormalApiProvider
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -94,6 +96,31 @@ class BatteryViewModel : ViewModel() {
         } else {
             records.filter { it.category == category }
         }
+    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    /**
+     * 根据当前分类筛选结果提取的健康度衰减趋势数据点列表（按采样时间从早到晚升序排列）。
+     */
+    val healthTrendPoints: StateFlow<List<HealthTrendPoint>> = filteredHistoryRecords.map { records ->
+        records.filter { it.batteryHealth != null && it.batteryHealth > 0f }
+            .sortedBy { it.id }
+            .map { record ->
+                val displayTime = if (record.captureTime.length >= 16) {
+                    record.captureTime.substring(5, 16)
+                } else {
+                    record.captureTime
+                }
+                HealthTrendPoint(
+                    id = record.id,
+                    captureTime = record.captureTime,
+                    displayTime = displayTime,
+                    health = record.batteryHealth!!.toFloat(),
+                    cycleCount = record.cycleCount,
+                    fullCapacity = record.fullChargeCapacity,
+                    designCapacity = record.designCapacity,
+                    category = record.category
+                )
+            }
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     /**

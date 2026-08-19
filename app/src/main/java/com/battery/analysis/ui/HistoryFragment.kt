@@ -84,7 +84,7 @@ class HistoryFragment : Fragment() {
     }
 
     /**
-     * 初始化 RecyclerView 与单行列表适配器。
+     * 初始化 RecyclerView 与单行列表适配器，并显式启用嵌套滚动支持。
      */
     private fun setupRecyclerView() {
         adapter = HistoryAdapter(
@@ -92,6 +92,7 @@ class HistoryFragment : Fragment() {
         )
         binding.rvHistory.layoutManager = LinearLayoutManager(requireContext())
         binding.rvHistory.adapter = adapter
+        binding.rvHistory.isNestedScrollingEnabled = true
     }
 
     /**
@@ -319,6 +320,36 @@ class HistoryFragment : Fragment() {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.historyRecords.collect { allRecords ->
                     binding.btnClearHistory.visibility = if (allRecords.isNotEmpty()) View.VISIBLE else View.GONE
+                }
+            }
+        }
+
+        // 4. 观察健康度衰减趋势数据点流，绘制平滑折线图并更新统计概要
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.healthTrendPoints.collect { points ->
+                    binding.chartHealthTrend.setData(points)
+
+                    if (points.isNotEmpty()) {
+                        binding.layoutTrendChartCard.visibility = View.VISIBLE
+                        val latestHealth = points.last().health
+                        if (points.size >= 2) {
+                            val firstHealth = points.first().health
+                            val delta = latestHealth - firstHealth
+                            if (delta < 0) {
+                                binding.tvTrendSummary.text = String.format("最新 %.2f%% (衰减 %.2f%%)", latestHealth, delta)
+                                binding.tvTrendSummary.setTextColor(Color.parseColor("#EF4444"))
+                            } else {
+                                binding.tvTrendSummary.text = String.format("最新 %.2f%%", latestHealth)
+                                binding.tvTrendSummary.setTextColor(Color.parseColor("#10B981"))
+                            }
+                        } else {
+                            binding.tvTrendSummary.text = String.format("当前 %.2f%%", latestHealth)
+                            binding.tvTrendSummary.setTextColor(Color.parseColor("#10B981"))
+                        }
+                    } else {
+                        binding.layoutTrendChartCard.visibility = View.GONE
+                    }
                 }
             }
         }

@@ -83,7 +83,6 @@ jobs:
           echo "Found release apk: $UNSIGNED_APK"
 
           SIGNED_VERSIONED_APK="output_apks/Battery-${FULL_VERSION}-release-signed.apk"
-          SIGNED_LATEST_APK="output_apks/Battery-release-signed.apk"
           KEYSTORE_FILE="release.keystore"
 
           if [ -n "$KEYSTORE_BASE64" ]; then
@@ -130,14 +129,10 @@ jobs:
           # 验证签名有效性
           $APKSIGNER verify -v "$SIGNED_VERSIONED_APK"
 
-          # 同时复制一份通用命名的 Signed APK
-          cp "$SIGNED_VERSIONED_APK" "$SIGNED_LATEST_APK"
-
           # 2. 拷贝 Debug APK 作为备用安装包
           DEBUG_APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
           if [ -n "$DEBUG_APK" ]; then
             cp "$DEBUG_APK" "output_apks/Battery-${FULL_VERSION}-debug.apk"
-            cp "$DEBUG_APK" "output_apks/Battery-debug.apk"
           fi
 
           # 清理临时 keystore
@@ -188,8 +183,6 @@ jobs:
           prerelease: ${{ steps.release_info.outputs.is_prerelease == 'true' }}
           files: |
             output_apks/Battery-${{ steps.version_info.outputs.full_version }}-release-signed.apk
-            output_apks/Battery-release-signed.apk
             output_apks/Battery-${{ steps.version_info.outputs.full_version }}-debug.apk
-            output_apks/Battery-debug.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

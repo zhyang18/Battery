@@ -150,6 +150,20 @@
     <string name="dialog_decay_formula_title">📐 Algorithms &amp; Advice</string>
     <string name="dialog_decay_formula_desc" formatted="false">• Daily Decay = (Initial Health - Latest Health) ÷ Sampling Days\n• Monthly Decay = Daily Decay × 30.44 days; Yearly Est = Daily Decay × 365.25 days\n• Daily Cycle Consumption = Total Cycle Increase ÷ Sampling Days\n• Monthly Cycle = Daily Cycle × 30.44 days; Yearly Est = Daily Cycle × 365.25 days\n• Lithium batteries typically decay to ~80% after 300~500 cycles (~4%~8% yearly decay, ~0.5~1.2 cycles/day is normal).</string>
     <string name="empty_periodic_records">No snapshot records in this period</string>
+    <string name="decay_stat_decay_format">Decay %.2f%%</string>
+    <string name="decay_stat_gain_format">Gain %.2f%%</string>
+    <string name="decay_stat_flat">Unchanged (0.00%)</string>
+    <string name="decay_stat_details_template">• Valid Snapshots: %1$d records\n• Time Span: %2$s days (%3$s ~ %4$s)\n• Total Health Change: %5$s%6$s</string>
+    <string name="decay_stat_cycle_detail_template">\n• Total Cycle Change: %1$s%2$d cycles%3$s</string>
+    <string name="decay_stat_cycle_range_format"> (%1$d → %2$d cycles)</string>
+    <string name="decay_stat_insufficient_hint">• Valid Snapshots: %1$d records\n• Note: Save at least 2 snapshots from different timestamps to calculate decay and cycle consumption rates.</string>
+    <string name="period_month_format">%1$s-%2$s</string>
+    <string name="period_year_format">Year %s</string>
+    <string name="period_sample_count_format">%d checks</string>
+    <string name="period_cycle_range_format"> • Cycles %1$d → %2$d (%3$s)</string>
+    <string name="period_cycle_single_format"> • Cycles %s</string>
+    <string name="cycle_rate_format">+%.2f cycles</string>
+    <string name="cycle_rate_zero_format">0 cycles</string>
 
     <!-- Delete & Clear Confirmation -->
     <string name="dialog_delete_title">Delete this snapshot?</string>

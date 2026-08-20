@@ -457,19 +457,25 @@ class HistoryFragment : Fragment() {
     }
 
     /**
-     * 格式化充放电循环次数消耗速率带符号。
+     * 格式化充放电循环次数消耗速率带符号（支持多语言）。
      *
      * @param rate 循环消耗速率数值（正数代表循环消耗增长）
      * @param decimals 小数点保留位数
      * @return 格式化后的带符号文本（如 "+0.50 次"、"+15.2 次" 或 "0 次"）
      */
     private fun formatCycleRate(rate: Float, decimals: Int): String {
-        return if (rate > 0.0001f) {
-            String.format(Locale.getDefault(), "+%.${decimals}f 次", rate)
+        val ctx = context
+        val numStr = if (rate > 0.0001f) {
+            String.format(Locale.getDefault(), "+%.${decimals}f", rate)
         } else if (rate < -0.0001f) {
-            String.format(Locale.getDefault(), "%.${decimals}f 次", rate)
+            String.format(Locale.getDefault(), "%.${decimals}f", rate)
         } else {
-            String.format(Locale.getDefault(), "%.${decimals}f 次", 0f)
+            String.format(Locale.getDefault(), "%.${decimals}f", 0f)
+        }
+        return if (ctx != null) {
+            ctx.getString(R.string.period_cycle_single_format, numStr).replace("•", "").trim()
+        } else {
+            "$numStr 次"
         }
     }
 
@@ -515,8 +521,6 @@ class HistoryFragment : Fragment() {
         val container = dialogView.findViewById<ViewGroup>(R.id.layout_periodic_items_container)
         val tvEmptyHint = dialogView.findViewById<TextView>(R.id.tv_periodic_empty_hint)
         val btnClose = dialogView.findViewById<TextView>(R.id.btn_dialog_decay_close)
-
-        val isZh = Locale.getDefault().language.startsWith("zh")
 
         // 1. 填充健康度衰减卡片数值
         if (stats.hasSufficientData) {
@@ -568,32 +572,34 @@ class HistoryFragment : Fragment() {
         if (stats.hasSufficientData || stats.hasCycleData) {
             val spanText = String.format(Locale.getDefault(), "%.1f", stats.spanDays)
             val decayText = if (stats.totalDecay > 0.001f) {
-                if (isZh) String.format(Locale.getDefault(), "衰减 %.2f%%", stats.totalDecay) else String.format(Locale.getDefault(), "Decay %.2f%%", stats.totalDecay)
+                getString(R.string.decay_stat_decay_format, stats.totalDecay)
             } else if (stats.totalDecay < -0.001f) {
-                if (isZh) String.format(Locale.getDefault(), "上升 %.2f%%", -stats.totalDecay) else String.format(Locale.getDefault(), "Gain %.2f%%", -stats.totalDecay)
+                getString(R.string.decay_stat_gain_format, -stats.totalDecay)
             } else {
-                if (isZh) "持平 (0.00%)" else "Unchanged (0.00%)"
+                getString(R.string.decay_stat_flat)
             }
             val startShort = if ((stats.firstTime?.length ?: 0) >= 10) stats.firstTime!!.substring(0, 10) else (stats.firstTime ?: "")
             val lastShort = if ((stats.lastTime?.length ?: 0) >= 10) stats.lastTime!!.substring(0, 10) else (stats.lastTime ?: "")
 
             val cycleDetailStr = if (stats.totalCycleChange != null) {
                 val sign = if (stats.totalCycleChange >= 0) "+" else ""
-                val range = if (stats.firstCycle != null && stats.lastCycle != null) " (${stats.firstCycle} 次 → ${stats.lastCycle} 次)" else ""
-                if (isZh) "\n• 累计循环消耗: $sign${stats.totalCycleChange} 次$range" else "\n• Total Cycle Change: $sign${stats.totalCycleChange} cycles$range"
+                val range = if (stats.firstCycle != null && stats.lastCycle != null) {
+                    getString(R.string.decay_stat_cycle_range_format, stats.firstCycle, stats.lastCycle)
+                } else ""
+                getString(R.string.decay_stat_cycle_detail_template, sign, stats.totalCycleChange, range)
             } else ""
 
-            if (isZh) {
-                tvStatDetails.text = "• 有效采样快照: ${stats.totalPoints} 次\n• 时间跨度: $spanText 天 ($startShort ~ $lastShort)\n• 累计健康度变化: $decayText$cycleDetailStr"
-            } else {
-                tvStatDetails.text = "• Valid Snapshots: ${stats.totalPoints} records\n• Time Span: $spanText days ($startShort ~ $lastShort)\n• Total Health Change: $decayText$cycleDetailStr"
-            }
+            tvStatDetails.text = getString(
+                R.string.decay_stat_details_template,
+                stats.totalPoints,
+                spanText,
+                startShort,
+                lastShort,
+                decayText,
+                cycleDetailStr
+            )
         } else {
-            if (isZh) {
-                tvStatDetails.text = "• 有效采样快照: ${stats.totalPoints} 次\n• 提示: 需至少保存 2 次以上不同时间的健康度快照方可测算日/月/年衰减与循环消耗速率。"
-            } else {
-                tvStatDetails.text = "• Valid Snapshots: ${stats.totalPoints} records\n• Note: Save at least 2 snapshots from different timestamps to calculate decay and cycle consumption rates."
-            }
+            tvStatDetails.text = getString(R.string.decay_stat_insufficient_hint, stats.totalPoints)
         }
 
         // 4. 动态渲染周期明细方法
@@ -611,25 +617,20 @@ class HistoryFragment : Fragment() {
                     val tvRangeText = rowView.findViewById<TextView>(R.id.tv_periodic_range_text)
                     val divider = rowView.findViewById<View>(R.id.divider_periodic_row)
 
-                    tvTitle.text = item.periodLabel
+                    tvTitle.text = item.getFormattedPeriodLabel(requireContext())
 
                     val cycleStr = if (item.cycleChange != null) {
+                        val sign = if (item.cycleChange >= 0) "+${item.cycleChange}" else "${item.cycleChange}"
                         if (item.startCycle != null && item.endCycle != null && item.startCycle != item.endCycle) {
-                            val sign = if (item.cycleChange >= 0) "+${item.cycleChange}" else "${item.cycleChange}"
-                            if (isZh) " • 循环 ${item.startCycle} → ${item.endCycle} ($sign 次)" else " • Cycles ${item.startCycle} → ${item.endCycle} ($sign)"
+                            getString(R.string.period_cycle_range_format, item.startCycle, item.endCycle, sign)
                         } else {
-                            val sign = if (item.cycleChange >= 0) "+${item.cycleChange}" else "${item.cycleChange}"
-                            if (isZh) " • 循环 $sign 次" else " • Cycles $sign"
+                            getString(R.string.period_cycle_single_format, sign)
                         }
                     } else ""
 
-                    if (isZh) {
-                        tvSubInfo.text = "共 ${item.sampleCount} 次检测$cycleStr"
-                    } else {
-                        tvSubInfo.text = "${item.sampleCount} checks$cycleStr"
-                    }
+                    tvSubInfo.text = "${getString(R.string.period_sample_count_format, item.sampleCount)}$cycleStr"
 
-                    tvDecayBadge.text = item.formatDecay()
+                    tvDecayBadge.text = item.formatDecay(requireContext())
                     tvDecayBadge.setTextColor(getDecayTextColor(item.decay))
 
                     tvRangeText.text = String.format(Locale.getDefault(), "%.2f%% → %.2f%%", item.startHealth, item.endHealth)

@@ -1,5 +1,7 @@
 package com.battery.analysis.model
 
+import android.content.Context
+import com.battery.analysis.R
 import java.util.Locale
 
 /**
@@ -177,31 +179,50 @@ data class PeriodicDecayItem(
     val cycleChange: Int? = null
 ) {
     /**
-     * 获取该周期内健康度衰减值的格式化字符串。
+     * 获取该周期内健康度衰减值的格式化字符串（支持多语言）。
      *
+     * @param context 可选 Android 上下文环境
      * @return 格式化后的衰减文本（如 "-0.25%"、"+0.10%" 或 "持平 (0.00%)"）
      */
-    fun formatDecay(): String {
+    fun formatDecay(context: Context? = null): String {
         return when {
             decay > 0.001f -> String.format(Locale.getDefault(), "-%.2f%%", decay)
             decay < -0.001f -> String.format(Locale.getDefault(), "+%.2f%%", -decay)
-            else -> "持平 (0.00%)"
+            else -> context?.getString(R.string.decay_stat_flat) ?: "持平 (0.00%)"
         }
     }
 
     /**
-     * 获取该周期内循环次数消耗变化的格式化字符串。
+     * 获取支持当前语言环境的友好周期展示标题。
      *
+     * @param context 可选 Android 上下文环境
+     * @return 格式化后的本地化周期标题
+     */
+    fun getFormattedPeriodLabel(context: Context? = null): String {
+        return if (periodKey.length == 7 && periodKey.contains("-")) {
+            val parts = periodKey.split("-")
+            context?.getString(R.string.period_month_format, parts[0], parts[1]) ?: "${parts[0]}年${parts[1]}月"
+        } else if (periodKey.length == 4) {
+            context?.getString(R.string.period_year_format, periodKey) ?: "${periodKey}年度"
+        } else {
+            periodKey
+        }
+    }
+
+    /**
+     * 获取该周期内循环次数消耗变化的格式化字符串（支持多语言）。
+     *
+     * @param context 可选 Android 上下文环境
      * @return 格式化后的循环消耗文本（如 "+2 次"、"-1 次"、"0 次" 或 "--"）
      */
-    fun formatCycleChange(): String {
+    fun formatCycleChange(context: Context? = null): String {
         return cycleChange?.let { change ->
             if (change > 0) {
-                "+$change 次"
+                if (context != null) context.getString(R.string.period_cycle_single_format, "+$change") else "+$change 次"
             } else if (change < 0) {
-                "$change 次"
+                if (context != null) context.getString(R.string.period_cycle_single_format, "$change") else "$change 次"
             } else {
-                "0 次"
+                context?.getString(R.string.cycle_rate_zero_format) ?: "0 次"
             }
         } ?: "--"
     }

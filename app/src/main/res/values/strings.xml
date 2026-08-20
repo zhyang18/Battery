@@ -150,6 +150,20 @@
     <string name="dialog_decay_formula_title">📐 算法原理与科学建议</string>
     <string name="dialog_decay_formula_desc" formatted="false">• 日均衰减 = (首点健康度 - 末点健康度) ÷ 采样天数\n• 月均衰减 = 日均衰减 × 30.44 天；年均预估 = 日均衰减 × 365.25 天\n• 日均循环消耗 = 累计循环增量 ÷ 采样天数\n• 月均循环消耗 = 日均循环 × 30.44 天；年均预估 = 日均循环 × 365.25 天\n• 正常锂电池在 300~500 次完整充放循环后健康度衰减至 80% 左右（年均损耗约 4%~8%、日均约 0.5~1.2 次循环为常规水平）。</string>
     <string name="empty_periodic_records">暂无该周期的快照记录</string>
+    <string name="decay_stat_decay_format">衰减 %.2f%%</string>
+    <string name="decay_stat_gain_format">上升 %.2f%%</string>
+    <string name="decay_stat_flat">持平 (0.00%)</string>
+    <string name="decay_stat_details_template">• 有效采样快照: %1$d 次\n• 时间跨度: %2$s 天 (%3$s ~ %4$s)\n• 累计健康度变化: %5$s%6$s</string>
+    <string name="decay_stat_cycle_detail_template">\n• 累计循环消耗: %1$s%2$d 次%3$s</string>
+    <string name="decay_stat_cycle_range_format"> (%1$d 次 → %2$d 次)</string>
+    <string name="decay_stat_insufficient_hint">• 有效采样快照: %1$d 次\n• 提示: 需至少保存 2 次以上不同时间的健康度快照方可测算日/月/年衰减与循环消耗速率。</string>
+    <string name="period_month_format">%1$s年%2$s月</string>
+    <string name="period_year_format">%s年度</string>
+    <string name="period_sample_count_format">共 %d 次检测</string>
+    <string name="period_cycle_range_format"> • 循环 %1$d → %2$d (%3$s 次)</string>
+    <string name="period_cycle_single_format"> • 循环 %s 次</string>
+    <string name="cycle_rate_format">+%.2f 次</string>
+    <string name="cycle_rate_zero_format">0 次</string>
 
     <!-- 删除与清空确认弹窗 -->
     <string name="dialog_delete_title">确认删除该条快照？</string>

@@ -128,7 +128,7 @@
             android:focusable="true"
             android:gravity="center"
             android:text="@string/delete"
-            android:textColor="@android:color/white"
+            android:textColor="@color/white"
             android:textSize="14sp"
             android:textStyle="bold" />
     </LinearLayout>

@@ -44,10 +44,10 @@ class MainActivity : AppCompatActivity() {
     private val requestPermissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode == SHIZUKU_REQUEST_CODE) {
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(this, "Shizuku 授权成功！", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.toast_shizuku_success), Toast.LENGTH_SHORT).show()
                 viewModel.refreshShizuku(this)
             } else {
-                Toast.makeText(this, "Shizuku 授权被拒绝", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.toast_shizuku_denied), Toast.LENGTH_SHORT).show()
             }
             updateShizukuStatusState()
         }
@@ -177,14 +177,14 @@ class MainActivity : AppCompatActivity() {
      */
     fun updateShizukuStatusState() {
         if (!Shizuku.pingBinder()) {
-            val statusText = "Shizuku: 未运行"
+            val statusText = getString(R.string.shizuku_status_not_running)
             viewModel.updateShizukuStatus(statusText, false)
         } else {
             if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-                val statusText = "Shizuku: 已授权"
+                val statusText = getString(R.string.shizuku_status_authorized)
                 viewModel.updateShizukuStatus(statusText, true)
             } else {
-                val statusText = "Shizuku: 未授权"
+                val statusText = getString(R.string.shizuku_status_unauthorized)
                 viewModel.updateShizukuStatus(statusText, false)
             }
         }
@@ -264,20 +264,20 @@ class MainActivity : AppCompatActivity() {
                 try {
                     Shizuku.requestPermission(SHIZUKU_REQUEST_CODE)
                 } catch (e: Exception) {
-                    Toast.makeText(this, "请求授权失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.toast_request_auth_failed, e.message ?: ""), Toast.LENGTH_SHORT).show()
                 }
             } else {
-                Toast.makeText(this, "已经授权，无需再次请求", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.toast_already_authorized), Toast.LENGTH_SHORT).show()
                 updateShizukuStatusState()
             }
         } else {
-            Toast.makeText(this, "Shizuku 尚未连接，尝试打开 Shizuku App...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.toast_shizuku_not_connected), Toast.LENGTH_SHORT).show()
             try {
                 val intent = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
                 if (intent != null) {
                     startActivity(intent)
                 } else {
-                    Toast.makeText(this, "未找到 Shizuku App，请先安装并启动", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, getString(R.string.toast_shizuku_not_found), Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

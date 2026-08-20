@@ -43,7 +43,7 @@
     <string name="param_current_capacity">🔋 当前容量</string>
     <string name="param_dual_cell">🔋 双电芯</string>
     <string name="param_technology">🔬 电池技术</string>
-    <string name="param_capture_time">📅 检测时间</string>
+    <string name="param_capture_time">⏱️ 检测时间</string>
 
     <!-- 电池状态枚举文本 -->
     <string name="battery_status_charging">充电中</string>
@@ -88,7 +88,7 @@
     <string name="history_snapshot_source">数据来源: 错误报告快照</string>
     <string name="history_details_title">【电池检测历史记录】</string>
     <string name="history_detail_category">🏷️ 数据分类</string>
-    <string name="history_detail_time">📅 检测时间</string>
+    <string name="history_detail_time">⏱️ 检测时间</string>
     <string name="history_detail_note">📝 快照备注</string>
     <string name="history_detail_level">🔋 当前电量</string>
     <string name="history_detail_status">⚡ 工作状态</string>
@@ -97,7 +97,7 @@
     <string name="history_detail_cycle">🔄 循环次数</string>
     <string name="history_detail_temp">🌡️ 电池温度</string>
     <string name="history_detail_voltage">⚡ 电池电压</string>
-    <string name="history_detail_current">📈 实时电流</string>
+    <string name="history_detail_current">⚡ 实时电流</string>
     <string name="history_detail_power">💡 实时功率</string>
     <string name="history_detail_design_cap">🔋 设计容量</string>
     <string name="history_detail_full_cap">🔋 充满容量</string>
@@ -115,15 +115,15 @@
     <string name="filter_bugreport">错误报告</string>
 
     <!-- 趋势图与衰减统计 -->
-    <string name="trend_chart_title">📈 电池健康度衰减趋势</string>
-    <string name="trend_decay_stats_title">📉 衰减速率统计</string>
+    <string name="trend_chart_title">📊 电池健康度衰减趋势</string>
+    <string name="trend_decay_stats_title">📊 衰减速率统计</string>
     <string name="trend_cycle_stats_title">🔄 循环次数消耗统计</string>
-    <string name="stat_daily_avg">📅 每日平均</string>
-    <string name="stat_monthly_avg">📆 每月平均</string>
-    <string name="stat_yearly_est">🗓️ 每年预估</string>
-    <string name="stat_cycle_daily">📅 日均消耗</string>
-    <string name="stat_cycle_monthly">📆 月均消耗</string>
-    <string name="stat_cycle_yearly">🗓️ 年均预估</string>
+    <string name="stat_daily_avg">每日平均</string>
+    <string name="stat_monthly_avg">每月平均</string>
+    <string name="stat_yearly_est">每年预估</string>
+    <string name="stat_cycle_daily">日均消耗</string>
+    <string name="stat_cycle_monthly">月均消耗</string>
+    <string name="stat_cycle_yearly">年均预估</string>
     <string name="trend_touch_tip">💡 按住图表可左右滑动探查每个快照详情</string>
     <string name="trend_latest_decay_format">最新 %1$.2f%% (衰减 %2$.2f%%)</string>
     <string name="trend_latest_format">最新 %.2f%%</string>
@@ -214,6 +214,9 @@
     <string name="guide_eval_desc" formatted="false">• 95% ~ 100%：极佳状态，电池几乎无衰减\n• 85% ~ 95%：良好状态，正常日常使用损耗\n• 80% ~ 85%：轻度衰减，续航体验可能略有下降\n• &lt; 80%：重度衰减，建议根据实际续航考虑更换电池</string>
     <string name="guide_tip_temp">💡 提示：充满容量会随环境温度（低温 &lt; 15℃ 或高温 &gt; 35℃）产生微小浮动，建议在室温充满电后查看数据。</string>
 
+    <!-- 历史详情标题 -->
+    <string name="history_detail_title_format">【%s】检测详情</string>
+
     <!-- Toast 提示文本 -->
     <string name="toast_shizuku_success">Shizuku 授权成功！</string>
     <string name="toast_shizuku_denied">Shizuku 授权被拒绝</string>
@@ -224,6 +227,14 @@
     <string name="toast_save_snapshots_format">已同时保存【%s】历史快照</string>
     <string name="toast_no_data_to_save">当前暂无可用的电池检测数据，请先在检测页刷新</string>
     <string name="toast_backup_success">备份成功！共导出 %d 条历史记录</string>
+    <string name="toast_backup_failed">备份导出失败: %s</string>
     <string name="toast_restore_success">已成功%1$s恢复 %2$d 条历史记录！</string>
     <string name="toast_restore_failed">数据恢复失败: %s</string>
+    <string name="toast_system_api_updated">系统 API 数据已更新</string>
+    <string name="toast_shizuku_data_updated">Shizuku 数据已更新</string>
+    <string name="toast_bugreport_reimport_tip">错误报告请点击卡片重新导入</string>
+    <string name="toast_request_auth_failed">请求授权失败: %s</string>
+    <string name="toast_already_authorized">已经授权，无需再次请求</string>
+    <string name="toast_shizuku_not_connected">Shizuku 尚未连接，尝试打开 Shizuku App...</string>
+    <string name="toast_shizuku_not_found">未找到 Shizuku App，请先安装并启动</string>
 </resources>

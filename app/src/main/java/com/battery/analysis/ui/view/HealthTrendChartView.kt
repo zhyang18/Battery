@@ -14,6 +14,8 @@ import android.graphics.Shader
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import androidx.core.content.ContextCompat
+import com.battery.analysis.R
 import com.battery.analysis.model.HealthTrendPoint
 import kotlin.math.abs
 import kotlin.math.max
@@ -55,7 +57,7 @@ class HealthTrendChartView @JvmOverloads constructor(
 
     private val pointInnerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.WHITE
+        color = ContextCompat.getColor(context, R.color.white)
     }
 
     private val pointHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

@@ -3,7 +3,7 @@
     <item android:state_selected="true">
         <shape android:shape="rectangle">
             <corners android:radius="14dp" />
-            <solid android:color="#2196F3" />
+            <solid android:color="@color/nav_indicator_color" />
             <padding android:bottom="5dp" android:left="12dp" android:right="12dp" android:top="5dp" />
         </shape>
     </item>

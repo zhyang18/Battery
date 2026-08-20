@@ -126,58 +126,56 @@ data class HistoryRecord(
             else -> category
         }
 
-        val localizedStatus = localizeStatusText(status, isZh) ?: unknownText
-        val localizedHealth = localizeHealthText(healthStatus, isZh) ?: unknownText
+        val localizedStatus = localizeStatusText(context, status, isZh) ?: unknownText
+        val localizedHealth = localizeHealthText(context, healthStatus, isZh) ?: unknownText
 
         val noteText = if (!note.isNullOrBlank()) {
-            val noteLabel = if (isZh) "📝 备注" else "📝 Note"
+            val noteLabel = if (context != null) context.getString(R.string.history_detail_note) else if (isZh) "📝 快照备注" else "📝 Note"
             "\n$noteLabel: $note"
         } else ""
 
-        val cycleText = cycleCount?.let { if (isZh) "$it 次" else "$it cycles" } ?: unknownText
+        val cycleText = cycleCount?.let {
+            if (context != null) context.getString(R.string.history_cycle_format, it) else if (isZh) "$it 次" else "$it cycles"
+        } ?: unknownText
         val dualCellText = isDualCell?.let { if (it) yesText else noText } ?: noText
 
-        return if (isZh) {
-            """
-            【电池检测历史记录】
-            🏷️ 数据分类: $localizedCat
-            📅 检测时间: $captureTime$noteText
-            🔋 当前电量: ${level?.let { "$it%" } ?: unknownText}
-            ⚡ 工作状态: $localizedStatus
-            💚 健康状态: $localizedHealth
-            ✨ 健康度: ${batteryHealth?.let { String.format(Locale.getDefault(), "%.2f%%", it) } ?: unknownText}
-            🔄 循环次数: $cycleText
-            🌡️ 电池温度: ${temperature?.let { String.format(Locale.getDefault(), "%.1f ℃", it) } ?: unknownText}
-            ⚡ 电池电压: ${voltage?.let { String.format(Locale.getDefault(), "%.0f mV", it) } ?: unknownText}
-            📈 实时电流: ${currentNow?.let { String.format(Locale.getDefault(), "%.0f mA", it) } ?: unknownText}
-            💡 实时功率: ${powerWatts?.let { String.format(Locale.getDefault(), "%.2f W", it) } ?: unknownText}
-            🔋 设计容量: ${designCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText}
-            🔋 充满容量: ${fullChargeCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText}
-            🔋 当前容量: ${currentCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText}
-            ⚙️ 双电芯: $dualCellText
-            🔬 电池技术: ${technology ?: unknownText}
-            """.trimIndent()
-        } else {
-            """
-            [Battery Inspection History]
-            🏷️ Category: $localizedCat
-            📅 Capture Time: $captureTime$noteText
-            🔋 Battery Level: ${level?.let { "$it%" } ?: unknownText}
-            ⚡ Status: $localizedStatus
-            💚 Health State: $localizedHealth
-            ✨ Battery Health: ${batteryHealth?.let { String.format(Locale.getDefault(), "%.2f%%", it) } ?: unknownText}
-            🔄 Cycle Count: $cycleText
-            🌡️ Temperature: ${temperature?.let { String.format(Locale.getDefault(), "%.1f ℃", it) } ?: unknownText}
-            ⚡ Voltage: ${voltage?.let { String.format(Locale.getDefault(), "%.0f mV", it) } ?: unknownText}
-            📈 Current: ${currentNow?.let { String.format(Locale.getDefault(), "%.0f mA", it) } ?: unknownText}
-            💡 Power: ${powerWatts?.let { String.format(Locale.getDefault(), "%.2f W", it) } ?: unknownText}
-            🔋 Design Capacity: ${designCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText}
-            🔋 Full Capacity: ${fullChargeCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText}
-            🔋 Current Capacity: ${currentCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText}
-            ⚙️ Dual Cell: $dualCellText
-            🔬 Technology: ${technology ?: unknownText}
-            """.trimIndent()
-        }
+        val title = if (context != null) context.getString(R.string.history_details_title) else if (isZh) "【电池检测历史记录】" else "[Battery Inspection History]"
+        val labelCat = if (context != null) context.getString(R.string.history_detail_category) else if (isZh) "🏷️ 数据分类" else "🏷️ Category"
+        val labelTime = if (context != null) context.getString(R.string.history_detail_time) else if (isZh) "⏱️ 检测时间" else "⏱️ Capture Time"
+        val labelLevel = if (context != null) context.getString(R.string.history_detail_level) else if (isZh) "🔋 当前电量" else "🔋 Battery Level"
+        val labelStatus = if (context != null) context.getString(R.string.history_detail_status) else if (isZh) "⚡ 工作状态" else "⚡ Status"
+        val labelHealthStatus = if (context != null) context.getString(R.string.history_detail_health_status) else if (isZh) "💚 健康状态" else "💚 Health State"
+        val labelHealth = if (context != null) context.getString(R.string.history_detail_health) else if (isZh) "✨ 健康度" else "✨ Battery Health"
+        val labelCycle = if (context != null) context.getString(R.string.history_detail_cycle) else if (isZh) "🔄 循环次数" else "🔄 Cycle Count"
+        val labelTemp = if (context != null) context.getString(R.string.history_detail_temp) else if (isZh) "🌡️ 电池温度" else "🌡️ Temperature"
+        val labelVoltage = if (context != null) context.getString(R.string.history_detail_voltage) else if (isZh) "⚡ 电池电压" else "⚡ Voltage"
+        val labelCurrent = if (context != null) context.getString(R.string.history_detail_current) else if (isZh) "⚡ 实时电流" else "⚡ Current"
+        val labelPower = if (context != null) context.getString(R.string.history_detail_power) else if (isZh) "💡 实时功率" else "💡 Power"
+        val labelDesignCap = if (context != null) context.getString(R.string.history_detail_design_cap) else if (isZh) "🔋 设计容量" else "🔋 Design Capacity"
+        val labelFullCap = if (context != null) context.getString(R.string.history_detail_full_cap) else if (isZh) "🔋 充满容量" else "🔋 Full Capacity"
+        val labelCurrentCap = if (context != null) context.getString(R.string.history_detail_current_cap) else if (isZh) "🔋 当前容量" else "🔋 Current Capacity"
+        val labelDualCell = if (context != null) context.getString(R.string.history_detail_dual_cell) else if (isZh) "⚙️ 双电芯" else "⚙️ Dual Cell"
+        val labelTech = if (context != null) context.getString(R.string.history_detail_tech) else if (isZh) "🔬 电池技术" else "🔬 Technology"
+
+        return """
+        $title
+        $labelCat: $localizedCat
+        $labelTime: $captureTime$noteText
+        $labelLevel: ${level?.let { "$it%" } ?: unknownText}
+        $labelStatus: $localizedStatus
+        $labelHealthStatus: $localizedHealth
+        $labelHealth: ${batteryHealth?.let { String.format(Locale.getDefault(), "%.2f%%", it) } ?: unknownText}
+        $labelCycle: $cycleText
+        $labelTemp: ${temperature?.let { String.format(Locale.getDefault(), "%.1f ℃", it) } ?: unknownText}
+        $labelVoltage: ${voltage?.let { String.format(Locale.getDefault(), "%.0f mV", it) } ?: unknownText}
+        $labelCurrent: ${currentNow?.let { String.format(Locale.getDefault(), "%.0f mA", it) } ?: unknownText}
+        $labelPower: ${powerWatts?.let { String.format(Locale.getDefault(), "%.2f W", it) } ?: unknownText}
+        $labelDesignCap: ${designCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText}
+        $labelFullCap: ${fullChargeCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText}
+        $labelCurrentCap: ${currentCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText}
+        $labelDualCell: $dualCellText
+        $labelTech: ${technology ?: unknownText}
+        """.trimIndent()
     }
 
     /**
@@ -201,41 +199,73 @@ data class HistoryRecord(
             else -> category
         }
 
-        val localizedStatus = localizeStatusText(status, isZh) ?: unknownText
-        val localizedHealth = localizeHealthText(healthStatus, isZh) ?: unknownText
+        val localizedStatus = localizeStatusText(context, status, isZh) ?: unknownText
+        val localizedHealth = localizeHealthText(context, healthStatus, isZh) ?: unknownText
+
+        val labelCat = if (context != null) context.getString(R.string.history_detail_category) else if (isZh) "🏷️ 数据分类" else "🏷️ Category"
+        val labelTime = if (context != null) context.getString(R.string.history_detail_time) else if (isZh) "⏱️ 检测时间" else "⏱️ Capture Time"
+        val labelNote = if (context != null) context.getString(R.string.history_detail_note) else if (isZh) "📝 快照备注" else "📝 Note"
+        val labelLevel = if (context != null) context.getString(R.string.history_detail_level) else if (isZh) "🔋 当前电量" else "🔋 Battery Level"
+        val labelStatus = if (context != null) context.getString(R.string.history_detail_status) else if (isZh) "⚡ 工作状态" else "⚡ Status"
+        val labelHealthStatus = if (context != null) context.getString(R.string.history_detail_health_status) else if (isZh) "💚 健康状态" else "💚 Health State"
+        val labelHealth = if (context != null) context.getString(R.string.history_detail_health) else if (isZh) "✨ 健康度" else "✨ Battery Health"
+        val labelCycle = if (context != null) context.getString(R.string.history_detail_cycle) else if (isZh) "🔄 循环次数" else "🔄 Cycle Count"
+        val labelTemp = if (context != null) context.getString(R.string.history_detail_temp) else if (isZh) "🌡️ 电池温度" else "🌡️ Temperature"
+        val labelVoltage = if (context != null) context.getString(R.string.history_detail_voltage) else if (isZh) "⚡ 电池电压" else "⚡ Voltage"
+        val labelCurrent = if (context != null) context.getString(R.string.history_detail_current) else if (isZh) "⚡ 实时电流" else "⚡ Current"
+        val labelPower = if (context != null) context.getString(R.string.history_detail_power) else if (isZh) "💡 实时功率" else "💡 Power"
+        val labelDesignCap = if (context != null) context.getString(R.string.history_detail_design_cap) else if (isZh) "🔋 设计容量" else "🔋 Design Capacity"
+        val labelFullCap = if (context != null) context.getString(R.string.history_detail_full_cap) else if (isZh) "🔋 充满容量" else "🔋 Full Capacity"
+        val labelCurrentCap = if (context != null) context.getString(R.string.history_detail_current_cap) else if (isZh) "🔋 当前容量" else "🔋 Current Capacity"
+        val labelDualCell = if (context != null) context.getString(R.string.history_detail_dual_cell) else if (isZh) "⚙️ 双电芯" else "⚙️ Dual Cell"
+        val labelTech = if (context != null) context.getString(R.string.history_detail_tech) else if (isZh) "🔬 电池技术" else "🔬 Technology"
+
+        val cycleText = cycleCount?.let {
+            if (context != null) context.getString(R.string.history_cycle_format, it) else if (isZh) "$it 次" else "$it cycles"
+        } ?: unknownText
 
         val list = mutableListOf<Triple<String, String, String?>>()
-        list.add(Triple(if (isZh) "🏷️ 数据分类" else "🏷️ Category", localizedCat, "#2196F3"))
-        list.add(Triple(if (isZh) "📅 检测时间" else "📅 Capture Time", captureTime, null))
+        list.add(Triple(labelCat, localizedCat, "#2196F3"))
+        list.add(Triple(labelTime, captureTime, null))
         if (!note.isNullOrBlank()) {
-            list.add(Triple(if (isZh) "📝 快照备注" else "📝 Note", note, null))
+            list.add(Triple(labelNote, note, null))
         }
-        list.add(Triple(if (isZh) "🔋 当前电量" else "🔋 Battery Level", level?.let { "$it%" } ?: unknownText, null))
-        list.add(Triple(if (isZh) "⚡ 工作状态" else "⚡ Status", localizedStatus, null))
-        list.add(Triple(if (isZh) "💚 健康状态" else "💚 Health State", localizedHealth, "#10B981"))
-        list.add(Triple(if (isZh) "✨ 健康度" else "✨ Battery Health", batteryHealth?.let { String.format(Locale.getDefault(), "%.2f%%", it) } ?: unknownText, "#10B981"))
-        list.add(Triple(if (isZh) "🔄 循环次数" else "🔄 Cycle Count", cycleCount?.let { if (isZh) "$it 次" else "$it cycles" } ?: unknownText, null))
-        list.add(Triple(if (isZh) "🌡️ 电池温度" else "🌡️ Temperature", temperature?.let { String.format(Locale.getDefault(), "%.1f ℃", it) } ?: unknownText, null))
-        list.add(Triple(if (isZh) "⚡ 电池电压" else "⚡ Voltage", voltage?.let { String.format(Locale.getDefault(), "%.0f mV", it) } ?: unknownText, null))
-        list.add(Triple(if (isZh) "📈 实时电流" else "📈 Current", currentNow?.let { String.format(Locale.getDefault(), "%.0f mA", it) } ?: unknownText, null))
-        list.add(Triple(if (isZh) "💡 实时功率" else "💡 Power", powerWatts?.let { String.format(Locale.getDefault(), "%.2f W", it) } ?: unknownText, null))
-        list.add(Triple(if (isZh) "🔋 设计容量" else "🔋 Design Capacity", designCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText, null))
-        list.add(Triple(if (isZh) "🔋 充满容量" else "🔋 Full Capacity", fullChargeCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText, "#2196F3"))
-        list.add(Triple(if (isZh) "🔋 当前容量" else "🔋 Current Capacity", currentCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText, null))
-        list.add(Triple(if (isZh) "⚙️ 双电芯" else "⚙️ Dual Cell", isDualCell?.let { if (it) yesText else noText } ?: noText, null))
-        list.add(Triple(if (isZh) "🔬 电池技术" else "🔬 Technology", technology ?: unknownText, null))
+        list.add(Triple(labelLevel, level?.let { "$it%" } ?: unknownText, null))
+        list.add(Triple(labelStatus, localizedStatus, null))
+        list.add(Triple(labelHealthStatus, localizedHealth, "#10B981"))
+        list.add(Triple(labelHealth, batteryHealth?.let { String.format(Locale.getDefault(), "%.2f%%", it) } ?: unknownText, "#10B981"))
+        list.add(Triple(labelCycle, cycleText, null))
+        list.add(Triple(labelTemp, temperature?.let { String.format(Locale.getDefault(), "%.1f ℃", it) } ?: unknownText, null))
+        list.add(Triple(labelVoltage, voltage?.let { String.format(Locale.getDefault(), "%.0f mV", it) } ?: unknownText, null))
+        list.add(Triple(labelCurrent, currentNow?.let { String.format(Locale.getDefault(), "%.0f mA", it) } ?: unknownText, null))
+        list.add(Triple(labelPower, powerWatts?.let { String.format(Locale.getDefault(), "%.2f W", it) } ?: unknownText, null))
+        list.add(Triple(labelDesignCap, designCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText, null))
+        list.add(Triple(labelFullCap, fullChargeCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText, "#2196F3"))
+        list.add(Triple(labelCurrentCap, currentCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText, null))
+        list.add(Triple(labelDualCell, isDualCell?.let { if (it) yesText else noText } ?: noText, null))
+        list.add(Triple(labelTech, technology ?: unknownText, null))
         return list
     }
 
     /**
      * 将电池状态本地化为当前语言。
      *
+     * @param context 可选 Android 上下文环境
      * @param raw 原始状态字符串
      * @param isZh 是否为中文环境
      * @return 本地化后的电池状态
      */
-    private fun localizeStatusText(raw: String?, isZh: Boolean): String? {
+    private fun localizeStatusText(context: Context?, raw: String?, isZh: Boolean): String? {
         if (raw.isNullOrBlank()) return null
+        if (context != null) {
+            return when {
+                (raw.contains("Charging", true) && !raw.contains("Not", true) && !raw.contains("Dis", true)) || raw.contains("充电中") -> context.getString(R.string.battery_status_charging)
+                raw.contains("Discharging", true) || raw.contains("放电中") -> context.getString(R.string.battery_status_discharging)
+                raw.contains("Not charging", true) || raw.contains("未充电") -> context.getString(R.string.battery_status_not_charging)
+                raw.contains("Full", true) || raw.contains("充满") -> context.getString(R.string.battery_status_full)
+                else -> raw
+            }
+        }
         return if (isZh) {
             when {
                 raw.contains("Charging", true) && !raw.contains("Not", true) && !raw.contains("Dis", true) -> "充电中"
@@ -258,12 +288,23 @@ data class HistoryRecord(
     /**
      * 将电池健康状态本地化为当前语言。
      *
+     * @param context 可选 Android 上下文环境
      * @param raw 原始健康状态字符串
      * @param isZh 是否为中文环境
      * @return 本地化后的电池健康状态
      */
-    private fun localizeHealthText(raw: String?, isZh: Boolean): String? {
+    private fun localizeHealthText(context: Context?, raw: String?, isZh: Boolean): String? {
         if (raw.isNullOrBlank()) return null
+        if (context != null) {
+            return when {
+                raw.contains("Good", true) || raw.contains("良好") -> context.getString(R.string.battery_health_good)
+                raw.contains("Overheat", true) || raw.contains("过热") -> context.getString(R.string.battery_health_overheat)
+                raw.contains("Dead", true) || raw.contains("损坏") -> context.getString(R.string.battery_health_dead)
+                raw.contains("Over voltage", true) || raw.contains("过压") || raw.contains("电压过高") -> context.getString(R.string.battery_health_over_voltage)
+                raw.contains("Cold", true) || raw.contains("低温") || raw.contains("过冷") -> context.getString(R.string.battery_health_cold)
+                else -> raw
+            }
+        }
         return if (isZh) {
             when {
                 raw.contains("Good", true) -> "良好"

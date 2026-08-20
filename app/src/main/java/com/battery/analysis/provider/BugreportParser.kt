@@ -496,7 +496,7 @@ class BugreportParser {
         tableItems.add(HealthInfoItem("🩺 电池健康", healthStatusVal, "Android 判断正常"))
 
         // 增加抓取/报告日期时间
-        tableItems.add(HealthInfoItem("📅 报告时间", captureTime, "错误报告生成/抓取时间"))
+        tableItems.add(HealthInfoItem("⏱️ 报告时间", captureTime, "错误报告生成/抓取时间"))
 
         val hasRealData = (batteryLevel != null || batteryVoltage != null || batteryFullCharge != null || batteryCycleCount != null || batteryTemperature != null)
         val rawText = healthInfoRawLines.joinToString("\n").trim()

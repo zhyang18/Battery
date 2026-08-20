@@ -109,7 +109,7 @@ class DetectionFragment : Fragment() {
                         delay(200)
                         if (_binding != null) {
                             binding.swipeRefreshLayout.isRefreshing = false
-                            Toast.makeText(requireContext(), "系统 API 数据已更新", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(requireContext(), getString(R.string.toast_system_api_updated), Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -119,7 +119,7 @@ class DetectionFragment : Fragment() {
                         delay(500)
                         if (_binding != null) {
                             binding.swipeRefreshLayout.isRefreshing = false
-                            Toast.makeText(requireContext(), "Shizuku 数据已更新", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(requireContext(), getString(R.string.toast_shizuku_data_updated), Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -128,7 +128,7 @@ class DetectionFragment : Fragment() {
                         delay(200)
                         if (_binding != null) {
                             binding.swipeRefreshLayout.isRefreshing = false
-                            Toast.makeText(requireContext(), "错误报告请点击卡片重新导入", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(requireContext(), getString(R.string.toast_bugreport_reimport_tip), Toast.LENGTH_SHORT).show()
                         }
                     }
                 }

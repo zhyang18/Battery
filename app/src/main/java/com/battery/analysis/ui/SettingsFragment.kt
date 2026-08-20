@@ -393,7 +393,7 @@ class SettingsFragment : Fragment() {
             result.onSuccess { count ->
                 Toast.makeText(ctx, getString(R.string.toast_backup_success, count), Toast.LENGTH_LONG).show()
             }.onFailure { exception ->
-                Toast.makeText(ctx, "Export failed: ${exception.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, getString(R.string.toast_backup_failed, exception.message ?: ""), Toast.LENGTH_LONG).show()
             }
         }
     }

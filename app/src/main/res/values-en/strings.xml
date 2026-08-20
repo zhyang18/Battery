@@ -43,7 +43,7 @@
     <string name="param_current_capacity">🔋 Current Capacity</string>
     <string name="param_dual_cell">🔋 Dual Cell</string>
     <string name="param_technology">🔬 Technology</string>
-    <string name="param_capture_time">📅 Capture Time</string>
+    <string name="param_capture_time">⏱️ Capture Time</string>
 
     <!-- Battery Status Enums -->
     <string name="battery_status_charging">Charging</string>
@@ -58,37 +58,37 @@
 
     <!-- Detection Tab Descriptions -->
     <string name="tip_drag_refresh">Pull down to refresh battery data</string>
-    <string name="shizuku_card_title">Shizuku Deep Hardware Reading</string>
-    <string name="shizuku_card_desc">Obtain ADB-level permissions via Shizuku to read Linux kernel fuel gauge chip registers, extracting true cycle counts, physical FCC capacity, and dual-cell status.</string>
-    <string name="shizuku_action_authorize">Request Auth</string>
+    <string name="shizuku_card_title">Shizuku Privileged Deep Read</string>
+    <string name="shizuku_card_desc">Authorize via Shizuku for ADB-level access to Linux kernel fuel gauge registers, extracting true cycle count, hardware FCC and dual-cell info.</string>
+    <string name="shizuku_action_authorize">Authorize</string>
     <string name="shizuku_action_authorized">Authorized</string>
     <string name="shizuku_action_unauthorized">Unauthorized</string>
     <string name="shizuku_status_checking">Checking...</string>
     <string name="shizuku_status_not_running">Shizuku: Not Running</string>
     <string name="shizuku_status_authorized">Shizuku: Authorized</string>
     <string name="shizuku_status_unauthorized">Shizuku: Unauthorized</string>
-    <string name="shizuku_service_name">Shizuku Privileged Service</string>
+    <string name="shizuku_service_name">Shizuku Service</string>
 
     <!-- Bugreport Parser -->
-    <string name="bugreport_card_title">Bugreport Fast Stream Parsing</string>
-    <string name="bugreport_card_desc">Support importing system bugreport zip archives or text files, using sliding window byte stream indexing to instantly extract official getHealthInfo battery data.</string>
-    <string name="bugreport_btn_import">Import Bugreport</string>
-    <string name="bugreport_btn_cancel">Cancel Parsing</string>
-    <string name="bugreport_btn_view_raw">View getHealthInfo Raw Log</string>
-    <string name="bugreport_status_default">No bugreport log imported. Click below to select bugreport.zip or txt file.</string>
-    <string name="bugreport_status_auto_loaded">Automatically loaded latest saved bugreport snapshot (%s)</string>
-    <string name="bugreport_status_indexing">Quickly indexing and streaming bugreport log...</string>
-    <string name="bugreport_status_parsing">Streaming getHealthInfo data (%d%%)... Tap to cancel anytime</string>
-    <string name="bugreport_status_success">Successfully extracted getHealthInfo core battery data</string>
-    <string name="bugreport_status_failed">Failed to parse complete getHealthInfo data from bugreport</string>
+    <string name="bugreport_card_title">Bugreport Rapid Analysis</string>
+    <string name="bugreport_card_desc">Import Android bugreport (zip/txt) to instantly extract authoritative getHealthInfo data via fast streaming indexing.</string>
+    <string name="bugreport_btn_import">Import Report</string>
+    <string name="bugreport_btn_cancel">Cancel</string>
+    <string name="bugreport_btn_view_raw">View Raw getHealthInfo Log</string>
+    <string name="bugreport_status_default">No bugreport imported. Tap below to select bugreport.zip or txt to extract low-level data.</string>
+    <string name="bugreport_status_auto_loaded">Loaded latest saved Bugreport snapshot (%s)</string>
+    <string name="bugreport_status_indexing">Indexing &amp; streaming bugreport...</string>
+    <string name="bugreport_status_parsing">Parsing getHealthInfo data (%d%%)... Tap to cancel</string>
+    <string name="bugreport_status_success">Extracted core battery data successfully</string>
+    <string name="bugreport_status_failed">Failed to extract complete getHealthInfo data</string>
     <string name="bugreport_status_cancelled">Bugreport parsing cancelled</string>
 
     <!-- History Snapshot Raw Log Text -->
-    <string name="history_snapshot_load_title">[History Snapshot Loaded]</string>
+    <string name="history_snapshot_load_title">[Snapshot Loaded]</string>
     <string name="history_snapshot_source">Source: Bugreport Snapshot</string>
     <string name="history_details_title">[Battery Inspection History]</string>
     <string name="history_detail_category">🏷️ Category</string>
-    <string name="history_detail_time">📅 Capture Time</string>
+    <string name="history_detail_time">⏱️ Capture Time</string>
     <string name="history_detail_note">📝 Note</string>
     <string name="history_detail_level">🔋 Battery Level</string>
     <string name="history_detail_status">⚡ Status</string>
@@ -97,7 +97,7 @@
     <string name="history_detail_cycle">🔄 Cycle Count</string>
     <string name="history_detail_temp">🌡️ Temperature</string>
     <string name="history_detail_voltage">⚡ Voltage</string>
-    <string name="history_detail_current">📈 Current</string>
+    <string name="history_detail_current">⚡ Current</string>
     <string name="history_detail_power">💡 Power</string>
     <string name="history_detail_design_cap">🔋 Design Capacity</string>
     <string name="history_detail_full_cap">🔋 Full Charge Capacity</string>
@@ -115,15 +115,15 @@
     <string name="filter_bugreport">Bugreport</string>
 
     <!-- Trend Chart & Decay Stats -->
-    <string name="trend_chart_title">📈 Battery Health Decay Trend</string>
-    <string name="trend_decay_stats_title">📉 Decay Rate Statistics</string>
+    <string name="trend_chart_title">📊 Battery Health Decay Trend</string>
+    <string name="trend_decay_stats_title">📊 Decay Rate Statistics</string>
     <string name="trend_cycle_stats_title">🔄 Cycle Consumption Stats</string>
-    <string name="stat_daily_avg">📅 Daily Avg</string>
-    <string name="stat_monthly_avg">📆 Monthly Avg</string>
-    <string name="stat_yearly_est">🗓️ Yearly Est</string>
-    <string name="stat_cycle_daily">📅 Daily Use</string>
-    <string name="stat_cycle_monthly">📆 Monthly Use</string>
-    <string name="stat_cycle_yearly">🗓️ Yearly Est</string>
+    <string name="stat_daily_avg">Daily Avg</string>
+    <string name="stat_monthly_avg">Monthly Avg</string>
+    <string name="stat_yearly_est">Yearly Est</string>
+    <string name="stat_cycle_daily">Daily Use</string>
+    <string name="stat_cycle_monthly">Monthly Use</string>
+    <string name="stat_cycle_yearly">Yearly Est</string>
     <string name="trend_touch_tip">💡 Touch and slide on chart to inspect snapshots</string>
     <string name="trend_latest_decay_format">Latest %1$.2f%% (Decay %2$.2f%%)</string>
     <string name="trend_latest_format">Latest %.2f%%</string>
@@ -214,6 +214,9 @@
     <string name="guide_eval_desc" formatted="false">• 95% ~ 100%: Excellent state, almost no battery decay\n• 85% ~ 95%: Good state, normal daily degradation\n• 80% ~ 85%: Mild decay, slight battery life reduction\n• &lt; 80%: Heavy decay, battery replacement recommended</string>
     <string name="guide_tip_temp">💡 Tip: Full charge capacity fluctuates slightly with ambient temperature (&lt;15°C or &gt;35°C). It is recommended to inspect at room temperature after a full charge.</string>
 
+    <!-- History Detail Title -->
+    <string name="history_detail_title_format">[%s] Inspection Details</string>
+
     <!-- Toast Messages -->
     <string name="toast_shizuku_success">Shizuku authorization succeeded!</string>
     <string name="toast_shizuku_denied">Shizuku authorization denied</string>
@@ -224,6 +227,14 @@
     <string name="toast_save_snapshots_format">Saved snapshots for [%s]</string>
     <string name="toast_no_data_to_save">No battery data available to save. Please refresh first.</string>
     <string name="toast_backup_success">Backup succeeded! Exported %d records</string>
+    <string name="toast_backup_failed">Backup export failed: %s</string>
     <string name="toast_restore_success">Successfully %1$s restored %2$d records!</string>
     <string name="toast_restore_failed">Data restoration failed: %s</string>
+    <string name="toast_system_api_updated">System API data updated</string>
+    <string name="toast_shizuku_data_updated">Shizuku data updated</string>
+    <string name="toast_bugreport_reimport_tip">Please tap card to re-import bugreport</string>
+    <string name="toast_request_auth_failed">Failed to request authorization: %s</string>
+    <string name="toast_already_authorized">Already authorized, no need to request again</string>
+    <string name="toast_shizuku_not_connected">Shizuku not connected, attempting to launch Shizuku App...</string>
+    <string name="toast_shizuku_not_found">Shizuku App not found. Please install and launch it first.</string>
 </resources>

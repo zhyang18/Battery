@@ -114,7 +114,7 @@ class HistoryFragment : Fragment() {
                 isAntiAlias = true
             }
             private val deleteIcon: Drawable? = ContextCompat.getDrawable(requireContext(), R.drawable.ic_delete)?.apply {
-                setTint(Color.WHITE)
+                setTint(ContextCompat.getColor(requireContext(), R.color.white))
             }
 
             /**
@@ -235,7 +235,7 @@ class HistoryFragment : Fragment() {
             val isSelected = (cat == selectedCategory)
             if (isSelected) {
                 textView.setBackgroundResource(R.drawable.bg_filter_chip_selected)
-                textView.setTextColor(Color.WHITE)
+                textView.setTextColor(ContextCompat.getColor(requireContext(), R.color.nav_item_selected))
                 textView.setTypeface(null, android.graphics.Typeface.BOLD)
             } else {
                 textView.setBackgroundResource(R.drawable.bg_filter_chip_normal)
@@ -654,7 +654,7 @@ class HistoryFragment : Fragment() {
             for ((button, t, items) in tabs) {
                 if (t == tab) {
                     button.setBackgroundResource(R.drawable.bg_filter_chip_selected)
-                    button.setTextColor(Color.WHITE)
+                    button.setTextColor(ContextCompat.getColor(requireContext(), R.color.nav_item_selected))
                     button.setTypeface(null, android.graphics.Typeface.BOLD)
                     renderPeriodicItems(items)
                 } else {
@@ -732,7 +732,7 @@ class HistoryFragment : Fragment() {
      * @param record 待查看的历史记录对象
      */
     private fun showRecordDetailsDialog(record: HistoryRecord) {
-        val detailsText = record.formatFullDetails()
+        val detailsText = record.formatFullDetails(requireContext())
         val dialogView = layoutInflater.inflate(R.layout.dialog_history_detail, null)
 
         val tvTitle = dialogView.findViewById<TextView>(R.id.tv_dialog_detail_title)
@@ -746,10 +746,10 @@ class HistoryFragment : Fragment() {
             "错误报告" -> getString(R.string.tab_bugreport)
             else -> record.category
         }
-        tvTitle.text = "【$localizedCat】${getString(R.string.nav_detection)}"
+        tvTitle.text = getString(R.string.history_detail_title_format, localizedCat)
         container.removeAllViews()
 
-        val pairs = record.getDetailPairs()
+        val pairs = record.getDetailPairs(requireContext())
         pairs.forEachIndexed { index, triple ->
             val rowView = layoutInflater.inflate(R.layout.item_dialog_detail_row, container, false)
             val tvLabel = rowView.findViewById<TextView>(R.id.tv_row_label)

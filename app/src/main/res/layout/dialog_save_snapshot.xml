@@ -189,7 +189,7 @@
                 android:backgroundTint="#2196F3"
                 android:text="@string/confirm"
                 android:textAllCaps="false"
-                android:textColor="@android:color/white"
+                android:textColor="@color/white"
                 app:cornerRadius="8dp" />
         </LinearLayout>
 

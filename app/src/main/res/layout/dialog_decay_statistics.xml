@@ -327,7 +327,7 @@
                             android:gravity="center"
                             android:paddingHorizontal="8dp"
                             android:text="@string/tab_by_day"
-                            android:textColor="@android:color/white"
+                            android:textColor="@color/nav_item_selected"
                             android:textSize="11.5sp"
                             android:textStyle="bold" />
 
@@ -422,7 +422,7 @@
         android:focusable="true"
         android:gravity="center"
         android:text="@string/understood"
-        android:textColor="@android:color/white"
+        android:textColor="@color/white"
         android:textSize="14sp"
         android:textStyle="bold" />
 

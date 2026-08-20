@@ -15,7 +15,7 @@
         android:layout_height="38dp"
         android:background="@drawable/bg_dropdown_item_ripple"
         android:gravity="center"
-        android:text="1 秒"
+        android:text="@string/interval_1s"
         android:textColor="@color/popup_item_text"
         android:textSize="14sp"
         android:textStyle="bold" />
@@ -27,7 +27,7 @@
         android:layout_height="38dp"
         android:background="@drawable/bg_dropdown_item_ripple"
         android:gravity="center"
-        android:text="2 秒"
+        android:text="@string/interval_2s"
         android:textColor="@color/popup_item_text"
         android:textSize="14sp"
         android:textStyle="bold" />
@@ -39,7 +39,7 @@
         android:layout_height="38dp"
         android:background="@drawable/bg_dropdown_item_ripple"
         android:gravity="center"
-        android:text="3 秒"
+        android:text="@string/interval_3s"
         android:textColor="@color/popup_item_text"
         android:textSize="14sp"
         android:textStyle="bold" />
@@ -51,7 +51,7 @@
         android:layout_height="38dp"
         android:background="@drawable/bg_dropdown_item_ripple"
         android:gravity="center"
-        android:text="5 秒"
+        android:text="@string/interval_5s"
         android:textColor="@color/popup_item_text"
         android:textSize="14sp"
         android:textStyle="bold" />
@@ -63,7 +63,7 @@
         android:layout_height="38dp"
         android:background="@drawable/bg_dropdown_item_ripple"
         android:gravity="center"
-        android:text="10 秒"
+        android:text="@string/interval_10s"
         android:textColor="@color/popup_item_text"
         android:textSize="14sp"
         android:textStyle="bold" />

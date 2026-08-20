@@ -13,7 +13,7 @@
     <color name="popup_item_text">#1E293B</color>
     
     <color name="text_primary_light">#1E293B</color>
-    <color name="text_primary_dark">#FFFFFF</color>
+    <color name="text_primary_dark">#CCCCCC</color>
     <color name="text_secondary_light">#64748B</color>
     <color name="text_secondary_dark">#B0BEC5</color>
     

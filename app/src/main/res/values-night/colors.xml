@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 深色模式下的下拉弹窗背景（精致深灰）与文字（纯白高亮） -->
+    <!-- 全局白色（暗色模式下调为 80% 白色，避免高对比度刺眼） -->
+    <color name="white">#CCCCCC</color>
+    <color name="text_primary_dark">#CCCCCC</color>
+
+    <!-- 深色模式下的下拉弹窗背景（精致深灰）与文字（80% 白色） -->
     <color name="popup_bg">#27272A</color>
-    <color name="popup_item_text">#FFFFFF</color>
+    <color name="popup_item_text">#CCCCCC</color>
 
     <!-- 弹窗分层色彩体系（深色模式：分层明显，质感细腻） -->
     <color name="dialog_surface_bg">#1E1E22</color>

@@ -67,7 +67,6 @@ class HistoryAdapter(
          */
         fun bind(record: HistoryRecord) {
             val context: Context = binding.root.context
-            val isZh = Locale.getDefault().language.startsWith("zh")
 
             // 1. 数据来源彩色徽章与时间戳
             val localizedCat = when (record.category) {
@@ -107,11 +106,9 @@ class HistoryAdapter(
             binding.tvHistoryHealth.text = record.batteryHealth?.let { String.format(Locale.getDefault(), "%.2f%%", it) } ?: "--"
 
             // 4. 循环次数
-            if (isZh) {
-                binding.tvHistoryCycle.text = record.cycleCount?.let { "循环 $it 次" } ?: "循环未知"
-            } else {
-                binding.tvHistoryCycle.text = record.cycleCount?.let { "Cycle $it" } ?: "Cycle Unknown"
-            }
+            binding.tvHistoryCycle.text = record.cycleCount?.let {
+                context.getString(R.string.trend_tooltip_cycle_format, it)
+            } ?: "${context.getString(R.string.history_detail_cycle)}: ${context.getString(R.string.unknown)}"
 
             // 5. 点击事件监听
             binding.root.setOnClickListener {

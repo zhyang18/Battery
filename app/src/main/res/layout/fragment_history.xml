@@ -99,7 +99,7 @@
             android:focusable="true"
             android:gravity="center"
             android:text="@string/filter_all"
-            android:textColor="@android:color/white"
+            android:textColor="@color/nav_item_selected"
             android:textSize="13sp"
             android:textStyle="bold" />
 
@@ -436,7 +436,7 @@
                         android:backgroundTint="#2196F3"
                         android:text="@string/save_now"
                         android:textAllCaps="false"
-                        android:textColor="@android:color/white"
+                        android:textColor="@color/white"
                         android:textSize="14sp"
                         app:cornerRadius="22dp" />
 

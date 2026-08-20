@@ -157,20 +157,27 @@ class BugreportParser {
     }
 
     /**
-     * 采用原生字节数组快扫输入流，定位 getHealthInfo 数据。
+     * 采用原生字节数组滑动窗口快扫输入流，定位并迭代提取最佳 getHealthInfo 电池健康数据。
      *
      * @param stream 输入流
      * @param captureTime 报告抓取日期时间
-     * @return 解析结果
+     * @return 解析得到的 [BugreportResult] 对象
      */
-    private suspend fun scanStreamForHealthInfo(stream: InputStream, captureTime: String): BugreportResult {
+    internal suspend fun scanStreamForHealthInfo(stream: InputStream, captureTime: String): BugreportResult {
         val buffer = ByteArray(BUFFER_SIZE)
-        val patternGetHealthInfo = "getHealthInfo".toByteArray(StandardCharsets.US_ASCII)
-        val patternIHealth = "android.hardware.health.IHealth".toByteArray(StandardCharsets.US_ASCII)
-        val patternBatteryDump = "DUMP OF SERVICE battery:".toByteArray(StandardCharsets.US_ASCII)
+        // 采用精准的特征模式，严格避开 Logcat/auditd 中仅包含服务接口名称的权限报错日志
+        val patterns = listOf(
+            "getHealthInfo".toByteArray(StandardCharsets.US_ASCII),
+            "DUMP OF SERVICE android.hardware.health".toByteArray(StandardCharsets.US_ASCII),
+            "DUMP OF SERVICE health".toByteArray(StandardCharsets.US_ASCII),
+            "HealthInfo{".toByteArray(StandardCharsets.US_ASCII),
+            "DUMP OF SERVICE battery:".toByteArray(StandardCharsets.US_ASCII)
+        )
 
         var overlapLen = 0
         var totalBytesRead = 0L
+        var bestResult: BugreportResult? = null
+        var bestScore = 0
 
         while (coroutineContext.isActive) {
             val readLen = stream.read(buffer, overlapLen, BUFFER_SIZE - overlapLen)
@@ -179,28 +186,33 @@ class BugreportParser {
             val totalInChunk = overlapLen + readLen
             totalBytesRead += readLen
 
-            // 1. 优先搜索 getHealthInfo 模式
-            val idxHealth = indexOfPattern(buffer, totalInChunk, patternGetHealthInfo)
-            if (idxHealth != -1) {
-                Log.d(TAG, "在字节偏移 $totalBytesRead 处命中 getHealthInfo 模式！")
-                val textSlice = String(buffer, idxHealth, minOf(8192, totalInChunk - idxHealth), StandardCharsets.UTF_8)
-                return parseHealthInfoText(textSlice, captureTime)
-            }
+            var searchStart = 0
+            while (searchStart < totalInChunk && coroutineContext.isActive) {
+                // 寻找当前 chunk 中从 searchStart 开始最早出现的任意目标 pattern
+                val match = findEarliestPattern(buffer, totalInChunk, searchStart, patterns) ?: break
+                val (matchIdx, matchedPattern) = match
 
-            // 2. 次级搜索 IHealth 服务
-            val idxIHealth = indexOfPattern(buffer, totalInChunk, patternIHealth)
-            if (idxIHealth != -1) {
-                Log.d(TAG, "在字节偏移 $totalBytesRead 处命中 IHealth 服务！")
-                val textSlice = String(buffer, idxIHealth, minOf(8192, totalInChunk - idxIHealth), StandardCharsets.UTF_8)
-                return parseHealthInfoText(textSlice, captureTime)
-            }
+                Log.d(TAG, "在字节偏移 ${totalBytesRead - totalInChunk + matchIdx} 处命中模式: ${String(matchedPattern, StandardCharsets.US_ASCII)}")
 
-            // 3. 兜底搜索 battery 服务
-            val idxBattery = indexOfPattern(buffer, totalInChunk, patternBatteryDump)
-            if (idxBattery != -1) {
-                Log.d(TAG, "在字节偏移 $totalBytesRead 处命中 DUMP OF SERVICE battery！")
-                val textSlice = String(buffer, idxBattery, minOf(8192, totalInChunk - idxBattery), StandardCharsets.UTF_8)
-                return parseHealthInfoText(textSlice, captureTime)
+                val sliceLength = minOf(16384, totalInChunk - matchIdx)
+                val textSlice = String(buffer, matchIdx, sliceLength, StandardCharsets.UTF_8)
+                val candidateResult = parseHealthInfoText(textSlice, captureTime)
+                val score = calculateQualityScore(candidateResult)
+
+                if (score > bestScore) {
+                    bestScore = score
+                    bestResult = candidateResult
+                    Log.d(TAG, "捕获更高质量电池数据快照，质量分 = $score (hasRealData = ${candidateResult.hasRealData})")
+
+                    // 质量分 >= 3 表示已获取到包含循环次数/容量/电压等核心完整健康数据，可立即返回
+                    if (score >= 3) {
+                        return candidateResult
+                    }
+                } else if (bestResult == null) {
+                    bestResult = candidateResult
+                }
+
+                searchStart = matchIdx + maxOf(1, matchedPattern.size)
             }
 
             // 防跨块复制
@@ -212,17 +224,69 @@ class BugreportParser {
             }
         }
 
-        return BugreportResult(emptyList(), "", false)
+        return bestResult ?: BugreportResult(emptyList(), "", false)
     }
 
     /**
-     * 在字节数组中查找目标 ASCII 字节模式。
+     * 计算解析结果的数据质量完整度评分。
+     *
+     * @param result 待评估的 [BugreportResult]
+     * @return 质量得分（0 表示无有效电池数据，分数越高表示关键指标越齐全）
      */
-    private fun indexOfPattern(data: ByteArray, length: Int, pattern: ByteArray): Int {
-        if (pattern.isEmpty() || length < pattern.size) return -1
+    private fun calculateQualityScore(result: BugreportResult): Int {
+        if (!result.hasRealData) return 0
+        val info = result.parsedBatteryInfo ?: return 0
+        var score = 0
+        if (info.level != null) score += 1
+        if (info.voltage != null) score += 1
+        if (info.temperature != null) score += 1
+        if (info.cycleCount != null) score += 2
+        if (info.fullChargeCapacity != null) score += 2
+        if (info.designCapacity != null) score += 2
+        if (info.batteryHealth != null) score += 1
+        return score
+    }
+
+    /**
+     * 在字节数组指定区间内查找一组模式中最早出现的一个。
+     *
+     * @param data 字节数据源
+     * @param length 有效数据长度
+     * @param startIndex 开始搜索的偏移量
+     * @param patterns 待匹配的字节模式列表
+     * @return 包含命中索引和模式的键值对，若未找到则返回 null
+     */
+    private fun findEarliestPattern(data: ByteArray, length: Int, startIndex: Int, patterns: List<ByteArray>): Pair<Int, ByteArray>? {
+        var minIdx = -1
+        var matchedPattern: ByteArray? = null
+
+        for (p in patterns) {
+            val idx = indexOfPattern(data, length, startIndex, p)
+            if (idx != -1) {
+                if (minIdx == -1 || idx < minIdx) {
+                    minIdx = idx
+                    matchedPattern = p
+                }
+            }
+        }
+
+        return if (minIdx != -1 && matchedPattern != null) Pair(minIdx, matchedPattern) else null
+    }
+
+    /**
+     * 在字节数组中从指定位置查找目标 ASCII 字节模式。
+     *
+     * @param data 字节数据源
+     * @param length 有效数据长度
+     * @param startIndex 开始检索的位置偏移
+     * @param pattern 目标字节模式
+     * @return 模式起始索引，未找到返回 -1
+     */
+    private fun indexOfPattern(data: ByteArray, length: Int, startIndex: Int, pattern: ByteArray): Int {
+        if (pattern.isEmpty() || length < pattern.size || startIndex > length - pattern.size) return -1
         val first = pattern[0]
         val max = length - pattern.size
-        for (i in 0..max) {
+        for (i in startIndex..max) {
             if (data[i] == first) {
                 var match = true
                 for (j in 1 until pattern.size) {
@@ -244,7 +308,7 @@ class BugreportParser {
      * @param captureTime 报告抓取日期时间
      * @return 结构化结果
      */
-    private fun parseHealthInfoText(text: String, captureTime: String): BugreportResult {
+    internal fun parseHealthInfoText(text: String, captureTime: String): BugreportResult {
         var chargerAcOnline: Boolean? = null
         var chargerUsbOnline: Boolean? = null
         var chargerWirelessOnline: Boolean? = null
@@ -281,9 +345,9 @@ class BugreportParser {
             }
 
             // 1. 单行 getHealthInfo -> HealthInfo{...} 结构体解析
-            if (trimLine.contains("getHealthInfo", ignoreCase = true) && trimLine.contains("{") && trimLine.contains("}")) {
+            if ((trimLine.contains("getHealthInfo", ignoreCase = true) || trimLine.contains("HealthInfo{", ignoreCase = true)) && trimLine.contains("{") && trimLine.contains("}")) {
                 val insideBraces = trimLine.substringAfter("{").substringBeforeLast("}")
-                val map = Regex("(\\w+):\\s*([^,}]+)").findAll(insideBraces).associate {
+                val map = Regex("(\\w+)[=:]\\s*([^,}]+)").findAll(insideBraces).associate {
                     it.groupValues[1].trim() to it.groupValues[2].trim()
                 }
 
@@ -573,10 +637,24 @@ class BugreportParser {
         return sdf.format(java.util.Date(fallbackTime))
     }
 
+    /**
+     * 判断当前行是否表明已达到当前服务 DUMP 的结束边界。
+     *
+     * @param line 当前读取到的日志文本行
+     * @param count 当前已收集的日志行数
+     * @return 若已达到边界应终止后续收集则返回 true，否则返回 false
+     */
     private fun rawLinesListShouldStop(line: String, count: Int): Boolean {
         return count >= 3 && (line.startsWith("DUMP OF SERVICE") || line.startsWith("---------"))
     }
 
+    /**
+     * 从包含指定关键字的行中提取紧随其后的行内参数值。
+     *
+     * @param line 包含目标关键字的文本行
+     * @param key 目标参数名称关键字
+     * @return 提取出的字符串值，未找到返回 null
+     */
     private fun extractInlineValue(line: String, key: String): String? {
         val idx = line.indexOf(key, ignoreCase = true)
         if (idx == -1) return null
@@ -584,6 +662,12 @@ class BugreportParser {
         return sub.split(" ")[0].trim()
     }
 
+    /**
+     * 解析形如 `key=value` 或 `key: value` 的布尔类型参数值。
+     *
+     * @param line 待解析的文本行
+     * @return 解析得到的布尔值，无法识别返回 null
+     */
     private fun parseBooleanValue(line: String): Boolean? {
         val clean = line.replace(",", "").replace(";", "").lowercase()
         val raw = if (clean.contains("=")) clean.substringAfter("=").trim() else clean.substringAfter(":").trim()
@@ -594,6 +678,12 @@ class BugreportParser {
         }
     }
 
+    /**
+     * 从键值对行中提取长整型数值，自动剥离常见物理单位。
+     *
+     * @param line 待解析的文本行
+     * @return 提取到的长整型数值，解析失败返回 null
+     */
     private fun extractLongValue(line: String): Long? {
         val clean = line.replace(",", "").replace(";", "")
         val raw = if (clean.contains("=")) clean.substringAfter("=").trim() else clean.substringAfter(":").trim()
@@ -601,6 +691,12 @@ class BugreportParser {
         return numStr.toLongOrNull()
     }
 
+    /**
+     * 从键值对行中提取整型数值，自动剥离百分号等符号。
+     *
+     * @param line 待解析的文本行
+     * @return 提取到的整型数值，解析失败返回 null
+     */
     private fun extractIntValue(line: String): Int? {
         val clean = line.replace(",", "").replace(";", "")
         val raw = if (clean.contains("=")) clean.substringAfter("=").trim() else clean.substringAfter(":").trim()
@@ -608,6 +704,12 @@ class BugreportParser {
         return numStr.toIntOrNull()
     }
 
+    /**
+     * 从键值对行中提取浮点型数值，自动剥离摄氏度符号。
+     *
+     * @param line 待解析的文本行
+     * @return 提取到的浮点数值，解析失败返回 null
+     */
     private fun extractFloatValue(line: String): Float? {
         val clean = line.replace(",", "").replace(";", "")
         val raw = if (clean.contains("=")) clean.substringAfter("=").trim() else clean.substringAfter(":").trim()
@@ -615,12 +717,25 @@ class BugreportParser {
         return numStr.toFloatOrNull()
     }
 
+    /**
+     * 从键值对行中提取字符串类型值。
+     *
+     * @param line 待解析的文本行
+     * @return 提取到的纯字符串值
+     */
     private fun extractStringValue(line: String): String {
         val clean = line.replace(",", "").replace(";", "")
         val raw = if (clean.contains("=")) clean.substringAfter("=").trim() else clean.substringAfter(":").trim()
         return raw.split(" ")[0].trim()
     }
 
+    /**
+     * 从 ContentProvider 或 URI 中检索错误报告文件名。
+     *
+     * @param context 应用程序上下文
+     * @param uri 文件 URI
+     * @return 解析得到的文件名字符串
+     */
     private fun getFileName(context: Context, uri: Uri): String {
         var name = ""
         val cursor = context.contentResolver.query(uri, null, null, null, null)

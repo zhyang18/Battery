@@ -45,14 +45,19 @@
 
                 <Button
                     android:id="@+id/btn_import_bugreport"
-                    style="@style/Widget.AppCompat.Button.Colored"
                     android:layout_width="wrap_content"
                     android:layout_height="36dp"
                     android:minWidth="0dp"
                     android:paddingHorizontal="14dp"
+                    android:backgroundTint="@color/nav_indicator_color"
                     android:text="@string/bugreport_btn_import"
                     android:textAllCaps="false"
-                    android:textSize="12sp" />
+                    android:textColor="@color/nav_item_selected"
+                    android:textSize="12.5sp"
+                    android:textStyle="bold"
+                    app:cornerRadius="8dp"
+                    app:strokeColor="#402196F3"
+                    app:strokeWidth="1dp" />
             </LinearLayout>
 
             <ProgressBar

@@ -217,7 +217,7 @@
             android:focusable="true"
             android:gravity="center"
             android:text="@string/dialog_restore_btn_confirm"
-            android:textColor="@color/white"
+            android:textColor="@color/nav_item_selected"
             android:textSize="14sp"
             android:textStyle="bold" />
     </LinearLayout>

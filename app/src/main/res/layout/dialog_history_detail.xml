@@ -68,13 +68,12 @@
             android:layout_height="match_parent"
             android:layout_marginStart="6dp"
             android:layout_weight="1"
-            android:background="@drawable/bg_dialog_btn_delete"
-            android:backgroundTint="#2196F3"
+            android:background="@drawable/bg_dialog_btn_primary"
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
             android:text="@string/copy"
-            android:textColor="@color/white"
+            android:textColor="@color/nav_item_selected"
             android:textSize="14sp"
             android:textStyle="bold" />
     </LinearLayout>

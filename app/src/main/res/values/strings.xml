@@ -1,3 +1,224 @@
 <resources>
+    <!-- 基础应用 -->
     <string name="app_name">电池检测</string>
+    <string name="app_full_title">电池检测 (Battery App)</string>
+
+    <!-- 底部导航 -->
+    <string name="nav_detection">检测</string>
+    <string name="nav_history">记录</string>
+    <string name="nav_settings">设置</string>
+
+    <!-- 通用操作与状态 -->
+    <string name="unknown">未知</string>
+    <string name="yes">是</string>
+    <string name="no">否</string>
+    <string name="cancel">取消</string>
+    <string name="confirm">确认</string>
+    <string name="close">关闭</string>
+    <string name="understood">我知道了</string>
+    <string name="copy">复制全部</string>
+    <string name="delete">删除</string>
+    <string name="clear_all">清空全部</string>
+    <string name="save_snapshot">保存快照</string>
+    <string name="save_now">立即保存当前快照</string>
+    <string name="details">明细 ❯</string>
+
+    <!-- 检测页三大 Tab -->
+    <string name="tab_normal_api">系统api</string>
+    <string name="tab_shizuku">Shizuku</string>
+    <string name="tab_bugreport">错误报告</string>
+
+    <!-- 15 项电池参数标签 -->
+    <string name="param_level">🔋 当前电量</string>
+    <string name="param_status">⚡ 电池状态</string>
+    <string name="param_health_status">🩺 电池健康</string>
+    <string name="param_health_percent">❤️ 健康度</string>
+    <string name="param_cycle_count">🔄 循环计数</string>
+    <string name="param_temperature">🌡️ 电池温度</string>
+    <string name="param_voltage">🔋 电池电压</string>
+    <string name="param_current">⚡ 瞬时电流</string>
+    <string name="param_power">⚡ 电池功率</string>
+    <string name="param_design_capacity">🔋 设计容量</string>
+    <string name="param_full_capacity">🔋 充满容量</string>
+    <string name="param_current_capacity">🔋 当前容量</string>
+    <string name="param_dual_cell">🔋 双电芯</string>
+    <string name="param_technology">🔬 电池技术</string>
+    <string name="param_capture_time">📅 检测时间</string>
+
+    <!-- 电池状态枚举文本 -->
+    <string name="battery_status_charging">充电中</string>
+    <string name="battery_status_discharging">放电中</string>
+    <string name="battery_status_not_charging">未充电</string>
+    <string name="battery_status_full">已充满</string>
+    <string name="battery_health_good">良好</string>
+    <string name="battery_health_overheat">过热</string>
+    <string name="battery_health_dead">损坏</string>
+    <string name="battery_health_over_voltage">过压</string>
+    <string name="battery_health_cold">低温</string>
+
+    <!-- 检测页各 Tab 说明与提示 -->
+    <string name="tip_drag_refresh">向下拉动可实时刷新电池数据</string>
+    <string name="shizuku_card_title">Shizuku 提权深度读取</string>
+    <string name="shizuku_card_desc">通过 Shizuku 授权获取 ADB 级权限，穿透读取 Linux 内核电量计芯片寄存器，提取真实循环计数、物理充满容量 (FCC) 及双电芯状态。</string>
+    <string name="shizuku_action_authorize">请求授权</string>
+    <string name="shizuku_action_authorized">已授权</string>
+    <string name="shizuku_action_unauthorized">未授权</string>
+    <string name="shizuku_status_checking">检查中...</string>
+    <string name="shizuku_status_not_running">Shizuku: 未运行</string>
+    <string name="shizuku_status_authorized">Shizuku: 已授权</string>
+    <string name="shizuku_status_unauthorized">Shizuku: 未授权</string>
+    <string name="shizuku_service_name">Shizuku 提权服务</string>
+
+    <!-- 错误报告解析 -->
+    <string name="bugreport_card_title">错误报告 (Bugreport) 秒级解析</string>
+    <string name="bugreport_card_desc">支持直接导入系统错误报告压缩包 (bugreport.zip) 或文本文件，采用字节流快速滑动索引瞬间提取权威 getHealthInfo 电池健康数据。</string>
+    <string name="bugreport_btn_import">导入报告</string>
+    <string name="bugreport_btn_cancel">取消解析</string>
+    <string name="bugreport_btn_view_raw">查看 getHealthInfo 原始日志</string>
+    <string name="bugreport_status_default">未导入错误报告日志。点击下方按钮选择 bugreport.zip 或 txt 提取底层数据。</string>
+    <string name="bugreport_status_auto_loaded">已自动加载历史保存的最新错误报告快照（%s）</string>
+    <string name="bugreport_status_indexing">正在快速索引并流式解析错误报告...</string>
+    <string name="bugreport_status_parsing">正在流式解析 getHealthInfo 数据 (%d%%)... 点击可随时取消</string>
+    <string name="bugreport_status_success">已成功提取 getHealthInfo 核心电池数据</string>
+    <string name="bugreport_status_failed">未能从该错误报告中解析出完整 getHealthInfo 数据</string>
+    <string name="bugreport_status_cancelled">已取消错误报告解析</string>
+
+    <!-- 历史快照原始日志文本 -->
+    <string name="history_snapshot_load_title">【历史快照载入】</string>
+    <string name="history_snapshot_source">数据来源: 错误报告快照</string>
+    <string name="history_details_title">【电池检测历史记录】</string>
+    <string name="history_detail_category">🏷️ 数据分类</string>
+    <string name="history_detail_time">📅 检测时间</string>
+    <string name="history_detail_note">📝 快照备注</string>
+    <string name="history_detail_level">🔋 当前电量</string>
+    <string name="history_detail_status">⚡ 工作状态</string>
+    <string name="history_detail_health_status">💚 健康状态</string>
+    <string name="history_detail_health">✨ 健康度</string>
+    <string name="history_detail_cycle">🔄 循环次数</string>
+    <string name="history_detail_temp">🌡️ 电池温度</string>
+    <string name="history_detail_voltage">⚡ 电池电压</string>
+    <string name="history_detail_current">📈 实时电流</string>
+    <string name="history_detail_power">💡 实时功率</string>
+    <string name="history_detail_design_cap">🔋 设计容量</string>
+    <string name="history_detail_full_cap">🔋 充满容量</string>
+    <string name="history_detail_current_cap">🔋 当前容量</string>
+    <string name="history_detail_dual_cell">⚙️ 双电芯</string>
+    <string name="history_detail_tech">🔬 电池技术</string>
+    <string name="history_cycle_format">%d 次</string>
+
+    <!-- 历史记录页面 -->
+    <string name="history_title">历史记录</string>
+    <string name="history_count_format">共 %d 条</string>
+    <string name="filter_all">全部</string>
+    <string name="filter_normal_api">系统api</string>
+    <string name="filter_shizuku">Shizuku</string>
+    <string name="filter_bugreport">错误报告</string>
+
+    <!-- 趋势图与衰减统计 -->
+    <string name="trend_chart_title">📈 电池健康度衰减趋势</string>
+    <string name="trend_decay_stats_title">📉 衰减速率统计</string>
+    <string name="stat_daily_avg">📅 每日平均</string>
+    <string name="stat_monthly_avg">📆 每月平均</string>
+    <string name="stat_yearly_est">🗓️ 每年预估</string>
+    <string name="trend_touch_tip">💡 按住图表可左右滑动探查每个快照详情</string>
+    <string name="trend_latest_decay_format">最新 %1$.2f%% (衰减 %2$.2f%%)</string>
+    <string name="trend_latest_format">最新 %.2f%%</string>
+    <string name="trend_current_format">当前 %.2f%%</string>
+    <string name="trend_empty_hint">暂无健康度快照，保存快照后将自动生成衰减趋势图</string>
+    <string name="trend_tooltip_cycle_format">循环 %d 次</string>
+    <string name="trend_tooltip_full_format">充满 %.0f mAh</string>
+
+    <!-- 历史空状态 -->
+    <string name="empty_history_title">暂无电池检测记录</string>
+    <string name="empty_history_desc">点击右上角或下方按钮，可一次性同时保存【系统api、Shizuku、错误报告】的全部检测数据。</string>
+    <string name="empty_history_category_title">【%s】分类下暂无记录</string>
+    <string name="empty_history_category_desc">您可以切换上方其他分类标签查看，或点击下方按钮保存当前全部数据源快照。</string>
+
+    <!-- 衰减统计弹窗 -->
+    <string name="dialog_decay_title">🔋 电池健康度衰减统计</string>
+    <string name="dialog_decay_subtitle">根据历史趋势数据全维度分析每日、每月、每年衰减速率</string>
+    <string name="dialog_decay_rate_title">📊 衰减速率统计（均值/预估）</string>
+    <string name="dialog_decay_periodic_title">📋 周期衰减明细</string>
+    <string name="tab_by_day">按日</string>
+    <string name="tab_by_month">按月</string>
+    <string name="tab_by_year">按年</string>
+    <string name="dialog_decay_formula_title">📐 衰减算法与科学建议</string>
+    <string name="dialog_decay_formula_desc" formatted="false">• 日均衰减 = (首点健康度 - 末点健康度) ÷ 采样天数\n• 月均衰减 = 日均衰减 × 30.44 天\n• 年均预估 = 日均衰减 × 365.25 天\n• 正常锂电池通常在 300~500 次完整充放循环后健康度衰减至 80% 左右（年均损耗约 4%~8% 为正常水平）。</string>
+    <string name="empty_periodic_records">暂无该周期的快照记录</string>
+
+    <!-- 删除与清空确认弹窗 -->
+    <string name="dialog_delete_title">确认删除该条快照？</string>
+    <string name="dialog_delete_desc">删除后此条电池检测记录将从本地数据库中永久移除。</string>
+    <string name="dialog_clear_all_title">清空全部历史记录？</string>
+    <string name="dialog_clear_all_desc">确定要清空本地保存的全部 %d 条电池快照吗？\n此操作不可撤销。</string>
+
+    <!-- 设置页面 -->
+    <string name="settings_title">设置</string>
+    <string name="settings_section_ui">用户界面</string>
+    <string name="setting_language">语言 (Language)</string>
+    <string name="setting_follow_system_theme">跟随系统主题</string>
+    <string name="setting_dark_mode">开启暗黑模式</string>
+
+    <string name="settings_section_refresh">数据与刷新</string>
+    <string name="setting_auto_refresh">开启实时自动刷新</string>
+    <string name="setting_refresh_interval">刷新时间间隔</string>
+    <string name="interval_1s">1 秒</string>
+    <string name="interval_2s">2 秒</string>
+    <string name="interval_3s">3 秒</string>
+    <string name="interval_5s">5 秒</string>
+    <string name="interval_10s">10 秒</string>
+
+    <string name="settings_section_shizuku">Shizuku 提权</string>
+
+    <string name="settings_section_backup">数据备份与恢复</string>
+    <string name="setting_export_backup">导出数据备份</string>
+    <string name="setting_export_backup_desc">将电池快照及设置导出为 JSON 文件</string>
+    <string name="setting_restore_backup">导入并恢复数据</string>
+    <string name="setting_restore_backup_desc">从本地 JSON 备份中恢复数据与配置</string>
+
+    <string name="settings_section_about">关于</string>
+    <string name="setting_health_guide">电池健康度计算方式说明</string>
+    <string name="setting_app_version">电池检测 (Battery App)</string>
+
+    <!-- 语言选择 -->
+    <string name="lang_follow_system">🌐 系统</string>
+    <string name="lang_zh">🇨🇳 简体中文</string>
+    <string name="lang_en">🇺🇸 English</string>
+
+    <!-- 备份恢复确认弹窗 -->
+    <string name="dialog_restore_title">确认恢复备份数据？</string>
+    <string name="dialog_restore_mode_title">恢复模式：</string>
+    <string name="dialog_restore_mode_overwrite">覆盖现有数据（清空本地后写入）</string>
+    <string name="dialog_restore_mode_merge">合并现有数据（保留现有并去重追加）</string>
+    <string name="dialog_restore_btn_confirm">立即恢复</string>
+
+    <!-- 健康度指南说明弹窗 -->
+    <string name="guide_title">电池健康度计算说明</string>
+    <string name="guide_subtitle">SoH 核心算法与三大数据源采集原理</string>
+    <string name="guide_formula_title">📐 黄金计算公式</string>
+    <string name="guide_formula_badge" formatted="false">健康度 (%) = (充满容量 ÷ 设计容量) × 100%</string>
+    <string name="guide_formula_desc">电池健康度（State of Health）是衡量锂电池当前可用最大电量相比出厂设计额定容量的衰减百分比。</string>
+    <string name="guide_sources_title">🔬 三大数据源采集机制</string>
+    <string name="guide_source_1_title">1. 系统原生 API</string>
+    <string name="guide_source_1_desc">基于 BatteryManager 框架。通过当前电量与电荷量等比反推满电容量，通过反射读取出厂配置。部分厂商未对外开放底层电芯节点。</string>
+    <string name="guide_source_2_title">2. Shizuku 底层驱动节点 (高精度推荐)</string>
+    <string name="guide_source_2_desc">通过 ADB 提权直接读取 Linux 内核驱动节点（charge_full、charge_full_design、cycle_count）及电量计 IC 硬件寄存器，数据精度最高。</string>
+    <string name="guide_source_3_title">3. 错误报告 (Bugreport)</string>
+    <string name="guide_source_3_desc">提取自系统底层 dump 的权威 getHealthInfo 快照，包含系统电源管理框架维护的健康数据。</string>
+    <string name="guide_eval_title">📊 健康度衰减评估标准</string>
+    <string name="guide_eval_desc" formatted="false">• 95% ~ 100%：极佳状态，电池几乎无衰减\n• 85% ~ 95%：良好状态，正常日常使用损耗\n• 80% ~ 85%：轻度衰减，续航体验可能略有下降\n• &lt; 80%：重度衰减，建议根据实际续航考虑更换电池</string>
+    <string name="guide_tip_temp">💡 提示：充满容量会随环境温度（低温 &lt; 15℃ 或高温 &gt; 35℃）产生微小浮动，建议在室温充满电后查看数据。</string>
+
+    <!-- Toast 提示文本 -->
+    <string name="toast_shizuku_success">Shizuku 授权成功！</string>
+    <string name="toast_shizuku_denied">Shizuku 授权被拒绝</string>
+    <string name="toast_press_again_exit">再按一次退出应用</string>
+    <string name="toast_copy_success">已复制该条历史记录至剪贴板</string>
+    <string name="toast_delete_success">已成功删除该条快照</string>
+    <string name="toast_clear_success">已清空全部历史记录</string>
+    <string name="toast_save_snapshots_format">已同时保存【%s】历史快照</string>
+    <string name="toast_no_data_to_save">当前暂无可用的电池检测数据，请先在检测页刷新</string>
+    <string name="toast_backup_success">备份成功！共导出 %d 条历史记录</string>
+    <string name="toast_restore_success">已成功%1$s恢复 %2$d 条历史记录！</string>
+    <string name="toast_restore_failed">数据恢复失败: %s</string>
 </resources>

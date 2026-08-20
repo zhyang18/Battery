@@ -1,22 +1,27 @@
 package com.battery.analysis.ui
 
+import android.content.Context
 import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
+import com.battery.analysis.R
 import com.battery.analysis.databinding.ItemHistoryRecordBinding
 import com.battery.analysis.model.HistoryRecord
+import java.util.Locale
 
 /**
  * 电池检测历史记录单行列表适配器。
- * 负责展示紧凑美观的单行历史快照条目，支持 DiffUtil 局部刷新与点击查看 14 项完整指标详情。
+ * 负责展示紧凑美观的单行历史快照条目，支持 DiffUtil 局部刷新与点击查看 14 项完整指标详情，并适配多语言显示。
  *
  * @param onItemClick 点击条目回调，用于弹出全量指标详情对话框
+ * @param onDeleteClick 侧滑删除条目回调
  */
 class HistoryAdapter(
-    private val onItemClick: (HistoryRecord) -> Unit
+    private val onItemClick: (HistoryRecord) -> Unit,
+    private val onDeleteClick: (HistoryRecord) -> Unit
 ) : ListAdapter<HistoryRecord, HistoryAdapter.ViewHolder>(HistoryDiffCallback()) {
 
     /**
@@ -61,8 +66,18 @@ class HistoryAdapter(
          * @param record 待展示的历史记录对象
          */
         fun bind(record: HistoryRecord) {
+            val context: Context = binding.root.context
+            val isZh = Locale.getDefault().language.startsWith("zh")
+
             // 1. 数据来源彩色徽章与时间戳
-            binding.tvHistorySource.text = record.category
+            val localizedCat = when (record.category) {
+                "系统api" -> context.getString(R.string.tab_normal_api)
+                "Shizuku" -> context.getString(R.string.tab_shizuku)
+                "错误报告" -> context.getString(R.string.tab_bugreport)
+                else -> record.category
+            }
+            binding.tvHistorySource.text = localizedCat
+
             when {
                 record.category.contains("Shizuku", ignoreCase = true) -> {
                     binding.tvHistorySource.setTextColor(Color.parseColor("#818CF8"))
@@ -77,22 +92,26 @@ class HistoryAdapter(
             binding.tvHistoryTime.text = record.captureTime
 
             // 2. 充满容量 / 设计容量展示
-            val fullCapStr = record.fullChargeCapacity?.let { String.format("%.0f", it) } ?: "-"
-            val designCapStr = record.designCapacity?.let { String.format("%.0f", it) } ?: "-"
+            val fullCapStr = record.fullChargeCapacity?.let { String.format(Locale.getDefault(), "%.0f", it) } ?: "-"
+            val designCapStr = record.designCapacity?.let { String.format(Locale.getDefault(), "%.0f", it) } ?: "-"
             val capacityDisplay = if (fullCapStr != "-" || designCapStr != "-") {
                 "$fullCapStr / $designCapStr mAh"
             } else {
-                val levelStr = record.level?.let { "$it%" } ?: "未知"
+                val levelStr = record.level?.let { "$it%" } ?: context.getString(R.string.unknown)
                 val statusStr = record.status?.let { " ($it)" } ?: ""
                 "$levelStr$statusStr"
             }
             binding.tvHistoryCapacity.text = capacityDisplay
 
             // 3. 电池健康度
-            binding.tvHistoryHealth.text = record.batteryHealth?.let { String.format("%.2f%%", it) } ?: "--"
+            binding.tvHistoryHealth.text = record.batteryHealth?.let { String.format(Locale.getDefault(), "%.2f%%", it) } ?: "--"
 
             // 4. 循环次数
-            binding.tvHistoryCycle.text = record.cycleCount?.let { "循环 $it 次" } ?: "循环未知"
+            if (isZh) {
+                binding.tvHistoryCycle.text = record.cycleCount?.let { "循环 $it 次" } ?: "循环未知"
+            } else {
+                binding.tvHistoryCycle.text = record.cycleCount?.let { "Cycle $it" } ?: "Cycle Unknown"
+            }
 
             // 5. 点击事件监听
             binding.root.setOnClickListener {

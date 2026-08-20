@@ -113,7 +113,7 @@
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
-            android:text="取消"
+            android:text="@string/cancel"
             android:textColor="?android:attr/textColorPrimary"
             android:textSize="14sp" />
 
@@ -127,7 +127,7 @@
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
-            android:text="确认删除"
+            android:text="@string/delete"
             android:textColor="@android:color/white"
             android:textSize="14sp"
             android:textStyle="bold" />

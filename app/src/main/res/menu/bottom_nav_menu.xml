@@ -3,15 +3,15 @@
     <item
         android:id="@+id/nav_detection"
         android:icon="@drawable/ic_nav_detection"
-        android:title="检测" />
+        android:title="@string/nav_detection" />
 
     <item
         android:id="@+id/nav_history"
         android:icon="@drawable/ic_nav_history"
-        android:title="记录" />
+        android:title="@string/nav_history" />
 
     <item
         android:id="@+id/nav_settings"
         android:icon="@drawable/ic_nav_settings"
-        android:title="设置" />
+        android:title="@string/nav_settings" />
 </menu>

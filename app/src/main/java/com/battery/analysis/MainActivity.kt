@@ -83,6 +83,9 @@ class MainActivity : AppCompatActivity() {
 
         prefs = getSharedPreferences("battery_app_settings", Context.MODE_PRIVATE)
 
+        // 0. 初始化并应用保存的语言配置
+        com.battery.analysis.manager.LanguageManager.initLanguage(this)
+
         val savedThemeMode = prefs.getInt("theme_mode", AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
         AppCompatDelegate.setDefaultNightMode(savedThemeMode)
 
@@ -116,7 +119,7 @@ class MainActivity : AppCompatActivity() {
                     exitAppAndKillProcess()
                 } else {
                     lastBackPressedTime = currentTime
-                    Toast.makeText(this@MainActivity, "再按一次退出应用", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, getString(R.string.toast_press_again_exit), Toast.LENGTH_SHORT).show()
                 }
             }
         })

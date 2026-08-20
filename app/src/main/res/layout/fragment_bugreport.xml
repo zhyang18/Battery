@@ -38,7 +38,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="错误报告 (Bugreport) 解析"
+                    android:text="@string/bugreport_card_title"
                     android:textColor="?attr/colorPrimary"
                     android:textSize="14sp"
                     android:textStyle="bold" />
@@ -50,7 +50,8 @@
                     android:layout_height="36dp"
                     android:minWidth="0dp"
                     android:paddingHorizontal="14dp"
-                    android:text="导入报告"
+                    android:text="@string/bugreport_btn_import"
+                    android:textAllCaps="false"
                     android:textSize="12sp" />
             </LinearLayout>
 
@@ -72,7 +73,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:lineSpacingExtra="2dp"
-                android:text="未导入错误报告日志。点击【导入报告】选择 bugreport.zip 或 txt 提取底层数据。"
+                android:text="@string/bugreport_status_default"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="12sp" />
         </LinearLayout>
@@ -104,7 +105,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="【原始数据】"
+                    android:text="@string/bugreport_btn_view_raw"
                     android:textColor="#FF9800"
                     android:textSize="13sp"
                     android:textStyle="bold" />
@@ -131,7 +132,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:lineSpacingExtra="3dp"
-                    android:text="未导入错误报告日志。"
+                    android:text="@string/bugreport_status_default"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textIsSelectable="true"
                     android:textSize="11sp"

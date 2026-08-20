@@ -23,6 +23,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.battery.analysis.MainActivity
 import com.battery.analysis.R
 import com.battery.analysis.databinding.FragmentSettingsBinding
+import com.battery.analysis.manager.LanguageManager
 import com.battery.analysis.model.BackupData
 import com.battery.analysis.viewmodel.BatteryViewModel
 import kotlinx.coroutines.launch
@@ -32,7 +33,7 @@ import java.util.Locale
 
 /**
  * 设置顶级页面 Fragment。
- * 负责管理应用主题模式、实时数据刷新开关与间隔、Shizuku 提权状态与授权、数据备份与恢复，以及应用关于信息。
+ * 负责管理应用多语言切换、主题模式、实时数据刷新开关与间隔、Shizuku 提权状态与授权、数据备份与恢复，以及应用关于信息。
  */
 class SettingsFragment : Fragment() {
 
@@ -88,12 +89,75 @@ class SettingsFragment : Fragment() {
 
         prefs = requireContext().getSharedPreferences("battery_app_settings", Context.MODE_PRIVATE)
 
+        setupLanguageSettings()
         setupThemeSettings()
         setupRefreshSettings()
         setupShizukuSettings()
         setupBackupRestoreSettings()
         setupHelpSection()
         setupAboutSection()
+    }
+
+    /**
+     * 初始化多语言切换设置项与右上角展开气泡弹窗交互。
+     */
+    private fun setupLanguageSettings() {
+        val currentMode = LanguageManager.getLanguageMode(requireContext())
+        binding.tvCurrentLanguage.text = LanguageManager.getLanguageTitle(requireContext(), currentMode)
+
+        binding.layoutLanguageSetting.setOnClickListener {
+            val popupView = layoutInflater.inflate(R.layout.popup_language_picker, null)
+            val density = resources.displayMetrics.density
+            val popupWidth = (180 * density).toInt()
+
+            val popupWindow = android.widget.PopupWindow(
+                popupView,
+                popupWidth,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                true
+            )
+
+            popupWindow.isOutsideTouchable = true
+            popupWindow.isFocusable = true
+            popupWindow.animationStyle = R.style.Animation_PopupTopRight
+
+            val tvFollowSystem = popupView.findViewById<TextView>(R.id.tv_lang_follow_system)
+            val tvZh = popupView.findViewById<TextView>(R.id.tv_lang_zh)
+            val tvEn = popupView.findViewById<TextView>(R.id.tv_lang_en)
+
+            val normalColor = androidx.core.content.ContextCompat.getColor(requireContext(), R.color.popup_item_text)
+            val activeColor = Color.parseColor("#2196F3")
+
+            val activeMode = LanguageManager.getLanguageMode(requireContext())
+            tvFollowSystem.setTextColor(if (activeMode == LanguageManager.MODE_FOLLOW_SYSTEM) activeColor else normalColor)
+            tvZh.setTextColor(if (activeMode == LanguageManager.MODE_SIMPLIFIED_CHINESE) activeColor else normalColor)
+            tvEn.setTextColor(if (activeMode == LanguageManager.MODE_ENGLISH) activeColor else normalColor)
+
+            tvFollowSystem.setOnClickListener {
+                LanguageManager.setLanguageMode(requireContext(), LanguageManager.MODE_FOLLOW_SYSTEM)
+                binding.tvCurrentLanguage.text = LanguageManager.getLanguageTitle(requireContext(), LanguageManager.MODE_FOLLOW_SYSTEM)
+                popupWindow.dismiss()
+            }
+
+            tvZh.setOnClickListener {
+                LanguageManager.setLanguageMode(requireContext(), LanguageManager.MODE_SIMPLIFIED_CHINESE)
+                binding.tvCurrentLanguage.text = LanguageManager.getLanguageTitle(requireContext(), LanguageManager.MODE_SIMPLIFIED_CHINESE)
+                popupWindow.dismiss()
+            }
+
+            tvEn.setOnClickListener {
+                LanguageManager.setLanguageMode(requireContext(), LanguageManager.MODE_ENGLISH)
+                binding.tvCurrentLanguage.text = LanguageManager.getLanguageTitle(requireContext(), LanguageManager.MODE_ENGLISH)
+                popupWindow.dismiss()
+            }
+
+            popupWindow.showAsDropDown(
+                binding.layoutLanguageSetting,
+                0,
+                (4 * density).toInt(),
+                android.view.Gravity.END
+            )
+        }
     }
 
     /**
@@ -125,8 +189,6 @@ class SettingsFragment : Fragment() {
         dialog.window?.let { window ->
             window.setBackgroundDrawableResource(android.R.color.transparent)
             val width = (resources.displayMetrics.widthPixels * 0.92).toInt()
-//            val height = (resources.displayMetrics.heightPixels * 0.92).toInt()
-//            window.setLayout(width, height)
             window.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
             window.setGravity(android.view.Gravity.CENTER)
         }
@@ -184,29 +246,22 @@ class SettingsFragment : Fragment() {
         val refreshIntervalMs = prefs.getLong("refresh_interval_ms", 2000L)
 
         binding.switchAutoRefresh.isChecked = isAutoRefreshEnabled
-        binding.tvCurrentInterval.text = "${refreshIntervalMs / 1000} 秒"
+        binding.tvCurrentInterval.text = getIntervalDisplay(refreshIntervalMs)
 
         val mainActivity = activity as? MainActivity
 
         binding.switchAutoRefresh.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean("auto_refresh_enabled", isChecked).apply()
             mainActivity?.setAutoRefreshEnabled(isChecked)
-            if (isChecked) {
-                val currentInterval = prefs.getLong("refresh_interval_ms", 2000L)
-                Toast.makeText(requireContext(), "已开启实时自动刷新 (${currentInterval / 1000}秒)", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(requireContext(), "已关闭实时自动刷新", Toast.LENGTH_SHORT).show()
-            }
         }
 
         binding.layoutIntervalSetting.setOnClickListener { _ ->
-            val intervals = arrayOf("1 秒", "2 秒", "3 秒", "5 秒", "10 秒")
             val intervalValues = arrayOf(1000L, 2000L, 3000L, 5000L, 10000L)
             val currentVal = prefs.getLong("refresh_interval_ms", 2000L)
 
             val popupView = layoutInflater.inflate(R.layout.popup_interval_picker, null)
             val density = resources.displayMetrics.density
-            val popupWidth = (120 * density).toInt()
+            val popupWidth = (140 * density).toInt()
 
             val popupWindow = android.widget.PopupWindow(
                 popupView,
@@ -215,22 +270,27 @@ class SettingsFragment : Fragment() {
                 true
             )
 
-            // 支持外部点击收起与右上角展开动画
             popupWindow.isOutsideTouchable = true
             popupWindow.isFocusable = true
             popupWindow.animationStyle = R.style.Animation_PopupTopRight
 
-            // 获取全部选项并绑定高对比度文字与选中态
             val optionViews = listOf(
-                popupView.findViewById<android.widget.TextView>(R.id.tv_opt_1s),
-                popupView.findViewById<android.widget.TextView>(R.id.tv_opt_2s),
-                popupView.findViewById<android.widget.TextView>(R.id.tv_opt_3s),
-                popupView.findViewById<android.widget.TextView>(R.id.tv_opt_5s),
-                popupView.findViewById<android.widget.TextView>(R.id.tv_opt_10s)
+                popupView.findViewById<TextView>(R.id.tv_opt_1s),
+                popupView.findViewById<TextView>(R.id.tv_opt_2s),
+                popupView.findViewById<TextView>(R.id.tv_opt_3s),
+                popupView.findViewById<TextView>(R.id.tv_opt_5s),
+                popupView.findViewById<TextView>(R.id.tv_opt_10s)
             )
 
+            // 多语言刷新间隔文本配置
+            optionViews[0].text = getString(R.string.interval_1s)
+            optionViews[1].text = getString(R.string.interval_2s)
+            optionViews[2].text = getString(R.string.interval_3s)
+            optionViews[3].text = getString(R.string.interval_5s)
+            optionViews[4].text = getString(R.string.interval_10s)
+
             val normalColor = androidx.core.content.ContextCompat.getColor(requireContext(), R.color.popup_item_text)
-            val activeColor = android.graphics.Color.parseColor("#2196F3")
+            val activeColor = Color.parseColor("#2196F3")
 
             optionViews.forEachIndexed { index, textView ->
                 val intervalVal = intervalValues[index]
@@ -242,7 +302,7 @@ class SettingsFragment : Fragment() {
 
                 textView.setOnClickListener {
                     prefs.edit().putLong("refresh_interval_ms", intervalVal).apply()
-                    binding.tvCurrentInterval.text = intervals[index]
+                    binding.tvCurrentInterval.text = getIntervalDisplay(intervalVal)
                     mainActivity?.updateRefreshInterval(intervalVal)
                     popupWindow.dismiss()
                 }
@@ -254,6 +314,23 @@ class SettingsFragment : Fragment() {
                 (4 * density).toInt(),
                 android.view.Gravity.END
             )
+        }
+    }
+
+    /**
+     * 根据当前选定的毫秒数获取本地化刷新间隔文案。
+     *
+     * @param intervalMs 刷新时间间隔毫秒数
+     * @return 本地化文案
+     */
+    private fun getIntervalDisplay(intervalMs: Long): String {
+        return when (intervalMs) {
+            1000L -> getString(R.string.interval_1s)
+            2000L -> getString(R.string.interval_2s)
+            3000L -> getString(R.string.interval_3s)
+            5000L -> getString(R.string.interval_5s)
+            10000L -> getString(R.string.interval_10s)
+            else -> "${intervalMs / 1000}s"
         }
     }
 
@@ -270,15 +347,17 @@ class SettingsFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.shizukuStatus.collect { status ->
-                    binding.tvShizukuStatus.text = status
                     val isGranted = viewModel.isShizukuGranted.value
                     if (isGranted) {
+                        binding.tvShizukuStatus.text = getString(R.string.shizuku_status_authorized)
                         binding.tvShizukuStatus.setTextColor(Color.parseColor("#10B981"))
-                        binding.tvShizukuAction.text = "已授权"
+                        binding.tvShizukuAction.text = getString(R.string.shizuku_action_authorized)
                         binding.tvShizukuAction.setTextColor(Color.parseColor("#10B981"))
                     } else {
-                        binding.tvShizukuStatus.setTextColor(if (status.contains("未运行")) Color.parseColor("#EF4444") else Color.parseColor("#F59E0B"))
-                        binding.tvShizukuAction.text = "去授权"
+                        val isNotRunning = status.contains("未运行", ignoreCase = true) || status.contains("Not Running", ignoreCase = true)
+                        binding.tvShizukuStatus.text = if (isNotRunning) getString(R.string.shizuku_status_not_running) else getString(R.string.shizuku_status_unauthorized)
+                        binding.tvShizukuStatus.setTextColor(if (isNotRunning) Color.parseColor("#EF4444") else Color.parseColor("#F59E0B"))
+                        binding.tvShizukuAction.text = getString(R.string.shizuku_action_authorize)
                         binding.tvShizukuAction.setTextColor(Color.parseColor("#818CF8"))
                     }
                 }
@@ -312,9 +391,9 @@ class SettingsFragment : Fragment() {
         val ctx = context ?: return
         viewModel.exportBackup(ctx, uri) { result ->
             result.onSuccess { count ->
-                Toast.makeText(ctx, "备份成功！共导出 $count 条历史记录", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, getString(R.string.toast_backup_success, count), Toast.LENGTH_LONG).show()
             }.onFailure { exception ->
-                Toast.makeText(ctx, "导出备份失败: ${exception.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, "Export failed: ${exception.message}", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -330,7 +409,7 @@ class SettingsFragment : Fragment() {
             result.onSuccess { backupData ->
                 showRestoreConfirmDialog(backupData)
             }.onFailure { exception ->
-                Toast.makeText(ctx, "解析备份文件失败: ${exception.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(ctx, getString(R.string.toast_restore_failed, exception.message), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -353,21 +432,21 @@ class SettingsFragment : Fragment() {
         val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_restore_cancel)
         val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_restore_confirm)
 
-        tvTime.text = backupData.backupTime.ifBlank { "未知时间" }
+        tvTime.text = backupData.backupTime.ifBlank { getString(R.string.unknown) }
         tvAppVersion.text = "v${backupData.appVersion}"
-        tvRecordsCount.text = "共 ${backupData.historyRecords.size} 条快照记录"
+        tvRecordsCount.text = getString(R.string.history_count_format, backupData.historyRecords.size)
 
         val settingsList = mutableListOf<String>()
-        if (backupData.settings.themeMode != null) settingsList.add("主题模式")
-        if (backupData.settings.autoRefreshEnabled != null) settingsList.add("自动刷新")
-        if (backupData.settings.refreshIntervalMs != null) settingsList.add("刷新间隔")
+        if (backupData.settings.themeMode != null) settingsList.add(getString(R.string.setting_follow_system_theme))
+        if (backupData.settings.autoRefreshEnabled != null) settingsList.add(getString(R.string.setting_auto_refresh))
+        if (backupData.settings.refreshIntervalMs != null) settingsList.add(getString(R.string.setting_refresh_interval))
 
         if (settingsList.isNotEmpty()) {
-            tvSettingsInfo.text = "包含 " + settingsList.joinToString("、")
+            tvSettingsInfo.text = settingsList.joinToString("、")
             cbRestoreSettings.isEnabled = true
             cbRestoreSettings.isChecked = true
         } else {
-            tvSettingsInfo.text = "未包含偏好设置"
+            tvSettingsInfo.text = "—"
             cbRestoreSettings.isEnabled = false
             cbRestoreSettings.isChecked = false
         }
@@ -389,11 +468,11 @@ class SettingsFragment : Fragment() {
                     if (restoreSettings) {
                         syncSettingsUiState()
                     }
-                    val modeText = if (isOverwrite) "覆盖" else "合并"
-                    Toast.makeText(ctx, "已成功${modeText}恢复 $count 条历史记录！", Toast.LENGTH_LONG).show()
+                    val modeText = if (isOverwrite) getString(R.string.dialog_restore_mode_overwrite) else getString(R.string.dialog_restore_mode_merge)
+                    Toast.makeText(ctx, getString(R.string.toast_restore_success, modeText, count), Toast.LENGTH_LONG).show()
                     dialog.dismiss()
                 }.onFailure { exception ->
-                    Toast.makeText(ctx, "数据恢复失败: ${exception.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(ctx, getString(R.string.toast_restore_failed, exception.message), Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -428,8 +507,9 @@ class SettingsFragment : Fragment() {
         val isAutoRefreshEnabled = prefs.getBoolean("auto_refresh_enabled", false)
         val refreshIntervalMs = prefs.getLong("refresh_interval_ms", 2000L)
         binding.switchAutoRefresh.isChecked = isAutoRefreshEnabled
-        binding.tvCurrentInterval.text = "${refreshIntervalMs / 1000} 秒"
+        binding.tvCurrentInterval.text = getIntervalDisplay(refreshIntervalMs)
 
+        setupLanguageSettings()
         setupThemeSettings()
         setupRefreshSettings()
 

@@ -16,7 +16,7 @@
         android:id="@+id/tv_dialog_decay_title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="🔋 电池健康度衰减统计"
+        android:text="@string/dialog_decay_title"
         android:textColor="?android:attr/textColorPrimary"
         android:textSize="18sp"
         android:textStyle="bold" />
@@ -26,7 +26,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:text="根据历史趋势数据分析每日、每月、每年衰减速率"
+        android:text="@string/dialog_decay_subtitle"
         android:textColor="?android:attr/textColorSecondary"
         android:textSize="12.5sp" />
 
@@ -56,7 +56,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="📊 衰减速率统计（均值/预估）"
+                    android:text="@string/dialog_decay_rate_title"
                     android:textColor="#2196F3"
                     android:textSize="13.5sp"
                     android:textStyle="bold" />
@@ -93,7 +93,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
-                            android:text="📅 每日平均"
+                            android:text="@string/stat_daily_avg"
                             android:textColor="?android:attr/textColorSecondary"
                             android:textSize="11sp" />
                     </LinearLayout>
@@ -123,7 +123,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
-                            android:text="📆 每月平均"
+                            android:text="@string/stat_monthly_avg"
                             android:textColor="?android:attr/textColorSecondary"
                             android:textSize="11sp" />
                     </LinearLayout>
@@ -153,7 +153,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
-                            android:text="🗓️ 每年预估"
+                            android:text="@string/stat_yearly_est"
                             android:textColor="?android:attr/textColorSecondary"
                             android:textSize="11sp" />
                     </LinearLayout>
@@ -200,7 +200,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="📋 周期衰减明细"
+                        android:text="@string/dialog_decay_periodic_title"
                         android:textColor="#818CF8"
                         android:textSize="13.5sp"
                         android:textStyle="bold" />
@@ -218,7 +218,7 @@
                             android:background="@drawable/bg_filter_chip_selected"
                             android:gravity="center"
                             android:paddingHorizontal="8dp"
-                            android:text="按日"
+                            android:text="@string/tab_by_day"
                             android:textColor="@android:color/white"
                             android:textSize="11.5sp"
                             android:textStyle="bold" />
@@ -231,7 +231,7 @@
                             android:background="@drawable/bg_filter_chip_normal"
                             android:gravity="center"
                             android:paddingHorizontal="8dp"
-                            android:text="按月"
+                            android:text="@string/tab_by_month"
                             android:textColor="?android:attr/textColorSecondary"
                             android:textSize="11.5sp" />
 
@@ -243,7 +243,7 @@
                             android:background="@drawable/bg_filter_chip_normal"
                             android:gravity="center"
                             android:paddingHorizontal="8dp"
-                            android:text="按年"
+                            android:text="@string/tab_by_year"
                             android:textColor="?android:attr/textColorSecondary"
                             android:textSize="11.5sp" />
                     </LinearLayout>
@@ -265,7 +265,7 @@
                     android:layout_marginTop="8dp"
                     android:gravity="center"
                     android:paddingVertical="12dp"
-                    android:text="暂无该周期的快照记录"
+                    android:text="@string/empty_periodic_records"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="12sp"
                     android:visibility="gone" />
@@ -284,7 +284,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="📐 衰减算法与科学建议"
+                    android:text="@string/dialog_decay_formula_title"
                     android:textColor="#10B981"
                     android:textSize="13.5sp"
                     android:textStyle="bold" />
@@ -294,7 +294,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:lineSpacingExtra="3dp"
-                    android:text="• 日均衰减 = (首点健康度 - 末点健康度) ÷ 采样天数\n• 月均衰减 = 日均衰减 × 30.44 天\n• 年均预估 = 日均衰减 × 365.25 天\n• 正常锂电池通常在 300~500 次完整充放循环后健康度衰减至 80% 左右（年均损耗约 4%~8% 为正常水平）。"
+                    android:text="@string/dialog_decay_formula_desc"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="12sp" />
             </LinearLayout>
@@ -313,7 +313,7 @@
         android:clickable="true"
         android:focusable="true"
         android:gravity="center"
-        android:text="我知道了"
+        android:text="@string/understood"
         android:textColor="@android:color/white"
         android:textSize="14sp"
         android:textStyle="bold" />

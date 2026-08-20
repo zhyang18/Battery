@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import java.util.Locale
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -236,14 +237,14 @@ class BatteryViewModel : ViewModel() {
         bugreportJob?.cancel()
         _isParsingBugreport.value = true
         _bugreportProgress.value = 0
-        _bugreportStatus.value = "正在快速索引并流式解析错误报告..."
+        _bugreportStatus.value = appCtx.getString(com.battery.analysis.R.string.bugreport_status_indexing)
 
         bugreportJob = viewModelScope.launch {
             val result = bugreportParser.parseHealthInfo(appCtx, uri) { progress ->
                 viewModelScope.launch(Dispatchers.Main) {
                     if (_isParsingBugreport.value) {
                         _bugreportProgress.value = progress
-                        _bugreportStatus.value = "正在流式解析 getHealthInfo 数据 ($progress%)... 点击可随时取消"
+                        _bugreportStatus.value = appCtx.getString(com.battery.analysis.R.string.bugreport_status_parsing, progress)
                     }
                 }
             }
@@ -252,25 +253,27 @@ class BatteryViewModel : ViewModel() {
 
             if (result != null && result.hasRealData) {
                 _bugreportResult.value = result
-                _bugreportStatus.value = "已成功提取 getHealthInfo 核心电池数据"
+                _bugreportStatus.value = appCtx.getString(com.battery.analysis.R.string.bugreport_status_success)
             } else {
                 if (result != null && result.rawHealthInfoText.isNotEmpty()) {
                     _bugreportResult.value = result
                 }
-                _bugreportStatus.value = "未能从该错误报告中解析出完整 getHealthInfo 数据"
+                _bugreportStatus.value = appCtx.getString(com.battery.analysis.R.string.bugreport_status_failed)
             }
         }
     }
 
     /**
      * 取消当前正在进行的错误报告解析任务。
+     *
+     * @param context 可选应用程序上下文
      */
-    fun cancelBugreportParsing() {
+    fun cancelBugreportParsing(context: Context? = null) {
         if (_isParsingBugreport.value) {
             bugreportJob?.cancel()
             bugreportJob = null
             _isParsingBugreport.value = false
-            _bugreportStatus.value = "已取消错误报告解析"
+            _bugreportStatus.value = context?.getString(com.battery.analysis.R.string.bugreport_status_cancelled) ?: "已取消错误报告解析"
         }
     }
 
@@ -292,17 +295,23 @@ class BatteryViewModel : ViewModel() {
             val dbHelper = HistoryDbHelper.getInstance(appCtx)
             val latestRecord = dbHelper.getLatestRecordByCategory("错误报告")
             if (latestRecord != null) {
-                val batteryInfo = latestRecord.toBatteryInfo("错误报告 (历史快照)")
+                val batteryInfo = latestRecord.toBatteryInfo(appCtx.getString(com.battery.analysis.R.string.tab_bugreport) + " (" + appCtx.getString(com.battery.analysis.R.string.nav_history) + ")")
+                val isZh = Locale.getDefault().language.startsWith("zh")
+                val header = if (isZh) {
+                    "【历史快照载入】\n检测时间: ${latestRecord.captureTime}\n数据来源: 错误报告快照\n"
+                } else {
+                    "[History Snapshot Loaded]\nCapture Time: ${latestRecord.captureTime}\nSource: Bugreport Snapshot\n"
+                }
                 val bugreportResult = BugreportResult(
                     tableItems = emptyList(),
-                    rawHealthInfoText = "【历史快照载入】\n检测时间: ${latestRecord.captureTime}\n数据来源: 错误报告快照\n${latestRecord.formatFullDetails()}",
+                    rawHealthInfoText = "$header${latestRecord.formatFullDetails(appCtx)}",
                     hasRealData = true,
                     parsedBatteryInfo = batteryInfo
                 )
                 withContext(Dispatchers.Main) {
                     if (_bugreportResult.value == null || !_bugreportResult.value!!.hasRealData) {
                         _bugreportResult.value = bugreportResult
-                        _bugreportStatus.value = "已自动加载历史保存的最新错误报告快照（${latestRecord.captureTime}）"
+                        _bugreportStatus.value = appCtx.getString(com.battery.analysis.R.string.bugreport_status_auto_loaded, latestRecord.captureTime)
                     }
                 }
             }

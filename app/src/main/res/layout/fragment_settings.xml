@@ -10,17 +10,18 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingHorizontal="20dp"
+        android:paddingHorizontal="16dp"
         android:paddingTop="18dp"
         android:paddingBottom="8dp">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="设置"
+            android:text="@string/settings_title"
+            android:textStyle="bold"
             android:textColor="?android:attr/textColorPrimary"
             android:textSize="20sp"
-            android:textStyle="bold" />
+             />
     </LinearLayout>
 
     <ScrollView
@@ -32,7 +33,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingHorizontal="16dp"
+            android:paddingHorizontal="12dp"
             android:paddingBottom="32dp">
 
             <!-- 1. 用户界面 分类 -->
@@ -42,10 +43,55 @@
                 android:layout_marginStart="4dp"
                 android:layout_marginTop="12dp"
                 android:layout_marginBottom="8dp"
-                android:text="用户界面"
+                android:text="@string/settings_section_ui"
                 android:textColor="#818CF8"
                 android:textSize="13sp"
-                android:textStyle="bold" />
+                 />
+
+            <!-- 条目 0: 语言设置 (Language) -->
+            <LinearLayout
+                android:id="@+id/layout_language_setting"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/bg_setting_card_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:clipToOutline="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:src="@drawable/ic_nav_detection"
+                    app:tint="?android:attr/textColorPrimary" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:text="@string/setting_language"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/tv_current_language"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="14sp"
+                    tools:text="简体中文" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_arrow_drop_down"
+                    app:tint="?android:attr/textColorSecondary" />
+            </LinearLayout>
 
             <!-- 条目 1: 跟随系统主题 -->
             <LinearLayout
@@ -56,7 +102,7 @@
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp">
+                android:paddingHorizontal="12dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -67,12 +113,12 @@
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="14dp"
+                    android:layout_marginStart="10dp"
                     android:layout_weight="1"
-                    android:text="跟随系统主题"
+                    android:text="@string/setting_follow_system_theme"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="15sp"
-                    android:textStyle="bold" />
+                     />
 
                 <com.google.android.material.materialswitch.MaterialSwitch
                     android:id="@+id/switch_follow_system"
@@ -94,7 +140,7 @@
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp">
+                android:paddingHorizontal="12dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -105,12 +151,12 @@
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="14dp"
+                    android:layout_marginStart="10dp"
                     android:layout_weight="1"
-                    android:text="开启暗黑模式"
+                    android:text="@string/setting_dark_mode"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="15sp"
-                    android:textStyle="bold" />
+                     />
 
                 <com.google.android.material.materialswitch.MaterialSwitch
                     android:id="@+id/switch_dark_mode"
@@ -127,12 +173,12 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="12dp"
                 android:layout_marginBottom="8dp"
-                android:text="数据与刷新"
+                android:text="@string/settings_section_refresh"
                 android:textColor="#818CF8"
                 android:textSize="13sp"
-                android:textStyle="bold" />
+                 />
 
             <!-- 条目 3: 开启实时自动刷新 -->
             <LinearLayout
@@ -143,7 +189,7 @@
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp">
+                android:paddingHorizontal="12dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -154,12 +200,12 @@
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="14dp"
+                    android:layout_marginStart="10dp"
                     android:layout_weight="1"
-                    android:text="开启实时自动刷新"
+                    android:text="@string/setting_auto_refresh"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="15sp"
-                    android:textStyle="bold" />
+                     />
 
                 <com.google.android.material.materialswitch.MaterialSwitch
                     android:id="@+id/switch_auto_refresh"
@@ -183,7 +229,7 @@
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp">
+                android:paddingHorizontal="12dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -194,12 +240,12 @@
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="14dp"
+                    android:layout_marginStart="10dp"
                     android:layout_weight="1"
-                    android:text="刷新时间间隔"
+                    android:text="@string/setting_refresh_interval"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="15sp"
-                    android:textStyle="bold" />
+                     />
 
                 <TextView
                     android:id="@+id/tv_current_interval"
@@ -222,12 +268,12 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="12dp"
                 android:layout_marginBottom="8dp"
-                android:text="Shizuku 提权"
+                android:text="@string/settings_section_shizuku"
                 android:textColor="#818CF8"
                 android:textSize="13sp"
-                android:textStyle="bold" />
+                 />
 
             <!-- 条目 5: 启用 Shizuku 提权读取 -->
             <LinearLayout
@@ -241,7 +287,7 @@
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp">
+                android:paddingHorizontal="12dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -252,24 +298,24 @@
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="14dp"
+                    android:layout_marginStart="10dp"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Shizuku 提权服务"
+                        android:text="@string/shizuku_service_name"
                         android:textColor="?android:attr/textColorPrimary"
                         android:textSize="15sp"
-                        android:textStyle="bold" />
+                         />
 
                     <TextView
                         android:id="@+id/tv_shizuku_status"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="1dp"
-                        android:text="检查中..."
+                        android:text="@string/shizuku_status_checking"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="11.5sp" />
                 </LinearLayout>
@@ -279,10 +325,10 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginEnd="6dp"
-                    android:text="请求授权"
+                    android:text="@string/shizuku_action_authorize"
                     android:textColor="#818CF8"
                     android:textSize="14sp"
-                    android:textStyle="bold" />
+                     />
 
                 <ImageView
                     android:layout_width="18dp"
@@ -296,12 +342,12 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="12dp"
                 android:layout_marginBottom="8dp"
-                android:text="数据备份与恢复"
+                android:text="@string/settings_section_backup"
                 android:textColor="#818CF8"
                 android:textSize="13sp"
-                android:textStyle="bold" />
+                 />
 
             <!-- 条目: 导出数据备份 -->
             <LinearLayout
@@ -315,7 +361,7 @@
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp">
+                android:paddingHorizontal="12dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -326,23 +372,23 @@
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="14dp"
+                    android:layout_marginStart="10dp"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="导出数据备份"
+                        android:text="@string/setting_export_backup"
                         android:textColor="?android:attr/textColorPrimary"
                         android:textSize="15sp"
-                        android:textStyle="bold" />
+                         />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="1dp"
-                        android:text="将电池快照及设置导出为 JSON 文件"
+                        android:text="@string/setting_export_backup_desc"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="11.5sp" />
                 </LinearLayout>
@@ -366,7 +412,7 @@
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp">
+                android:paddingHorizontal="12dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -377,23 +423,23 @@
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="14dp"
+                    android:layout_marginStart="10dp"
                     android:layout_weight="1"
                     android:orientation="vertical">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="导入并恢复数据"
+                        android:text="@string/setting_restore_backup"
                         android:textColor="?android:attr/textColorPrimary"
                         android:textSize="15sp"
-                        android:textStyle="bold" />
+                         />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="1dp"
-                        android:text="从本地 JSON 备份中恢复数据与配置"
+                        android:text="@string/setting_restore_backup_desc"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="11.5sp" />
                 </LinearLayout>
@@ -410,12 +456,12 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
-                android:layout_marginTop="16dp"
+                android:layout_marginTop="12dp"
                 android:layout_marginBottom="8dp"
-                android:text="关于"
+                android:text="@string/settings_section_about"
                 android:textColor="#818CF8"
                 android:textSize="13sp"
-                android:textStyle="bold" />
+                 />
 
             <!-- 条目 6: 电池健康度计算方式说明 -->
             <LinearLayout
@@ -429,7 +475,7 @@
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp">
+                android:paddingHorizontal="12dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -440,12 +486,12 @@
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="14dp"
+                    android:layout_marginStart="10dp"
                     android:layout_weight="1"
-                    android:text="电池健康度计算方式说明"
+                    android:text="@string/setting_health_guide"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="15sp"
-                    android:textStyle="bold" />
+                     />
 
                 <ImageView
                     android:layout_width="18dp"
@@ -454,7 +500,7 @@
                     app:tint="?android:attr/textColorSecondary" />
             </LinearLayout>
 
-            <!-- 条目 6: 应用版本 -->
+            <!-- 条目 7: 应用版本 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="56dp"
@@ -463,7 +509,7 @@
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="16dp">
+                android:paddingHorizontal="12dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -474,12 +520,12 @@
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="14dp"
+                    android:layout_marginStart="10dp"
                     android:layout_weight="1"
-                    android:text="电池检测 (Battery App)"
+                    android:text="@string/setting_app_version"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="15sp"
-                    android:textStyle="bold" />
+                     />
 
                 <TextView
                     android:id="@+id/tv_app_version"

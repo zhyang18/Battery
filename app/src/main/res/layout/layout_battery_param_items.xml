@@ -24,7 +24,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="🔋 电量"
+                android:text="@string/param_level"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -47,7 +47,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="⚡ 电池状态"
+                android:text="@string/param_status"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -70,7 +70,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="🩺 电池健康"
+                android:text="@string/param_health_status"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -93,7 +93,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="❤️ 健康度"
+                android:text="@string/param_health_percent"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -116,7 +116,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="🔄 循环计数"
+                android:text="@string/param_cycle_count"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -139,7 +139,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="🌡️ 电池温度"
+                android:text="@string/param_temperature"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -162,7 +162,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="🔋 电池电压"
+                android:text="@string/param_voltage"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -185,7 +185,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="⚡ 瞬时电流"
+                android:text="@string/param_current"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -208,7 +208,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="⚡ 电池功率"
+                android:text="@string/param_power"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -231,7 +231,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="🔋 设计容量"
+                android:text="@string/param_design_capacity"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -245,7 +245,7 @@
         </LinearLayout>
         <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#14888888" />
 
-        <!-- 11. 充满容量 (原充满电容量，移至当前容量上方) -->
+        <!-- 11. 充满容量 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -254,7 +254,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="🔋 充满容量"
+                android:text="@string/param_full_capacity"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -268,7 +268,7 @@
         </LinearLayout>
         <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#14888888" />
 
-        <!-- 12. 当前容量 (移至充满容量下方) -->
+        <!-- 12. 当前容量 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -277,7 +277,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="🔋 当前容量"
+                android:text="@string/param_current_capacity"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -300,7 +300,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="🔋 双电芯"
+                android:text="@string/param_dual_cell"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -323,7 +323,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="🔬 电池技术"
+                android:text="@string/param_technology"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView
@@ -336,7 +336,7 @@
                 tools:text="Li-ion" />
         </LinearLayout>
 
-        <!-- 15. 抓取/报告日期时间 (有值时动态显示) -->
+        <!-- 15. 抓取/报告日期时间 -->
         <View
             android:id="@+id/divider_capture_time"
             android:layout_width="match_parent"
@@ -353,7 +353,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="📅 检测时间"
+                android:text="@string/param_capture_time"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp" />
             <TextView

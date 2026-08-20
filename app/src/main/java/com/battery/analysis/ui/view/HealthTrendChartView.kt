@@ -236,7 +236,8 @@ class HealthTrendChartView @JvmOverloads constructor(
      */
     private fun drawEmptyHint(canvas: Canvas, centerX: Float, centerY: Float) {
         textPaint.textAlign = Paint.Align.CENTER
-        canvas.drawText("暂无健康度快照，保存快照后将自动生成衰减趋势图", centerX, centerY, textPaint)
+        val hint = context.getString(com.battery.analysis.R.string.trend_empty_hint)
+        canvas.drawText(hint, centerX, centerY, textPaint)
     }
 
     /**
@@ -375,10 +376,16 @@ class HealthTrendChartView @JvmOverloads constructor(
         canvas.drawLine(p.x, top, p.x, top + chartHeight, cursorPaint)
 
         // 2. 准备 Tooltip 文本
-        val titleText = "【${pt.category}】${String.format("%.2f%%", pt.health)}"
+        val localizedCat = when (pt.category) {
+            "系统api" -> context.getString(com.battery.analysis.R.string.tab_normal_api)
+            "Shizuku" -> "Shizuku"
+            "错误报告" -> context.getString(com.battery.analysis.R.string.tab_bugreport)
+            else -> pt.category
+        }
+        val titleText = "【$localizedCat】${String.format(java.util.Locale.getDefault(), "%.2f%%", pt.health)}"
         val timeText = pt.captureTime
-        val cycleText = pt.cycleCount?.let { "循环 $it 次" } ?: ""
-        val capText = pt.fullCapacity?.let { "充满 ${String.format("%.0f", it)} mAh" } ?: ""
+        val cycleText = pt.cycleCount?.let { context.getString(com.battery.analysis.R.string.trend_tooltip_cycle_format, it) } ?: ""
+        val capText = pt.fullCapacity?.let { context.getString(com.battery.analysis.R.string.trend_tooltip_full_format, it) } ?: ""
         val extraText = listOf(cycleText, capText).filter { it.isNotBlank() }.joinToString(" | ")
 
         // 3. 计算气泡尺寸与位置

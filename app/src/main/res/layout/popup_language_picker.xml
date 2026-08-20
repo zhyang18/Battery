@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_popup_dropdown"
+    android:elevation="12dp"
+    android:orientation="vertical"
+    android:paddingVertical="6dp"
+    android:paddingHorizontal="4dp">
+
+    <!-- 选项 1: 跟随系统 -->
+    <TextView
+        android:id="@+id/tv_lang_follow_system"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp"
+        android:text="@string/lang_follow_system"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp" />
+
+    <!-- 选项 2: 简体中文 -->
+    <TextView
+        android:id="@+id/tv_lang_zh"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp"
+        android:text="@string/lang_zh"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp" />
+
+    <!-- 选项 3: English -->
+    <TextView
+        android:id="@+id/tv_lang_en"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp"
+        android:text="@string/lang_en"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp" />
+
+</LinearLayout>

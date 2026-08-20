@@ -177,7 +177,8 @@
                 style="@style/Widget.MaterialComponents.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="取消"
+                android:text="@string/cancel"
+                android:textAllCaps="false"
                 android:textColor="?android:attr/textColorSecondary" />
 
             <Button
@@ -186,7 +187,8 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:backgroundTint="#2196F3"
-                android:text="确认保存"
+                android:text="@string/confirm"
+                android:textAllCaps="false"
                 android:textColor="@android:color/white"
                 app:cornerRadius="8dp" />
         </LinearLayout>

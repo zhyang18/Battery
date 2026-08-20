@@ -10,6 +10,7 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.viewpager2.widget.ViewPager2
+import com.battery.analysis.R
 import com.battery.analysis.databinding.FragmentDetectionBinding
 import com.battery.analysis.viewmodel.BatteryViewModel
 import com.google.android.material.tabs.TabLayoutMediator
@@ -58,7 +59,11 @@ class DetectionFragment : Fragment() {
         binding.detectionViewPager.adapter = pagerAdapter
         binding.detectionViewPager.offscreenPageLimit = 2
 
-        val tabTitles = arrayOf("系统api", "Shizuku", "错误报告")
+        val tabTitles = arrayOf(
+            getString(R.string.tab_normal_api),
+            getString(R.string.tab_shizuku),
+            getString(R.string.tab_bugreport)
+        )
 
         TabLayoutMediator(binding.tabLayout, binding.detectionViewPager) { tab, position ->
             tab.text = tabTitles.getOrElse(position) { "" }

@@ -20,7 +20,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="历史记录"
+            android:text="@string/history_title"
             android:textColor="?android:attr/textColorPrimary"
             android:textSize="20sp"
             android:textStyle="bold" />
@@ -62,7 +62,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="4dp"
-                android:text="保存快照"
+                android:text="@string/save_snapshot"
                 android:textColor="#2196F3"
                 android:textSize="13sp"
                 android:textStyle="bold" />
@@ -98,7 +98,7 @@
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
-            android:text="全部"
+            android:text="@string/filter_all"
             android:textColor="@android:color/white"
             android:textSize="13sp"
             android:textStyle="bold" />
@@ -113,7 +113,7 @@
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
-            android:text="系统api"
+            android:text="@string/filter_normal_api"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="13sp" />
 
@@ -127,7 +127,7 @@
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
-            android:text="Shizuku"
+            android:text="@string/filter_shizuku"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="13sp" />
 
@@ -141,15 +141,10 @@
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
-            android:text="错误报告"
+            android:text="@string/filter_bugreport"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="13sp" />
     </LinearLayout>
-
-<!--    <View-->
-<!--        android:layout_width="match_parent"-->
-<!--        android:layout_height="1dp"-->
-<!--        android:background="#1A888888" />-->
 
     <!-- 3. 原生 CoordinatorLayout 嵌套滑动联动容器 -->
     <androidx.coordinatorlayout.widget.CoordinatorLayout
@@ -166,7 +161,7 @@
             android:background="?android:attr/colorBackground"
             app:elevation="0dp">
 
-            <!-- 电池健康度衰减趋势折线图卡片（原生 AppBarLayout 滑动折叠：仅当列表滑到第一项时向下滑才展开） -->
+            <!-- 电池健康度衰减趋势折线图卡片（原生 AppBarLayout 滑动折叠） -->
             <LinearLayout
                 android:id="@+id/layout_trend_chart_card"
                 android:layout_width="match_parent"
@@ -190,7 +185,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:text="📈 电池健康度衰减趋势"
+                        android:text="@string/trend_chart_title"
                         android:textColor="?android:attr/textColorPrimary"
                         android:textSize="13.5sp"
                         android:textStyle="bold" />
@@ -230,7 +225,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="📉 衰减速率统计"
+                            android:text="@string/trend_decay_stats_title"
                             android:textColor="?android:attr/textColorSecondary"
                             android:textSize="11.5sp"
                             android:textStyle="bold" />
@@ -244,7 +239,7 @@
                             android:focusable="true"
                             android:gravity="center"
                             android:paddingHorizontal="8dp"
-                            android:text="明细 ❯"
+                            android:text="@string/details"
                             android:textColor="#2196F3"
                             android:textSize="11sp"
                             android:textStyle="bold" />
@@ -285,7 +280,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="1dp"
-                                android:text="📅 每日平均"
+                                android:text="@string/stat_daily_avg"
                                 android:textColor="?android:attr/textColorSecondary"
                                 android:textSize="10.5sp" />
                         </LinearLayout>
@@ -318,7 +313,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="1dp"
-                                android:text="📆 每月平均"
+                                android:text="@string/stat_monthly_avg"
                                 android:textColor="?android:attr/textColorSecondary"
                                 android:textSize="10.5sp" />
                         </LinearLayout>
@@ -351,7 +346,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="1dp"
-                                android:text="🗓️ 每年预估"
+                                android:text="@string/stat_yearly_est"
                                 android:textColor="?android:attr/textColorSecondary"
                                 android:textSize="10.5sp" />
                         </LinearLayout>
@@ -366,7 +361,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:gravity="center"
-                    android:text="💡 按住图表可左右滑动探查每个快照详情"
+                    android:text="@string/trend_touch_tip"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="11sp" />
             </LinearLayout>
@@ -417,7 +412,7 @@
                         android:id="@+id/tv_empty_title"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="暂无电池检测记录"
+                        android:text="@string/empty_history_title"
                         android:textColor="?android:attr/textColorPrimary"
                         android:textSize="18sp"
                         android:textStyle="bold" />
@@ -429,7 +424,7 @@
                         android:layout_marginTop="8dp"
                         android:gravity="center"
                         android:lineSpacingExtra="4dp"
-                        android:text="点击右上角或下方按钮，可一次性同时保存【系统api、Shizuku、错误报告】的全部检测数据。"
+                        android:text="@string/empty_history_desc"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="14sp" />
 
@@ -439,7 +434,8 @@
                         android:layout_height="44dp"
                         android:layout_marginTop="20dp"
                         android:backgroundTint="#2196F3"
-                        android:text="立即保存当前快照"
+                        android:text="@string/save_now"
+                        android:textAllCaps="false"
                         android:textColor="@android:color/white"
                         android:textSize="14sp"
                         app:cornerRadius="22dp" />

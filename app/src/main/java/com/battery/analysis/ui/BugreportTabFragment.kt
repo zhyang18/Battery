@@ -12,6 +12,7 @@ import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.battery.analysis.R
 import com.battery.analysis.databinding.FragmentBugreportBinding
 import com.battery.analysis.viewmodel.BatteryViewModel
 import kotlinx.coroutines.launch
@@ -76,8 +77,8 @@ class BugreportTabFragment : Fragment() {
         // 导入错误报告 / 取消解析按钮点击事件
         binding.btnImportBugreport.setOnClickListener {
             if (viewModel.isParsingBugreport.value) {
-                viewModel.cancelBugreportParsing()
-                Toast.makeText(requireContext(), "已取消解析", Toast.LENGTH_SHORT).show()
+                viewModel.cancelBugreportParsing(requireContext())
+                Toast.makeText(requireContext(), getString(R.string.cancel), Toast.LENGTH_SHORT).show()
             } else {
                 openBugreportLauncher.launch(arrayOf("*/*", "application/zip", "text/plain"))
             }
@@ -96,8 +97,19 @@ class BugreportTabFragment : Fragment() {
                 launch {
                     viewModel.bugreportResult.collect { result ->
                         BatteryParamViewBinder.bind(binding.layoutParams, result?.parsedBatteryInfo)
-                        if (result != null && result.rawHealthInfoText.isNotEmpty()) {
-                            binding.tvRawHealthInfo.text = result.rawHealthInfoText
+                        if (result != null) {
+                            if (result.tableItems.isEmpty() && result.parsedBatteryInfo != null) {
+                                val isZh = requireContext().resources.configuration.locales[0].language.startsWith("zh")
+                                val header = if (isZh) {
+                                    "【历史快照载入】\n检测时间: ${result.parsedBatteryInfo.captureTime ?: ""}\n数据来源: 错误报告快照\n"
+                                } else {
+                                    "[History Snapshot Loaded]\nCapture Time: ${result.parsedBatteryInfo.captureTime ?: ""}\nSource: Bugreport Snapshot\n"
+                                }
+                                val record = com.battery.analysis.model.HistoryRecord.fromBatteryInfo(result.parsedBatteryInfo, "错误报告")
+                                binding.tvRawHealthInfo.text = "$header${record.formatFullDetails(requireContext())}"
+                            } else if (result.rawHealthInfoText.isNotEmpty()) {
+                                binding.tvRawHealthInfo.text = result.rawHealthInfoText
+                            }
                         }
                     }
                 }
@@ -106,7 +118,7 @@ class BugreportTabFragment : Fragment() {
                     viewModel.isParsingBugreport.collect { isParsing ->
                         binding.progressBarBugreport.visibility = if (isParsing) View.VISIBLE else View.GONE
                         if (!isParsing) {
-                            binding.btnImportBugreport.text = "导入报告"
+                            binding.btnImportBugreport.text = getString(R.string.bugreport_btn_import)
                         }
                     }
                 }
@@ -115,7 +127,7 @@ class BugreportTabFragment : Fragment() {
                     viewModel.bugreportProgress.collect { progress ->
                         if (viewModel.isParsingBugreport.value) {
                             binding.progressBarBugreport.progress = progress
-                            binding.btnImportBugreport.text = "取消 ($progress%)"
+                            binding.btnImportBugreport.text = "${getString(R.string.bugreport_btn_cancel)} ($progress%)"
                         }
                     }
                 }

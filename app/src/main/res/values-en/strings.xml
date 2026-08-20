@@ -1,0 +1,224 @@
+<resources>
+    <!-- Base App -->
+    <string name="app_name">Battery Analysis</string>
+    <string name="app_full_title">Battery Analysis (Battery App)</string>
+
+    <!-- Bottom Navigation -->
+    <string name="nav_detection">Detection</string>
+    <string name="nav_history">History</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Common Operations & Status -->
+    <string name="unknown">Unknown</string>
+    <string name="yes">Yes</string>
+    <string name="no">No</string>
+    <string name="cancel">Cancel</string>
+    <string name="confirm">Confirm</string>
+    <string name="close">Close</string>
+    <string name="understood">Got It</string>
+    <string name="copy">Copy All</string>
+    <string name="delete">Delete</string>
+    <string name="clear_all">Clear All</string>
+    <string name="save_snapshot">Save Snapshot</string>
+    <string name="save_now">Save Current Snapshot</string>
+    <string name="details">Details ❯</string>
+
+    <!-- Detection Tabs -->
+    <string name="tab_normal_api">System API</string>
+    <string name="tab_shizuku">Shizuku</string>
+    <string name="tab_bugreport">Bugreport</string>
+
+    <!-- 15 Battery Parameter Labels -->
+    <string name="param_level">🔋 Battery Level</string>
+    <string name="param_status">⚡ Status</string>
+    <string name="param_health_status">🩺 Health State</string>
+    <string name="param_health_percent">❤️ Battery Health</string>
+    <string name="param_cycle_count">🔄 Cycle Count</string>
+    <string name="param_temperature">🌡️ Temperature</string>
+    <string name="param_voltage">🔋 Voltage</string>
+    <string name="param_current">⚡ Current</string>
+    <string name="param_power">⚡ Power</string>
+    <string name="param_design_capacity">🔋 Design Capacity</string>
+    <string name="param_full_capacity">🔋 Full Charge Capacity</string>
+    <string name="param_current_capacity">🔋 Current Capacity</string>
+    <string name="param_dual_cell">🔋 Dual Cell</string>
+    <string name="param_technology">🔬 Technology</string>
+    <string name="param_capture_time">📅 Capture Time</string>
+
+    <!-- Battery Status Enums -->
+    <string name="battery_status_charging">Charging</string>
+    <string name="battery_status_discharging">Discharging</string>
+    <string name="battery_status_not_charging">Not Charging</string>
+    <string name="battery_status_full">Full</string>
+    <string name="battery_health_good">Good</string>
+    <string name="battery_health_overheat">Overheat</string>
+    <string name="battery_health_dead">Dead</string>
+    <string name="battery_health_over_voltage">Over Voltage</string>
+    <string name="battery_health_cold">Cold</string>
+
+    <!-- Detection Tab Descriptions -->
+    <string name="tip_drag_refresh">Pull down to refresh battery data</string>
+    <string name="shizuku_card_title">Shizuku Deep Hardware Reading</string>
+    <string name="shizuku_card_desc">Obtain ADB-level permissions via Shizuku to read Linux kernel fuel gauge chip registers, extracting true cycle counts, physical FCC capacity, and dual-cell status.</string>
+    <string name="shizuku_action_authorize">Request Auth</string>
+    <string name="shizuku_action_authorized">Authorized</string>
+    <string name="shizuku_action_unauthorized">Unauthorized</string>
+    <string name="shizuku_status_checking">Checking...</string>
+    <string name="shizuku_status_not_running">Shizuku: Not Running</string>
+    <string name="shizuku_status_authorized">Shizuku: Authorized</string>
+    <string name="shizuku_status_unauthorized">Shizuku: Unauthorized</string>
+    <string name="shizuku_service_name">Shizuku Privileged Service</string>
+
+    <!-- Bugreport Parser -->
+    <string name="bugreport_card_title">Bugreport Fast Stream Parsing</string>
+    <string name="bugreport_card_desc">Support importing system bugreport zip archives or text files, using sliding window byte stream indexing to instantly extract official getHealthInfo battery data.</string>
+    <string name="bugreport_btn_import">Import Bugreport</string>
+    <string name="bugreport_btn_cancel">Cancel Parsing</string>
+    <string name="bugreport_btn_view_raw">View getHealthInfo Raw Log</string>
+    <string name="bugreport_status_default">No bugreport log imported. Click below to select bugreport.zip or txt file.</string>
+    <string name="bugreport_status_auto_loaded">Automatically loaded latest saved bugreport snapshot (%s)</string>
+    <string name="bugreport_status_indexing">Quickly indexing and streaming bugreport log...</string>
+    <string name="bugreport_status_parsing">Streaming getHealthInfo data (%d%%)... Tap to cancel anytime</string>
+    <string name="bugreport_status_success">Successfully extracted getHealthInfo core battery data</string>
+    <string name="bugreport_status_failed">Failed to parse complete getHealthInfo data from bugreport</string>
+    <string name="bugreport_status_cancelled">Bugreport parsing cancelled</string>
+
+    <!-- History Snapshot Raw Log Text -->
+    <string name="history_snapshot_load_title">[History Snapshot Loaded]</string>
+    <string name="history_snapshot_source">Source: Bugreport Snapshot</string>
+    <string name="history_details_title">[Battery Inspection History]</string>
+    <string name="history_detail_category">🏷️ Category</string>
+    <string name="history_detail_time">📅 Capture Time</string>
+    <string name="history_detail_note">📝 Note</string>
+    <string name="history_detail_level">🔋 Battery Level</string>
+    <string name="history_detail_status">⚡ Status</string>
+    <string name="history_detail_health_status">💚 Health State</string>
+    <string name="history_detail_health">✨ Battery Health</string>
+    <string name="history_detail_cycle">🔄 Cycle Count</string>
+    <string name="history_detail_temp">🌡️ Temperature</string>
+    <string name="history_detail_voltage">⚡ Voltage</string>
+    <string name="history_detail_current">📈 Current</string>
+    <string name="history_detail_power">💡 Power</string>
+    <string name="history_detail_design_cap">🔋 Design Capacity</string>
+    <string name="history_detail_full_cap">🔋 Full Charge Capacity</string>
+    <string name="history_detail_current_cap">🔋 Current Capacity</string>
+    <string name="history_detail_dual_cell">⚙️ Dual Cell</string>
+    <string name="history_detail_tech">🔬 Technology</string>
+    <string name="history_cycle_format">%d cycles</string>
+
+    <!-- History Page -->
+    <string name="history_title">History</string>
+    <string name="history_count_format">%d records</string>
+    <string name="filter_all">All</string>
+    <string name="filter_normal_api">System API</string>
+    <string name="filter_shizuku">Shizuku</string>
+    <string name="filter_bugreport">Bugreport</string>
+
+    <!-- Trend Chart & Decay Stats -->
+    <string name="trend_chart_title">📈 Battery Health Decay Trend</string>
+    <string name="trend_decay_stats_title">📉 Decay Rate Statistics</string>
+    <string name="stat_daily_avg">📅 Daily Avg</string>
+    <string name="stat_monthly_avg">📆 Monthly Avg</string>
+    <string name="stat_yearly_est">🗓️ Yearly Est</string>
+    <string name="trend_touch_tip">💡 Touch and slide on chart to inspect snapshots</string>
+    <string name="trend_latest_decay_format">Latest %1$.2f%% (Decay %2$.2f%%)</string>
+    <string name="trend_latest_format">Latest %.2f%%</string>
+    <string name="trend_current_format">Current %.2f%%</string>
+    <string name="trend_empty_hint">No snapshots yet. Trend chart will appear after saving snapshots.</string>
+    <string name="trend_tooltip_cycle_format">Cycles: %d</string>
+    <string name="trend_tooltip_full_format">Full: %.0f mAh</string>
+
+    <!-- History Empty State -->
+    <string name="empty_history_title">No Battery Snapshots</string>
+    <string name="empty_history_desc">Tap the button above or below to save current [System API, Shizuku, Bugreport] snapshots at once.</string>
+    <string name="empty_history_category_title">No records under [%s]</string>
+    <string name="empty_history_category_desc">Switch category tabs above or tap the button below to save current battery snapshots.</string>
+
+    <!-- Decay Statistics Dialog -->
+    <string name="dialog_decay_title">🔋 Battery Health Decay Statistics</string>
+    <string name="dialog_decay_subtitle">Multi-dimensional analysis of daily, monthly, and yearly decay rates based on history trends</string>
+    <string name="dialog_decay_rate_title">📊 Decay Rate Estimation</string>
+    <string name="dialog_decay_periodic_title">📋 Periodic Breakdown</string>
+    <string name="tab_by_day">Daily</string>
+    <string name="tab_by_month">Monthly</string>
+    <string name="tab_by_year">Yearly</string>
+    <string name="dialog_decay_formula_title">📐 Decay Algorithm &amp; Advice</string>
+    <string name="dialog_decay_formula_desc" formatted="false">• Daily Decay = (Initial Health - Latest Health) ÷ Sampling Days\n• Monthly Decay = Daily Decay × 30.44 days\n• Yearly Est = Daily Decay × 365.25 days\n• Lithium batteries typically decay to ~80% after 300~500 cycles (~4%~8% yearly loss is normal).</string>
+    <string name="empty_periodic_records">No snapshot records in this period</string>
+
+    <!-- Delete & Clear Confirmation -->
+    <string name="dialog_delete_title">Delete this snapshot?</string>
+    <string name="dialog_delete_desc">This battery record will be permanently removed from local storage.</string>
+    <string name="dialog_clear_all_title">Clear all history records?</string>
+    <string name="dialog_clear_all_desc">Are you sure you want to clear all %d snapshots? This action cannot be undone.</string>
+
+    <!-- Settings Page -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_section_ui">User Interface</string>
+    <string name="setting_language">Language</string>
+    <string name="setting_follow_system_theme">Follow System Theme</string>
+    <string name="setting_dark_mode">Dark Mode</string>
+
+    <string name="settings_section_refresh">Data &amp; Refresh</string>
+    <string name="setting_auto_refresh">Auto Refresh</string>
+    <string name="setting_refresh_interval">Refresh Interval</string>
+    <string name="interval_1s">1 second</string>
+    <string name="interval_2s">2 seconds</string>
+    <string name="interval_3s">3 seconds</string>
+    <string name="interval_5s">5 seconds</string>
+    <string name="interval_10s">10 seconds</string>
+
+    <string name="settings_section_shizuku">Shizuku Service</string>
+
+    <string name="settings_section_backup">Data Backup &amp; Restore</string>
+    <string name="setting_export_backup">Export Data Backup</string>
+    <string name="setting_export_backup_desc">Export snapshots and settings as JSON</string>
+    <string name="setting_restore_backup">Import &amp; Restore Data</string>
+    <string name="setting_restore_backup_desc">Restore snapshots and settings from JSON</string>
+
+    <string name="settings_section_about">About</string>
+    <string name="setting_health_guide">Health Calculation Guide</string>
+    <string name="setting_app_version">Battery Analysis (Battery App)</string>
+
+    <!-- Language Selection -->
+    <string name="lang_follow_system">🌐 Follow System</string>
+    <string name="lang_zh">🇨🇳 简体中文</string>
+    <string name="lang_en">🇺🇸 English</string>
+
+    <!-- Backup Restore Dialog -->
+    <string name="dialog_restore_title">Confirm Data Restoration?</string>
+    <string name="dialog_restore_mode_title">Restore Mode:</string>
+    <string name="dialog_restore_mode_overwrite">Overwrite existing data (clear then import)</string>
+    <string name="dialog_restore_mode_merge">Merge with existing data (deduplicate &amp; append)</string>
+    <string name="dialog_restore_btn_confirm">Restore Now</string>
+
+    <!-- Health Calculation Guide Dialog -->
+    <string name="guide_title">Battery Health Guide</string>
+    <string name="guide_subtitle">SoH Core Algorithm &amp; 3 Data Sources Principle</string>
+    <string name="guide_formula_title">📐 Golden Calculation Formula</string>
+    <string name="guide_formula_badge" formatted="false">Health (%) = (Full Capacity ÷ Design Capacity) × 100%</string>
+    <string name="guide_formula_desc">State of Health (SoH) measures the maximum available capacity of the battery compared to its factory rated design capacity.</string>
+    <string name="guide_sources_title">🔬 3 Data Acquisition Mechanisms</string>
+    <string name="guide_source_1_title">1. System Native API</string>
+    <string name="guide_source_1_desc">Based on the BatteryManager framework. Calculates full charge capacity proportionally from current level and charge counter, reflecting factory configs.</string>
+    <string name="guide_source_2_title">2. Shizuku Kernel Node (High Precision)</string>
+    <string name="guide_source_2_desc">Reads Linux kernel driver nodes (charge_full, charge_full_design, cycle_count) and fuel gauge IC registers via ADB privileges for highest precision.</string>
+    <string name="guide_source_3_title">3. Bugreport Log Snapshot</string>
+    <string name="guide_source_3_desc">Authoritative getHealthInfo snapshots dumped from system bugreport, containing official Android power management framework health data.</string>
+    <string name="guide_eval_title">📊 Health Decay Evaluation Standard</string>
+    <string name="guide_eval_desc" formatted="false">• 95% ~ 100%: Excellent state, almost no battery decay\n• 85% ~ 95%: Good state, normal daily degradation\n• 80% ~ 85%: Mild decay, slight battery life reduction\n• &lt; 80%: Heavy decay, battery replacement recommended</string>
+    <string name="guide_tip_temp">💡 Tip: Full charge capacity fluctuates slightly with ambient temperature (&lt;15°C or &gt;35°C). It is recommended to inspect at room temperature after a full charge.</string>
+
+    <!-- Toast Messages -->
+    <string name="toast_shizuku_success">Shizuku authorization succeeded!</string>
+    <string name="toast_shizuku_denied">Shizuku authorization denied</string>
+    <string name="toast_press_again_exit">Press back again to exit</string>
+    <string name="toast_copy_success">Snapshot copied to clipboard</string>
+    <string name="toast_delete_success">Snapshot deleted successfully</string>
+    <string name="toast_clear_success">All history records cleared</string>
+    <string name="toast_save_snapshots_format">Saved snapshots for [%s]</string>
+    <string name="toast_no_data_to_save">No battery data available to save. Please refresh first.</string>
+    <string name="toast_backup_success">Backup succeeded! Exported %d records</string>
+    <string name="toast_restore_success">Successfully %1$s restored %2$d records!</string>
+    <string name="toast_restore_failed">Data restoration failed: %s</string>
+</resources>

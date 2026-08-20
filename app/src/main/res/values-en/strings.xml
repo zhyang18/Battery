@@ -117,9 +117,13 @@
     <!-- Trend Chart & Decay Stats -->
     <string name="trend_chart_title">📈 Battery Health Decay Trend</string>
     <string name="trend_decay_stats_title">📉 Decay Rate Statistics</string>
+    <string name="trend_cycle_stats_title">🔄 Cycle Consumption Stats</string>
     <string name="stat_daily_avg">📅 Daily Avg</string>
     <string name="stat_monthly_avg">📆 Monthly Avg</string>
     <string name="stat_yearly_est">🗓️ Yearly Est</string>
+    <string name="stat_cycle_daily">📅 Daily Use</string>
+    <string name="stat_cycle_monthly">📆 Monthly Use</string>
+    <string name="stat_cycle_yearly">🗓️ Yearly Est</string>
     <string name="trend_touch_tip">💡 Touch and slide on chart to inspect snapshots</string>
     <string name="trend_latest_decay_format">Latest %1$.2f%% (Decay %2$.2f%%)</string>
     <string name="trend_latest_format">Latest %.2f%%</string>
@@ -135,15 +139,16 @@
     <string name="empty_history_category_desc">Switch category tabs above or tap the button below to save current battery snapshots.</string>
 
     <!-- Decay Statistics Dialog -->
-    <string name="dialog_decay_title">🔋 Battery Health Decay Statistics</string>
-    <string name="dialog_decay_subtitle">Multi-dimensional analysis of daily, monthly, and yearly decay rates based on history trends</string>
-    <string name="dialog_decay_rate_title">📊 Decay Rate Estimation</string>
+    <string name="dialog_decay_title">🔋 Health &amp; Cycle Decay Statistics</string>
+    <string name="dialog_decay_subtitle">Daily, monthly, and yearly consumption rates of health decay and cycle count</string>
+    <string name="dialog_decay_rate_title">📊 Health Decay Rate (Avg/Est)</string>
+    <string name="dialog_decay_cycle_rate_title">🔄 Cycle Consumption Rate (Avg/Est)</string>
     <string name="dialog_decay_periodic_title">📋 Periodic Breakdown</string>
     <string name="tab_by_day">Daily</string>
     <string name="tab_by_month">Monthly</string>
     <string name="tab_by_year">Yearly</string>
-    <string name="dialog_decay_formula_title">📐 Decay Algorithm &amp; Advice</string>
-    <string name="dialog_decay_formula_desc" formatted="false">• Daily Decay = (Initial Health - Latest Health) ÷ Sampling Days\n• Monthly Decay = Daily Decay × 30.44 days\n• Yearly Est = Daily Decay × 365.25 days\n• Lithium batteries typically decay to ~80% after 300~500 cycles (~4%~8% yearly loss is normal).</string>
+    <string name="dialog_decay_formula_title">📐 Algorithms &amp; Advice</string>
+    <string name="dialog_decay_formula_desc" formatted="false">• Daily Decay = (Initial Health - Latest Health) ÷ Sampling Days\n• Monthly Decay = Daily Decay × 30.44 days; Yearly Est = Daily Decay × 365.25 days\n• Daily Cycle Consumption = Total Cycle Increase ÷ Sampling Days\n• Monthly Cycle = Daily Cycle × 30.44 days; Yearly Est = Daily Cycle × 365.25 days\n• Lithium batteries typically decay to ~80% after 300~500 cycles (~4%~8% yearly decay, ~0.5~1.2 cycles/day is normal).</string>
     <string name="empty_periodic_records">No snapshot records in this period</string>
 
     <!-- Delete & Clear Confirmation -->

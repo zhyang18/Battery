@@ -297,7 +297,7 @@ class HistoryFragment : Fragment() {
     }
 
     /**
-     * 观察 ViewModel 中的历史数据流、选中分类流以及衰减统计流，刷新界面状态。
+     * 观察 ViewModel 中的历史数据流、选中分类流以及衰减与循环统计流，刷新界面状态。
      */
     private fun observeData() {
         // 1. 观察当前选中的分类，更新标签外观
@@ -397,7 +397,7 @@ class HistoryFragment : Fragment() {
     }
 
     /**
-     * 更新趋势图下方的每日、每月、每年衰减速率卡片展示内容及文字色彩。
+     * 更新趋势图下方的每日、每月、每年健康度衰减速率卡片展示内容及文字色彩。
      *
      * @param stats 当前计算得出的衰减统计结果对象
      */
@@ -457,6 +457,23 @@ class HistoryFragment : Fragment() {
     }
 
     /**
+     * 格式化充放电循环次数消耗速率带符号。
+     *
+     * @param rate 循环消耗速率数值（正数代表循环消耗增长）
+     * @param decimals 小数点保留位数
+     * @return 格式化后的带符号文本（如 "+0.50 次"、"+15.2 次" 或 "0 次"）
+     */
+    private fun formatCycleRate(rate: Float, decimals: Int): String {
+        return if (rate > 0.0001f) {
+            String.format(Locale.getDefault(), "+%.${decimals}f 次", rate)
+        } else if (rate < -0.0001f) {
+            String.format(Locale.getDefault(), "%.${decimals}f 次", rate)
+        } else {
+            String.format(Locale.getDefault(), "%.${decimals}f 次", 0f)
+        }
+    }
+
+    /**
      * 根据衰减速率的正负返回对应的高亮警示或平稳色彩。
      *
      * @param rate 衰减速率数值
@@ -471,9 +488,9 @@ class HistoryFragment : Fragment() {
     }
 
     /**
-     * 弹出电池健康度衰减全量统计与按日/月/年周期明细对话框。
+     * 弹出电池健康度衰减与充放电循环消耗全量统计与按日/月/年周期明细对话框。
      *
-     * @param stats 电池衰减统计数据对象
+     * @param stats 电池衰减与循环统计数据对象
      * @param initialTab 初始选中的周期分类 Tab（"DAY"、"MONTH" 或 "YEAR"）
      */
     private fun showDecayStatisticsDialog(
@@ -485,6 +502,11 @@ class HistoryFragment : Fragment() {
         val tvDailyVal = dialogView.findViewById<TextView>(R.id.tv_modal_daily_val)
         val tvMonthlyVal = dialogView.findViewById<TextView>(R.id.tv_modal_monthly_val)
         val tvYearlyVal = dialogView.findViewById<TextView>(R.id.tv_modal_yearly_val)
+
+        val tvDailyCycle = dialogView.findViewById<TextView>(R.id.tv_modal_daily_cycle)
+        val tvMonthlyCycle = dialogView.findViewById<TextView>(R.id.tv_modal_monthly_cycle)
+        val tvYearlyCycle = dialogView.findViewById<TextView>(R.id.tv_modal_yearly_cycle)
+
         val tvStatDetails = dialogView.findViewById<TextView>(R.id.tv_modal_stat_details)
 
         val btnTabDay = dialogView.findViewById<TextView>(R.id.btn_tab_day)
@@ -494,7 +516,9 @@ class HistoryFragment : Fragment() {
         val tvEmptyHint = dialogView.findViewById<TextView>(R.id.tv_periodic_empty_hint)
         val btnClose = dialogView.findViewById<TextView>(R.id.btn_dialog_decay_close)
 
-        // 1. 填充概览卡片数值
+        val isZh = Locale.getDefault().language.startsWith("zh")
+
+        // 1. 填充健康度衰减卡片数值
         if (stats.hasSufficientData) {
             stats.dailyDecayRate?.let {
                 tvDailyVal.text = formatDecayValue(it, 3)
@@ -508,9 +532,41 @@ class HistoryFragment : Fragment() {
                 tvYearlyVal.text = formatDecayValue(it, 2)
                 tvYearlyVal.setTextColor(getDecayTextColor(it))
             }
+        } else {
+            tvDailyVal.text = "--"
+            tvDailyVal.setTextColor(Color.parseColor("#9CA3AF"))
+            tvMonthlyVal.text = "--"
+            tvMonthlyVal.setTextColor(Color.parseColor("#9CA3AF"))
+            tvYearlyVal.text = "--"
+            tvYearlyVal.setTextColor(Color.parseColor("#9CA3AF"))
+        }
 
+        // 2. 填充循环消耗卡片数值
+        if (stats.hasCycleData) {
+            stats.dailyCycleRate?.let {
+                tvDailyCycle.text = formatCycleRate(it, 2)
+                tvDailyCycle.setTextColor(Color.parseColor("#3B82F6"))
+            }
+            stats.monthlyCycleRate?.let {
+                tvMonthlyCycle.text = formatCycleRate(it, 1)
+                tvMonthlyCycle.setTextColor(Color.parseColor("#3B82F6"))
+            }
+            stats.yearlyCycleRate?.let {
+                tvYearlyCycle.text = formatCycleRate(it, 0)
+                tvYearlyCycle.setTextColor(Color.parseColor("#3B82F6"))
+            }
+        } else {
+            tvDailyCycle.text = "--"
+            tvDailyCycle.setTextColor(Color.parseColor("#9CA3AF"))
+            tvMonthlyCycle.text = "--"
+            tvMonthlyCycle.setTextColor(Color.parseColor("#9CA3AF"))
+            tvYearlyCycle.text = "--"
+            tvYearlyCycle.setTextColor(Color.parseColor("#9CA3AF"))
+        }
+
+        // 3. 填充辅助详细信息
+        if (stats.hasSufficientData || stats.hasCycleData) {
             val spanText = String.format(Locale.getDefault(), "%.1f", stats.spanDays)
-            val isZh = Locale.getDefault().language.startsWith("zh")
             val decayText = if (stats.totalDecay > 0.001f) {
                 if (isZh) String.format(Locale.getDefault(), "衰减 %.2f%%", stats.totalDecay) else String.format(Locale.getDefault(), "Decay %.2f%%", stats.totalDecay)
             } else if (stats.totalDecay < -0.001f) {
@@ -521,34 +577,32 @@ class HistoryFragment : Fragment() {
             val startShort = if ((stats.firstTime?.length ?: 0) >= 10) stats.firstTime!!.substring(0, 10) else (stats.firstTime ?: "")
             val lastShort = if ((stats.lastTime?.length ?: 0) >= 10) stats.lastTime!!.substring(0, 10) else (stats.lastTime ?: "")
 
+            val cycleDetailStr = if (stats.totalCycleChange != null) {
+                val sign = if (stats.totalCycleChange >= 0) "+" else ""
+                val range = if (stats.firstCycle != null && stats.lastCycle != null) " (${stats.firstCycle} 次 → ${stats.lastCycle} 次)" else ""
+                if (isZh) "\n• 累计循环消耗: $sign${stats.totalCycleChange} 次$range" else "\n• Total Cycle Change: $sign${stats.totalCycleChange} cycles$range"
+            } else ""
+
             if (isZh) {
-                tvStatDetails.text = "• 有效采样快照: ${stats.totalPoints} 次\n• 时间跨度: $spanText 天 ($startShort ~ $lastShort)\n• 累计健康度变化: $decayText"
+                tvStatDetails.text = "• 有效采样快照: ${stats.totalPoints} 次\n• 时间跨度: $spanText 天 ($startShort ~ $lastShort)\n• 累计健康度变化: $decayText$cycleDetailStr"
             } else {
-                tvStatDetails.text = "• Valid Snapshots: ${stats.totalPoints} records\n• Time Span: $spanText days ($startShort ~ $lastShort)\n• Total Health Change: $decayText"
+                tvStatDetails.text = "• Valid Snapshots: ${stats.totalPoints} records\n• Time Span: $spanText days ($startShort ~ $lastShort)\n• Total Health Change: $decayText$cycleDetailStr"
             }
         } else {
-            tvDailyVal.text = "--"
-            tvDailyVal.setTextColor(Color.parseColor("#9CA3AF"))
-            tvMonthlyVal.text = "--"
-            tvMonthlyVal.setTextColor(Color.parseColor("#9CA3AF"))
-            tvYearlyVal.text = "--"
-            tvYearlyVal.setTextColor(Color.parseColor("#9CA3AF"))
-            val isZh = Locale.getDefault().language.startsWith("zh")
             if (isZh) {
-                tvStatDetails.text = "• 有效采样快照: ${stats.totalPoints} 次\n• 提示: 需至少保存 2 次以上不同时间的健康度快照方可测算日/月/年衰减速率。"
+                tvStatDetails.text = "• 有效采样快照: ${stats.totalPoints} 次\n• 提示: 需至少保存 2 次以上不同时间的健康度快照方可测算日/月/年衰减与循环消耗速率。"
             } else {
-                tvStatDetails.text = "• Valid Snapshots: ${stats.totalPoints} records\n• Note: Save at least 2 snapshots from different timestamps to calculate decay rates."
+                tvStatDetails.text = "• Valid Snapshots: ${stats.totalPoints} records\n• Note: Save at least 2 snapshots from different timestamps to calculate decay and cycle consumption rates."
             }
         }
 
-        // 2. 动态渲染周期明细方法
+        // 4. 动态渲染周期明细方法
         fun renderPeriodicItems(items: List<PeriodicDecayItem>) {
             container.removeAllViews()
             if (items.isEmpty()) {
                 tvEmptyHint.visibility = View.VISIBLE
             } else {
                 tvEmptyHint.visibility = View.GONE
-                val isZh = Locale.getDefault().language.startsWith("zh")
                 items.forEachIndexed { index, item ->
                     val rowView = layoutInflater.inflate(R.layout.item_dialog_periodic_decay_row, container, false)
                     val tvTitle = rowView.findViewById<TextView>(R.id.tv_periodic_title)
@@ -558,12 +612,21 @@ class HistoryFragment : Fragment() {
                     val divider = rowView.findViewById<View>(R.id.divider_periodic_row)
 
                     tvTitle.text = item.periodLabel
+
+                    val cycleStr = if (item.cycleChange != null) {
+                        if (item.startCycle != null && item.endCycle != null && item.startCycle != item.endCycle) {
+                            val sign = if (item.cycleChange >= 0) "+${item.cycleChange}" else "${item.cycleChange}"
+                            if (isZh) " • 循环 ${item.startCycle} → ${item.endCycle} ($sign 次)" else " • Cycles ${item.startCycle} → ${item.endCycle} ($sign)"
+                        } else {
+                            val sign = if (item.cycleChange >= 0) "+${item.cycleChange}" else "${item.cycleChange}"
+                            if (isZh) " • 循环 $sign 次" else " • Cycles $sign"
+                        }
+                    } else ""
+
                     if (isZh) {
-                        val cycleText = item.cycleChange?.let { if (it >= 0) " • 循环 +$it 次" else " • 循环 $it 次" } ?: ""
-                        tvSubInfo.text = "共 ${item.sampleCount} 次检测$cycleText"
+                        tvSubInfo.text = "共 ${item.sampleCount} 次检测$cycleStr"
                     } else {
-                        val cycleText = item.cycleChange?.let { if (it >= 0) " • Cycles +$it" else " • Cycles $it" } ?: ""
-                        tvSubInfo.text = "${item.sampleCount} checks$cycleText"
+                        tvSubInfo.text = "${item.sampleCount} checks$cycleStr"
                     }
 
                     tvDecayBadge.text = item.formatDecay()
@@ -580,7 +643,7 @@ class HistoryFragment : Fragment() {
             }
         }
 
-        // 3. Tab 切换状态处理（按日、按月、按年顺序排列）
+        // 5. Tab 切换状态处理（按日、按月、按年顺序排列）
         fun updateTabUI(tab: String) {
             val tabs = listOf(
                 Triple(btnTabDay, "DAY", stats.dailyItems),

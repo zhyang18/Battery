@@ -159,6 +159,114 @@
                     </LinearLayout>
                 </LinearLayout>
 
+                <!-- 循环消耗速率副标题 -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/dialog_decay_cycle_rate_title"
+                    android:textColor="#3B82F6"
+                    android:textSize="13.5sp"
+                    android:textStyle="bold" />
+
+                <!-- 循环消耗日、月、年三个等宽并列卡片 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal">
+
+                    <!-- 每日消耗 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="4dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_stat_chip"
+                        android:gravity="center"
+                        android:orientation="vertical"
+                        android:paddingVertical="10dp"
+                        android:paddingHorizontal="4dp">
+
+                        <TextView
+                            android:id="@+id/tv_modal_daily_cycle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="#3B82F6"
+                            android:textSize="13.5sp"
+                            android:textStyle="bold"
+                            tools:text="+0.50 次" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/stat_cycle_daily"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+
+                    <!-- 每月消耗 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginHorizontal="2dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_stat_chip"
+                        android:gravity="center"
+                        android:orientation="vertical"
+                        android:paddingVertical="10dp"
+                        android:paddingHorizontal="4dp">
+
+                        <TextView
+                            android:id="@+id/tv_modal_monthly_cycle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="#3B82F6"
+                            android:textSize="13.5sp"
+                            android:textStyle="bold"
+                            tools:text="+15.2 次" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/stat_cycle_monthly"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+
+                    <!-- 每年预估 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="4dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_stat_chip"
+                        android:gravity="center"
+                        android:orientation="vertical"
+                        android:paddingVertical="10dp"
+                        android:paddingHorizontal="4dp">
+
+                        <TextView
+                            android:id="@+id/tv_modal_yearly_cycle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="#3B82F6"
+                            android:textSize="13.5sp"
+                            android:textStyle="bold"
+                            tools:text="+182 次" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="@string/stat_cycle_yearly"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
                 <!-- 采样与汇总辅助信息 -->
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -176,7 +284,7 @@
                         android:lineSpacingExtra="3dp"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="11.5sp"
-                        tools:text="• 有效采样快照: 8 次\n• 采样时间跨度: 12.5 天 (08-06 ~ 08-18)\n• 累计健康度变化: 98.50% → 98.25% (衰减 0.25%)" />
+                        tools:text="• 有效采样快照: 8 次\n• 采样时间跨度: 12.5 天 (08-06 ~ 08-18)\n• 累计健康度变化: 98.50% → 98.25% (衰减 0.25%)\n• 累计循环消耗: +15 次 (120 次 → 135 次)" />
                 </LinearLayout>
             </LinearLayout>
 

@@ -117,9 +117,13 @@
     <!-- 趋势图与衰减统计 -->
     <string name="trend_chart_title">📈 电池健康度衰减趋势</string>
     <string name="trend_decay_stats_title">📉 衰减速率统计</string>
+    <string name="trend_cycle_stats_title">🔄 循环次数消耗统计</string>
     <string name="stat_daily_avg">📅 每日平均</string>
     <string name="stat_monthly_avg">📆 每月平均</string>
     <string name="stat_yearly_est">🗓️ 每年预估</string>
+    <string name="stat_cycle_daily">📅 日均消耗</string>
+    <string name="stat_cycle_monthly">📆 月均消耗</string>
+    <string name="stat_cycle_yearly">🗓️ 年均预估</string>
     <string name="trend_touch_tip">💡 按住图表可左右滑动探查每个快照详情</string>
     <string name="trend_latest_decay_format">最新 %1$.2f%% (衰减 %2$.2f%%)</string>
     <string name="trend_latest_format">最新 %.2f%%</string>
@@ -135,15 +139,16 @@
     <string name="empty_history_category_desc">您可以切换上方其他分类标签查看，或点击下方按钮保存当前全部数据源快照。</string>
 
     <!-- 衰减统计弹窗 -->
-    <string name="dialog_decay_title">🔋 电池健康度衰减统计</string>
-    <string name="dialog_decay_subtitle">根据历史趋势数据全维度分析每日、每月、每年衰减速率</string>
-    <string name="dialog_decay_rate_title">📊 衰减速率统计（均值/预估）</string>
-    <string name="dialog_decay_periodic_title">📋 周期衰减明细</string>
+    <string name="dialog_decay_title">🔋 电池健康与循环消耗统计</string>
+    <string name="dialog_decay_subtitle">健康度衰减与充放电循环次数的日/月/年消耗速率</string>
+    <string name="dialog_decay_rate_title">📊 健康度衰减速率（均值/预估）</string>
+    <string name="dialog_decay_cycle_rate_title">🔄 循环次数消耗速率（均值/预估）</string>
+    <string name="dialog_decay_periodic_title">📋 周期损耗明细</string>
     <string name="tab_by_day">按日</string>
     <string name="tab_by_month">按月</string>
     <string name="tab_by_year">按年</string>
-    <string name="dialog_decay_formula_title">📐 衰减算法与科学建议</string>
-    <string name="dialog_decay_formula_desc" formatted="false">• 日均衰减 = (首点健康度 - 末点健康度) ÷ 采样天数\n• 月均衰减 = 日均衰减 × 30.44 天\n• 年均预估 = 日均衰减 × 365.25 天\n• 正常锂电池通常在 300~500 次完整充放循环后健康度衰减至 80% 左右（年均损耗约 4%~8% 为正常水平）。</string>
+    <string name="dialog_decay_formula_title">📐 算法原理与科学建议</string>
+    <string name="dialog_decay_formula_desc" formatted="false">• 日均衰减 = (首点健康度 - 末点健康度) ÷ 采样天数\n• 月均衰减 = 日均衰减 × 30.44 天；年均预估 = 日均衰减 × 365.25 天\n• 日均循环消耗 = 累计循环增量 ÷ 采样天数\n• 月均循环消耗 = 日均循环 × 30.44 天；年均预估 = 日均循环 × 365.25 天\n• 正常锂电池在 300~500 次完整充放循环后健康度衰减至 80% 左右（年均损耗约 4%~8%、日均约 0.5~1.2 次循环为常规水平）。</string>
     <string name="empty_periodic_records">暂无该周期的快照记录</string>
 
     <!-- 删除与清空确认弹窗 -->

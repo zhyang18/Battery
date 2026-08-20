@@ -8,15 +8,15 @@ import java.util.Locale
 import kotlin.math.max
 
 /**
- * 电池健康度衰减计算与统计工具类。
- * 提供从历史快照趋势点集中分析日衰减率、月衰减率、年衰减率以及按自然周期（日、月、年）聚合统计的核心算法。
+ * 电池健康度衰减与充放电循环消耗计算与统计工具类。
+ * 提供从历史快照趋势点集中分析健康度日/月/年衰减率、循环次数日/月/年消耗速率以及按自然周期（日、月、年）聚合统计的核心算法。
  */
 object BatteryDecayCalculator {
 
     private val timeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
 
     /**
-     * 根据传入的健康度采样点列表计算全量衰减统计数据。
+     * 根据传入的健康度采样点列表计算全量衰减与循环消耗统计数据。
      *
      * @param points 按时间或ID排序的健康度趋势点列表
      * @return 计算构建完成的 [DecayStatistics] 统计结果对象
@@ -44,10 +44,51 @@ object BatteryDecayCalculator {
         val firstTimeMillis = parseTimeToMillis(firstPt.captureTime, firstPt.id)
         val lastTimeMillis = parseTimeToMillis(lastPt.captureTime, lastPt.id)
 
-        // 聚合按日、月、年的实际衰减列表
+        // 聚合按日、月、年的实际衰减与循环明细列表
         val dailyItems = groupPointsByPeriod(validPoints, PeriodType.DAY)
         val monthlyItems = groupPointsByPeriod(validPoints, PeriodType.MONTH)
         val yearlyItems = groupPointsByPeriod(validPoints, PeriodType.YEAR)
+
+        // 提取包含有效循环次数的数据点集合
+        val cyclePoints = validPoints.filter { it.cycleCount != null }
+        var firstCycle: Int? = null
+        var lastCycle: Int? = null
+        var totalCycleChange: Int? = null
+        var dailyCycleRate: Float? = null
+        var monthlyCycleRate: Float? = null
+        var yearlyCycleRate: Float? = null
+        var hasCycleData = false
+
+        if (cyclePoints.size >= 2) {
+            val firstCyclePt = cyclePoints.first()
+            val lastCyclePt = cyclePoints.last()
+            firstCycle = firstCyclePt.cycleCount
+            lastCycle = lastCyclePt.cycleCount
+
+            if (firstCycle != null && lastCycle != null) {
+                totalCycleChange = lastCycle - firstCycle
+
+                val cycleSpanMillis = max(
+                    0L,
+                    parseTimeToMillis(lastCyclePt.captureTime, lastCyclePt.id) -
+                            parseTimeToMillis(firstCyclePt.captureTime, firstCyclePt.id)
+                )
+                val rawCycleDays = cycleSpanMillis / (1000.0 * 60 * 60 * 24)
+                val cycleSpanDays = if (rawCycleDays <= 0.0) 0.01 else rawCycleDays
+
+                // 每日平均循环消耗量 (次/天)
+                dailyCycleRate = (totalCycleChange / cycleSpanDays).toFloat()
+                // 每月平均循环消耗量 (次/月，按平均每月 30.4375 天折算)
+                monthlyCycleRate = dailyCycleRate * 30.4375f
+                // 每年预估循环消耗量 (次/年，按每年 365.25 天折算)
+                yearlyCycleRate = dailyCycleRate * 365.25f
+                hasCycleData = true
+            }
+        } else if (cyclePoints.size == 1) {
+            firstCycle = cyclePoints.first().cycleCount
+            lastCycle = cyclePoints.first().cycleCount
+            totalCycleChange = 0
+        }
 
         if (totalPoints < 2) {
             return DecayStatistics(
@@ -59,10 +100,17 @@ object BatteryDecayCalculator {
                 dailyDecayRate = null,
                 monthlyDecayRate = null,
                 yearlyDecayRate = null,
+                firstCycle = firstCycle,
+                lastCycle = lastCycle,
+                totalCycleChange = totalCycleChange,
+                dailyCycleRate = null,
+                monthlyCycleRate = null,
+                yearlyCycleRate = null,
                 dailyItems = dailyItems,
                 monthlyItems = monthlyItems,
                 yearlyItems = yearlyItems,
-                hasSufficientData = false
+                hasSufficientData = false,
+                hasCycleData = false
             )
         }
 
@@ -91,10 +139,17 @@ object BatteryDecayCalculator {
             dailyDecayRate = dailyRate,
             monthlyDecayRate = monthlyRate,
             yearlyDecayRate = yearlyRate,
+            firstCycle = firstCycle,
+            lastCycle = lastCycle,
+            totalCycleChange = totalCycleChange,
+            dailyCycleRate = dailyCycleRate,
+            monthlyCycleRate = monthlyCycleRate,
+            yearlyCycleRate = yearlyCycleRate,
             dailyItems = dailyItems,
             monthlyItems = monthlyItems,
             yearlyItems = yearlyItems,
-            hasSufficientData = true
+            hasSufficientData = true,
+            hasCycleData = hasCycleData
         )
     }
 
@@ -121,7 +176,7 @@ object BatteryDecayCalculator {
     }
 
     /**
-     * 将数据点按照指定的自然周期（日/月/年）进行分组聚合，并统计各周期的起止健康度与衰减损耗。
+     * 将数据点按照指定的自然周期（日/月/年）进行分组聚合，并统计各周期的起止健康度、衰减损耗及起止循环。
      *
      * @param points 按时间正序排列的健康度点列表
      * @param type 周期聚合类型
@@ -147,10 +202,10 @@ object BatteryDecayCalculator {
             val decay = startHealth - endHealth
             val label = formatPeriodLabel(key, type)
 
-            var cycleChange: Int? = null
-            if (startPoint.cycleCount != null && endPoint.cycleCount != null) {
-                cycleChange = endPoint.cycleCount - startPoint.cycleCount
-            }
+            val groupCyclePoints = group.filter { it.cycleCount != null }
+            val startCycle = groupCyclePoints.firstOrNull()?.cycleCount
+            val endCycle = groupCyclePoints.lastOrNull()?.cycleCount
+            val cycleChange = if (startCycle != null && endCycle != null) endCycle - startCycle else null
 
             result.add(
                 PeriodicDecayItem(
@@ -160,6 +215,8 @@ object BatteryDecayCalculator {
                     endHealth = endHealth,
                     decay = decay,
                     sampleCount = group.size,
+                    startCycle = startCycle,
+                    endCycle = endCycle,
                     cycleChange = cycleChange
                 )
             )

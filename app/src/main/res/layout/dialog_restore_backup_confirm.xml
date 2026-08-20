@@ -87,7 +87,7 @@
                 android:id="@+id/tv_restore_app_version"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="#818CF8"
+                android:textColor="@color/nav_item_selected"
                 android:textSize="11.5sp"
                 tools:text="v1.2.1" />
         </LinearLayout>

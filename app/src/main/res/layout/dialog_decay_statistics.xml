@@ -309,7 +309,7 @@
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="@string/dialog_decay_periodic_title"
-                        android:textColor="#818CF8"
+                        android:textColor="@color/nav_item_selected"
                         android:textSize="13.5sp"
                         android:textStyle="bold" />
 

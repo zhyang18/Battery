@@ -15,6 +15,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Lifecycle
@@ -358,7 +359,7 @@ class SettingsFragment : Fragment() {
                         binding.tvShizukuStatus.text = if (isNotRunning) getString(R.string.shizuku_status_not_running) else getString(R.string.shizuku_status_unauthorized)
                         binding.tvShizukuStatus.setTextColor(if (isNotRunning) Color.parseColor("#EF4444") else Color.parseColor("#F59E0B"))
                         binding.tvShizukuAction.text = getString(R.string.shizuku_action_authorize)
-                        binding.tvShizukuAction.setTextColor(Color.parseColor("#818CF8"))
+                        binding.tvShizukuAction.setTextColor(ContextCompat.getColor(requireContext(), R.color.nav_item_selected))
                     }
                 }
             }

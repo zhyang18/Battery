@@ -95,7 +95,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/guide_sources_title"
-                    android:textColor="#818CF8"
+                    android:textColor="@color/nav_item_selected"
                     android:textSize="14sp"
                     android:textStyle="bold" />
 
@@ -124,7 +124,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="10dp"
                     android:text="@string/guide_source_2_title"
-                    android:textColor="#818CF8"
+                    android:textColor="@color/nav_item_selected"
                     android:textSize="14sp"
                     android:textStyle="bold" />
 

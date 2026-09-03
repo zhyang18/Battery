@@ -90,19 +90,40 @@ class ViewPagerSwipeRefreshLayout @JvmOverloads constructor(
         return canViewScrollUp(itemView)
     }
 
+    private var cachedViewPager: java.lang.ref.WeakReference<ViewPager2>? = null
+
     /**
      * 辅助查找当前容器树下的 [ViewPager2] 实例。
+     * 优先使用弱引用缓存，避免每一帧手势滑动都触发整棵视图树的深度递归遍历。
      *
      * @param group 待检索的父级视图容器 [ViewGroup]
      * @return 查找到的 [ViewPager2] 实例，若未找到则返回 `null`
      */
     private fun findChildViewPager2(group: ViewGroup): ViewPager2? {
+        val cached = cachedViewPager?.get()
+        if (cached != null && cached.isAttachedToWindow) {
+            return cached
+        }
+        val found = searchChildViewPager2(group)
+        if (found != null) {
+            cachedViewPager = java.lang.ref.WeakReference(found)
+        }
+        return found
+    }
+
+    /**
+     * 深度优先遍历检索子视图树中的 [ViewPager2] 实例。
+     *
+     * @param group 目标父容器
+     * @return 匹配到的 [ViewPager2] 对象，未找到返回 null
+     */
+    private fun searchChildViewPager2(group: ViewGroup): ViewPager2? {
         for (i in 0 until group.childCount) {
             val child = group.getChildAt(i)
             if (child is ViewPager2) {
                 return child
             } else if (child is ViewGroup) {
-                val found = findChildViewPager2(child)
+                val found = searchChildViewPager2(child)
                 if (found != null) return found
             }
         }
@@ -113,16 +134,17 @@ class ViewPagerSwipeRefreshLayout @JvmOverloads constructor(
      * 递归探测指定视图及其子视图是否支持并能够向上滚动。
      *
      * @param view 待检测的目标视图 [View]
+     * @param depth 当前递归深度（默认 0，上限 6 层以保证快速剪枝）
      * @return 若目标视图或其子视图可继续向上滚动返回 `true`，否则返回 `false`
      */
-    private fun canViewScrollUp(view: View): Boolean {
+    private fun canViewScrollUp(view: View, depth: Int = 0): Boolean {
         if (view.canScrollVertically(-1)) {
             return true
         }
-        if (view is ViewGroup) {
+        if (depth < 6 && view is ViewGroup) {
             for (i in 0 until view.childCount) {
                 val child = view.getChildAt(i)
-                if (canViewScrollUp(child)) {
+                if (canViewScrollUp(child, depth + 1)) {
                     return true
                 }
             }

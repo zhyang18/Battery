@@ -94,7 +94,7 @@ class ShizukuProvider : BatteryDataProvider {
             health = (fullCap / designCap) * 100f
         }
 
-        val currentTimeStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        val currentTimeStr = NormalApiProvider.getCurrentFormattedTime()
 
         return BatteryInfo(
             batteryHealth = health,
@@ -334,8 +334,7 @@ class ShizukuProvider : BatteryDataProvider {
 
         // 1. 获取 dumpsys battery 信息
         val batteryOutput = executeCommand("dumpsys battery")
-        val regexChargeCounter = Regex("(?m)^\\s*Charge counter:\\s*(\\d+)")
-        val matchCharge = regexChargeCounter.find(batteryOutput)
+        val matchCharge = REGEX_CHARGE_COUNTER.find(batteryOutput)
         if (matchCharge != null) {
             val raw = matchCharge.groupValues[1].toLongOrNull()
             if (raw != null && raw > 0) {
@@ -343,14 +342,12 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        val regexLevel = Regex("(?m)^\\s*level:\\s*(\\d+)")
-        val matchLevel = regexLevel.find(batteryOutput)
+        val matchLevel = REGEX_LEVEL.find(batteryOutput)
         if (matchLevel != null) {
             batteryLevel = matchLevel.groupValues[1].toIntOrNull()
         }
 
-        val regexStatus = Regex("(?m)^\\s*status:\\s*(\\d+)")
-        val matchStatus = regexStatus.find(batteryOutput)
+        val matchStatus = REGEX_STATUS.find(batteryOutput)
         if (matchStatus != null) {
             statusStr = when (matchStatus.groupValues[1].toIntOrNull()) {
                 2 -> "充电中"
@@ -361,8 +358,7 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        val regexHealth = Regex("(?m)^\\s*health:\\s*(\\d+)")
-        val matchHealth = regexHealth.find(batteryOutput)
+        val matchHealth = REGEX_HEALTH.find(batteryOutput)
         if (matchHealth != null) {
             healthStr = when (matchHealth.groupValues[1].toIntOrNull()) {
                 2 -> "良好"
@@ -375,8 +371,7 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        val regexTemp = Regex("(?m)^\\s*temperature:\\s*(\\d+)")
-        val matchTemp = regexTemp.find(batteryOutput)
+        val matchTemp = REGEX_TEMP.find(batteryOutput)
         if (matchTemp != null) {
             val rawTemp = matchTemp.groupValues[1].toFloatOrNull()
             if (rawTemp != null && rawTemp > 0) {
@@ -384,8 +379,7 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        val regexVolt = Regex("(?m)^\\s*voltage:\\s*(\\d+)")
-        val matchVolt = regexVolt.find(batteryOutput)
+        val matchVolt = REGEX_VOLT.find(batteryOutput)
         if (matchVolt != null) {
             val raw = matchVolt.groupValues[1].toLongOrNull()
             if (raw != null) {
@@ -393,28 +387,24 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        val regexTech = Regex("(?m)^\\s*technology:\\s*(\\w+)")
-        val matchTech = regexTech.find(batteryOutput)
+        val matchTech = REGEX_TECH.find(batteryOutput)
         if (matchTech != null) {
             technology = matchTech.groupValues[1]
         }
 
-        val regexCycle = Regex("(?i)(?:cycle count|mcyclecount|battery cycle|cycle_count):\\s*(\\d+)")
-        val matchCycle = regexCycle.find(batteryOutput)
+        val matchCycle = REGEX_CYCLE.find(batteryOutput)
         if (matchCycle != null) {
             cycleCount = matchCycle.groupValues[1].toIntOrNull()
         }
 
         // 2. 获取 dumpsys batterystats 信息
         val statsOutput = executeCommand("dumpsys batterystats")
-        val regexCapacity = Regex("(?i)(?:Estimated battery capacity|Capacity):\\s*(\\d+)\\s*(?:mAh)?")
-        val matchCapacity = regexCapacity.find(statsOutput)
+        val matchCapacity = REGEX_CAPACITY.find(statsOutput)
         if (matchCapacity != null) {
             designCapacity = matchCapacity.groupValues[1].toFloatOrNull()
         }
 
-        val regexLearned = Regex("(?i)(?:Learned battery capacity|Min learned battery capacity|mLearnedCap):\\s*(\\d+)")
-        val matchLearned = regexLearned.find(statsOutput)
+        val matchLearned = REGEX_LEARNED.find(statsOutput)
         if (matchLearned != null) {
             val raw = matchLearned.groupValues[1].toLongOrNull()
             if (raw != null && raw > 0) {
@@ -424,8 +414,7 @@ class ShizukuProvider : BatteryDataProvider {
 
         // 3. 从 dumpsys activity broadcasts 中提取系统电池粘性广播里的循环次数
         val broadcastsOutput = executeCommand("dumpsys activity broadcasts")
-        val regexBroadcastCycle = Regex("(?i)android\\.os\\.extra\\.CYCLE_COUNT=(\\d+)")
-        val matchBroadcastCycle = regexBroadcastCycle.find(broadcastsOutput)
+        val matchBroadcastCycle = REGEX_BROADCAST_CYCLE.find(broadcastsOutput)
         if (matchBroadcastCycle != null) {
             val count = matchBroadcastCycle.groupValues[1].toIntOrNull()
             if (count != null && count > 0) {
@@ -506,8 +495,7 @@ class ShizukuProvider : BatteryDataProvider {
         // 尝试执行小米/澎湃专属电池调试服务
         val miuiBattery = executeCommand("dumpsys miui.battery 2>/dev/null")
         if (miuiBattery.isNotEmpty()) {
-            val regexMiuiCycle = Regex("(?i)(?:cycle|cycle_count|mf_02):\\s*(\\d+)")
-            val match = regexMiuiCycle.find(miuiBattery)
+            val match = REGEX_MIUI_CYCLE.find(miuiBattery)
             if (match != null) {
                 val count = match.groupValues[1].toIntOrNull()
                 if (count != null && count > 0) {
@@ -525,34 +513,75 @@ class ShizukuProvider : BatteryDataProvider {
     }
 
     /**
-     * 通过 Shizuku 执行 Shell 命令。
+     * 通过 Shizuku 执行 Shell 命令，内部复用已缓存的反射 Method 并完整读取输出流，确保关键容量与循环指标不被截断。
      *
      * @param command 要执行的命令字符串
-     * @return 命令执行输出的字符串结果
+     * @return 命令执行输出的完整字符串结果
      */
     private fun executeCommand(command: String): String {
         return try {
-            val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
-            val newProcessMethod = shizukuClass.getDeclaredMethod(
-                "newProcess",
-                Array<String>::class.java,
-                Array<String>::class.java,
-                String::class.java
-            )
-            newProcessMethod.isAccessible = true
-            val process = newProcessMethod.invoke(null, arrayOf("sh", "-c", command), null, null) as Process
+            val method = getNewProcessMethod() ?: return ""
+            val process = method.invoke(null, arrayOf("sh", "-c", command), null, null) as? Process ?: return ""
 
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            val reader = BufferedReader(InputStreamReader(process.inputStream), 8192)
             val output = StringBuilder()
             var line: String?
             while (reader.readLine().also { line = it } != null) {
-                output.append(line).append("\n")
+                output.append(line).append('\n')
             }
+            reader.close()
             process.waitFor()
             output.toString()
         } catch (e: Exception) {
             e.printStackTrace()
             ""
         }
+    }
+
+    /**
+     * 获取或缓存 Shizuku.newProcess 反射 Method 引用。
+     *
+     * @return 可调用的 [java.lang.reflect.Method] 实例，若反射失败则返回 null
+     */
+    private fun getNewProcessMethod(): java.lang.reflect.Method? {
+        if (hasInitMethod) return newProcessMethod
+        synchronized(ShizukuProvider::class.java) {
+            if (hasInitMethod) return newProcessMethod
+            newProcessMethod = try {
+                val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
+                shizukuClass.getDeclaredMethod(
+                    "newProcess",
+                    Array<String>::class.java,
+                    Array<String>::class.java,
+                    String::class.java
+                ).apply {
+                    isAccessible = true
+                }
+            } catch (e: Exception) {
+                null
+            }
+            hasInitMethod = true
+            return newProcessMethod
+        }
+    }
+
+    companion object {
+        @Volatile
+        private var newProcessMethod: java.lang.reflect.Method? = null
+        @Volatile
+        private var hasInitMethod: Boolean = false
+
+        private val REGEX_CHARGE_COUNTER = Regex("(?m)^\\s*Charge counter:\\s*(\\d+)")
+        private val REGEX_LEVEL = Regex("(?m)^\\s*level:\\s*(\\d+)")
+        private val REGEX_STATUS = Regex("(?m)^\\s*status:\\s*(\\d+)")
+        private val REGEX_HEALTH = Regex("(?m)^\\s*health:\\s*(\\d+)")
+        private val REGEX_TEMP = Regex("(?m)^\\s*temperature:\\s*(\\d+)")
+        private val REGEX_VOLT = Regex("(?m)^\\s*voltage:\\s*(\\d+)")
+        private val REGEX_TECH = Regex("(?m)^\\s*technology:\\s*(\\w+)")
+        private val REGEX_CYCLE = Regex("(?i)(?:cycle count|mcyclecount|battery cycle|cycle_count):\\s*(\\d+)")
+        private val REGEX_CAPACITY = Regex("(?i)(?:Estimated battery capacity|Capacity):\\s*(\\d+)\\s*(?:mAh)?")
+        private val REGEX_LEARNED = Regex("(?i)(?:Learned battery capacity|Min learned battery capacity|mLearnedCap):\\s*(\\d+)")
+        private val REGEX_BROADCAST_CYCLE = Regex("(?i)android\\.os\\.extra\\.CYCLE_COUNT=(\\d+)")
+        private val REGEX_MIUI_CYCLE = Regex("(?i)(?:cycle|cycle_count|mf_02):\\s*(\\d+)")
     }
 }

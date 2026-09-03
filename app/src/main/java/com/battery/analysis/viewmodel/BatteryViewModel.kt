@@ -103,27 +103,36 @@ class BatteryViewModel : ViewModel() {
 
     /**
      * 根据当前分类筛选结果提取的健康度衰减趋势数据点列表（按采样时间从早到晚升序排列）。
+     * 采用单次反向遍历高效构建，消除原有多重中间 List 分配与额外排序开销。
      */
     val healthTrendPoints: StateFlow<List<HealthTrendPoint>> = filteredHistoryRecords.map { records ->
-        records.filter { it.batteryHealth != null && it.batteryHealth > 0f }
-            .sortedBy { it.id }
-            .map { record ->
+        if (records.isEmpty()) return@map emptyList()
+        val result = ArrayList<HealthTrendPoint>(records.size)
+        // records 在数据库查询时按 id DESC 倒序输出，反向遍历即为从早到晚自然升序
+        for (i in records.indices.reversed()) {
+            val record = records[i]
+            val health = record.batteryHealth
+            if (health != null && health > 0f) {
                 val displayTime = if (record.captureTime.length >= 16) {
                     record.captureTime.substring(5, 16)
                 } else {
                     record.captureTime
                 }
-                HealthTrendPoint(
-                    id = record.id,
-                    captureTime = record.captureTime,
-                    displayTime = displayTime,
-                    health = record.batteryHealth!!.toFloat(),
-                    cycleCount = record.cycleCount,
-                    fullCapacity = record.fullChargeCapacity,
-                    designCapacity = record.designCapacity,
-                    category = record.category
+                result.add(
+                    HealthTrendPoint(
+                        id = record.id,
+                        captureTime = record.captureTime,
+                        displayTime = displayTime,
+                        health = health,
+                        cycleCount = record.cycleCount,
+                        fullCapacity = record.fullChargeCapacity,
+                        designCapacity = record.designCapacity,
+                        category = record.category
+                    )
                 )
             }
+        }
+        result
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     /**

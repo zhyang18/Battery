@@ -309,10 +309,11 @@ class HistoryFragment : Fragment() {
             }
         }
 
-        // 2. 观察筛选过滤后的历史记录列表
+        // 2. 观察筛选过滤后的历史记录列表并同步更新顶部角标
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.filteredHistoryRecords.collect { list ->
+                    binding.tvHistoryCount.text = getString(R.string.history_count_format, list.size)
                     adapter.submitList(list) {
                         if (shouldScrollToTopOnUpdate) {
                             binding.rvHistory.scrollToPosition(0)
@@ -343,15 +344,6 @@ class HistoryFragment : Fragment() {
                         binding.rvHistory.visibility = View.VISIBLE
                         binding.layoutEmptyHistory.visibility = View.GONE
                     }
-                }
-            }
-        }
-
-        // 3. 观察总记录条数，更新顶部角标
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.filteredHistoryRecords.collect { list ->
-                    binding.tvHistoryCount.text = getString(R.string.history_count_format, list.size)
                 }
             }
         }

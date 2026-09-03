@@ -79,13 +79,13 @@ class HistoryAdapter(
 
             when {
                 record.category.contains("Shizuku", ignoreCase = true) -> {
-                    binding.tvHistorySource.setTextColor(Color.parseColor("#818CF8"))
+                    binding.tvHistorySource.setTextColor(COLOR_SHIZUKU)
                 }
                 record.category.contains("错误报告", ignoreCase = true) -> {
-                    binding.tvHistorySource.setTextColor(Color.parseColor("#10B981"))
+                    binding.tvHistorySource.setTextColor(COLOR_BUGREPORT)
                 }
                 else -> {
-                    binding.tvHistorySource.setTextColor(Color.parseColor("#2196F3"))
+                    binding.tvHistorySource.setTextColor(COLOR_NORMAL_API)
                 }
             }
             binding.tvHistoryTime.text = record.captureTime
@@ -142,5 +142,11 @@ class HistoryAdapter(
         override fun areContentsTheSame(oldItem: HistoryRecord, newItem: HistoryRecord): Boolean {
             return oldItem == newItem
         }
+    }
+
+    companion object {
+        private const val COLOR_SHIZUKU = 0xFF818CF8.toInt()
+        private const val COLOR_BUGREPORT = 0xFF10B981.toInt()
+        private const val COLOR_NORMAL_API = 0xFF2196F3.toInt()
     }
 }

@@ -37,10 +37,42 @@ class HealthTrendChartView @JvmOverloads constructor(
 
     private val dataPoints = mutableListOf<HealthTrendPoint>()
 
+    // 复用坐标点对象池与着色器缓存，实现重绘与拖拽手势过程中的零 GC 分配
+    private val cachedPointList = mutableListOf<PointF>()
+    private val tooltipRect = RectF()
+    private var lastGradientTopY = Float.NaN
+    private var lastGradientBottomY = Float.NaN
+
+    // 预计算缓存尺寸标量，避免在每一帧 onDraw 中重复计算 displayMetrics
+    private val dp1 = dpToPx(1f)
+    private val dp2_2 = dpToPx(2.2f)
+    private val dp2_5 = dpToPx(2.5f)
+    private val dp3 = dpToPx(3f)
+    private val dp3_5 = dpToPx(3.5f)
+    private val dp4 = dpToPx(4f)
+    private val dp4_5 = dpToPx(4.5f)
+    private val dp6 = dpToPx(6f)
+    private val dp8 = dpToPx(8f)
+    private val dp8_5 = dpToPx(8.5f)
+    private val dp10 = dpToPx(10f)
+    private val dp12 = dpToPx(12f)
+    private val dp14 = dpToPx(14f)
+    private val dp16 = dpToPx(16f)
+    private val dp20 = dpToPx(20f)
+    private val dp28 = dpToPx(28f)
+    private val dp38 = dpToPx(38f)
+    private val dp46 = dpToPx(46f)
+    private val dp62 = dpToPx(62f)
+
+    private val sp10 = spToPx(10f)
+    private val sp10_5 = spToPx(10.5f)
+    private val sp11 = spToPx(11f)
+    private val sp14 = spToPx(14f)
+
     // 绘制画笔
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = dpToPx(2.5f)
+        strokeWidth = dp2_5
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
         color = Color.parseColor("#10B981")
@@ -67,13 +99,13 @@ class HealthTrendChartView @JvmOverloads constructor(
 
     private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = dpToPx(1f)
+        strokeWidth = dp1
         color = Color.parseColor("#1F888888")
-        pathEffect = DashPathEffect(floatArrayOf(dpToPx(4f), dpToPx(4f)), 0f)
+        pathEffect = DashPathEffect(floatArrayOf(dp4, dp4), 0f)
     }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = spToPx(10.5f)
+        textSize = sp10_5
         color = Color.parseColor("#9CA3AF")
     }
 
@@ -81,7 +113,7 @@ class HealthTrendChartView @JvmOverloads constructor(
         style = Paint.Style.STROKE
         strokeWidth = dpToPx(1.2f)
         color = Color.parseColor("#818CF8")
-        pathEffect = DashPathEffect(floatArrayOf(dpToPx(3f), dpToPx(3f)), 0f)
+        pathEffect = DashPathEffect(floatArrayOf(dp3, dp3), 0f)
     }
 
     private val tooltipBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -91,18 +123,18 @@ class HealthTrendChartView @JvmOverloads constructor(
 
     private val tooltipStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = dpToPx(1f)
+        strokeWidth = dp1
         color = Color.parseColor("#40818CF8")
     }
 
     private val tooltipTextTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = spToPx(11f)
+        textSize = sp11
         color = Color.parseColor("#F9FAFB")
         isFakeBoldText = true
     }
 
     private val tooltipTextDescPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = spToPx(10.5f)
+        textSize = sp10_5
         color = Color.parseColor("#D1D5DB")
     }
 
@@ -244,88 +276,90 @@ class HealthTrendChartView @JvmOverloads constructor(
 
     /**
      * 计算数据点在屏幕上的具体像素坐标。
+     * 复用预分配的 cachedPointList 对象池，杜绝在每一帧绘制时分配临时 List 与 PointF 对象。
      *
      * @param left 左偏移
      * @param top 上偏移
      * @param chartWidth 宽度
      * @param chartHeight 高度
-     * @return 像素坐标点列表
+     * @return 复用的像素坐标点列表视图
      */
     private fun calculateCoordinates(left: Float, top: Float, chartWidth: Float, chartHeight: Float): List<PointF> {
         val size = dataPoints.size
-        val coords = mutableListOf<PointF>()
+        while (cachedPointList.size < size) {
+            cachedPointList.add(PointF())
+        }
 
         if (size == 1) {
             val pt = dataPoints[0]
             val x = left + chartWidth / 2f
-            val yRatio = ((pt.health - minY) / (maxY - minY)).coerceIn(0f, 1f)
+            val rangeY = (maxY - minY).let { if (it <= 0f) 1f else it }
+            val yRatio = ((pt.health - minY) / rangeY).coerceIn(0f, 1f)
             val y = top + chartHeight * (1f - yRatio)
-            coords.add(PointF(x, y))
-            return coords
+            cachedPointList[0].set(x, y)
+            return cachedPointList.subList(0, 1)
         }
 
         val stepX = chartWidth / (size - 1).toFloat()
+        val rangeY = (maxY - minY).let { if (it <= 0f) 1f else it }
         for (i in 0 until size) {
             val pt = dataPoints[i]
             val x = left + i * stepX
-            val yRatio = ((pt.health - minY) / (maxY - minY)).coerceIn(0f, 1f)
+            val yRatio = ((pt.health - minY) / rangeY).coerceIn(0f, 1f)
             val y = top + chartHeight * (1f - yRatio)
-            coords.add(PointF(x, y))
+            cachedPointList[i].set(x, y)
         }
 
-        return coords
+        return cachedPointList.subList(0, size)
     }
 
     /**
      * 绘制贝塞尔曲线与下方半透明翡翠绿渐变填充。
+     * 直接传递浮点控制点坐标，消除临时 PointF 分配；并且仅在坐标边界发生变化时更新 Shader。
      *
      * @param canvas 画布
      * @param coords 坐标列表
      * @param bottomY 底部基准线Y坐标
      */
     private fun drawChartCurveAndFill(canvas: Canvas, coords: List<PointF>, bottomY: Float) {
-        if (coords.isEmpty()) return
-
-        if (coords.size == 1) {
-            return
-        }
+        if (coords.size <= 1) return
 
         linePath.reset()
         fillPath.reset()
 
-        linePath.moveTo(coords[0].x, coords[0].y)
-        fillPath.moveTo(coords[0].x, bottomY)
-        fillPath.lineTo(coords[0].x, coords[0].y)
+        val firstPoint = coords[0]
+        linePath.moveTo(firstPoint.x, firstPoint.y)
+        fillPath.moveTo(firstPoint.x, bottomY)
+        fillPath.lineTo(firstPoint.x, firstPoint.y)
+
+        var minYCoord = firstPoint.y
 
         for (i in 1 until coords.size) {
             val p0 = coords[i - 1]
             val p1 = coords[i]
-            val controlPoint1 = PointF(p0.x + (p1.x - p0.x) / 2f, p0.y)
-            val controlPoint2 = PointF(p0.x + (p1.x - p0.x) / 2f, p1.y)
+            if (p1.y < minYCoord) minYCoord = p1.y
 
-            linePath.cubicTo(
-                controlPoint1.x, controlPoint1.y,
-                controlPoint2.x, controlPoint2.y,
-                p1.x, p1.y
-            )
-            fillPath.cubicTo(
-                controlPoint1.x, controlPoint1.y,
-                controlPoint2.x, controlPoint2.y,
-                p1.x, p1.y
-            )
+            val midX = p0.x + (p1.x - p0.x) / 2f
+
+            linePath.cubicTo(midX, p0.y, midX, p1.y, p1.x, p1.y)
+            fillPath.cubicTo(midX, p0.y, midX, p1.y, p1.x, p1.y)
         }
 
         fillPath.lineTo(coords.last().x, bottomY)
         fillPath.close()
 
-        // 渐变着色器
-        fillPaint.shader = LinearGradient(
-            0f, coords.minOf { it.y },
-            0f, bottomY,
-            Color.parseColor("#3810B981"),
-            Color.parseColor("#0210B981"),
-            Shader.TileMode.CLAMP
-        )
+        // 仅在 Y 轴跨度发生改变时重建底层 Skia LinearGradient 着色器
+        if (minYCoord != lastGradientTopY || bottomY != lastGradientBottomY) {
+            lastGradientTopY = minYCoord
+            lastGradientBottomY = bottomY
+            fillPaint.shader = LinearGradient(
+                0f, minYCoord,
+                0f, bottomY,
+                Color.parseColor("#3810B981"),
+                Color.parseColor("#0210B981"),
+                Shader.TileMode.CLAMP
+            )
+        }
 
         // 绘制渐变填充与折线
         canvas.drawPath(fillPath, fillPaint)
@@ -339,33 +373,30 @@ class HealthTrendChartView @JvmOverloads constructor(
      * @param coords 坐标列表
      */
     private fun drawDataNodes(canvas: Canvas, coords: List<PointF>) {
-        val radiusOuter = dpToPx(4.5f)
-        val radiusInner = dpToPx(2.2f)
-        val radiusHalo = dpToPx(8.5f)
-
         for (i in coords.indices) {
             val p = coords[i]
             val isLatest = (i == coords.size - 1)
 
             // 最新点展示呼吸光晕
             if (isLatest) {
-                canvas.drawCircle(p.x, p.y, radiusHalo, pointHaloPaint)
+                canvas.drawCircle(p.x, p.y, dp8_5, pointHaloPaint)
             }
 
-            canvas.drawCircle(p.x, p.y, radiusOuter, pointOuterPaint)
-            canvas.drawCircle(p.x, p.y, radiusInner, pointInnerPaint)
+            canvas.drawCircle(p.x, p.y, dp4_5, pointOuterPaint)
+            canvas.drawCircle(p.x, p.y, dp2_2, pointInnerPaint)
 
             // 绘制 X 轴时间标签（首点、末点或间隔绘制）
             if (coords.size <= 5 || i == 0 || i == coords.size - 1 || i == coords.size / 2) {
                 textPaint.textAlign = Paint.Align.CENTER
                 val displayTime = dataPoints[i].displayTime
-                canvas.drawText(displayTime, p.x, height - dpToPx(8f), textPaint)
+                canvas.drawText(displayTime, p.x, height - dp8, textPaint)
             }
         }
     }
 
     /**
      * 绘制手指触控交互时的垂直标尺虚线与悬浮 Tooltip 气泡卡片。
+     * 复用预分配的 tooltipRect，避免每帧分配 RectF。
      *
      * @param canvas 画布
      * @param p 选中的数据点屏幕坐标
@@ -391,39 +422,39 @@ class HealthTrendChartView @JvmOverloads constructor(
         val extraText = listOf(cycleText, capText).filter { it.isNotBlank() }.joinToString(" | ")
 
         // 3. 计算气泡尺寸与位置
-        val paddingH = dpToPx(10f)
-        val paddingV = dpToPx(8f)
+        val paddingH = dp10
+        val paddingV = dp8
         val titleWidth = tooltipTextTitlePaint.measureText(titleText)
         val timeWidth = tooltipTextDescPaint.measureText(timeText)
         val extraWidth = if (extraText.isNotBlank()) tooltipTextDescPaint.measureText(extraText) else 0f
 
         val boxWidth = max(titleWidth, max(timeWidth, extraWidth)) + paddingH * 2
-        val boxHeight = if (extraText.isNotBlank()) dpToPx(62f) else dpToPx(46f)
+        val boxHeight = if (extraText.isNotBlank()) dp62 else dp46
 
         var boxLeft = p.x - boxWidth / 2f
-        var boxTop = p.y - boxHeight - dpToPx(12f)
+        var boxTop = p.y - boxHeight - dp12
 
         // 边界防溢出纠偏
-        if (boxLeft < dpToPx(8f)) boxLeft = dpToPx(8f)
-        if (boxLeft + boxWidth > width - dpToPx(8f)) boxLeft = width - dpToPx(8f) - boxWidth
-        if (boxTop < dpToPx(4f)) boxTop = p.y + dpToPx(14f)
+        if (boxLeft < dp8) boxLeft = dp8
+        if (boxLeft + boxWidth > width - dp8) boxLeft = width - dp8 - boxWidth
+        if (boxTop < dp4) boxTop = p.y + dp14
 
-        val boxRect = RectF(boxLeft, boxTop, boxLeft + boxWidth, boxTop + boxHeight)
-        val cornerRadius = dpToPx(8f)
+        tooltipRect.set(boxLeft, boxTop, boxLeft + boxWidth, boxTop + boxHeight)
+        val cornerRadius = dp8
 
         // 4. 绘制卡片背景与描边
-        canvas.drawRoundRect(boxRect, cornerRadius, cornerRadius, tooltipBgPaint)
-        canvas.drawRoundRect(boxRect, cornerRadius, cornerRadius, tooltipStrokePaint)
+        canvas.drawRoundRect(tooltipRect, cornerRadius, cornerRadius, tooltipBgPaint)
+        canvas.drawRoundRect(tooltipRect, cornerRadius, cornerRadius, tooltipStrokePaint)
 
         // 5. 绘制卡片内部文字
-        var textY = boxTop + paddingV + spToPx(10f)
+        var textY = boxTop + paddingV + sp10
         canvas.drawText(titleText, boxLeft + paddingH, textY, tooltipTextTitlePaint)
 
-        textY += spToPx(14f)
+        textY += sp14
         canvas.drawText(timeText, boxLeft + paddingH, textY, tooltipTextDescPaint)
 
         if (extraText.isNotBlank()) {
-            textY += spToPx(14f)
+            textY += sp14
             canvas.drawText(extraText, boxLeft + paddingH, textY, tooltipTextDescPaint)
         }
     }
@@ -435,6 +466,7 @@ class HealthTrendChartView @JvmOverloads constructor(
 
     /**
      * 处理手势触控事件，仅在用户明确横向滑动探查图表时拦截消费，垂直滑动完全放行给父容器以确保列表滚动丝滑不冲突。
+     * 手势跟踪采用 O(1) 索引算法，彻底免去滑动每帧重新计算与遍历点集的开销。
      *
      * @param event 触摸事件
      * @return 若消费横向手势返回 true，否则返回 false 放行给列表滚动
@@ -443,8 +475,8 @@ class HealthTrendChartView @JvmOverloads constructor(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (dataPoints.isEmpty()) return super.onTouchEvent(event)
 
-        val paddingLeft = dpToPx(38f)
-        val paddingRight = dpToPx(16f)
+        val paddingLeft = dp38
+        val paddingRight = dp16
         val chartWidth = width - paddingLeft - paddingRight
 
         when (event.actionMasked) {
@@ -472,16 +504,12 @@ class HealthTrendChartView @JvmOverloads constructor(
                 if (isDraggingHorizontally) {
                     isTouching = true
                     val touchX = event.x
-                    val coords = calculateCoordinates(paddingLeft, dpToPx(20f), chartWidth, height - dpToPx(48f))
-
-                    var closestIndex = 0
-                    var minDistance = Float.MAX_VALUE
-                    for (i in coords.indices) {
-                        val dist = abs(coords[i].x - touchX)
-                        if (dist < minDistance) {
-                            minDistance = dist
-                            closestIndex = i
-                        }
+                    val size = dataPoints.size
+                    val closestIndex = if (size <= 1) {
+                        0
+                    } else {
+                        val stepX = chartWidth / (size - 1).toFloat()
+                        Math.round((touchX - paddingLeft) / stepX).toInt().coerceIn(0, size - 1)
                     }
 
                     if (selectedIndex != closestIndex) {

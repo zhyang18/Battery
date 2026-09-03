@@ -44,6 +44,8 @@ class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
             )
         """.trimIndent()
         db.execSQL(createTableSql)
+        // 创建分类与主键倒序联合索引，大幅度加速按分类筛选与最新记录检索速度
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_battery_history_category ON $TABLE_NAME ($COL_CATEGORY, $COL_ID DESC)")
     }
 
     /**
@@ -62,6 +64,9 @@ class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
                 e.printStackTrace()
             }
         }
+        try {
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_battery_history_category ON $TABLE_NAME ($COL_CATEGORY, $COL_ID DESC)")
+        } catch (_: Exception) {}
     }
 
     /**
@@ -130,6 +135,7 @@ class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
 
     /**
      * 获取全部历史记录，按时间倒序排列（最新记录在前）。
+     * 提前在循环外一次性解析列索引，大幅降低成百上千条记录遍历时的反射与字符串检索开销。
      *
      * @return 历史记录列表
      */
@@ -147,8 +153,11 @@ class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
         )
 
         cursor.use { c ->
-            while (c.moveToNext()) {
-                recordList.add(parseRecordFromCursor(c))
+            if (c.moveToFirst()) {
+                val indices = ColumnIndices(c)
+                do {
+                    recordList.add(parseRecordFromCursor(c, indices))
+                } while (c.moveToNext())
             }
         }
         return recordList
@@ -175,7 +184,8 @@ class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
 
         cursor.use { c ->
             if (c.moveToFirst()) {
-                return parseRecordFromCursor(c)
+                val indices = ColumnIndices(c)
+                return parseRecordFromCursor(c, indices)
             }
         }
         return null
@@ -230,33 +240,37 @@ class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
     }
 
     /**
-     * 从 Cursor 解析一条 [HistoryRecord] 实体。
+     * 基于预解析的列索引从 Cursor 解析一条 [HistoryRecord] 实体。
+     *
+     * @param c 数据库游标
+     * @param indices 已预解析的列索引容器
+     * @return 映射出的 [HistoryRecord] 数据对象
      */
-    private fun parseRecordFromCursor(c: android.database.Cursor): HistoryRecord {
-        val id = c.getLong(c.getColumnIndexOrThrow(COL_ID))
-        val captureTime = c.getString(c.getColumnIndexOrThrow(COL_CAPTURE_TIME))
-        val source = c.getString(c.getColumnIndexOrThrow(COL_SOURCE))
-        val category = if (c.getColumnIndex(COL_CATEGORY) != -1 && !c.isNull(c.getColumnIndexOrThrow(COL_CATEGORY))) {
-            c.getString(c.getColumnIndexOrThrow(COL_CATEGORY))
+    private fun parseRecordFromCursor(c: android.database.Cursor, indices: ColumnIndices): HistoryRecord {
+        val id = c.getLong(indices.id)
+        val captureTime = c.getString(indices.captureTime)
+        val source = c.getString(indices.source)
+        val category = if (indices.category != -1 && !c.isNull(indices.category)) {
+            c.getString(indices.category)
         } else source
-        val note = if (c.getColumnIndex(COL_NOTE) != -1 && !c.isNull(c.getColumnIndexOrThrow(COL_NOTE))) {
-            c.getString(c.getColumnIndexOrThrow(COL_NOTE))
+        val note = if (indices.note != -1 && !c.isNull(indices.note)) {
+            c.getString(indices.note)
         } else null
 
-        val batteryHealth = if (!c.isNull(c.getColumnIndexOrThrow(COL_BATTERY_HEALTH))) c.getFloat(c.getColumnIndexOrThrow(COL_BATTERY_HEALTH)) else null
-        val healthStatus = if (!c.isNull(c.getColumnIndexOrThrow(COL_HEALTH_STATUS))) c.getString(c.getColumnIndexOrThrow(COL_HEALTH_STATUS)) else null
-        val level = if (!c.isNull(c.getColumnIndexOrThrow(COL_LEVEL))) c.getInt(c.getColumnIndexOrThrow(COL_LEVEL)) else null
-        val status = if (!c.isNull(c.getColumnIndexOrThrow(COL_STATUS))) c.getString(c.getColumnIndexOrThrow(COL_STATUS)) else null
-        val designCapacity = if (!c.isNull(c.getColumnIndexOrThrow(COL_DESIGN_CAPACITY))) c.getFloat(c.getColumnIndexOrThrow(COL_DESIGN_CAPACITY)) else null
-        val currentCapacity = if (!c.isNull(c.getColumnIndexOrThrow(COL_CURRENT_CAPACITY))) c.getFloat(c.getColumnIndexOrThrow(COL_CURRENT_CAPACITY)) else null
-        val fullChargeCapacity = if (!c.isNull(c.getColumnIndexOrThrow(COL_FULL_CHARGE_CAPACITY))) c.getFloat(c.getColumnIndexOrThrow(COL_FULL_CHARGE_CAPACITY)) else null
-        val cycleCount = if (!c.isNull(c.getColumnIndexOrThrow(COL_CYCLE_COUNT))) c.getInt(c.getColumnIndexOrThrow(COL_CYCLE_COUNT)) else null
-        val temperature = if (!c.isNull(c.getColumnIndexOrThrow(COL_TEMPERATURE))) c.getFloat(c.getColumnIndexOrThrow(COL_TEMPERATURE)) else null
-        val voltage = if (!c.isNull(c.getColumnIndexOrThrow(COL_VOLTAGE))) c.getFloat(c.getColumnIndexOrThrow(COL_VOLTAGE)) else null
-        val currentNow = if (!c.isNull(c.getColumnIndexOrThrow(COL_CURRENT_NOW))) c.getFloat(c.getColumnIndexOrThrow(COL_CURRENT_NOW)) else null
-        val powerWatts = if (!c.isNull(c.getColumnIndexOrThrow(COL_POWER_WATTS))) c.getFloat(c.getColumnIndexOrThrow(COL_POWER_WATTS)) else null
-        val isDualCell = if (!c.isNull(c.getColumnIndexOrThrow(COL_IS_DUAL_CELL))) c.getInt(c.getColumnIndexOrThrow(COL_IS_DUAL_CELL)) == 1 else null
-        val technology = if (!c.isNull(c.getColumnIndexOrThrow(COL_TECHNOLOGY))) c.getString(c.getColumnIndexOrThrow(COL_TECHNOLOGY)) else null
+        val batteryHealth = if (!c.isNull(indices.batteryHealth)) c.getFloat(indices.batteryHealth) else null
+        val healthStatus = if (!c.isNull(indices.healthStatus)) c.getString(indices.healthStatus) else null
+        val level = if (!c.isNull(indices.level)) c.getInt(indices.level) else null
+        val status = if (!c.isNull(indices.status)) c.getString(indices.status) else null
+        val designCapacity = if (!c.isNull(indices.designCapacity)) c.getFloat(indices.designCapacity) else null
+        val currentCapacity = if (!c.isNull(indices.currentCapacity)) c.getFloat(indices.currentCapacity) else null
+        val fullChargeCapacity = if (!c.isNull(indices.fullChargeCapacity)) c.getFloat(indices.fullChargeCapacity) else null
+        val cycleCount = if (!c.isNull(indices.cycleCount)) c.getInt(indices.cycleCount) else null
+        val temperature = if (!c.isNull(indices.temperature)) c.getFloat(indices.temperature) else null
+        val voltage = if (!c.isNull(indices.voltage)) c.getFloat(indices.voltage) else null
+        val currentNow = if (!c.isNull(indices.currentNow)) c.getFloat(indices.currentNow) else null
+        val powerWatts = if (!c.isNull(indices.powerWatts)) c.getFloat(indices.powerWatts) else null
+        val isDualCell = if (!c.isNull(indices.isDualCell)) c.getInt(indices.isDualCell) == 1 else null
+        val technology = if (!c.isNull(indices.technology)) c.getString(indices.technology) else null
 
         return HistoryRecord(
             id = id,
@@ -279,6 +293,33 @@ class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
             isDualCell = isDualCell,
             technology = technology
         )
+    }
+
+    /**
+     * 数据库列索引缓存数据类，用于单次解析列索引以消除游标循环内重复的字符串查找与哈希。
+     *
+     * @param c 数据库游标
+     */
+    private class ColumnIndices(c: android.database.Cursor) {
+        val id = c.getColumnIndexOrThrow(COL_ID)
+        val captureTime = c.getColumnIndexOrThrow(COL_CAPTURE_TIME)
+        val source = c.getColumnIndexOrThrow(COL_SOURCE)
+        val category = c.getColumnIndex(COL_CATEGORY)
+        val note = c.getColumnIndex(COL_NOTE)
+        val batteryHealth = c.getColumnIndexOrThrow(COL_BATTERY_HEALTH)
+        val healthStatus = c.getColumnIndexOrThrow(COL_HEALTH_STATUS)
+        val level = c.getColumnIndexOrThrow(COL_LEVEL)
+        val status = c.getColumnIndexOrThrow(COL_STATUS)
+        val designCapacity = c.getColumnIndexOrThrow(COL_DESIGN_CAPACITY)
+        val currentCapacity = c.getColumnIndexOrThrow(COL_CURRENT_CAPACITY)
+        val fullChargeCapacity = c.getColumnIndexOrThrow(COL_FULL_CHARGE_CAPACITY)
+        val cycleCount = c.getColumnIndexOrThrow(COL_CYCLE_COUNT)
+        val temperature = c.getColumnIndexOrThrow(COL_TEMPERATURE)
+        val voltage = c.getColumnIndexOrThrow(COL_VOLTAGE)
+        val currentNow = c.getColumnIndexOrThrow(COL_CURRENT_NOW)
+        val powerWatts = c.getColumnIndexOrThrow(COL_POWER_WATTS)
+        val isDualCell = c.getColumnIndexOrThrow(COL_IS_DUAL_CELL)
+        val technology = c.getColumnIndexOrThrow(COL_TECHNOLOGY)
     }
 
     companion object {

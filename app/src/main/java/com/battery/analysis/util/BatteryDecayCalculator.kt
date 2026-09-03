@@ -13,7 +13,16 @@ import kotlin.math.max
  */
 object BatteryDecayCalculator {
 
-    private val timeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+    private val dateFormatThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
+        /**
+         * 初始化线程独立的 SimpleDateFormat 实例。
+         *
+         * @return SimpleDateFormat 实例
+         */
+        override fun initialValue(): SimpleDateFormat {
+            return SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+        }
+    }
 
     /**
      * 根据传入的健康度采样点列表计算全量衰减与循环消耗统计数据。
@@ -26,11 +35,10 @@ object BatteryDecayCalculator {
             return DecayStatistics()
         }
 
-        // 过滤有效健康度数据点，并按时间正序排序
+        // 过滤有效健康度数据点，并按时间自然字典序正序排序（格式为 yyyy-MM-dd HH:mm:ss 天然单调递增，彻底消除排序时上千次 SimpleDateFormat parse 开销）
         val validPoints = points.filter { it.health > 0f }.sortedWith(Comparator { a, b ->
-            val tA = parseTimeToMillis(a.captureTime, a.id)
-            val tB = parseTimeToMillis(b.captureTime, b.id)
-            tA.compareTo(tB)
+            val cmp = a.captureTime.compareTo(b.captureTime)
+            if (cmp != 0) cmp else a.id.compareTo(b.id)
         })
 
         val totalPoints = validPoints.size
@@ -162,7 +170,7 @@ object BatteryDecayCalculator {
      */
     fun parseTimeToMillis(timeStr: String, fallbackId: Long): Long {
         return try {
-            timeFormat.parse(timeStr)?.time ?: fallbackId
+            dateFormatThreadLocal.get()?.parse(timeStr)?.time ?: fallbackId
         } catch (_: Exception) {
             fallbackId
         }

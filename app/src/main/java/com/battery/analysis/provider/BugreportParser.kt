@@ -26,6 +26,20 @@ class BugreportParser {
         private const val TAG = "BugreportParser"
         private const val BUFFER_SIZE = 1048576 // 1MB 极速缓冲块
         private const val OVERLAP_SIZE = 512    // 512 字节防跨块截断区
+
+        // 预分配字节特征模式常量，避免每次扫描重复转换字节数组
+        private val HEALTH_PATTERNS = listOf(
+            "getHealthInfo".toByteArray(StandardCharsets.US_ASCII),
+            "DUMP OF SERVICE android.hardware.health".toByteArray(StandardCharsets.US_ASCII),
+            "DUMP OF SERVICE health".toByteArray(StandardCharsets.US_ASCII),
+            "HealthInfo{".toByteArray(StandardCharsets.US_ASCII),
+            "DUMP OF SERVICE battery:".toByteArray(StandardCharsets.US_ASCII)
+        )
+
+        // 预编译高频正则表达式
+        private val REGEX_INSIDE_BRACES = Regex("(\\w+)[=:]\\s*([^,}]+)")
+        private val REGEX_FULL_DASH = Regex("(\\d{4})[-_](\\d{2})[-_](\\d{2})[-_](\\d{2})[-_](\\d{2})[-_](\\d{2})")
+        private val REGEX_STANDARD = Regex("(\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2})")
     }
 
     /**
@@ -165,15 +179,6 @@ class BugreportParser {
      */
     internal suspend fun scanStreamForHealthInfo(stream: InputStream, captureTime: String): BugreportResult {
         val buffer = ByteArray(BUFFER_SIZE)
-        // 采用精准的特征模式，严格避开 Logcat/auditd 中仅包含服务接口名称的权限报错日志
-        val patterns = listOf(
-            "getHealthInfo".toByteArray(StandardCharsets.US_ASCII),
-            "DUMP OF SERVICE android.hardware.health".toByteArray(StandardCharsets.US_ASCII),
-            "DUMP OF SERVICE health".toByteArray(StandardCharsets.US_ASCII),
-            "HealthInfo{".toByteArray(StandardCharsets.US_ASCII),
-            "DUMP OF SERVICE battery:".toByteArray(StandardCharsets.US_ASCII)
-        )
-
         var overlapLen = 0
         var totalBytesRead = 0L
         var bestResult: BugreportResult? = null
@@ -189,7 +194,7 @@ class BugreportParser {
             var searchStart = 0
             while (searchStart < totalInChunk && coroutineContext.isActive) {
                 // 寻找当前 chunk 中从 searchStart 开始最早出现的任意目标 pattern
-                val match = findEarliestPattern(buffer, totalInChunk, searchStart, patterns) ?: break
+                val match = findEarliestPattern(buffer, totalInChunk, searchStart, HEALTH_PATTERNS) ?: break
                 val (matchIdx, matchedPattern) = match
 
                 Log.d(TAG, "在字节偏移 ${totalBytesRead - totalInChunk + matchIdx} 处命中模式: ${String(matchedPattern, StandardCharsets.US_ASCII)}")
@@ -347,7 +352,7 @@ class BugreportParser {
             // 1. 单行 getHealthInfo -> HealthInfo{...} 结构体解析
             if ((trimLine.contains("getHealthInfo", ignoreCase = true) || trimLine.contains("HealthInfo{", ignoreCase = true)) && trimLine.contains("{") && trimLine.contains("}")) {
                 val insideBraces = trimLine.substringAfter("{").substringBeforeLast("}")
-                val map = Regex("(\\w+)[=:]\\s*([^,}]+)").findAll(insideBraces).associate {
+                val map = REGEX_INSIDE_BRACES.findAll(insideBraces).associate {
                     it.groupValues[1].trim() to it.groupValues[2].trim()
                 }
 
@@ -619,16 +624,14 @@ class BugreportParser {
      */
     private fun extractCaptureTime(fileName: String, fallbackTime: Long = System.currentTimeMillis()): String {
         // 匹配 YYYY-MM-DD-HH-MM-SS 或 YYYY-MM-DD_HH-MM-SS 或 YYYYMMDD-HHMMSS
-        val regexFullDash = Regex("(\\d{4})[-_](\\d{2})[-_](\\d{2})[-_](\\d{2})[-_](\\d{2})[-_](\\d{2})")
-        val matchDash = regexFullDash.find(fileName)
+        val matchDash = REGEX_FULL_DASH.find(fileName)
         if (matchDash != null) {
             val (y, m, d, hh, mm, ss) = matchDash.destructured
             return "$y-$m-$d $hh:$mm:$ss"
         }
 
         // 匹配 YYYY-MM-DD HH:MM:SS
-        val regexStandard = Regex("(\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2})")
-        val matchStd = regexStandard.find(fileName)
+        val matchStd = REGEX_STANDARD.find(fileName)
         if (matchStd != null) {
             return matchStd.value
         }

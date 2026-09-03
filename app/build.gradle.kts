@@ -13,13 +13,38 @@ android {
         applicationId = "com.battery.analysis"
         minSdk = 24
         targetSdk = 34
-        val baseVersionName = "1.5.9"
-        val baseVersionCode = 18
-        versionCode = baseVersionCode
-        val buildProp = findProperty("buildNumber") as? String
-        versionName = if (!buildProp.isNullOrBlank()) "$baseVersionName-$buildProp" else baseVersionName
+        versionCode = 19
+        versionName = "1.6.0"
+    }
+    // 正确位置：splits 必须与 defaultConfig 平级，放在 android 闭包下
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = true
+        }
     }
 
+    // 动态设置 versionCode 并解决多架构文件名冲突
+    val abiVersionCodes = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2)
+
+    applicationVariants.all {
+        val variant = this
+        variant.outputs.forEach { output ->
+            val abiOutput = output as? com.android.build.gradle.internal.api.ApkVariantOutputImpl
+            if (abiOutput != null) {
+                val abiFilter = abiOutput.getFilter(com.android.build.OutputFile.ABI)
+                if (abiFilter != null) {
+                    val abiCode = abiVersionCodes[abiFilter] ?: 0
+                    abiOutput.versionCodeOverride = abiCode * 100000 + variant.versionCode
+                }
+                val abiName = abiFilter ?: "universal"
+                abiOutput.outputFileName =
+                    "Battery-v${variant.versionName}-${abiName}-${variant.buildType.name}.apk"
+            }
+        }
+    }
     signingConfigs {
         create("release") {
             val localProperties = Properties()
@@ -33,16 +58,16 @@ android {
                 storeFile = keystoreFile
                 storePassword = localProperties.getProperty("KEYSTORE_PASSWORD")
                     ?: (findProperty("KEYSTORE_PASSWORD") as? String)
-                    ?: System.getenv("KEYSTORE_PASSWORD")
-                    ?: ""
+                            ?: System.getenv("KEYSTORE_PASSWORD")
+                            ?: ""
                 keyAlias = localProperties.getProperty("KEY_ALIAS")
                     ?: (findProperty("KEY_ALIAS") as? String)
-                    ?: System.getenv("KEY_ALIAS")
-                    ?: ""
+                            ?: System.getenv("KEY_ALIAS")
+                            ?: ""
                 keyPassword = localProperties.getProperty("KEY_PASSWORD")
                     ?: (findProperty("KEY_PASSWORD") as? String)
-                    ?: System.getenv("KEY_PASSWORD")
-                    ?: ""
+                            ?: System.getenv("KEY_PASSWORD")
+                            ?: ""
             }
         }
     }
@@ -61,8 +86,10 @@ android {
             }
         }
         debug {
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true  // 开启 R8 代码压缩与混淆
+            isShrinkResources = true // 开启无用资源裁剪
+            // 临时开启调试能力，方便用 Android Studio 抓 Logcat 和附加断点
+            isDebuggable = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -93,7 +120,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
-    
+
     // Shizuku
     val shizuku_version = "13.1.5"
     implementation("dev.rikka.shizuku:api:$shizuku_version")

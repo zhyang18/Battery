@@ -93,10 +93,98 @@ class SettingsFragment : Fragment() {
         setupLanguageSettings()
         setupThemeSettings()
         setupRefreshSettings()
+        setupPowerModeSettings()
         setupShizukuSettings()
         setupBackupRestoreSettings()
         setupHelpSection()
         setupAboutSection()
+    }
+
+    /**
+     * 界面恢复至前台时的生命周期回调，同步最新的耗电模式副标题。
+     */
+    override fun onResume() {
+        super.onResume()
+        val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(requireContext())
+        updatePowerModeDisplay(powerManager.getSelectedMode())
+    }
+
+    /**
+     * 初始化耗电统计检测模式设置项与下拉气泡弹窗交互。
+     * 点击时弹出与刷新时间间隔样式一致的气泡菜单，供用户切换 Shizuku 模式与标准模式。
+     */
+    private fun setupPowerModeSettings() {
+        val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(requireContext())
+        updatePowerModeDisplay(powerManager.getSelectedMode())
+
+        binding.layoutPowerModeSetting.setOnClickListener {
+            val currentMode = powerManager.getSelectedMode()
+
+            val popupView = layoutInflater.inflate(R.layout.popup_power_mode_picker, null)
+            val density = resources.displayMetrics.density
+            val popupWidth = (230 * density).toInt()
+
+            val popupWindow = android.widget.PopupWindow(
+                popupView,
+                popupWidth,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                true
+            )
+
+            popupWindow.isOutsideTouchable = true
+            popupWindow.isFocusable = true
+            popupWindow.animationStyle = R.style.Animation_PopupTopRight
+
+            val tvShizuku = popupView.findViewById<TextView>(R.id.tv_mode_shizuku)
+            val tvNormal = popupView.findViewById<TextView>(R.id.tv_mode_normal)
+
+            val normalColor = ContextCompat.getColor(requireContext(), R.color.popup_item_text)
+            val activeColor = Color.parseColor("#2196F3")
+
+            tvShizuku.setTextColor(if (currentMode == com.battery.analysis.manager.PowerUsageManager.MODE_SHIZUKU) activeColor else normalColor)
+            tvNormal.setTextColor(if (currentMode == com.battery.analysis.manager.PowerUsageManager.MODE_NORMAL) activeColor else normalColor)
+
+            val selectMode = { which: Int ->
+                powerManager.setSelectedMode(which)
+                powerManager.setPowerModeConfigured(true)
+                updatePowerModeDisplay(which)
+                popupWindow.dismiss()
+                val tip = if (which == com.battery.analysis.manager.PowerUsageManager.MODE_SHIZUKU) {
+                    getString(R.string.power_mode_tip_shizuku)
+                } else {
+                    getString(R.string.power_mode_tip_normal)
+                }
+                Toast.makeText(requireContext(), tip, Toast.LENGTH_SHORT).show()
+            }
+
+            tvShizuku.setOnClickListener {
+                selectMode(com.battery.analysis.manager.PowerUsageManager.MODE_SHIZUKU)
+            }
+
+            tvNormal.setOnClickListener {
+                selectMode(com.battery.analysis.manager.PowerUsageManager.MODE_NORMAL)
+            }
+
+            popupWindow.showAsDropDown(
+                binding.layoutPowerModeSetting,
+                0,
+                (4 * density).toInt(),
+                android.view.Gravity.END
+            )
+        }
+    }
+
+    /**
+     * 更新耗电统计检测模式副标题文本。
+     *
+     * @param mode 当前工作模式
+     */
+    private fun updatePowerModeDisplay(mode: Int) {
+        binding.tvCurrentPowerMode.text = if (mode == com.battery.analysis.manager.PowerUsageManager.MODE_SHIZUKU) {
+            "⚡ Shizuku"
+        } else {
+            getString(R.string.power_mode_normal)
+        }
     }
 
     /**

@@ -84,7 +84,17 @@ class BatteryViewModel : ViewModel() {
     private val _historyRecords = MutableStateFlow<List<HistoryRecord>>(emptyList())
     val historyRecords: StateFlow<List<HistoryRecord>> = _historyRecords.asStateFlow()
 
-    // 8. 固定三大数据源分类体系（全部、系统api、Shizuku、错误报告）
+    // 8. 历史快照查看模式状态流
+    private val _isViewingHistorySnapshot = MutableStateFlow(false)
+    val isViewingHistorySnapshot: StateFlow<Boolean> = _isViewingHistorySnapshot.asStateFlow()
+
+    private val _loadedSnapshotRecord = MutableStateFlow<HistoryRecord?>(null)
+    val loadedSnapshotRecord: StateFlow<HistoryRecord?> = _loadedSnapshotRecord.asStateFlow()
+
+    private val _targetSnapshotTab = MutableStateFlow<Int?>(null)
+    val targetSnapshotTab: StateFlow<Int?> = _targetSnapshotTab.asStateFlow()
+
+    // 9. 固定三大数据源分类体系（全部、系统api、Shizuku、错误报告）
     private val _selectedCategory = MutableStateFlow("全部")
     val selectedCategory: StateFlow<String> = _selectedCategory.asStateFlow()
 
@@ -425,6 +435,66 @@ class BatteryViewModel : ViewModel() {
                 _historyRecords.value = emptyList()
             }
         }
+    }
+
+    /**
+     * 将选中的历史快照记录载入至检测页面中，并开启历史快照查看模式。
+     *
+     * @param record 待加载查看的历史记录对象
+     */
+    fun loadRecordToDetection(record: HistoryRecord) {
+        _loadedSnapshotRecord.value = record
+        _isViewingHistorySnapshot.value = true
+
+        val batteryInfo = record.toBatteryInfo(
+            customSource = "${record.category} (快照)"
+        )
+
+        when (record.category) {
+            "Shizuku" -> {
+                _shizukuBatteryInfo.value = batteryInfo
+                _activeTabPosition.value = 1
+                _targetSnapshotTab.value = 1
+            }
+            "错误报告" -> {
+                val bugreportResult = BugreportResult(
+                    tableItems = emptyList(),
+                    rawHealthInfoText = record.formatFullDetails(),
+                    hasRealData = true,
+                    parsedBatteryInfo = batteryInfo
+                )
+                _bugreportResult.value = bugreportResult
+                _activeTabPosition.value = 2
+                _targetSnapshotTab.value = 2
+            }
+            else -> {
+                _normalBatteryInfo.value = batteryInfo
+                _activeTabPosition.value = 0
+                _targetSnapshotTab.value = 0
+            }
+        }
+    }
+
+    /**
+     * 退出历史快照查看模式，恢复实时电池数据监测。
+     *
+     * @param context 应用程序上下文
+     */
+    fun exitHistorySnapshotMode(context: Context) {
+        _isViewingHistorySnapshot.value = false
+        _loadedSnapshotRecord.value = null
+        _targetSnapshotTab.value = null
+        refreshNormalApi(context)
+        if (_isShizukuGranted.value) {
+            refreshShizuku(context)
+        }
+    }
+
+    /**
+     * 重置已处理的目标子 Tab 导航请求，防止重复触发切换。
+     */
+    fun clearTargetSnapshotTab() {
+        _targetSnapshotTab.value = null
     }
 
     /**

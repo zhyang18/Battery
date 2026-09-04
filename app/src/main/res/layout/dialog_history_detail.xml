@@ -52,7 +52,7 @@
             android:id="@+id/btn_dialog_detail_close"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_marginEnd="6dp"
+            android:layout_marginEnd="4dp"
             android:layout_weight="1"
             android:background="@drawable/bg_dialog_btn_cancel"
             android:clickable="true"
@@ -60,13 +60,13 @@
             android:gravity="center"
             android:text="@string/close"
             android:textColor="?android:attr/textColorPrimary"
-            android:textSize="14sp" />
+            android:textSize="13.5sp" />
 
         <TextView
             android:id="@+id/btn_dialog_detail_copy"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_marginStart="6dp"
+            android:layout_marginHorizontal="4dp"
             android:layout_weight="1"
             android:background="@drawable/bg_dialog_btn_primary"
             android:clickable="true"
@@ -74,7 +74,22 @@
             android:gravity="center"
             android:text="@string/copy"
             android:textColor="@color/nav_item_selected"
-            android:textSize="14sp"
+            android:textSize="13.5sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/btn_dialog_detail_load"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1.2"
+            android:background="@drawable/bg_dialog_btn_highlight"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="@string/btn_load_snapshot"
+            android:textColor="@color/white"
+            android:textSize="13.5sp"
             android:textStyle="bold" />
     </LinearLayout>
 

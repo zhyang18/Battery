@@ -8,7 +8,9 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.viewpager2.widget.ViewPager2
 import com.battery.analysis.R
 import com.battery.analysis.databinding.FragmentDetectionBinding
@@ -102,6 +104,10 @@ class DetectionFragment : Fragment() {
             }
 
             val currentTab = binding.detectionViewPager.currentItem
+            if (viewModel.isViewingHistorySnapshot.value) {
+                viewModel.exitHistorySnapshotMode(ctx)
+                Toast.makeText(requireContext(), getString(R.string.toast_restored_realtime), Toast.LENGTH_SHORT).show()
+            }
             when (currentTab) {
                 0 -> {
                     viewModel.refreshNormalApi(ctx)
@@ -130,6 +136,41 @@ class DetectionFragment : Fragment() {
                             binding.swipeRefreshLayout.isRefreshing = false
                             Toast.makeText(requireContext(), getString(R.string.toast_bugreport_reimport_tip), Toast.LENGTH_SHORT).show()
                         }
+                    }
+                }
+            }
+        }
+
+        // 4. 点击“恢复实时”按钮退出历史快照模式，刷新恢复最新实时数据
+        binding.btnRestoreRealtime.setOnClickListener {
+            val ctx = context ?: return@setOnClickListener
+            viewModel.exitHistorySnapshotMode(ctx)
+            Toast.makeText(requireContext(), getString(R.string.toast_restored_realtime), Toast.LENGTH_SHORT).show()
+        }
+
+        // 5. 观察历史快照查看状态流，动态显示/隐藏顶部提示横幅
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.isViewingHistorySnapshot.collect { isViewing ->
+                    if (isViewing) {
+                        val record = viewModel.loadedSnapshotRecord.value
+                        val timeStr = record?.captureTime ?: ""
+                        binding.tvHistorySnapshotHint.text = getString(R.string.history_snapshot_banner_format, timeStr)
+                        binding.layoutHistorySnapshotBanner.visibility = View.VISIBLE
+                    } else {
+                        binding.layoutHistorySnapshotBanner.visibility = View.GONE
+                    }
+                }
+            }
+        }
+
+        // 6. 观察目标子 Tab 定位请求并自动滑动至对应分类
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.targetSnapshotTab.collect { targetTab ->
+                    if (targetTab != null) {
+                        binding.detectionViewPager.setCurrentItem(targetTab, false)
+                        viewModel.clearTargetSnapshotTab()
                     }
                 }
             }

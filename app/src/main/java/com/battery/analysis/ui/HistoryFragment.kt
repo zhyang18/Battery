@@ -778,6 +778,14 @@ class HistoryFragment : Fragment() {
             Toast.makeText(requireContext(), getString(R.string.toast_copy_success), Toast.LENGTH_SHORT).show()
         }
 
+        val btnLoad = dialogView.findViewById<TextView>(R.id.btn_dialog_detail_load)
+        btnLoad.setOnClickListener {
+            dialog.dismiss()
+            viewModel.loadRecordToDetection(record)
+            (activity as? com.battery.analysis.MainActivity)?.navigateToNav(R.id.nav_detection)
+            Toast.makeText(requireContext(), getString(R.string.toast_load_snapshot_success), Toast.LENGTH_SHORT).show()
+        }
+
         dialog.show()
 
         dialog.window?.let { window ->

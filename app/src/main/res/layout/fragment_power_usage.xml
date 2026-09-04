@@ -1,0 +1,839 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.swiperefreshlayout.widget.SwipeRefreshLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/swipe_refresh_layout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- 顶部标题栏：与原始设计图保持 100% 纯粹与一致 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="12dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/power_stats_title"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <!-- 右侧说明文档图标 -->
+            <ImageView
+                android:id="@+id/btn_power_guide"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:contentDescription="@string/understood"
+                android:focusable="true"
+                android:padding="9dp"
+                android:src="@drawable/ic_report_doc"
+                app:tint="?android:attr/textColorPrimary" />
+
+            <!-- 右侧历史记录按钮 (右上角删除按钮旁边就是历史记录按钮) -->
+            <ImageView
+                android:id="@+id/btn_power_history"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:contentDescription="@string/power_history_title"
+                android:focusable="true"
+                android:padding="8dp"
+                android:src="@drawable/ic_power_history"
+                app:tint="?android:attr/textColorPrimary" />
+
+            <!-- 右侧垃圾桶清空图标 -->
+            <ImageView
+                android:id="@+id/btn_power_clear"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:contentDescription="@string/clear_all"
+                android:focusable="true"
+                android:padding="8dp"
+                android:src="@drawable/ic_delete"
+                app:tint="?android:attr/textColorPrimary" />
+        </LinearLayout>
+
+        <!-- 主内容滚动容器 -->
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:fillViewport="true"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="24dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- 首次打开 App 模式选择引导容器：仅在未配置模式时呈现，确认后隐藏 -->
+                <LinearLayout
+                    android:id="@+id/layout_first_time_setup"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical"
+                    android:visibility="gone"
+                    tools:visibility="visible">
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        app:cardBackgroundColor="@color/dialog_card_bg"
+                        app:cardCornerRadius="16dp"
+                        app:cardElevation="0dp"
+                        app:strokeColor="#20888888"
+                        app:strokeWidth="1.2dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="18dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/power_setup_title"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="17sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="6dp"
+                                android:lineSpacingExtra="3dp"
+                                android:text="@string/power_setup_subtitle"
+                                android:textColor="#757575"
+                                android:textSize="13sp" />
+
+                            <!-- 模式 1：Shizuku 高精度模式卡片 -->
+                            <com.google.android.material.card.MaterialCardView
+                                android:id="@+id/card_setup_mode_shizuku"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="14dp"
+                                android:clickable="true"
+                                android:focusable="true"
+                                app:cardBackgroundColor="?android:attr/colorBackground"
+                                app:cardCornerRadius="12dp"
+                                app:cardElevation="0dp"
+                                app:strokeColor="#2196F3"
+                                app:strokeWidth="2dp">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="vertical"
+                                    android:padding="14dp">
+
+                                    <RelativeLayout
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="@string/power_mode_shizuku"
+                                            android:textColor="?android:attr/textColorPrimary"
+                                            android:textSize="15sp"
+                                            android:textStyle="bold" />
+
+                                        <RadioButton
+                                            android:id="@+id/radio_setup_shizuku"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_alignParentEnd="true"
+                                            android:layout_centerVertical="true"
+                                            android:checked="true"
+                                            android:clickable="false"
+                                            android:focusable="false" />
+                                    </RelativeLayout>
+
+                                    <TextView
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="6dp"
+                                        android:lineSpacingExtra="2dp"
+                                        android:text="@string/power_setup_shizuku_desc"
+                                        android:textColor="#757575"
+                                        android:textSize="12sp" />
+                                </LinearLayout>
+                            </com.google.android.material.card.MaterialCardView>
+
+                            <!-- 模式 2：标准普通模式卡片 -->
+                            <com.google.android.material.card.MaterialCardView
+                                android:id="@+id/card_setup_mode_normal"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="10dp"
+                                android:clickable="true"
+                                android:focusable="true"
+                                app:cardBackgroundColor="?android:attr/colorBackground"
+                                app:cardCornerRadius="12dp"
+                                app:cardElevation="0dp"
+                                app:strokeColor="#18888888"
+                                app:strokeWidth="1dp">
+
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="vertical"
+                                    android:padding="10dp">
+
+                                    <RelativeLayout
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content">
+
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="@string/power_mode_normal"
+                                            android:textColor="?android:attr/textColorPrimary"
+                                            android:textSize="15sp"
+                                            android:textStyle="bold" />
+
+                                        <RadioButton
+                                            android:id="@+id/radio_setup_normal"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_alignParentEnd="true"
+                                            android:layout_centerVertical="true"
+                                            android:checked="false"
+                                            android:clickable="false"
+                                            android:focusable="false" />
+                                    </RelativeLayout>
+
+                                    <TextView
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="6dp"
+                                        android:lineSpacingExtra="2dp"
+                                        android:text="@string/power_setup_normal_desc"
+                                        android:textColor="#757575"
+                                        android:textSize="12sp" />
+                                </LinearLayout>
+                            </com.google.android.material.card.MaterialCardView>
+
+                            <!-- 确认并开始检测按钮 -->
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_setup_confirm"
+                                android:layout_width="match_parent"
+                                android:layout_height="48dp"
+                                android:layout_marginTop="18dp"
+                                android:text="@string/power_setup_btn_confirm"
+                                android:textColor="#FFFFFF"
+                                android:textSize="14.5sp"
+                                android:textStyle="bold"
+                                app:backgroundTint="#2196F3"
+                                app:cornerRadius="24dp" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+                </LinearLayout>
+
+                <!-- 耗电详情主容器：只有当用户明确配置/选择了检测模式后才展示 -->
+                <LinearLayout
+                    android:id="@+id/layout_power_content"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <!-- 历史耗电快照查看模式横幅 -->
+                    <LinearLayout
+                        android:id="@+id/layout_power_snapshot_banner"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:layout_marginBottom="4dp"
+                        android:background="@drawable/bg_dialog_card"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="14dp"
+                        android:paddingVertical="9dp"
+                        android:visibility="gone"
+                        tools:visibility="visible">
+
+                        <TextView
+                            android:id="@+id/tv_power_snapshot_hint"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:textColor="#2196F3"
+                            android:textSize="12.5sp"
+                            android:textStyle="bold"
+                            tools:text="📌 正在查看耗电历史快照: 2026-09-04 13:30:22" />
+
+                        <TextView
+                            android:id="@+id/btn_power_restore_realtime"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_history_badge"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:paddingHorizontal="10dp"
+                            android:paddingVertical="5dp"
+                            android:text="@string/btn_restore_realtime"
+                            android:textColor="#2196F3"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <!-- Shizuku 授权与状态提示引导卡片（仅当在 Shizuku 模式下未激活或未授权时醒目展现） -->
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/card_shizuku_guide"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:visibility="gone"
+                        app:cardBackgroundColor="@color/dialog_card_bg"
+                        app:cardCornerRadius="14dp"
+                        app:cardElevation="0dp"
+                        app:strokeColor="#402196F3"
+                        app:strokeWidth="1.2dp"
+                        tools:visibility="visible">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="14dp">
+
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
+
+                                <TextView
+                                    android:id="@+id/tv_shizuku_guide_title"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:text="@string/power_shizuku_unauthorized_title"
+                                    android:textColor="#1E88E5"
+                                    android:textSize="14sp"
+                                    android:textStyle="bold" />
+
+                                <com.google.android.material.button.MaterialButton
+                                    android:id="@+id/btn_shizuku_action"
+                                    style="@style/Widget.Material3.Button.TonalButton"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="36dp"
+                                    android:insetTop="0dp"
+                                    android:insetBottom="0dp"
+                                    android:paddingStart="12dp"
+                                    android:paddingEnd="12dp"
+                                    android:text="@string/power_shizuku_btn_auth"
+                                    android:textSize="12sp"
+                                    app:cornerRadius="18dp" />
+                            </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/tv_shizuku_guide_desc"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="6dp"
+                                android:lineSpacingExtra="2dp"
+                                android:text="@string/power_shizuku_unauthorized_desc"
+                                android:textColor="#757575"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <!-- 1. “使用过程”卡片 -->
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        app:cardBackgroundColor="@color/dialog_card_bg"
+                        app:cardCornerRadius="14dp"
+                        app:cardElevation="0dp"
+                        app:strokeColor="#18888888"
+                        app:strokeWidth="1dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="10dp">
+
+                            <!-- 卡片标题行：使用过程 ? ... 65% -->
+                            <RelativeLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content">
+
+                                <LinearLayout
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_alignParentStart="true"
+                                    android:layout_centerVertical="true"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="@string/power_usage_process"
+                                        android:textColor="?android:attr/textColorPrimary"
+                                        android:textSize="15sp"
+                                        android:textStyle="bold" />
+
+                                    <ImageView
+                                        android:id="@+id/btn_process_help"
+                                        android:layout_width="22dp"
+                                        android:layout_height="22dp"
+                                        android:layout_marginStart="6dp"
+                                        android:contentDescription="@string/power_usage_process"
+                                        android:padding="2dp"
+                                        android:src="@drawable/ic_help_circle" />
+                                </LinearLayout>
+
+                                <LinearLayout
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_alignParentEnd="true"
+                                    android:layout_centerVertical="true"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal">
+
+                                    <!-- 开始记录放电时的电量 -->
+                                    <TextView
+                                        android:id="@+id/tv_battery_start_percent"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:textColor="#757575"
+                                        android:textSize="18sp"
+                                        android:textStyle="bold"
+                                        tools:text="100%" />
+
+                                    <!-- 起止放电箭头指示 -->
+                                    <TextView
+                                        android:id="@+id/tv_battery_percent_arrow"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="4dp"
+                                        android:layout_marginEnd="4dp"
+                                        android:text="→"
+                                        android:textColor="#757575"
+                                        android:textSize="16sp"
+                                        android:textStyle="bold" />
+
+                                    <!-- 当前放电电量 -->
+                                    <TextView
+                                        android:id="@+id/tv_battery_percent_header"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:textColor="#757575"
+                                        android:textSize="18sp"
+                                        android:textStyle="bold"
+                                        tools:text="58%" />
+                                </LinearLayout>
+                            </RelativeLayout>
+
+                            <!-- 自定义放电折线图控件 -->
+                            <com.battery.analysis.ui.view.PowerUsageChartView
+                                android:id="@+id/power_chart_view"
+                                android:layout_width="match_parent"
+                                android:layout_height="205dp"
+                                android:layout_marginTop="8dp" />
+
+                            <!-- 底部状态指示行：能量、温度、电压、充电状态 -->
+                            <LinearLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="12dp"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal">
+
+                                <!-- 能量 -->
+                                <LinearLayout
+                                    android:id="@+id/ll_energy_container"
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal">
+
+                                    <ImageView
+                                        android:layout_width="16dp"
+                                        android:layout_height="16dp"
+                                        android:contentDescription="@string/power_param_energy"
+                                        android:src="@drawable/ic_battery_energy" />
+
+                                    <TextView
+                                        android:id="@+id/tv_energy_wh"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="4dp"
+                                        android:textColor="#757575"
+                                        android:textSize="12sp"
+                                        tools:text="17.8Wh" />
+                                </LinearLayout>
+
+                                <!-- 温度 -->
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal">
+
+                                    <ImageView
+                                        android:layout_width="16dp"
+                                        android:layout_height="16dp"
+                                        android:contentDescription="@string/param_temperature"
+                                        android:src="@drawable/ic_thermometer" />
+
+                                    <TextView
+                                        android:id="@+id/tv_temperature"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="4dp"
+                                        android:textColor="#757575"
+                                        android:textSize="12sp"
+                                        tools:text="30.5℃" />
+                                </LinearLayout>
+
+                                <!-- 电压 -->
+                                <LinearLayout
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal">
+
+                                    <ImageView
+                                        android:layout_width="16dp"
+                                        android:layout_height="16dp"
+                                        android:contentDescription="@string/param_voltage"
+                                        android:src="@drawable/ic_bolt"
+                                        app:tint="#888888" />
+
+                                    <TextView
+                                        android:id="@+id/tv_voltage"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="4dp"
+                                        android:textColor="#757575"
+                                        android:textSize="12sp"
+                                        tools:text="3.972V" />
+                                </LinearLayout>
+
+                                <!-- 充电状态 -->
+                                <LinearLayout
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal">
+
+                                    <ImageView
+                                        android:layout_width="16dp"
+                                        android:layout_height="16dp"
+                                        android:contentDescription="@string/param_status"
+                                        android:src="@drawable/ic_power_plug" />
+
+                                    <TextView
+                                        android:id="@+id/tv_charging_status"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="4dp"
+                                        android:textColor="#757575"
+                                        android:textSize="12sp"
+                                        tools:text="未充电" />
+                                </LinearLayout>
+                            </LinearLayout>
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <!-- 2. 核心功耗指标卡片（三列指标） -->
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        app:cardBackgroundColor="@color/dialog_card_bg"
+                        app:cardCornerRadius="14dp"
+                        app:cardElevation="0dp"
+                        app:strokeColor="#18888888"
+                        app:strokeWidth="1dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:baselineAligned="false"
+                            android:orientation="horizontal"
+                            android:paddingStart="10dp"
+                            android:paddingTop="10dp"
+                            android:paddingEnd="10dp"
+                            android:paddingBottom="10dp">
+
+                            <!-- 放电功耗（第一列：左对齐） -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:id="@+id/tv_power_screen_on"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:textColor="?android:attr/textColorPrimary"
+                                    android:textSize="13sp"
+                                    android:textStyle="bold"
+                                    tools:text="亮屏 1.65W" />
+
+                                <TextView
+                                    android:id="@+id/tv_power_avg"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4.5dp"
+                                    android:textColor="?android:attr/textColorPrimary"
+                                    android:textSize="13sp"
+                                    android:textStyle="bold"
+                                    tools:text="平均 0.80W" />
+
+                                <TextView
+                                    android:id="@+id/tv_power_screen_off"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4.5dp"
+                                    android:textColor="?android:attr/textColorPrimary"
+                                    android:textSize="13sp"
+                                    android:textStyle="bold"
+                                    tools:text="息屏 0.15W" />
+                            </LinearLayout>
+
+                            <!-- 放电时长（第二列：左对齐） -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:id="@+id/tv_time_screen_on"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:textColor="?android:attr/textColorPrimary"
+                                    android:textSize="13sp"
+                                    android:textStyle="bold"
+                                    tools:text="亮屏 5h5m" />
+
+                                <TextView
+                                    android:id="@+id/tv_time_total"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4.5dp"
+                                    android:textColor="?android:attr/textColorPrimary"
+                                    android:textSize="13sp"
+                                    android:textStyle="bold"
+                                    tools:text="总计 13h44m" />
+
+                                <TextView
+                                    android:id="@+id/tv_time_screen_off"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4.5dp"
+                                    android:textColor="?android:attr/textColorPrimary"
+                                    android:textSize="13sp"
+                                    android:textStyle="bold"
+                                    tools:text="息屏 8h39m" />
+                            </LinearLayout>
+
+                            <!-- 理论续航（第三列：左对齐） -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:id="@+id/tv_remaining_screen_on"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:textColor="?android:attr/textColorPrimary"
+                                    android:textSize="13sp"
+                                    android:textStyle="bold"
+                                    tools:text="亮屏 6h30m" />
+
+                                <TextView
+                                    android:id="@+id/tv_remaining_composite"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4.5dp"
+                                    android:textColor="?android:attr/textColorPrimary"
+                                    android:textSize="13sp"
+                                    android:textStyle="bold"
+                                    tools:text="综合 14h46m" />
+
+                                <TextView
+                                    android:id="@+id/tv_remaining_screen_off"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4.5dp"
+                                    android:textColor="?android:attr/textColorPrimary"
+                                    android:textSize="13sp"
+                                    android:textStyle="bold"
+                                    tools:text="息屏 2d18h" />
+                            </LinearLayout>
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                    <!-- 3. “使用场景”卡片 -->
+                    <com.google.android.material.card.MaterialCardView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        app:cardBackgroundColor="@color/dialog_card_bg"
+                        app:cardCornerRadius="14dp"
+                        app:cardElevation="0dp"
+                        app:strokeColor="#18888888"
+                        app:strokeWidth="1dp">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="vertical"
+                            android:padding="10dp">
+
+                            <!-- 场景卡片标题行 -->
+                            <RelativeLayout
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content">
+
+                                <LinearLayout
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_alignParentStart="true"
+                                    android:layout_centerVertical="true"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="@string/power_usage_scene"
+                                        android:textColor="?android:attr/textColorPrimary"
+                                        android:textSize="15sp"
+                                        android:textStyle="bold" />
+
+                                    <ImageView
+                                        android:id="@+id/btn_scene_help"
+                                        android:layout_width="22dp"
+                                        android:layout_height="22dp"
+                                        android:layout_marginStart="6dp"
+                                        android:contentDescription="@string/power_usage_scene"
+                                        android:padding="2dp"
+                                        android:src="@drawable/ic_help_circle" />
+                                </LinearLayout>
+
+                                <!-- 右侧操作按钮组：切换与排序 -->
+                                <LinearLayout
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_alignParentEnd="true"
+                                    android:layout_centerVertical="true"
+                                    android:orientation="horizontal">
+
+                                    <ImageView
+                                        android:id="@+id/btn_scene_swap"
+                                        android:layout_width="32dp"
+                                        android:layout_height="32dp"
+                                        android:background="?attr/selectableItemBackgroundBorderless"
+                                        android:clickable="true"
+                                        android:contentDescription="@string/power_sort_duration"
+                                        android:focusable="true"
+                                        android:padding="6dp"
+                                        android:src="@drawable/ic_swap_horiz" />
+
+                                    <ImageView
+                                        android:id="@+id/btn_scene_sort"
+                                        android:layout_width="32dp"
+                                        android:layout_height="32dp"
+                                        android:layout_marginStart="6dp"
+                                        android:background="?attr/selectableItemBackgroundBorderless"
+                                        android:clickable="true"
+                                        android:contentDescription="@string/power_sort_power"
+                                        android:focusable="true"
+                                        android:padding="6dp"
+                                        android:src="@drawable/ic_sort" />
+                                </LinearLayout>
+                            </RelativeLayout>
+
+                            <!-- 普通模式下的使用情况权限提示横幅 -->
+                            <LinearLayout
+                                android:id="@+id/layout_permission_banner"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="10dp"
+                                android:background="@drawable/bg_stat_chip"
+                                android:gravity="center_vertical"
+                                android:orientation="horizontal"
+                                android:padding="10dp"
+                                android:visibility="gone"
+                                tools:visibility="visible">
+
+                                <TextView
+                                    android:layout_width="0dp"
+                                    android:layout_height="wrap_content"
+                                    android:layout_weight="1"
+                                    android:text="@string/power_permission_title"
+                                    android:textColor="#1E88E5"
+                                    android:textSize="12sp" />
+
+                                <TextView
+                                    android:id="@+id/btn_grant_permission"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:background="@drawable/bg_badge_btn"
+                                    android:paddingStart="10dp"
+                                    android:paddingTop="4dp"
+                                    android:paddingEnd="10dp"
+                                    android:paddingBottom="4dp"
+                                    android:text="@string/power_permission_btn"
+                                    android:textColor="#FFFFFF"
+                                    android:textSize="11sp" />
+                            </LinearLayout>
+
+                            <!-- 应用场景列表 -->
+                            <androidx.recyclerview.widget.RecyclerView
+                                android:id="@+id/recycler_app_usage"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="10dp"
+                                android:nestedScrollingEnabled="false" />
+                        </LinearLayout>
+                    </com.google.android.material.card.MaterialCardView>
+
+                </LinearLayout>
+
+            </LinearLayout>
+        </androidx.core.widget.NestedScrollView>
+
+    </LinearLayout>
+</androidx.swiperefreshlayout.widget.SwipeRefreshLayout>

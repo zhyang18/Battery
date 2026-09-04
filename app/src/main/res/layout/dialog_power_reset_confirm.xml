@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog_surface"
+    android:clipToOutline="true"
+    android:gravity="center_horizontal"
+    android:orientation="vertical"
+    android:paddingHorizontal="16dp"
+    android:paddingVertical="18dp">
+
+    <!-- 顶部红色圆形重置警告图标 -->
+    <FrameLayout
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:background="@drawable/bg_delete_icon_circle">
+
+        <ImageView
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_gravity="center"
+            android:contentDescription="@string/dialog_power_reset_title"
+            android:src="@drawable/ic_delete"
+            app:tint="#EF4444" />
+    </FrameLayout>
+
+    <!-- 弹窗标题 -->
+    <TextView
+        android:id="@+id/tv_dialog_reset_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:text="@string/dialog_power_reset_title"
+        android:textColor="?android:attr/textColorPrimary"
+        android:textSize="17sp"
+        android:textStyle="bold" />
+
+    <!-- 弹窗副标题/风险说明 -->
+    <TextView
+        android:id="@+id/tv_dialog_reset_desc"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:gravity="center"
+        android:lineSpacingExtra="3dp"
+        android:text="@string/dialog_power_reset_desc"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="13sp" />
+
+    <!-- 当前周期状态预览卡片 -->
+    <LinearLayout
+        android:id="@+id/layout_reset_preview"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:background="@drawable/bg_dialog_card"
+        android:clipToOutline="true"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tv_reset_preview_mode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_history_badge"
+                android:textColor="#2196F3"
+                android:textSize="11.5sp"
+                android:textStyle="bold"
+                tools:text="⚡ Shizuku 模式" />
+
+            <TextView
+                android:id="@+id/tv_reset_preview_time"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="12sp"
+                tools:text="已记录放电: 4h 32m" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tv_reset_preview_summary"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="13sp"
+            tools:text="🔋 当前电量 58%   •   📊 采样点数: 36 个" />
+    </LinearLayout>
+
+    <!-- 底部操作按钮 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginTop="20dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/btn_dialog_reset_cancel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="6dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_dialog_btn_cancel"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="@string/cancel"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/btn_dialog_reset_confirm"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="6dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_dialog_btn_delete"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="@string/dialog_power_reset_confirm_btn"
+            android:textColor="@color/white"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+</LinearLayout>

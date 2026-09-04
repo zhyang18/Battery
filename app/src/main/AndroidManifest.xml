@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.BATTERY_STATS" />
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
     <queries>
@@ -32,6 +39,16 @@
             android:enabled="true"
             android:exported="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <!-- 监听拔掉充电器/断开外部电源系统广播 -->
+        <receiver
+            android:name=".receiver.BatteryUnplugReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 </manifest>

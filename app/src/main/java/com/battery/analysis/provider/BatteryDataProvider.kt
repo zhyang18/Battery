@@ -144,39 +144,39 @@ class NormalApiProvider : BatteryDataProvider {
         )
     }
 
-    /**
-     * 通过反射调用 PowerProfile 获取电池设计容量，并在内存中进行线程安全的静态缓存以避免重复反射开销。
-     *
-     * @param context 应用程序的上下文
-     * @return 电池设计容量（mAh），如果获取失败则返回 null
-     */
-    private fun getDesignCapacity(context: Context): Float? {
-        if (hasCheckedDesignCapacity) {
-            return cachedDesignCapacity
-        }
-        synchronized(NormalApiProvider::class.java) {
-            if (hasCheckedDesignCapacity) {
-                return cachedDesignCapacity
-            }
-            cachedDesignCapacity = try {
-                val powerProfileClass = Class.forName("com.android.internal.os.PowerProfile")
-                val powerProfile = powerProfileClass.getConstructor(Context::class.java).newInstance(context)
-                val getBatteryCapacityMethod = powerProfileClass.getMethod("getBatteryCapacity")
-                val capacity = getBatteryCapacityMethod.invoke(powerProfile) as Double
-                if (capacity > 0) capacity.toFloat() else null
-            } catch (e: Exception) {
-                null
-            }
-            hasCheckedDesignCapacity = true
-            return cachedDesignCapacity
-        }
-    }
-
     companion object {
         @Volatile
         private var cachedDesignCapacity: Float? = null
         @Volatile
         private var hasCheckedDesignCapacity: Boolean = false
+
+        /**
+         * 通过反射调用 PowerProfile 获取电池设计容量，并在内存中进行线程安全的静态缓存以避免重复反射开销。
+         *
+         * @param context 应用程序的上下文
+         * @return 电池设计容量（mAh），如果获取失败则返回 null
+         */
+        fun getDesignCapacity(context: Context): Float? {
+            if (hasCheckedDesignCapacity) {
+                return cachedDesignCapacity
+            }
+            synchronized(NormalApiProvider::class.java) {
+                if (hasCheckedDesignCapacity) {
+                    return cachedDesignCapacity
+                }
+                cachedDesignCapacity = try {
+                    val powerProfileClass = Class.forName("com.android.internal.os.PowerProfile")
+                    val powerProfile = powerProfileClass.getConstructor(Context::class.java).newInstance(context)
+                    val getBatteryCapacityMethod = powerProfileClass.getMethod("getBatteryCapacity")
+                    val capacity = getBatteryCapacityMethod.invoke(powerProfile) as Double
+                    if (capacity > 0) capacity.toFloat() else null
+                } catch (e: Exception) {
+                    null
+                }
+                hasCheckedDesignCapacity = true
+                return cachedDesignCapacity
+            }
+        }
 
         private val dateFormatThreadLocal = object : ThreadLocal<java.text.SimpleDateFormat>() {
             /**

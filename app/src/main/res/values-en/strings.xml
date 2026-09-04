@@ -4,9 +4,91 @@
     <string name="app_full_title">Battery Analysis (Battery App)</string>
 
     <!-- Bottom Navigation -->
+    <string name="nav_power">Power</string>
     <string name="nav_detection">Detection</string>
     <string name="nav_history">History</string>
     <string name="nav_settings">Settings</string>
+
+    <!-- Power Usage Page -->
+    <string name="power_stats_title">Power Usage</string>
+    <string name="power_usage_process">Discharge Process</string>
+    <string name="power_usage_scene">Usage Scenarios</string>
+    <string name="power_avg_power">Discharge Power</string>
+    <string name="power_used_time">Discharge Time</string>
+    <string name="power_remaining_time">Est. Battery Life</string>
+    <string name="power_format_screen_on">On: %s</string>
+    <string name="power_format_screen_off">Off: %s</string>
+    <string name="power_format_total">Total: %s</string>
+    <string name="power_format_avg">Avg: %s</string>
+    <string name="power_format_composite">Mix: %s</string>
+    <string name="power_wh_format">%.1fWh</string>
+    <string name="power_param_energy">Remaining Energy</string>
+    <string name="power_tooltip_energy">Battery Remaining Energy: %s (Accurately calculated from available capacity and realtime voltage)</string>
+    <string name="power_temp_format">%.1f℃</string>
+    <string name="power_volt_format">%.3fV</string>
+    <string name="power_status_unplugged">Not charging</string>
+    <string name="power_status_charging">Charging</string>
+    <string name="power_avg_info_format">AVG: %1$.2fW, %2$d℃</string>
+    <string name="power_max_temp_format">MAX: %d℃</string>
+    <string name="power_permission_title">Usage Access Required</string>
+    <string name="power_permission_desc">To accurately analyze per-app power consumption and foreground duration, please enable "Usage Access" in system settings.</string>
+    <string name="power_permission_btn">Grant Access</string>
+    <string name="power_sort_power">Sort by Power</string>
+    <string name="power_sort_duration">Sort by Duration</string>
+    <string name="power_sort_energy">Sort by Energy (Wh)</string>
+    <string name="power_sort_name">Sort by Name</string>
+    <string name="power_mode_shizuku">⚡ Shizuku Mode (High Precision)</string>
+    <string name="power_mode_normal">Standard Mode (UsageStats)</string>
+    <string name="power_mode_tip_shizuku">Shizuku high precision mode active, reading dumpsys batterystats authority log</string>
+    <string name="power_mode_tip_normal">Standard mode active, estimated from foreground usage stats and power profile</string>
+    <string name="power_shizuku_not_running_title">Shizuku Service Not Running</string>
+    <string name="power_shizuku_not_running_desc">Please launch the Shizuku app and ensure the service is running to enable deep battery stats.</string>
+    <string name="power_shizuku_unauthorized_title">Shizuku Permission Required</string>
+    <string name="power_shizuku_unauthorized_desc">Grant Shizuku permission to extract per-app real power consumption (mAh) and hardware breakdown.</string>
+    <string name="power_shizuku_btn_auth">Authorize Now</string>
+    <string name="power_shizuku_btn_open">Open Shizuku</string>
+    <string name="power_drain_format">%1$.1fmAh (%2$.1f%%)</string>
+    <string name="power_toast_cleared">Power sampling records have been reset</string>
+    <string name="power_guide_process_title">Discharge Process Guide</string>
+    <string name="power_guide_process_content">The discharge process chart shows the battery level curve over time since boot or last discharge, marking active apps during high-drain periods.</string>
+    <string name="power_guide_scene_title">Usage Scenarios Guide</string>
+    <string name="power_guide_scene_content">Usage scenarios breakdown displays foreground runtime, average power consumption, and operating temperature for each active app.</string>
+    <string name="power_guide_overview_title">Discharge Metrics Guide</string>
+    <string name="power_guide_overview_content">• Discharge Power: Shows screen-on average power, overall average power, and standby power since discharge (Watts).\n\n• Discharge Time: Tracks screen-on duration, screen-off standby duration, and total discharge duration.\n\n• Battery Life: Estimates remaining battery life for screen-on, mixed usage, and standby based on current battery energy and measured power.</string>
+
+    <!-- Power Reset Dialog -->
+    <string name="dialog_power_reset_title">Reset Power Statistics?</string>
+    <string name="dialog_power_reset_desc">Resetting will clear all sampling data, discharge curves, and app usage rankings for the current discharge cycle, starting fresh from the current battery level. Saved history snapshots will not be affected.</string>
+    <string name="dialog_power_reset_confirm_btn">Reset Now</string>
+    <string name="dialog_power_reset_current_level">Current Level</string>
+    <string name="dialog_power_reset_current_mode">Tracking Mode</string>
+    <string name="dialog_power_reset_recorded_time">Recorded Time</string>
+
+    <!-- Discharge Process Guide Dialog -->
+    <string name="power_guide_process_dialog_subtitle">Discharge history curve and real-time telemetry</string>
+    <string name="power_guide_process_curve_title">Battery Level Trend Curve</string>
+    <string name="power_guide_process_curve_desc">Displays the dynamic curve of battery percentage over time since the last discharge (or boot), showing battery drain slope and drop rate.</string>
+    <string name="power_guide_process_markers_title">High-Drain App Markers</string>
+    <string name="power_guide_process_markers_desc">Automatically flags foreground active applications during rapid battery drop or high-load periods to help identify battery drain culprits.</string>
+    <string name="power_guide_process_params_title">Real-time Telemetry Metrics</string>
+    <string name="power_guide_process_params_desc">• Energy (Wh): Current remaining battery energy reserve.\n• Temperature (℃): Real-time battery cell operating temperature.\n• Voltage (V): Real-time terminal voltage of the battery.\n• Status: Indicates discharging or connected charging device.</string>
+
+    <!-- Usage Scenarios Guide Dialog -->
+    <string name="power_guide_scene_dialog_subtitle">Foreground app power profiles and efficiency analysis</string>
+    <string name="power_guide_scene_metrics_title">Core Metrics</string>
+    <string name="power_guide_scene_metrics_desc">• Duration: Cumulative foreground active time of the application.\n• AVG Power: Average total system discharge power while running (W).\n• Temperature: Average (AVG) and maximum (MAX) temperature during execution.\n• Energy Consumed: Real energy consumption (mAh) and percentage of total discharge.</string>
+    <string name="power_guide_scene_modes_title">Dual Data Collection Modes</string>
+    <string name="power_guide_scene_modes_desc">• ⚡ Shizuku Mode: Directly reads dumpsys batterystats authority log from system framework for precise data.\n• 📊 Standard Mode: Scientifically estimated via Android UsageStats and platform hardware power profile.</string>
+    <string name="power_guide_scene_tips_title">Sorting and Quick Interactions</string>
+    <string name="power_guide_scene_tips_desc">• Toggle Button (⇄): Quickly cycles through sorting by duration, power, and energy consumed.\n• Filter Button: Opens menu for precise sorting by multiple dimensions.</string>
+
+    <!-- Statistics Overview Guide Dialog -->
+    <string name="power_guide_stats_dialog_title">Power Statistics &amp; Metrics Guide</string>
+    <string name="power_guide_stats_dialog_subtitle">Understand battery discharge model and calculation mechanisms</string>
+    <string name="power_guide_stats_cycle_title">Cycle &amp; Reset Mechanism</string>
+    <string name="power_guide_stats_cycle_desc">• Unplugging the charger automatically starts a new discharge cycle and captures the initial level.\n• You can manually reset current cycle sampling at any time via the top trash icon.\n• Current snapshots can be viewed or saved from the history records dialog.</string>
+
+
 
     <!-- Common Operations & Status -->
     <string name="unknown">Unknown</string>
@@ -181,13 +263,22 @@
     <string name="settings_section_refresh">Data &amp; Refresh</string>
     <string name="setting_auto_refresh">Auto Refresh</string>
     <string name="setting_refresh_interval">Refresh Interval</string>
+    <string name="setting_power_mode">Power Stats Detection Mode</string>
+    <string name="setting_power_mode_desc">Toggle between Shizuku and standard mode</string>
     <string name="interval_1s">1 second</string>
     <string name="interval_2s">2 seconds</string>
     <string name="interval_3s">3 seconds</string>
     <string name="interval_5s">5 seconds</string>
     <string name="interval_10s">10 seconds</string>
 
-    <string name="settings_section_shizuku">Shizuku Service</string>
+    <!-- First-time mode setup guide -->
+    <string name="power_setup_title">Select Power Stats Mode</string>
+    <string name="power_setup_subtitle">Please select a detection mode for power consumption analysis (can be changed in Settings anytime):</string>
+    <string name="power_setup_btn_confirm">Confirm and Start Detection</string>
+    <string name="power_setup_shizuku_desc">Directly extracts dumpsys batterystats authority log via ADB/Shizuku, providing per-app real drain (mAh) and hardware breakdown.</string>
+    <string name="power_setup_normal_desc">Estimates app power consumption from foreground duration and power profile, works out of the box without special privileges.</string>
+
+    <string name="settings_section_shizuku">Shizuku Privileges</string>
 
     <string name="settings_section_backup">Data Backup &amp; Restore</string>
     <string name="setting_export_backup">Export Data Backup</string>
@@ -251,4 +342,23 @@
     <string name="toast_already_authorized">Already authorized, no need to request again</string>
     <string name="toast_shizuku_not_connected">Shizuku not connected, attempting to launch Shizuku App...</string>
     <string name="toast_shizuku_not_found">Shizuku App not found. Please install and launch it first.</string>
+
+    <!-- History Snapshot Loading & Power Unplug Auto-Record -->
+    <string name="btn_load_snapshot">Load &amp; View</string>
+    <string name="toast_load_snapshot_success">History snapshot loaded</string>
+    <string name="history_snapshot_banner_format">📌 Viewing snapshot: %s</string>
+    <string name="btn_restore_realtime">Restore Live</string>
+    <string name="toast_restored_realtime">Restored to live battery monitoring</string>
+    <string name="note_auto_unplug">Recorded on power unplug</string>
+    <string name="toast_unplug_recorded">Battery snapshot recorded on unplug</string>
+
+    <!-- Power Usage History -->
+    <string name="power_history_title">Power Usage History</string>
+    <string name="power_history_empty_title">No Power Usage History</string>
+    <string name="power_history_empty_desc">Whenever you unplug the charger, a new power usage snapshot will be automatically recorded here.</string>
+    <string name="power_history_clear_title">Clear Power History</string>
+    <string name="power_history_clear_message">Are you sure you want to clear all power usage history records?</string>
+    <string name="power_history_banner_format">📌 Viewing power snapshot: %s</string>
+    <string name="power_history_loaded_toast">Power usage snapshot loaded</string>
+    <string name="power_history_app_count_format">%d apps</string>
 </resources>

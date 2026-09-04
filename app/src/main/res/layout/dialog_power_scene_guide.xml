@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog_surface"
+    android:clipToOutline="true"
+    android:gravity="center_horizontal"
+    android:orientation="vertical"
+    android:paddingHorizontal="16dp"
+    android:paddingVertical="20dp">
+
+    <!-- 弹窗标题与副标题 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/power_guide_scene_title"
+        android:textColor="?android:attr/textColorPrimary"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="@string/power_guide_scene_dialog_subtitle"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="13sp" />
+
+    <!-- 滚动内容区 -->
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:maxHeight="420dp"
+        android:overScrollMode="never">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- 卡片 1: 核心统计指标 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/power_guide_scene_metrics_title"
+                    android:textColor="#2196F3"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingExtra="4dp"
+                    android:text="@string/power_guide_scene_metrics_desc"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <!-- 卡片 2: 两种数据采集模式 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/power_guide_scene_modes_title"
+                    android:textColor="@color/nav_item_selected"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingExtra="4dp"
+                    android:text="@string/power_guide_scene_modes_desc"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <!-- 卡片 3: 排序与快捷交互技巧 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/power_guide_scene_tips_title"
+                    android:textColor="#F59E0B"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingExtra="4dp"
+                    android:text="@string/power_guide_scene_tips_desc"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- 底部确认按钮 -->
+    <TextView
+        android:id="@+id/btn_dialog_scene_guide_close"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/bg_dialog_btn_primary"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:text="@string/understood"
+        android:textColor="@color/nav_item_selected"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+</LinearLayout>

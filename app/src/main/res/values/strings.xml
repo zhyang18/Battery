@@ -4,9 +4,91 @@
     <string name="app_full_title">电池检测 (Battery App)</string>
 
     <!-- 底部导航 -->
+    <string name="nav_power">耗电</string>
     <string name="nav_detection">检测</string>
     <string name="nav_history">记录</string>
     <string name="nav_settings">设置</string>
+
+    <!-- 耗电统计页面 -->
+    <string name="power_stats_title">耗电统计</string>
+    <string name="power_usage_process">使用过程</string>
+    <string name="power_usage_scene">使用场景</string>
+    <string name="power_avg_power">放电功耗</string>
+    <string name="power_used_time">放电时间</string>
+    <string name="power_remaining_time">理论续航</string>
+    <string name="power_format_screen_on">亮屏 %s</string>
+    <string name="power_format_screen_off">息屏 %s</string>
+    <string name="power_format_total">总计 %s</string>
+    <string name="power_format_avg">平均 %s</string>
+    <string name="power_format_composite">综合 %s</string>
+    <string name="power_wh_format">%.1fWh</string>
+    <string name="power_param_energy">当前剩余能量</string>
+    <string name="power_tooltip_energy">电池当前剩余能量：%s（结合电池实际容量与实时电压精准计算）</string>
+    <string name="power_temp_format">%.1f℃</string>
+    <string name="power_volt_format">%.3fV</string>
+    <string name="power_status_unplugged">未充电</string>
+    <string name="power_status_charging">充电中</string>
+    <string name="power_avg_info_format">AVG: %1$.2fW, %2$d℃</string>
+    <string name="power_max_temp_format">MAX: %d℃</string>
+    <string name="power_permission_title">需要使用情况访问权限</string>
+    <string name="power_permission_desc">为了精确统计应用级耗电时长与场景分析，请在系统设置中授予“有权查看使用情况的应用”权限。</string>
+    <string name="power_permission_btn">前往授权</string>
+    <string name="power_sort_power">按功耗排序</string>
+    <string name="power_sort_duration">按使用时长排序</string>
+    <string name="power_sort_energy">按消耗电量排序</string>
+    <string name="power_sort_name">按名称排序</string>
+    <string name="power_mode_shizuku">⚡ Shizuku 模式 (高精度推荐)</string>
+    <string name="power_mode_normal">标准模式 (UsageStats)</string>
+    <string name="power_mode_tip_shizuku">已启用 Shizuku 高精度模式，直接读取系统底层 dumpsys batterystats 权威功耗账本</string>
+    <string name="power_mode_tip_normal">当前为标准模式，基于系统前台使用时长与硬件基准模型估算</string>
+    <string name="power_shizuku_not_running_title">Shizuku 服务未运行</string>
+    <string name="power_shizuku_not_running_desc">请先启动 Shizuku App 并确保服务已运行，以开启系统底层权威耗电统计。</string>
+    <string name="power_shizuku_unauthorized_title">需要 Shizuku 提权授权</string>
+    <string name="power_shizuku_unauthorized_desc">为了精确提取各应用的真实耗电量（mAh）与细分功耗，请授予 Shizuku 权限。</string>
+    <string name="power_shizuku_btn_auth">立即授权</string>
+    <string name="power_shizuku_btn_open">打开 Shizuku</string>
+    <string name="power_drain_format">%1$.1fmAh (%2$.1f%%)</string>
+    <string name="power_toast_cleared">已重置当前周期的耗电采样记录</string>
+    <string name="power_guide_process_title">使用过程说明</string>
+    <string name="power_guide_process_content">“使用过程”折线图展示自本次开机或放电以来电池电量百分比随时间的变化曲线，并在高耗电阶段下方打点展示当时活跃的应用，直观呈现电池消耗历程。</string>
+    <string name="power_guide_scene_title">使用场景说明</string>
+    <string name="power_guide_scene_content">“使用场景”统计每个前台活跃应用的使用时长、平均运行功耗与运行发热温度，帮助快速定位高耗电与发热元凶。</string>
+    <string name="power_guide_overview_title">放电指标说明</string>
+    <string name="power_guide_overview_content">• 放电功耗：统计自本次放电以来的亮屏平均功耗、全周期平均功耗及息屏待机功耗（单位：W）。\n\n• 放电时间：统计自本次放电以来的亮屏使用时间、息屏待机时间及累计总放电时间。\n\n• 理论续航：基于当前电池剩余能量与不同工况下的放电功耗，测算出的亮屏可用时长、综合可用时长及息屏待机时长。</string>
+
+    <!-- 耗电重置弹窗相关 -->
+    <string name="dialog_power_reset_title">重置耗电统计？</string>
+    <string name="dialog_power_reset_desc">重置后将清除本次放电周期的所有采样数据、折线图及各应用场景耗电排行，并以当前电量重新开始统计。历史已保存的快照不受影响。</string>
+    <string name="dialog_power_reset_confirm_btn">确认重置</string>
+    <string name="dialog_power_reset_current_level">当前电量</string>
+    <string name="dialog_power_reset_current_mode">统计模式</string>
+    <string name="dialog_power_reset_recorded_time">记录时长</string>
+
+    <!-- 使用过程说明弹窗 -->
+    <string name="power_guide_process_dialog_subtitle">电量变化历程与实时底层状态数据</string>
+    <string name="power_guide_process_curve_title">电量走势曲线</string>
+    <string name="power_guide_process_curve_desc">实时记录自本次放电（或开机）以来的电量百分比随时间变化的动态曲线，直观呈现电池消耗坡度与掉电速率。</string>
+    <string name="power_guide_process_markers_title">高耗电应用标记</string>
+    <string name="power_guide_process_markers_desc">系统在电量快速下降或高负荷运行时间段自动打点，标注当时的前台活跃应用，帮助您精准锁定各耗电波段的元凶。</string>
+    <string name="power_guide_process_params_title">实时底层状态监测</string>
+    <string name="power_guide_process_params_desc">• 能量 (Wh)：当前电池剩余的总能量储备。\n• 温度 (℃)：电芯当前运行发热温度与过热预警。\n• 电压 (V)：当前电池端实时工作电压。\n• 状态：指示当前放电中或已接入充电设备。</string>
+
+    <!-- 使用场景说明弹窗 -->
+    <string name="power_guide_scene_dialog_subtitle">前台活跃应用功耗画像与能效分析</string>
+    <string name="power_guide_scene_metrics_title">核心统计指标</string>
+    <string name="power_guide_scene_metrics_desc">• 使用时长：应用在前台处于活跃交互状态的累计时间。\n• AVG 功耗：该应用运行期间的平均整机放电功率（单位：W）。\n• 发热温度：运行期间的平均温度（AVG）与最高温度（MAX）。\n• 消耗电量：实际消耗的电量（mAh）及占放电总量的百分比。</string>
+    <string name="power_guide_scene_modes_title">两种数据采集模式</string>
+    <string name="power_guide_scene_modes_desc">• ⚡ Shizuku 模式：直接读取系统底层权威 dumpsys batterystats 耗电账本，提供毫米级精确的真实耗电数据。\n• 📊 标准模式：基于 Android UsageStats 使用记录与系统标准硬件能耗模型进行科学估算。</string>
+    <string name="power_guide_scene_tips_title">排序与快捷交互技巧</string>
+    <string name="power_guide_scene_tips_desc">• 切换按钮 (⇄)：一键在“按使用时长”、“按运行功耗”与“按消耗电量”间快速循环轮转。\n• 漏斗按钮：展开菜单，支持按使用时长、功耗、消耗电量及应用名称等多维度精确排序。</string>
+
+    <!-- 统计说明综合指南弹窗 -->
+    <string name="power_guide_stats_dialog_title">耗电统计与指标说明</string>
+    <string name="power_guide_stats_dialog_subtitle">全面了解电池放电模型与核心数据计算原理</string>
+    <string name="power_guide_stats_cycle_title">统计周期与重置机制</string>
+    <string name="power_guide_stats_cycle_desc">• 拔掉充电器时系统会自动开启新的放电统计周期并记录初始电量。\n• 您可随时点击右上角垃圾桶图标手动重置当前周期的采样数据。\n• 支持在右上角历史记录中查看或保存当前快照。</string>
+
+
 
     <!-- 通用操作与状态 -->
     <string name="unknown">未知</string>
@@ -181,11 +263,20 @@
     <string name="settings_section_refresh">数据与刷新</string>
     <string name="setting_auto_refresh">开启实时自动刷新</string>
     <string name="setting_refresh_interval">刷新时间间隔</string>
+    <string name="setting_power_mode">耗电统计检测模式</string>
+    <string name="setting_power_mode_desc">切换 Shizuku 权威账本与标准模式</string>
     <string name="interval_1s">1 秒</string>
     <string name="interval_2s">2 秒</string>
     <string name="interval_3s">3 秒</string>
     <string name="interval_5s">5 秒</string>
     <string name="interval_10s">10 秒</string>
+
+    <!-- 首次启动耗电模式选择引导 -->
+    <string name="power_setup_title">选择耗电检测模式</string>
+    <string name="power_setup_subtitle">为了给您呈现精确的耗电分析，请先选择检测模式（后续可在设置中随时更改）：</string>
+    <string name="power_setup_btn_confirm">确认并开始检测</string>
+    <string name="power_setup_shizuku_desc">通过 ADB 提权直接读取系统底层 dumpsys batterystats 权威功耗账本，精准提取各应用真实消耗（mAh）与硬件分摊。</string>
+    <string name="power_setup_normal_desc">基于系统前台使用时长与硬件基准模型估算各应用功耗，无需连接电脑与 Shizuku 授权，开箱即用。</string>
 
     <string name="settings_section_shizuku">Shizuku 提权</string>
 
@@ -251,4 +342,23 @@
     <string name="toast_already_authorized">已经授权，无需再次请求</string>
     <string name="toast_shizuku_not_connected">Shizuku 尚未连接，尝试打开 Shizuku App...</string>
     <string name="toast_shizuku_not_found">未找到 Shizuku App，请先安装并启动</string>
+
+    <!-- 历史记录加载与断电自动记录 -->
+    <string name="btn_load_snapshot">加载查看</string>
+    <string name="toast_load_snapshot_success">已加载该条历史快照数据</string>
+    <string name="history_snapshot_banner_format">📌 正在查看历史快照：%s</string>
+    <string name="btn_restore_realtime">恢复实时</string>
+    <string name="toast_restored_realtime">已切回实时电池监测</string>
+    <string name="note_auto_unplug">拔掉电源自动记录</string>
+    <string name="toast_unplug_recorded">已自动记录断电快照</string>
+
+    <!-- 耗电历史记录 -->
+    <string name="power_history_title">耗电记录历史</string>
+    <string name="power_history_empty_title">暂无耗电历史记录</string>
+    <string name="power_history_empty_desc">每次拔掉充电电源时，系统将自动生成并保存当时的放电走势与应用耗电快照。</string>
+    <string name="power_history_clear_title">清空耗电历史</string>
+    <string name="power_history_clear_message">确定要清空所有已保存的耗电历史快照吗？</string>
+    <string name="power_history_banner_format">📌 正在查看耗电历史快照：%s</string>
+    <string name="power_history_loaded_toast">已加载该条耗电历史快照</string>
+    <string name="power_history_app_count_format">%d款应用</string>
 </resources>

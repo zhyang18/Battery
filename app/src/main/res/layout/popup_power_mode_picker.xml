@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_popup_dropdown"
+    android:clipToOutline="true"
+    android:elevation="8dp"
+    android:orientation="vertical"
+    android:paddingHorizontal="4dp"
+    android:paddingVertical="6dp">
+
+    <!-- 选项 1: Shizuku 模式 -->
+    <TextView
+        android:id="@+id/tv_mode_shizuku"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="14dp"
+        android:singleLine="true"
+        android:text="@string/power_mode_shizuku"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- 选项 2: 标准模式 -->
+    <TextView
+        android:id="@+id/tv_mode_normal"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="14dp"
+        android:singleLine="true"
+        android:text="@string/power_mode_normal"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+</LinearLayout>

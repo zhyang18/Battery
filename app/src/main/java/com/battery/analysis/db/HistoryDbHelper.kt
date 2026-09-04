@@ -192,6 +192,33 @@ class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
     }
 
     /**
+     * 查询全库最新的一条历史快照记录（不论分类）。
+     *
+     * @return 最新的 [HistoryRecord] 实例，若无记录则返回 null
+     */
+    fun getLatestRecord(): HistoryRecord? {
+        val db = readableDatabase
+        val cursor = db.query(
+            TABLE_NAME,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "$COL_ID DESC",
+            "1"
+        )
+
+        cursor.use { c ->
+            if (c.moveToFirst()) {
+                val indices = ColumnIndices(c)
+                return parseRecordFromCursor(c, indices)
+            }
+        }
+        return null
+    }
+
+    /**
      * 根据主键 ID 删除指定的单条历史记录。
      *
      * @param id 要删除的记录 ID

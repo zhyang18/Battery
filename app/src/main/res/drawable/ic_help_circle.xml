@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp"
+    android:height="20dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 圆形问号说明图标 -->
+    <path
+        android:fillColor="#9E9E9E"
+        android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2z M12,20c-4.41,0 -8,-3.59 -8,-8s3.59,-8 8,-8 8,3.59 8,8 -3.59,8 -8,8z M11,16h2v2h-2z M12.07,6c-2.02,0 -3.32,1.3 -3.45,2.88l1.74,0.22c0.07,-0.77 0.72,-1.4 1.71,-1.4 1.04,0 1.83,0.61 1.83,1.5 0,0.85 -0.62,1.26 -1.27,1.75 -0.73,0.56 -1.53,1.23 -1.48,2.8h1.7v-0.5c0.02,-0.93 0.65,-1.37 1.34,-1.88 0.77,-0.57 1.57,-1.24 1.57,-2.67 0,-1.72 -1.43,-2.7 -3.44,-2.7z" />
+</vector>

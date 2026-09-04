@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
+        android:id="@+id/nav_power"
+        android:icon="@drawable/ic_nav_power"
+        android:title="@string/nav_power" />
+
+    <item
         android:id="@+id/nav_detection"
         android:icon="@drawable/ic_nav_detection"
         android:title="@string/nav_detection" />

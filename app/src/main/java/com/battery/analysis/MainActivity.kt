@@ -11,6 +11,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import com.battery.analysis.databinding.ActivityMainBinding
+import com.battery.analysis.receiver.BatteryUnplugReceiver
 import com.battery.analysis.ui.MainPagerAdapter
 import com.battery.analysis.viewmodel.BatteryViewModel
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +38,11 @@ class MainActivity : AppCompatActivity() {
     private var isAutoRefreshEnabled: Boolean = false
     private var refreshIntervalMs: Long = 2000L
     private var lastBackPressedTime: Long = 0L
+
+    /**
+     * 前台动态注册的拔电广播接收器，保障前台运行期间毫秒级捕获断电事件。
+     */
+    private val batteryUnplugReceiver = BatteryUnplugReceiver()
 
     /**
      * Shizuku 权限请求结果监听器。
@@ -96,16 +102,25 @@ class MainActivity : AppCompatActivity() {
         setupBottomNavigation()
 
         // 2. 初始化双击返回退出应用监听
-        setupBackPressHandler()
+        //setupBackPressHandler()
 
         // 3. 注册 Shizuku 监听器
         Shizuku.addRequestPermissionResultListener(requestPermissionResultListener)
         Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
         Shizuku.addBinderDeadListener(binderDeadListener)
 
-        // 4. 初始只刷新系统普通 API（因为默认处于系统 API 视图）
+        // 4. 动态注册拔电广播接收器（前台双保险，防止部分机型后台静态广播被阻断）
+        val unplugFilter = android.content.IntentFilter(android.content.Intent.ACTION_POWER_DISCONNECTED)
+        registerReceiver(batteryUnplugReceiver, unplugFilter)
+
+        // 5. 初始只刷新系统普通 API（因为默认处于系统 API 视图）
         updateShizukuStatusState()
         viewModel.refreshNormalApi(this)
+
+        // 6. 注册断开电源自动记录快照监听器，实时刷新历史数据流
+        BatteryUnplugReceiver.onRecordInsertedListener = {
+            viewModel.loadHistoryRecords(this)
+        }
     }
 
     /**
@@ -151,25 +166,31 @@ class MainActivity : AppCompatActivity() {
 
         // 禁用顶级 ViewPager2 手势横滑，避免干扰内部子 Tab 横滑切换
         binding.mainViewPager.isUserInputEnabled = false
-        binding.mainViewPager.offscreenPageLimit = 2
+        binding.mainViewPager.offscreenPageLimit = 3
 
         binding.bottomNavigation.setOnItemSelectedListener { item ->
             when (item.itemId) {
-                R.id.nav_detection -> {
+                R.id.nav_power -> {
                     binding.mainViewPager.setCurrentItem(0, false)
                     true
                 }
-                R.id.nav_history -> {
+                R.id.nav_detection -> {
                     binding.mainViewPager.setCurrentItem(1, false)
                     true
                 }
-                R.id.nav_settings -> {
+                R.id.nav_history -> {
                     binding.mainViewPager.setCurrentItem(2, false)
+                    true
+                }
+                R.id.nav_settings -> {
+                    binding.mainViewPager.setCurrentItem(3, false)
                     true
                 }
                 else -> false
             }
         }
+        // 默认选中第一个“耗电”页签
+        binding.bottomNavigation.selectedItemId = R.id.nav_power
     }
 
     /**
@@ -219,11 +240,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 活动销毁生命周期回调，注销 Shizuku 监听器与协程。
+     * 活动销毁生命周期回调，注销动态广播接收器、Shizuku 监听器与自动刷新协程。
      */
     override fun onDestroy() {
         super.onDestroy()
         stopAutoRefresh()
+        try {
+            unregisterReceiver(batteryUnplugReceiver)
+        } catch (_: Exception) {}
+        BatteryUnplugReceiver.onRecordInsertedListener = null
         Shizuku.removeRequestPermissionResultListener(requestPermissionResultListener)
         Shizuku.removeBinderReceivedListener(binderReceivedListener)
         Shizuku.removeBinderDeadListener(binderDeadListener)
@@ -287,10 +312,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 切换底部主导航页签至指定菜单项（如切换至检测页或记录页）。
+     *
+     * @param navItemId 底部导航菜单项 ID，如 [R.id.nav_detection]
+     */
+    fun navigateToNav(navItemId: Int) {
+        binding.bottomNavigation.selectedItemId = navItemId
+    }
+
+    /**
      * 根据当前用户正处于的顶级页面及子 Tab，精准且独立地刷新对应的数据源。
      */
     private fun refreshCurrentActiveTab() {
-        if (binding.mainViewPager.currentItem == 0) {
+        if (viewModel.isViewingHistorySnapshot.value) {
+            return
+        }
+        if (binding.mainViewPager.currentItem == 1) {
             when (viewModel.activeTabPosition.value) {
                 0 -> viewModel.refreshNormalApi(this)
                 1 -> viewModel.refreshShizuku(this)

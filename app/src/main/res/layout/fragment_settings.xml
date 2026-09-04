@@ -263,6 +263,51 @@
                     app:tint="?android:attr/textColorSecondary" />
             </LinearLayout>
 
+            <!-- 条目: 耗电统计检测模式 -->
+            <LinearLayout
+                android:id="@+id/layout_power_mode_setting"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/bg_setting_card_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:clipToOutline="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:src="@drawable/ic_nav_power"
+                    app:tint="?android:attr/textColorPrimary" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:text="@string/setting_power_mode"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="15sp" />
+
+                <TextView
+                    android:id="@+id/tv_current_power_mode"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13.5sp"
+                    tools:text="⚡ Shizuku 模式" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_arrow_drop_down"
+                    app:tint="?android:attr/textColorSecondary" />
+            </LinearLayout>
+
             <!-- 3. Shizuku 提权 分类 -->
             <TextView
                 android:layout_width="match_parent"

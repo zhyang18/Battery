@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_popup_dropdown"
+    android:clipToOutline="true"
+    android:elevation="8dp"
+    android:orientation="vertical"
+    android:paddingHorizontal="4dp"
+    android:paddingVertical="6dp">
+
+    <!-- 选项 1: 按使用时长排序 -->
+    <TextView
+        android:id="@+id/tv_sort_duration"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="14dp"
+        android:singleLine="true"
+        android:text="@string/power_sort_duration"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- 选项 2: 按功耗排序 -->
+    <TextView
+        android:id="@+id/tv_sort_power"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="14dp"
+        android:singleLine="true"
+        android:text="@string/power_sort_power"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- 选项 3: 按消耗电量排序 -->
+    <TextView
+        android:id="@+id/tv_sort_energy"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="14dp"
+        android:singleLine="true"
+        android:text="@string/power_sort_energy"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- 选项 4: 按名称排序 -->
+    <TextView
+        android:id="@+id/tv_sort_name"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="14dp"
+        android:singleLine="true"
+        android:text="@string/power_sort_name"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+</LinearLayout>

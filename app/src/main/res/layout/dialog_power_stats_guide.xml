@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog_surface"
+    android:clipToOutline="true"
+    android:gravity="center_horizontal"
+    android:orientation="vertical"
+    android:paddingHorizontal="16dp"
+    android:paddingVertical="20dp">
+
+    <!-- 弹窗标题与副标题 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/power_guide_stats_dialog_title"
+        android:textColor="?android:attr/textColorPrimary"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="@string/power_guide_stats_dialog_subtitle"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="13sp" />
+
+    <!-- 滚动内容区 -->
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:maxHeight="450dp"
+        android:overScrollMode="never">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- 卡片 1: 使用过程与放电曲线 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/power_guide_process_title"
+                    android:textColor="#2196F3"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingExtra="3dp"
+                    android:text="@string/power_guide_process_content"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:lineSpacingExtra="3dp"
+                    android:text="@string/power_guide_process_params_desc"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12.5sp" />
+            </LinearLayout>
+
+            <!-- 卡片 2: 三大核心放电指标 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/power_guide_overview_title"
+                    android:textColor="@color/nav_item_selected"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingExtra="4dp"
+                    android:text="@string/power_guide_overview_content"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <!-- 卡片 3: 使用场景应用画像 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/power_guide_scene_title"
+                    android:textColor="#818CF8"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingExtra="3dp"
+                    android:text="@string/power_guide_scene_content"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:lineSpacingExtra="3dp"
+                    android:text="@string/power_guide_scene_modes_desc"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12.5sp" />
+            </LinearLayout>
+
+            <!-- 卡片 4: 统计周期与重置机制 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/power_guide_stats_cycle_title"
+                    android:textColor="#10B981"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:lineSpacingExtra="4dp"
+                    android:text="@string/power_guide_stats_cycle_desc"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- 底部确认按钮 -->
+    <TextView
+        android:id="@+id/btn_dialog_stats_guide_close"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginTop="16dp"
+        android:background="@drawable/bg_dialog_btn_primary"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:text="@string/understood"
+        android:textColor="@color/nav_item_selected"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+</LinearLayout>

@@ -69,6 +69,9 @@ android {
                             ?: System.getenv("KEY_PASSWORD")
                             ?: ""
             }
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 

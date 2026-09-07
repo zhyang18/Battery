@@ -375,11 +375,17 @@
                     android:textSize="13sp"
                     android:textStyle="bold" />
 
-                <com.battery.analysis.ui.view.PowerUsageChartView
-                    android:id="@+id/power_chart_view"
+                <com.battery.analysis.timeline.presentation.BatteryTimelineView
+                    android:id="@+id/battery_timeline_view"
                     android:layout_width="match_parent"
-                    android:layout_height="200dp"
+                    android:layout_height="215dp"
                     android:layout_marginTop="10dp" />
+
+                <com.battery.analysis.timeline.presentation.MetricSelectorView
+                    android:id="@+id/metric_selector_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp" />
             </LinearLayout>
 
             <!-- 卡片 4：应用耗电列表 -->

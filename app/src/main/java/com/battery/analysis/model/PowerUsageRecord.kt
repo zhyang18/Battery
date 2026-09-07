@@ -212,9 +212,9 @@ data class PowerUsageRecord(
         val endDate = java.util.Date(endTs)
 
         return if (dayOnlyFormat.format(startDate) == dayOnlyFormat.format(endDate)) {
-            "${dateFormat.format(startDate)} ~ ${timeOnlyFormat.format(endDate)}"
+            "${dateFormat.format(startDate)}~${timeOnlyFormat.format(endDate)}"
         } else {
-            "${dateFormat.format(startDate)} ~ ${dateFormat.format(endDate)}"
+            "${dateFormat.format(startDate)}~${dateFormat.format(endDate)}"
         }
     }
 

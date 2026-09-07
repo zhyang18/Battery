@@ -32,6 +32,8 @@ import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.ChargingSamplePoint
 import com.battery.analysis.model.ChargingSessionSummary
 import com.battery.analysis.ui.view.ChargingChartView
+import com.battery.analysis.timeline.presentation.AppEnergyDetailBottomSheetDialog
+import com.battery.analysis.timeline.presentation.TimelineMetric
 import android.os.PowerManager
 import com.battery.analysis.provider.NormalApiProvider
 import kotlinx.coroutines.Dispatchers
@@ -548,6 +550,16 @@ class PowerUsageFragment : Fragment() {
                 Toast.makeText(requireContext(), getString(R.string.toast_request_auth_failed, ""), Toast.LENGTH_SHORT).show()
             }
         }
+
+        // 功耗时间轴底部指标多选/反选监听（功耗 / 电量 / 温度 / 电压 / 应用）
+        binding.metricSelectorView.setOnMetricsChangedListener { selectedMetrics ->
+            binding.batteryTimelineView.setSelectedMetrics(selectedMetrics)
+        }
+
+        // 功耗时间轴 App 图标点击监听：弹出 App 详细能耗 BottomSheet
+        binding.batteryTimelineView.setOnAppEventListener { event ->
+            AppEnergyDetailBottomSheetDialog(requireContext(), event).show()
+        }
     }
 
     /**
@@ -823,7 +835,7 @@ class PowerUsageFragment : Fragment() {
         val start = if (startTs > 0L) startTs else System.currentTimeMillis()
         val end = if (endTs >= start) endTs else System.currentTimeMillis()
         val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-        return "${timeFormat.format(Date(start))} ~ ${timeFormat.format(Date(end))}"
+        return "${timeFormat.format(Date(start))}~${timeFormat.format(Date(end))}"
     }
 
     /**
@@ -912,7 +924,11 @@ class PowerUsageFragment : Fragment() {
             .coerceAtLeast(snapshot.levelPercent)
         binding.tvBatteryStartPercent.text = "${startLevel}%"
         binding.tvBatteryPercentHeader.text = "${snapshot.levelPercent}%"
-        binding.powerChartView.setData(fullPackage.trendPoints)
+
+        // 构建并绑定功耗时间轴最新状态（多选模式）
+        val selectedMetrics = binding.metricSelectorView.getSelectedMetrics()
+        val timelineState = powerManager.buildTimelineState(fullPackage).copy(selectedMetrics = selectedMetrics)
+        binding.batteryTimelineView.setState(timelineState)
 
         val energyText = String.format(Locale.getDefault(), getString(R.string.power_wh_format), snapshot.energyWh)
         binding.tvEnergyWh.text = energyText

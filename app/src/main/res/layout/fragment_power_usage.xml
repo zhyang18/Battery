@@ -611,12 +611,19 @@
                                 </LinearLayout>
                             </RelativeLayout>
 
-                            <!-- 自定义放电折线图控件 -->
-                            <com.battery.analysis.ui.view.PowerUsageChartView
-                                android:id="@+id/power_chart_view"
+                            <!-- 功耗时间轴主可视化交互组件（四维数据融合与多行 App 堆叠） -->
+                            <com.battery.analysis.timeline.presentation.BatteryTimelineView
+                                android:id="@+id/battery_timeline_view"
                                 android:layout_width="match_parent"
-                                android:layout_height="205dp"
+                                android:layout_height="215dp"
                                 android:layout_marginTop="8dp" />
+
+                            <!-- 底部指标切换选择器（功耗 / 电量 / 温度 / 电压 / 应用） -->
+                            <com.battery.analysis.timeline.presentation.MetricSelectorView
+                                android:id="@+id/metric_selector_view"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="6dp" />
 
                             <!-- 底部状态指示行：能量、温度、电压、充电状态 -->
                             <LinearLayout

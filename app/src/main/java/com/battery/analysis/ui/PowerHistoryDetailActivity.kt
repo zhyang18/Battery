@@ -10,7 +10,9 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.battery.analysis.R
 import com.battery.analysis.databinding.ActivityPowerHistoryDetailBinding
 import com.battery.analysis.db.PowerUsageDbHelper
+import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.PowerUsageRecord
+import com.battery.analysis.timeline.presentation.AppEnergyDetailBottomSheetDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -85,6 +87,16 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
                 finish()
             }
         }
+
+        // 功耗时间轴指标多选/反选监听
+        binding.metricSelectorView.setOnMetricsChangedListener { selectedMetrics ->
+            binding.batteryTimelineView.setSelectedMetrics(selectedMetrics)
+        }
+
+        // 功耗时间轴 App 图标点击监听
+        binding.batteryTimelineView.setOnAppEventListener { event ->
+            AppEnergyDetailBottomSheetDialog(this@PowerHistoryDetailActivity, event).show()
+        }
     }
 
     /**
@@ -153,11 +165,14 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         binding.tvMetricRemComposite.text = String.format(Locale.getDefault(), getString(R.string.power_format_composite), record.remainingCompositeText)
         binding.tvMetricRemScreenOff.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), record.remainingScreenOffText)
 
-        // 3. 卡片 3 与 4：反序列化全量数据包加载走势图与应用排行榜
+        // 3. 卡片 3 与 4：反序列化全量数据包加载功耗时间轴与应用排行榜
         lifecycleScope.launch(Dispatchers.IO) {
             val fullPackage = record.toFullPowerPackage(this@PowerHistoryDetailActivity)
+            val powerMgr = PowerUsageManager.getInstance(this@PowerHistoryDetailActivity)
+            val selectedMetrics = binding.metricSelectorView.getSelectedMetrics()
+            val timelineState = powerMgr.buildTimelineState(fullPackage).copy(selectedMetrics = selectedMetrics)
             withContext(Dispatchers.Main) {
-                binding.powerChartView.setData(fullPackage.trendPoints)
+                binding.batteryTimelineView.setState(timelineState)
                 binding.tvAppListTitle.text = getString(R.string.power_history_app_count_format, fullPackage.appList.size)
                 appAdapter.submitList(fullPackage.appList)
             }

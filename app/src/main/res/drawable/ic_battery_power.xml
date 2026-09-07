@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp"
+    android:height="20dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 美化版电池功率图标：精致蓄电池外框与标准正负极符号 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M3,7c-0.83,0 -1.5,0.67 -1.5,1.5v7c0,0.83 0.67,1.5 1.5,1.5h18c0.83,0 1.5,-0.67 1.5,-1.5v-7c0,-0.83 -0.67,-1.5 -1.5,-1.5H3z M3.2,8.5h17.6c0.11,0 0.2,0.09 0.2,0.2v6.6c0,0.11 -0.09,0.2 -0.2,0.2H3.2c-0.11,0 -0.2,-0.09 -0.2,-0.2V8.7c0,-0.11 0.09,-0.2 0.2,-0.2z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M5.5,5h2.5v1.5H5.5z M16,5h2.5v1.5H16z" />
+    <!-- 负极 - -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M6.5,11.25h3.5v1.5H6.5z" />
+    <!-- 正极 + -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M15.5,10.25h-1.25V9h-1.5v1.25H11.5v1.5h1.25v1.25h1.5V11.75h1.25z" />
+</vector>

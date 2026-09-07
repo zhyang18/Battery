@@ -14,6 +14,7 @@ import android.graphics.drawable.Drawable
  * @property avgTemperature 平均运行温度（单位：摄氏度 ℃）
  * @property maxTemperature 最高运行温度（单位：摄氏度 ℃）
  * @property lastUsedTimeMs 最近一次前台使用的时间戳（毫秒）
+ * @property directEnergyWh 底层系统直接测量或换算的真实消耗电量（单位：瓦时 Wh，可选）
  */
 data class AppPowerUsageItem(
     val packageName: String,
@@ -23,14 +24,15 @@ data class AppPowerUsageItem(
     val avgPowerWatts: Float,
     val avgTemperature: Int,
     val maxTemperature: Int,
-    val lastUsedTimeMs: Long
+    val lastUsedTimeMs: Long,
+    val directEnergyWh: Float? = null
 ) {
     /**
      * 计算该应用消耗的总电量（单位：瓦时 Wh）。
-     * Wh = 平均功耗 (W) * 前台运行小时数 (h)。
+     * 优先使用底层系统 dumpsys 直接测得的真实消耗电量，若无直接测量值则基于平均功耗 (W) * 前台运行小时数 (h) 计算。
      */
     val energyWh: Float
-        get() = (avgPowerWatts * (foregroundTimeMs / 3600000f)).coerceAtLeast(0f)
+        get() = directEnergyWh ?: (avgPowerWatts * (foregroundTimeMs / 3600000f)).coerceAtLeast(0f)
 
     /**
      * 获取格式化后的电量消耗文本（如 "0.12Wh" 或 "<0.01Wh"）。

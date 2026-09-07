@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/card_power_history_item"
+    android:id="@+id/card_charging_history_item"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginHorizontal="12dp"
@@ -14,7 +14,7 @@
     android:paddingHorizontal="16dp"
     android:paddingVertical="14dp">
 
-    <!-- 第一行：左侧起止时间范围（含结束时间），右侧功耗数值 -->
+    <!-- 第一行：左侧起止时间范围（含结束时间），右侧功率数值 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -29,7 +29,7 @@
             android:textColor="?android:attr/textColorPrimary"
             android:textSize="14.5sp"
             android:textStyle="bold"
-            tools:text="2026/09/07 12:26 ~ 13:12" />
+            tools:text="2026/09/07 11:28 ~ 11:53" />
 
         <TextView
             android:id="@+id/tv_history_power_value"
@@ -39,10 +39,10 @@
             android:textColor="?android:attr/textColorPrimary"
             android:textSize="18.5sp"
             android:textStyle="bold"
-            tools:text="2.48 W" />
+            tools:text="18.50 W" />
     </LinearLayout>
 
-    <!-- 第二行：左侧时长与电量区间变化，右侧功耗说明标签 -->
+    <!-- 第二行：左侧时长与电量区间变化，右侧功率说明标签 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -57,7 +57,7 @@
             android:layout_weight="1"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="12.5sp"
-            tools:text="46m · 76%~69%(-7%)" />
+            tools:text="25m · 20%~85%(+65%)" />
 
         <TextView
             android:id="@+id/tv_history_power_label"
@@ -66,7 +66,7 @@
             android:layout_marginStart="12dp"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="11.5sp"
-            tools:text="平均亮屏功耗" />
+            tools:text="平均充电功率" />
     </LinearLayout>
 
 </LinearLayout>

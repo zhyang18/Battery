@@ -191,6 +191,26 @@ class MainActivity : AppCompatActivity() {
         }
         // 默认选中第一个“耗电”页签
         binding.bottomNavigation.selectedItemId = R.id.nav_power
+
+        // 根据初始充放电状态动态适配首个页签的标题与图标
+        val chargingManager = com.battery.analysis.manager.ChargingStatsManager.getInstance(this)
+        updateBottomNavPowerTab(chargingManager.isCharging())
+    }
+
+    /**
+     * 根据设备充放电状态动态更新底部导航栏首个页签的名称与图标。
+     *
+     * @param isCharging 是否处于充电状态（true 为充电，false 为耗电）
+     */
+    fun updateBottomNavPowerTab(isCharging: Boolean) {
+        val menuItem = binding.bottomNavigation.menu.findItem(R.id.nav_power) ?: return
+        if (isCharging) {
+            menuItem.title = getString(R.string.nav_charging)
+            menuItem.setIcon(R.drawable.ic_bolt)
+        } else {
+            menuItem.title = getString(R.string.nav_power)
+            menuItem.setIcon(R.drawable.ic_nav_power)
+        }
     }
 
     /**

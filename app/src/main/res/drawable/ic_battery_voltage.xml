@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp"
+    android:height="20dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 美化版立式带刻度电池电压图标 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M15,4h-1V2.5c0,-0.28 -0.22,-0.5 -0.5,-0.5h-3c-0.28,0 -0.5,0.22 -0.5,0.5V4H9C7.9,4 7,4.9 7,6v14c0,1.1 0.9,2 2,2h6c1.1,0 2,-0.9 2,-2V6C17,4.9 16.1,4 15,4z M15.5,20c0,0.28 -0.22,0.5 -0.5,0.5H9c-0.28,0 -0.5,-0.22 -0.5,-0.5V6c0,-0.28 0.22,-0.5 0.5,-0.5h6c0.28,0 0.5,0.22 0.5,0.5v14z" />
+    <!-- 内部精致刻度线 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M9.75,8.25h4.5v1.2h-4.5z M9.75,12h4.5v1.2h-4.5z M9.75,15.75h4.5v1.2h-4.5z" />
+</vector>

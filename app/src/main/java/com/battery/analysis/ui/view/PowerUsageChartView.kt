@@ -46,6 +46,7 @@ class PowerUsageChartView @JvmOverloads constructor(
     private val tooltipRect = RectF()
 
     // 预计算尺寸标量，避免在 onDraw 中重复计算
+    private val dp0_5 = dpToPx(0.5f)
     private val dp1 = dpToPx(1f)
     private val dp1_5 = dpToPx(1.5f)
     private val dp2 = dpToPx(2f)
@@ -204,10 +205,10 @@ class PowerUsageChartView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        val paddingLeft = dp20
-        val paddingRight = dp8
+        val paddingLeft = dp22
+        val paddingRight = dp22
         val paddingTop = dp14
-        val paddingBottom = dp20
+        val paddingBottom = dp22
 
         val chartWidth = width - paddingLeft - paddingRight
         val chartHeight = height - paddingTop - paddingBottom
@@ -238,7 +239,7 @@ class PowerUsageChartView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制 0~100 纵轴虚线网格及 X 轴时间标签刻度。
+     * 绘制 0~100 纵轴虚线网格及 X 轴时间标签刻度（时间文字统一居中对齐底部时间线刻度）。
      *
      * @param canvas 画布
      * @param left 左边界偏移
@@ -275,7 +276,8 @@ class PowerUsageChartView @JvmOverloads constructor(
         val totalSpan = max(endTs - startTs, 60000L)
 
         val xSteps = 4 // 5 个时间刻度点：0%, 25%, 50%, 75%, 100%
-        val labelY = top + chartHeight + dp20
+        val labelY = top + chartHeight + dp18
+        labelTextPaint.textAlign = Paint.Align.CENTER
 
         for (i in 0..xSteps) {
             val ratio = i.toFloat() / xSteps
@@ -290,25 +292,13 @@ class PowerUsageChartView @JvmOverloads constructor(
             val pointTs = startTs + (totalSpan * ratio).toLong()
             val labelStr = formatAxisTime(pointTs)
 
-            when (i) {
-                0 -> {
-                    labelTextPaint.textAlign = Paint.Align.LEFT
-                    canvas.drawText(labelStr, x, labelY, labelTextPaint)
-                }
-                xSteps -> {
-                    labelTextPaint.textAlign = Paint.Align.RIGHT
-                    canvas.drawText(labelStr, x, labelY, labelTextPaint)
-                }
-                else -> {
-                    labelTextPaint.textAlign = Paint.Align.CENTER
-                    canvas.drawText(labelStr, x, labelY, labelTextPaint)
-                }
-            }
+            // 时间文字以对应刻度线为中心严格水平居中绘制
+            canvas.drawText(labelStr, x, labelY, labelTextPaint)
         }
     }
 
     /**
-     * 绘制图表底部横向指示条（绿色表示亮屏区段，红色表示息屏区段）。
+     * 绘制图表底部横向指示条（绿色表示亮屏区段，红色表示息屏区段，整条连续平滑一体无分段断裂缝隙）。
      *
      * @param canvas 绘制画布
      * @param coords 各采样点的画布坐标列表
@@ -327,30 +317,45 @@ class PowerUsageChartView @JvmOverloads constructor(
 
         val barTop = gridBottomY + dp3
         val barBottom = barTop + dp4
-        val cornerRadius = dp1
+        val cornerRadius = dp2
 
         val n = coords.size
-        for (i in 0 until n) {
+        // 1. 裁剪整个长条底线的外轮廓圆角矩形，保证两端圆润而内部各状态区间无缝连接
+        val barPath = Path().apply {
+            addRoundRect(
+                chartLeft,
+                barTop,
+                chartLeft + chartWidth,
+                barBottom,
+                cornerRadius,
+                cornerRadius,
+                Path.Direction.CW
+            )
+        }
+
+        canvas.save()
+        canvas.clipPath(barPath)
+
+        // 2. 将相邻相同状态的采样点合并为一个连续完整色块，彻底消除逐点画圆角带来的分段与黑缝隙
+        var curStatus = dataPoints[0].isScreenOn
+        var segStartX = chartLeft
+
+        for (i in 1 until n) {
             val pt = dataPoints[i]
-            val isScreenOn = pt.isScreenOn
-            val paint = if (isScreenOn) screenOnBarPaint else screenOffBarPaint
-
-            val segLeft = if (i == 0) {
-                chartLeft
-            } else {
-                (coords[i - 1].x + coords[i].x) / 2f
-            }
-
-            val segRight = if (i == n - 1) {
-                chartLeft + chartWidth
-            } else {
-                (coords[i].x + coords[i + 1].x) / 2f
-            }
-
-            if (segRight > segLeft) {
-                canvas.drawRoundRect(segLeft, barTop, segRight, barBottom, cornerRadius, cornerRadius, paint)
+            if (pt.isScreenOn != curStatus) {
+                val segEndX = (coords[i - 1].x + coords[i].x) / 2f
+                val paint = if (curStatus) screenOnBarPaint else screenOffBarPaint
+                canvas.drawRect(segStartX, barTop, segEndX, barBottom, paint)
+                curStatus = pt.isScreenOn
+                segStartX = segEndX
             }
         }
+
+        // 绘制末尾最后一段连续区间
+        val lastPaint = if (curStatus) screenOnBarPaint else screenOffBarPaint
+        canvas.drawRect(segStartX, barTop, chartLeft + chartWidth, barBottom, lastPaint)
+
+        canvas.restore()
     }
 
     /**
@@ -456,7 +461,7 @@ class PowerUsageChartView @JvmOverloads constructor(
     }
 
     /**
-     * 在对应亮屏时段节点处垂直堆叠绘制活跃应用图标（自底部向上垂直累叠排布在亮屏指示条上方，微圆角方块俄罗斯方块式紧凑堆叠）。
+     * 绘制活跃应用图标的垂直堆叠展示（自底向上多层垂直排布，严格保证列间间距充足，杜绝横向遮挡与左右挤压）。
      *
      * @param canvas 绘制画布
      * @param coords 各数据采样点屏幕坐标列表
@@ -476,6 +481,7 @@ class PowerUsageChartView @JvmOverloads constructor(
 
         // 图标自底向上垂直堆叠的起始基准线（紧贴绿/红状态指示条上方）
         val baseBottomY = gridBottomY + dp2
+        var lastDrawnCenterX = -1000f
 
         for (i in coords.indices) {
             val pt = dataPoints[i]
@@ -485,33 +491,46 @@ class PowerUsageChartView @JvmOverloads constructor(
                 val minX = paddingLeft + iconSize / 2f
                 val maxX = width - paddingRight - iconSize / 2f
                 val centerX = p.x.coerceIn(minX, maxX)
+
+                // 横向防重叠保护：若当前列与上一绘制列距离过近（小于安全宽度），跳过以防左右遮挡
+                if (centerX - lastDrawnCenterX < iconSize - dp1) {
+                    continue
+                }
+
                 var stackBottomY: Float = baseBottomY
+                var hasDrawnAny = false
 
                 for (icon in pt.activeAppIcons) {
                     val bmp = iconBitmapCache[icon]
+                    // 若应用图标位图无法获取或已被回收，直接跳过并不预留空层，彻底杜绝空白断层
+                    if (bmp == null || bmp.isRecycled) continue
+
                     val iconLeft = centerX - iconSize / 2f
                     val iconTop = stackBottomY - iconSize
 
                     // 向上垂直堆叠边界保护，防止超出视图顶部
-                    if (iconTop < dp6) break
+                    if (iconTop < dp4) break
 
                     // 1. 绘制规整小方块底衬（与设计图一致的微圆角暗色积木卡片）
                     iconBgRect.set(iconLeft, iconTop, iconLeft + iconSize, stackBottomY)
-                    canvas.drawRoundRect(iconBgRect, dp2_5, dp2_5, iconTileBgPaint)
+                    canvas.drawRoundRect(iconBgRect, dp2, dp2, iconTileBgPaint)
 
-                    // 2. 在方块内部居中绘制应用图标
+                    // 2. 在方块内部贴合绘制应用图标（内缩仅 0.5dp，使图标饱满，不再因大内边距产生视觉空隙）
                     iconDstRect.set(
-                        iconLeft + dp1_5,
-                        iconTop + dp1_5,
-                        iconLeft + iconSize - dp1_5,
-                        stackBottomY - dp1_5
+                        iconLeft + dp0_5,
+                        iconTop + dp0_5,
+                        iconLeft + iconSize - dp0_5,
+                        stackBottomY - dp0_5
                     )
+                    canvas.drawBitmap(bmp, null, iconDstRect, null)
 
-                    if (bmp != null && !bmp.isRecycled) {
-                        canvas.drawBitmap(bmp, null, iconDstRect, null)
-                    }
+                    // 上下堆叠间距严格设定为 1dp
+                    stackBottomY -= (iconSize + iconMargin)
+                    hasDrawnAny = true
+                }
 
-                    stackBottomY = stackBottomY - (iconSize + iconMargin)
+                if (hasDrawnAny) {
+                    lastDrawnCenterX = centerX
                 }
             }
         }

@@ -1,14 +1,19 @@
 package com.battery.analysis.ui
 
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.os.BatteryManager
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.PopupWindow
 import android.widget.TextView
@@ -18,19 +23,33 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.battery.analysis.MainActivity
 import com.battery.analysis.R
 import com.battery.analysis.databinding.FragmentPowerUsageBinding
+import com.battery.analysis.manager.ChargingStatsManager
 import com.battery.analysis.manager.FullPowerDataPackage
 import com.battery.analysis.manager.PowerUsageManager
+import com.battery.analysis.model.ChargingSamplePoint
+import com.battery.analysis.model.ChargingSessionSummary
+import com.battery.analysis.ui.view.ChargingChartView
+import android.os.PowerManager
+import com.battery.analysis.provider.NormalApiProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 
 /**
- * 耗电统计顶级页签 Fragment。
- * 遵循设计图清爽布局，首次进入引导用户选择检测模式，确认后展示“使用过程”放电曲线、核心功耗指标与各应用使用场景排行。
+ * 电池统计顶级页签 Fragment。
+ * 智能自动检测耗电与充电状态，自适应展示【耗电统计】与【充电统计】双模界面。
+ * 在充电状态下，实时采集并更新功率、电量、温度三合一图表及方块图例标识；
  * 支持在设置中动态调整检测模式，并通过 onResume 自动响应最新配置。
  */
 class PowerUsageFragment : Fragment() {
@@ -39,7 +58,14 @@ class PowerUsageFragment : Fragment() {
     private val binding get() = _binding!!
 
     private lateinit var powerManager: PowerUsageManager
+    private lateinit var chargingManager: ChargingStatsManager
     private val adapter = AppPowerUsageAdapter()
+
+    // 当前展示界面模式：0 为耗电统计，1 为充电统计
+    private var currentDisplayTab: Int = 0
+
+    // 充电数据实时采样轮询后台协程
+    private var chargingPollingJob: Job? = null
 
     // 0: 按时长, 1: 按功耗, 2: 按名称
     private var currentSortIndex = 0
@@ -58,6 +84,26 @@ class PowerUsageFragment : Fragment() {
     private var lastRenderedPackage: FullPowerDataPackage? = null
 
     private val SHIZUKU_POWER_REQUEST_CODE = 2001
+
+    /**
+     * 系统电源连接、断开与电量广播监听器，实现智能自动状态识别与界面切换。
+     */
+    private val powerStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val action = intent?.action ?: return
+            when (action) {
+                Intent.ACTION_POWER_CONNECTED -> {
+                    onDevicePowerConnected()
+                }
+                Intent.ACTION_POWER_DISCONNECTED -> {
+                    onDevicePowerDisconnected()
+                }
+                Intent.ACTION_BATTERY_CHANGED -> {
+                    checkAndSyncChargingStatus()
+                }
+            }
+        }
+    }
 
     /**
      * Shizuku 权限请求监听器。
@@ -85,6 +131,13 @@ class PowerUsageFragment : Fragment() {
     }
 
     companion object {
+        private const val PREF_KEY_KEEP_SCREEN_ON = "pref_charging_keep_screen_on"
+
+        /**
+         * 存储从历史快照详情页面待载入至主页展示的快照记录实体对象。
+         */
+        var pendingSnapshotRecord: com.battery.analysis.model.PowerUsageRecord? = null
+
         /**
          * 创建 PowerUsageFragment 实例的工厂方法。
          *
@@ -121,6 +174,7 @@ class PowerUsageFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         powerManager = PowerUsageManager.getInstance(requireContext())
+        chargingManager = ChargingStatsManager.getInstance(requireContext())
         currentMode = powerManager.getSelectedMode()
         tempSelectedSetupMode = currentMode
 
@@ -135,6 +189,18 @@ class PowerUsageFragment : Fragment() {
 
         checkFirstTimeConfiguration()
 
+        // 动态注册充放电与电池状态广播
+        val powerFilter = IntentFilter().apply {
+            addAction(Intent.ACTION_POWER_CONNECTED)
+            addAction(Intent.ACTION_POWER_DISCONNECTED)
+            addAction(Intent.ACTION_BATTERY_CHANGED)
+        }
+        requireContext().registerReceiver(powerStateReceiver, powerFilter)
+
+        // 初始智能感知：检测是否在充电，智能决定初始展示界面并同步底栏页签
+        val isCharging = chargingManager.isCharging()
+        applySmartChargingMode(isCharging = isCharging, showToast = false)
+
         // 注册断开电源自动生成耗电快照回调监听，非快照模式下自动更新当前数据
         com.battery.analysis.receiver.BatteryUnplugReceiver.onPowerUsageRecordedListener = { _ ->
             if (!isViewingSnapshot && isResumed) {
@@ -144,30 +210,61 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 检查用户是否已配置过耗电模式：若为初次进入则展示模式引导，若已配置则展示耗电详情。
+     * 检查用户是否已配置过耗电模式：若为初次进入则展示模式引导，若已配置则展示耗电/充电详情。
      */
     private fun checkFirstTimeConfiguration() {
         if (powerManager.isPowerModeConfigured()) {
             binding.layoutFirstTimeSetup.visibility = View.GONE
-            binding.layoutPowerContent.visibility = View.VISIBLE
-            loadData()
+            val isCharging = chargingManager.isCharging()
+            applySmartChargingMode(isCharging = isCharging, showToast = false)
         } else {
             binding.layoutFirstTimeSetup.visibility = View.VISIBLE
             binding.layoutPowerContent.visibility = View.GONE
+            binding.cardPowerMetrics.visibility = View.GONE
+            binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
             updateSetupCardSelection(tempSelectedSetupMode)
         }
     }
 
     /**
-     * 界面恢复可见时的生命周期回调，同步设置页可能修改的最新模式及权限状态。
+     * 根据用户偏好及当前充电状态动态应用或清除屏幕常亮窗口标志。
+     *
+     * @param isCharging 当前是否处于充电状态
+     */
+    private fun applyKeepScreenOn(isCharging: Boolean) {
+        val prefs = context?.getSharedPreferences("charging_stats_prefs", Context.MODE_PRIVATE) ?: return
+        val keepOn = prefs.getBoolean(PREF_KEY_KEEP_SCREEN_ON, false)
+        if (isCharging && keepOn) {
+            activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    /**
+     * 界面恢复可见时的生命周期回调，同步设置页可能修改的最新模式、充电采样及底栏页签状态。
      */
     override fun onResume() {
         super.onResume()
+
+        val pending = pendingSnapshotRecord
+        if (pending != null) {
+            pendingSnapshotRecord = null
+            loadSnapshotRecord(pending)
+            return
+        }
+
+        val isCharging = chargingManager.isCharging()
+        applySmartChargingMode(isCharging = isCharging, showToast = false)
+        applyKeepScreenOn(isCharging)
+
         if (powerManager.isPowerModeConfigured()) {
             val latestMode = powerManager.getSelectedMode()
             if (latestMode != currentMode) {
                 currentMode = latestMode
-                loadData()
+                if (!isCharging) {
+                    loadData()
+                }
             }
             updateShizukuBannerState()
             checkNormalPermissionBanner()
@@ -175,10 +272,25 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 界面销毁生命周期回调，注销 Shizuku 监听并释放 ViewBinding。
+     * 界面退到后台或暂停时的生命周期回调，暂停高频充电采样协程以节约系统资源，并恢复屏幕休眠。
+     */
+    override fun onPause() {
+        super.onPause()
+        stopChargingPolling()
+        activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    /**
+     * 界面销毁生命周期回调，停止采样轮询、恢复屏幕休眠、注销动态广播及 Shizuku 监听并释放 ViewBinding。
      */
     override fun onDestroyView() {
         super.onDestroyView()
+        stopChargingPolling()
+        activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        try {
+            requireContext().unregisterReceiver(powerStateReceiver)
+        } catch (_: Exception) {
+        }
         com.battery.analysis.receiver.BatteryUnplugReceiver.onPowerUsageRecordedListener = null
         try {
             Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
@@ -209,6 +321,7 @@ class PowerUsageFragment : Fragment() {
 
             binding.layoutFirstTimeSetup.visibility = View.GONE
             binding.layoutPowerContent.visibility = View.VISIBLE
+            binding.cardPowerMetrics.visibility = View.VISIBLE
 
             val tip = if (currentMode == PowerUsageManager.MODE_SHIZUKU) {
                 getString(R.string.power_mode_tip_shizuku)
@@ -260,6 +373,11 @@ class PowerUsageFragment : Fragment() {
     private fun setupSwipeRefresh() {
         binding.swipeRefreshLayout.setColorSchemeColors(Color.parseColor("#1E88E5"))
         binding.swipeRefreshLayout.setOnRefreshListener {
+            if (currentDisplayTab == 1) {
+                // 充电统计界面下无需下拉刷新，自动停止刷新状态
+                binding.swipeRefreshLayout.isRefreshing = false
+                return@setOnRefreshListener
+            }
             if (isViewingSnapshot) {
                 restoreLivePowerData()
                 return@setOnRefreshListener
@@ -354,19 +472,39 @@ class PowerUsageFragment : Fragment() {
      * 设置各按钮与交互组件的点击事件监听。
      */
     private fun setupClickListeners() {
-        // 顶部说明文档图标点击
+        // 顶部说明文档图标点击（自适应展示耗电说明或充电说明）
         binding.btnPowerGuide.setOnClickListener {
-            showPowerGuideDialog()
+            if (currentDisplayTab == 0) {
+                showPowerGuideDialog()
+            } else {
+                showChargingGuideDialog()
+            }
         }
 
-        // 顶部历史记录按钮点击 (右上角删除按钮旁边就是历史记录按钮)
+        // 顶部耗电历史记录按钮点击
         binding.btnPowerHistory.setOnClickListener {
-            showPowerHistoryDialog()
+            val intent = Intent(requireContext(), PowerHistoryActivity::class.java)
+            startActivity(intent)
         }
 
-        // 顶部清空重置图标点击
+        // 顶部充电历史记录按钮点击
+        binding.btnChargingHistory.setOnClickListener {
+            val intent = Intent(requireContext(), ChargingHistoryActivity::class.java)
+            startActivity(intent)
+        }
+
+        // 顶部清空重置图标点击（自适应重置放电统计或充电图表数据）
         binding.btnPowerClear.setOnClickListener {
-            showClearConfirmDialog()
+            if (currentDisplayTab == 0) {
+                showClearConfirmDialog()
+            } else {
+                showChargingClearConfirmDialog()
+            }
+        }
+
+        // 充电图表帮助问号点击
+        binding.layoutChargingContent.btnChargingChartHelp.setOnClickListener {
+            showChargingGuideDialog()
         }
 
         // 历史快照横幅恢复实时按钮点击
@@ -413,6 +551,330 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
+     * 根据设备当前充放电状态智能应用界面模式：
+     * 处于充电状态时呈现【充电统计】界面，底部页签动态更新为“充电”；
+     * 处于放电状态时呈现【耗电统计】界面，底部页签动态更新为“耗电”。
+     *
+     * @param isCharging 系统当前是否处于充电状态
+     * @param showToast 是否弹出智能切换提示 Toast
+     */
+    fun applySmartChargingMode(isCharging: Boolean, showToast: Boolean = false) {
+        if (_binding == null) return
+        currentDisplayTab = if (isCharging) 1 else 0
+
+        // 智能联动更新 MainActivity 底部导航栏第一个页签的标题（充电 / 耗电）与图标
+        (activity as? MainActivity)?.updateBottomNavPowerTab(isCharging)
+
+        if (!powerManager.isPowerModeConfigured()) {
+            binding.layoutFirstTimeSetup.visibility = View.VISIBLE
+            binding.layoutPowerContent.visibility = View.GONE
+            binding.cardPowerMetrics.visibility = View.GONE
+            binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
+            return
+        }
+
+        binding.layoutFirstTimeSetup.visibility = View.GONE
+
+        if (isCharging) {
+            // 智能呈现【充电统计】界面并根据设置开启屏幕常亮
+            applyKeepScreenOn(true)
+            binding.swipeRefreshLayout.isEnabled = false
+            binding.swipeRefreshLayout.isRefreshing = false
+            binding.tvPowerTitle.text = getString(R.string.charging_stats_title)
+            binding.layoutPowerContent.visibility = View.GONE
+            binding.cardPowerMetrics.visibility = View.GONE
+            binding.layoutChargingContent.layoutChargingRoot.visibility = View.VISIBLE
+
+            renderChargingData()
+            startChargingPolling()
+
+            if (showToast) {
+                Toast.makeText(requireContext(), getString(R.string.toast_auto_switch_charging), Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            // 智能呈现【耗电统计】界面并恢复屏幕休眠
+            applyKeepScreenOn(false)
+            binding.swipeRefreshLayout.isEnabled = true
+            stopChargingPolling()
+            binding.tvPowerTitle.text = getString(R.string.power_stats_title)
+            binding.layoutPowerContent.visibility = View.VISIBLE
+            binding.cardPowerMetrics.visibility = View.VISIBLE
+            binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
+
+            loadData()
+
+            if (showToast) {
+                Toast.makeText(requireContext(), getString(R.string.toast_auto_switch_discharging), Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
+     * 当监听到连接外部电源（插入充电器）时触发，开启全新充电采样并智能展示充电统计界面。
+     */
+    private fun onDevicePowerConnected() {
+        if (_binding == null) return
+        val currentLevel = powerManager.getCurrentBatteryStatus().levelPercent
+        val (_, type) = chargingManager.checkCurrentSystemChargingState()
+        chargingManager.onPowerConnected(currentLevel, type)
+
+        applySmartChargingMode(isCharging = true, showToast = true)
+    }
+
+    /**
+     * 当监听到断开外部电源（拔掉充电器）时触发，固化充电数据并智能展示耗电统计界面。
+     */
+    private fun onDevicePowerDisconnected() {
+        if (_binding == null) return
+        val currentLevel = powerManager.getCurrentBatteryStatus().levelPercent
+        powerManager.onPowerDisconnected(currentLevel)
+        chargingManager.onPowerDisconnected()
+
+        applySmartChargingMode(isCharging = false, showToast = true)
+    }
+
+    /**
+     * 响应系统电池广播 ACTION_BATTERY_CHANGED，动态校准当前充电状态与界面展示。
+     */
+    private fun checkAndSyncChargingStatus() {
+        if (_binding == null) return
+        val isCharging = chargingManager.isCharging()
+        val currentIsChargingTab = (currentDisplayTab == 1)
+        if (isCharging != currentIsChargingTab) {
+            applySmartChargingMode(isCharging = isCharging, showToast = false)
+        } else {
+            (activity as? MainActivity)?.updateBottomNavPowerTab(isCharging)
+        }
+    }
+
+    /**
+     * 启动充电数据高频实时采样协程（默认 1.5 秒更新一次），向走势图追加新点并驱动界面实时刷新。
+     */
+    private fun startChargingPolling() {
+        chargingPollingJob?.cancel()
+        chargingPollingJob = viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                val samplePoint = chargingManager.sampleCurrentPoint()
+                val summary = chargingManager.getCurrentSummary()
+                val points = chargingManager.getSamplePoints()
+
+                withContext(Dispatchers.Main) {
+                    if (_binding != null && currentDisplayTab == 1) {
+                        renderChargingData(summary, points, samplePoint)
+                    }
+                }
+                delay(1500L)
+            }
+        }
+    }
+
+    /**
+     * 停止正在运行的充电实时采样后台协程。
+     */
+    private fun stopChargingPolling() {
+        chargingPollingJob?.cancel()
+        chargingPollingJob = null
+    }
+
+    /**
+     * 将当前或最新的充电统计数据包渲染更新至充电专属界面各卡片与三合一图表中。
+     *
+     * @param summary 充电会话汇总数据实体，若为空则由管理器内存获取
+     * @param points 采样点历史列表，若为空则由管理器内存获取
+     * @param latestPoint 最近一次采样的物理指标点，若为空则由最新点或兜底合成
+     */
+    private fun renderChargingData(
+        summary: ChargingSessionSummary = chargingManager.getCurrentSummary(),
+        points: List<ChargingSamplePoint> = chargingManager.getSamplePoints(),
+        latestPoint: ChargingSamplePoint? = null
+    ) {
+        if (_binding == null) return
+        val chargingView = binding.layoutChargingContent
+        val currentPoint = latestPoint ?: points.lastOrNull() ?: ChargingSamplePoint(
+            timestamp = System.currentTimeMillis(),
+            powerWatts = summary.maxPowerWatts,
+            batteryLevel = summary.currentLevel,
+            temperature = summary.maxTemperature,
+            voltageVolts = 4.2f,
+            currentMa = 2000f
+        )
+
+        // 1. 更新三合一走势折线图 (功率: 绿, 电量: 蓝, 温度: 红)
+        chargingView.chargingChartView.setData(points)
+        chargingView.chargingChartView.setOnPointSelectedListener(object : ChargingChartView.OnPointSelectedListener {
+            override fun onPointSelected(point: ChargingSamplePoint?) {
+                val targetPoint = point ?: currentPoint
+                chargingView.tvLegendPower.text = String.format(Locale.getDefault(), "%.2fW", targetPoint.powerWatts)
+                chargingView.tvLegendLevel.text = "${targetPoint.batteryLevel}%"
+                chargingView.tvLegendTemp.text = String.format(Locale.getDefault(), "%.1f℃", targetPoint.temperature)
+            }
+        })
+
+        // 2. 更新图表正下方的三色图例标识与实时读数看板（严格符合用户要求）
+        chargingView.tvLegendPower.text = String.format(Locale.getDefault(), "%.2fW", currentPoint.powerWatts)
+        chargingView.tvLegendLevel.text = "${currentPoint.batteryLevel}%"
+        chargingView.tvLegendTemp.text = String.format(Locale.getDefault(), "%.1f℃", currentPoint.temperature)
+
+        // 3. 填充整合版大卡片：环形进度条与中心大字
+        chargingView.circleProgressLevel.setProgress(currentPoint.batteryLevel)
+        chargingView.tvChargingCurrentPercent.text = "${currentPoint.batteryLevel}%"
+
+        // 4. 充电状态标题与屏幕常亮灯泡控制
+        chargingView.tvChargingStateTitle.text = if (summary.isCharging) {
+            "充电中"
+        } else {
+            "未充电"
+        }
+        val prefs = requireContext().getSharedPreferences("charging_stats_prefs", Context.MODE_PRIVATE)
+        val isKeepScreenOn = prefs.getBoolean(PREF_KEY_KEEP_SCREEN_ON, false)
+        chargingView.ivChargingBulb.setColorFilter(
+            if (isKeepScreenOn) Color.parseColor("#FFD600") else Color.parseColor("#757575")
+        )
+        chargingView.ivChargingBulb.setOnClickListener {
+            val newKeepOn = !prefs.getBoolean(PREF_KEY_KEEP_SCREEN_ON, false)
+            prefs.edit().putBoolean(PREF_KEY_KEEP_SCREEN_ON, newKeepOn).apply()
+            if (newKeepOn) {
+                activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                chargingView.ivChargingBulb.setColorFilter(Color.parseColor("#FFD600"))
+                Toast.makeText(requireContext(), "已开启充电保持屏幕常亮", Toast.LENGTH_SHORT).show()
+            } else {
+                activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                chargingView.ivChargingBulb.setColorFilter(Color.parseColor("#757575"))
+                Toast.makeText(requireContext(), "已关闭充电保持屏幕常亮", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // 5. 核心指标矩阵
+        // 行 1：电池实时功率与 USB 充电输入功率
+        val pWatts = currentPoint.powerWatts
+        val batteryPowerText = if (!summary.isCharging && pWatts > 0f) {
+            String.format(Locale.getDefault(), "-%.2fW", pWatts)
+        } else {
+            String.format(Locale.getDefault(), "%.2fW", pWatts)
+        }
+        chargingView.tvMetricBatteryPower.text = batteryPowerText
+
+        val usbPowerText = if (summary.isCharging) {
+            val estimatedUsb = (pWatts + 1.8f).coerceAtLeast(0f)
+            String.format(Locale.getDefault(), "%.1fW?", estimatedUsb)
+        } else {
+            "0.0W?"
+        }
+        chargingView.tvMetricUsbPower.text = usbPowerText
+
+        // 行 2（温度上方）：平均充电功率与峰值功率
+        chargingView.tvMetricAvgPower.text = String.format(Locale.getDefault(), "%.2fW", summary.avgPowerWatts)
+        chargingView.tvMetricMaxPower.text = String.format(Locale.getDefault(), "%.2fW", summary.maxPowerWatts)
+
+        // 行 3：当前温度与充电期间最高温度
+        chargingView.tvMetricTemp.text = String.format(Locale.getDefault(), "%.1f℃", currentPoint.temperature)
+        chargingView.tvMetricMaxTemp.text = String.format(Locale.getDefault(), "%.1f℃", summary.maxTemperature)
+
+        // 行 4（温度下方）：充电瞬时电流与电池电压
+        chargingView.tvMetricCurrent.text = String.format(Locale.getDefault(), "%.0fmA", currentPoint.currentMa)
+        chargingView.tvMetricVoltage.text = String.format(Locale.getDefault(), "%.3fv", currentPoint.voltageVolts)
+
+        // 行 5：电池容量与等效能量（如 8000mAh (≈30.9Wh)）
+        val capacityMah = NormalApiProvider.getDesignCapacity(requireContext())
+        val safeCap = if (capacityMah != null && capacityMah > 100f) capacityMah else 5000f
+        val safeWh = (safeCap * 3.86f) / 1000f
+        chargingView.tvMetricCapacityEnergy.text = "${safeCap.toInt()}mAh (≈${String.format(Locale.getDefault(), "%.1f", safeWh)}Wh)"
+
+        // 6. 填充下方条形底栏卡片：左侧日期与时间范围换行，右侧亮屏与息屏指标上下严格对齐
+        chargingView.tvChargingDate.text = formatChargingDate(summary.startTimestamp)
+        chargingView.tvChargingTimeRange.text = formatChargingTimeRangeOnly(summary.startTimestamp, summary.endTimestamp)
+
+        // 亮屏与息屏数据计算
+        val screenOnDurationMs = (summary.getDurationMs() - summary.screenOffDurationMs).coerceAtLeast(0L)
+        val screenOnLevelGain = (summary.getLevelGain() - summary.screenOffLevelGain).coerceAtLeast(0)
+        val screenOnEnergyWh = (summary.chargedEnergyWh - summary.screenOffEnergyWh).coerceAtLeast(0f)
+
+        // 第一行：亮屏数据（时间格式 00:00，百分比与能量）
+        chargingView.tvChargingScreenOnDuration.text = formatDurationColon(screenOnDurationMs)
+        chargingView.tvChargingScreenOnLevelGain.text = "+$screenOnLevelGain%"
+        chargingView.tvChargingScreenOnEnergyGain.text = String.format(Locale.getDefault(), "+%.1fWh", screenOnEnergyWh)
+
+        // 第二行：息屏数据（时间格式 00:00，百分比与能量，与亮屏行严格列对齐）
+        chargingView.tvChargingScreenOffDuration.text = formatDurationColon(summary.screenOffDurationMs)
+        chargingView.tvChargingScreenOffLevelGain.text = "+${summary.screenOffLevelGain}%"
+        chargingView.tvChargingScreenOffEnergyGain.text = String.format(Locale.getDefault(), "+%.1fWh", summary.screenOffEnergyWh)
+    }
+
+    /**
+     * 将充电起始时间戳格式化为纯日期字符串（如 "2026-09-07"）。
+     *
+     * @param startTs 充电开始时间戳（毫秒）
+     * @return 格式化后的日期文本
+     */
+    private fun formatChargingDate(startTs: Long): String {
+        val start = if (startTs > 0L) startTs else System.currentTimeMillis()
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        return dateFormat.format(Date(start))
+    }
+
+    /**
+     * 将充电起止时间戳格式化为纯时间区间字符串（如 "11:28 ~ 11:39"）。
+     *
+     * @param startTs 充电开始时间戳（毫秒）
+     * @param endTs 充电结束或最新采样时间戳（毫秒）
+     * @return 格式化后的时间区间文本
+     */
+    private fun formatChargingTimeRangeOnly(startTs: Long, endTs: Long): String {
+        val start = if (startTs > 0L) startTs else System.currentTimeMillis()
+        val end = if (endTs >= start) endTs else System.currentTimeMillis()
+        val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+        return "${timeFormat.format(Date(start))} ~ ${timeFormat.format(Date(end))}"
+    }
+
+    /**
+     * 将充电持续时长（毫秒）格式化为冒号分隔的 00:00 或 00:00:00 风格字符串。
+     *
+     * @param durationMs 持续毫秒数
+     * @return 格式化后的冒号分隔时长文本
+     */
+    private fun formatDurationColon(durationMs: Long): String {
+        val totalSec = (durationMs / 1000L).coerceAtLeast(0L)
+        val hours = totalSec / 3600L
+        val minutes = (totalSec % 3600L) / 60L
+        val seconds = totalSec % 60L
+        return if (hours > 0L) {
+            String.format(Locale.getDefault(), "%02d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds)
+        }
+    }
+
+    /**
+     * 弹出高颜值充电统计全景指南与图表说明对话框。
+     */
+    private fun showChargingGuideDialog() {
+        val dialog = AlertDialog.Builder(requireContext())
+            .setTitle(getString(R.string.charging_guide_title))
+            .setMessage(getString(R.string.charging_guide_desc))
+            .setPositiveButton(getString(R.string.understood), null)
+            .create()
+        dialog.show()
+        applyDialogWindowStyle(dialog)
+    }
+
+    /**
+     * 弹出重置充电走势图表与统计数据的二次确认对话框。
+     */
+    private fun showChargingClearConfirmDialog() {
+        AlertDialog.Builder(requireContext())
+            .setTitle(getString(R.string.charging_reset_confirm_title))
+            .setMessage(getString(R.string.charging_reset_confirm_msg))
+            .setPositiveButton(getString(R.string.confirm)) { _, _ ->
+                chargingManager.resetChargingStats()
+                binding.layoutChargingContent.chargingChartView.clearData()
+                renderChargingData()
+                Toast.makeText(requireContext(), getString(R.string.charging_reset_success), Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(getString(R.string.cancel), null)
+            .show()
+    }
+
+    /**
      * 异步加载电池状态、放电曲线与应用使用场景数据（按当前活跃模式读取真实数据）。
      */
     fun loadData() {
@@ -421,10 +883,14 @@ class PowerUsageFragment : Fragment() {
         checkNormalPermissionBanner()
 
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            if (currentMode == PowerUsageManager.MODE_SHIZUKU && powerManager.isShizukuAuthorized()) {
+                powerManager.grantUsageStatsPermissionViaShizuku()
+            }
             val fullPackage = powerManager.loadPowerData(currentMode)
 
             withContext(Dispatchers.Main) {
                 if (_binding == null) return@withContext
+                checkNormalPermissionBanner()
                 renderFullPowerData(fullPackage)
                 binding.swipeRefreshLayout.isRefreshing = false
             }
@@ -464,7 +930,11 @@ class PowerUsageFragment : Fragment() {
         }
 
         // 2. 刷新核心功耗指标卡片（三大卡片三行精准对应呈现）
-        val onPowerStr = String.format(Locale.getDefault(), "%.2fW", overview.screenOnPowerWatts)
+        val onPowerStr = if (overview.screenOnPowerWatts > 0.001f) {
+            String.format(Locale.getDefault(), "%.2fW", overview.screenOnPowerWatts)
+        } else {
+            "--"
+        }
         val avgPowerStr = String.format(Locale.getDefault(), "%.2fW", overview.avgPowerWatts)
         val offPowerStr = if (overview.screenOffPowerWatts > 0.001f) {
             String.format(Locale.getDefault(), "%.2fW", overview.screenOffPowerWatts)
@@ -566,6 +1036,107 @@ class PowerUsageFragment : Fragment() {
         }
 
         reloadHistoryList()
+        dialog.show()
+
+        dialog.window?.let { window ->
+            window.setBackgroundDrawableResource(android.R.color.transparent)
+            val width = (resources.displayMetrics.widthPixels * 0.92).toInt()
+            window.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            window.setGravity(android.view.Gravity.CENTER)
+        }
+    }
+
+    /**
+     * 弹出充电历史记录列表弹窗，支持浏览历史充电会话、查看详情、单条删除与全量清空。
+     */
+    private fun showChargingHistoryDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_charging_history, null)
+        val rvHistory = dialogView.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.rv_charging_history)
+        val layoutEmpty = dialogView.findViewById<View>(R.id.layout_empty_history)
+        val btnClose = dialogView.findViewById<ImageView>(R.id.btn_dialog_close)
+        val btnClearAll = dialogView.findViewById<ImageView>(R.id.btn_dialog_clear_all)
+
+        val dialog = AlertDialog.Builder(requireContext())
+            .setView(dialogView)
+            .create()
+
+        val chargingDb = com.battery.analysis.db.ChargingHistoryDbHelper.getInstance(requireContext())
+        lateinit var chargingHistoryAdapter: ChargingHistoryAdapter
+
+        fun reloadChargingHistory() {
+            viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                val list = chargingDb.getAllRecords()
+                withContext(Dispatchers.Main) {
+                    if (list.isEmpty()) {
+                        rvHistory.visibility = View.GONE
+                        layoutEmpty.visibility = View.VISIBLE
+                    } else {
+                        rvHistory.visibility = View.VISIBLE
+                        layoutEmpty.visibility = View.GONE
+                        chargingHistoryAdapter.submitList(list)
+                    }
+                }
+            }
+        }
+
+        chargingHistoryAdapter = ChargingHistoryAdapter(
+            onItemClick = { record ->
+                AlertDialog.Builder(requireContext())
+                    .setTitle("充电详情 (${record.recordTime})")
+                    .setMessage(
+                        "充电接口：${record.chargeType}\n" +
+                        "总充电时长：${record.getFormattedDuration()}\n" +
+                        "息屏充电时长：${record.getFormattedScreenOffDuration()}\n" +
+                        "电量变化：${record.startLevel}% → ${record.endLevel}% (+${record.levelGain}%)\n" +
+                        "充入能量：+${String.format(Locale.getDefault(), "%.2f", record.chargedEnergyWh)} Wh\n" +
+                        "平均功率：${String.format(Locale.getDefault(), "%.2f", record.avgPowerWatts)} W\n" +
+                        "峰值功率：${String.format(Locale.getDefault(), "%.2f", record.maxPowerWatts)} W\n" +
+                        "最高温度：${String.format(Locale.getDefault(), "%.1f", record.maxTemperature)} ℃"
+                    )
+                    .setPositiveButton(getString(R.string.understood), null)
+                    .show()
+            },
+            onDeleteClick = { record ->
+                AlertDialog.Builder(requireContext())
+                    .setTitle(getString(R.string.delete))
+                    .setMessage("确定要删除本次充电记录吗？")
+                    .setPositiveButton(getString(R.string.confirm)) { _, _ ->
+                        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                            chargingDb.deleteRecord(record.id)
+                            withContext(Dispatchers.Main) {
+                                reloadChargingHistory()
+                            }
+                        }
+                    }
+                    .setNegativeButton(getString(R.string.cancel), null)
+                    .show()
+            }
+        )
+
+        rvHistory.layoutManager = LinearLayoutManager(requireContext())
+        rvHistory.adapter = chargingHistoryAdapter
+
+        btnClose.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        btnClearAll.setOnClickListener {
+            AlertDialog.Builder(requireContext())
+                .setTitle("清空充电历史")
+                .setMessage("确定要清空所有已保存的充电历史记录吗？")
+                .setPositiveButton(getString(R.string.confirm)) { _, _ ->
+                    viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                        chargingDb.clearAll()
+                        withContext(Dispatchers.Main) {
+                            reloadChargingHistory()
+                        }
+                    }
+                }
+                .setNegativeButton(getString(R.string.cancel), null)
+                .show()
+        }
+
+        reloadChargingHistory()
         dialog.show()
 
         dialog.window?.let { window ->
@@ -800,3 +1371,4 @@ class PowerUsageFragment : Fragment() {
             .show()
     }
 }
+

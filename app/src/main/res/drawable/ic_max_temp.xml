@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp"
+    android:height="20dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 美化版最高温度图标：温度计与向上极值箭头 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M14,13.2V5c0,-1.66 -1.34,-3 -3,-3S8,3.34 8,5v8.2c-1.22,0.91 -2,2.36 -2,3.8 0,2.76 2.24,5 5,5s5,-2.24 5,-5c0,-1.44 -0.78,-2.89 -2,-3.8z M11,4c0.55,0 1,0.45 1,1v3.5H10V5c0,-0.55 0.45,-1 1,-1zm0,16.5c-1.93,0 -3.5,-1.57 -3.5,-3.5 0,-1.18 0.61,-2.23 1.5,-2.83V9.5h4v4.67c0.89,0.6 1.5,1.65 1.5,2.83 0,1.93 -1.57,3.5 -3.5,3.5z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M18.5,2l-3,3h2v4.5h2V5h2L18.5,2z" />
+</vector>

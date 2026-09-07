@@ -12,6 +12,7 @@
         android:orientation="vertical">
 
         <!-- 顶部标题栏：与原始设计图保持 100% 纯粹与一致 -->
+        <!-- 顶部标题栏：支持双模切换与状态指示 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="56dp"
@@ -21,6 +22,7 @@
             android:paddingEnd="12dp">
 
             <TextView
+                android:id="@+id/tv_power_title"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
@@ -42,7 +44,7 @@
                 android:src="@drawable/ic_report_doc"
                 app:tint="?android:attr/textColorPrimary" />
 
-            <!-- 右侧历史记录按钮 (右上角删除按钮旁边就是历史记录按钮) -->
+            <!-- 右侧耗电历史记录按钮 -->
             <ImageView
                 android:id="@+id/btn_power_history"
                 android:layout_width="40dp"
@@ -54,6 +56,20 @@
                 android:focusable="true"
                 android:padding="8dp"
                 android:src="@drawable/ic_power_history"
+                app:tint="?android:attr/textColorPrimary" />
+
+            <!-- 右侧充电历史记录按钮 -->
+            <ImageView
+                android:id="@+id/btn_charging_history"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:contentDescription="充电历史记录"
+                android:focusable="true"
+                android:padding="8dp"
+                android:src="@drawable/ic_charging_history"
                 app:tint="?android:attr/textColorPrimary" />
 
             <!-- 右侧垃圾桶清空图标 -->
@@ -70,6 +86,149 @@
                 android:src="@drawable/ic_delete"
                 app:tint="?android:attr/textColorPrimary" />
         </LinearLayout>
+
+        <!-- 核心功耗指标卡片（固定置顶于图表上方，不随下方列表滚动） -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/card_power_metrics"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:layout_marginEnd="14dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="4dp"
+            android:visibility="gone"
+            app:cardBackgroundColor="@color/dialog_card_bg"
+            app:cardCornerRadius="14dp"
+            app:cardElevation="0dp"
+            app:strokeColor="#18888888"
+            app:strokeWidth="1dp"
+            tools:visibility="visible">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:baselineAligned="false"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingTop="10dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="10dp">
+
+                <!-- 放电功耗（第一列：左对齐） -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="start"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tv_power_screen_on"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        tools:text="亮屏 1.65W" />
+
+                    <TextView
+                        android:id="@+id/tv_power_avg"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4.5dp"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        tools:text="平均 0.80W" />
+
+                    <TextView
+                        android:id="@+id/tv_power_screen_off"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4.5dp"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        tools:text="息屏 0.15W" />
+                </LinearLayout>
+
+                <!-- 放电时长（第二列：左对齐） -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="start"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tv_time_screen_on"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        tools:text="亮屏 5h5m" />
+
+                    <TextView
+                        android:id="@+id/tv_time_total"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4.5dp"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        tools:text="总计 13h44m" />
+
+                    <TextView
+                        android:id="@+id/tv_time_screen_off"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4.5dp"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        tools:text="息屏 8h39m" />
+                </LinearLayout>
+
+                <!-- 理论续航（第三列：左对齐） -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="start"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tv_remaining_screen_on"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        tools:text="亮屏 6h30m" />
+
+                    <TextView
+                        android:id="@+id/tv_remaining_composite"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4.5dp"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        tools:text="综合 14h46m" />
+
+                    <TextView
+                        android:id="@+id/tv_remaining_screen_off"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4.5dp"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        tools:text="息屏 2d18h" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
         <!-- 主内容滚动容器 -->
         <androidx.core.widget.NestedScrollView
@@ -567,144 +726,7 @@
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
 
-                    <!-- 2. 核心功耗指标卡片（三列指标） -->
-                    <com.google.android.material.card.MaterialCardView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        app:cardBackgroundColor="@color/dialog_card_bg"
-                        app:cardCornerRadius="14dp"
-                        app:cardElevation="0dp"
-                        app:strokeColor="#18888888"
-                        app:strokeWidth="1dp">
-
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:baselineAligned="false"
-                            android:orientation="horizontal"
-                            android:paddingStart="10dp"
-                            android:paddingTop="10dp"
-                            android:paddingEnd="10dp"
-                            android:paddingBottom="10dp">
-
-                            <!-- 放电功耗（第一列：左对齐） -->
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="start"
-                                android:orientation="vertical">
-
-                                <TextView
-                                    android:id="@+id/tv_power_screen_on"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:textColor="?android:attr/textColorPrimary"
-                                    android:textSize="13sp"
-                                    android:textStyle="bold"
-                                    tools:text="亮屏 1.65W" />
-
-                                <TextView
-                                    android:id="@+id/tv_power_avg"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="4.5dp"
-                                    android:textColor="?android:attr/textColorPrimary"
-                                    android:textSize="13sp"
-                                    android:textStyle="bold"
-                                    tools:text="平均 0.80W" />
-
-                                <TextView
-                                    android:id="@+id/tv_power_screen_off"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="4.5dp"
-                                    android:textColor="?android:attr/textColorPrimary"
-                                    android:textSize="13sp"
-                                    android:textStyle="bold"
-                                    tools:text="息屏 0.15W" />
-                            </LinearLayout>
-
-                            <!-- 放电时长（第二列：左对齐） -->
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="start"
-                                android:orientation="vertical">
-
-                                <TextView
-                                    android:id="@+id/tv_time_screen_on"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:textColor="?android:attr/textColorPrimary"
-                                    android:textSize="13sp"
-                                    android:textStyle="bold"
-                                    tools:text="亮屏 5h5m" />
-
-                                <TextView
-                                    android:id="@+id/tv_time_total"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="4.5dp"
-                                    android:textColor="?android:attr/textColorPrimary"
-                                    android:textSize="13sp"
-                                    android:textStyle="bold"
-                                    tools:text="总计 13h44m" />
-
-                                <TextView
-                                    android:id="@+id/tv_time_screen_off"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="4.5dp"
-                                    android:textColor="?android:attr/textColorPrimary"
-                                    android:textSize="13sp"
-                                    android:textStyle="bold"
-                                    tools:text="息屏 8h39m" />
-                            </LinearLayout>
-
-                            <!-- 理论续航（第三列：左对齐） -->
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="start"
-                                android:orientation="vertical">
-
-                                <TextView
-                                    android:id="@+id/tv_remaining_screen_on"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:textColor="?android:attr/textColorPrimary"
-                                    android:textSize="13sp"
-                                    android:textStyle="bold"
-                                    tools:text="亮屏 6h30m" />
-
-                                <TextView
-                                    android:id="@+id/tv_remaining_composite"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="4.5dp"
-                                    android:textColor="?android:attr/textColorPrimary"
-                                    android:textSize="13sp"
-                                    android:textStyle="bold"
-                                    tools:text="综合 14h46m" />
-
-                                <TextView
-                                    android:id="@+id/tv_remaining_screen_off"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginTop="4.5dp"
-                                    android:textColor="?android:attr/textColorPrimary"
-                                    android:textSize="13sp"
-                                    android:textStyle="bold"
-                                    tools:text="息屏 2d18h" />
-                            </LinearLayout>
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-
-                    <!-- 3. “使用场景”卡片 -->
+                    <!-- 2. “使用场景”卡片 -->
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -831,6 +853,13 @@
                     </com.google.android.material.card.MaterialCardView>
 
                 </LinearLayout>
+
+                <!-- 充电详情主容器：连接充电器或用户切换至充电统计时展示 -->
+                <include
+                    android:id="@+id/layout_charging_content"
+                    layout="@layout/layout_charging_stats"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
 
             </LinearLayout>
         </androidx.core.widget.NestedScrollView>

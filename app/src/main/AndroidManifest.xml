@@ -32,6 +32,22 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.PowerHistoryActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.PowerHistoryDetailActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.ChargingHistoryActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ui.ChargingHistoryDetailActivity"
+            android:exported="false" />
+
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"

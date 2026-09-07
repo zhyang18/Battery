@@ -1,24 +1,21 @@
 package com.battery.analysis.ui
 
-import android.content.Context
-import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import com.battery.analysis.R
 import com.battery.analysis.databinding.ItemPowerHistoryRecordBinding
 import com.battery.analysis.model.PowerUsageRecord
 import java.util.Locale
 
 /**
  * 耗电历史记录单行列表适配器。
- * 负责在弹窗中展示每次断电时自动保存的历史耗电快照列表，
- * 支持点击直接将快照加载到主页面全屏查看，并支持单条删除。
+ * 遵循现代化双行双列设计图样式渲染，展示起止时间范围、放电时长与电量变化区间、平均亮屏功耗数值与说明标签。
+ * 支持点击条目跳转详情页面，并支持长按条目触发删除操作。
  *
- * @param onItemClick 点击列表项回调函数，触发快照数据加载
- * @param onDeleteClick 点击删除图标回调函数，触发单条删除逻辑
+ * @param onItemClick 点击列表项回调函数，触发详情页面跳转或快照载入
+ * @param onDeleteClick 长按或点击删除回调函数，触发单条删除逻辑
  */
 class PowerHistoryAdapter(
     private val onItemClick: (PowerUsageRecord) -> Unit,
@@ -62,49 +59,36 @@ class PowerHistoryAdapter(
     ) : RecyclerView.ViewHolder(binding.root) {
 
         /**
-         * 将耗电历史数据绑定到各 UI 控件。
+         * 将耗电历史数据绑定到各 UI 控件中。
          *
          * @param record 待展示的耗电记录实体对象
          */
         fun bind(record: PowerUsageRecord) {
-            val context: Context = binding.root.context
+            // 1. 左上：起止时间范围（增加结束时间显示，如 "2026/09/07 12:26 ~ 13:12"）
+            binding.tvHistoryTime.text = record.getFormattedTimeRange()
 
-            // 1. 记录生成时间
-            binding.tvHistoryTime.text = record.recordTime
+            // 2. 右上：功耗数值（如 "2.48 W"）
+            binding.tvHistoryPowerValue.text = String.format(
+                Locale.getDefault(),
+                "%.2f W",
+                record.getDisplayPowerWatts()
+            )
 
-            // 2. 模式徽章展示
-            if (record.isShizukuRealData) {
-                binding.tvHistoryModeBadge.text = "Shizuku"
-                binding.tvHistoryModeBadge.setTextColor(Color.parseColor("#2196F3"))
-                binding.tvHistoryModeBadge.setBackgroundResource(R.drawable.bg_history_badge)
-            } else {
-                binding.tvHistoryModeBadge.text = context.getString(R.string.power_mode_normal)
-                binding.tvHistoryModeBadge.setTextColor(Color.parseColor("#9CA3AF"))
-                binding.tvHistoryModeBadge.setBackgroundResource(R.drawable.bg_dialog_btn_cancel)
-            }
+            // 3. 左下：时长与电量变化区间（如 "46m · 76%~69%(-7%)"）
+            binding.tvHistorySubInfo.text = record.getFormattedDurationAndLevel()
 
-            // 3. 核心概要信息组合（放电时长 • 平均功耗 • 应用数）
-            val durationStr = if (record.totalDurationText.isNotBlank()) {
-                "${context.getString(R.string.power_used_time)} ${record.totalDurationText}"
-            } else {
-                "${context.getString(R.string.power_used_time)} --"
-            }
-            val powerStr = String.format(Locale.getDefault(), "平均 %.2fW", record.avgPowerWatts)
-            val appCntStr = context.getString(R.string.power_history_app_count_format, record.appCount)
+            // 4. 右下：功耗说明标签（如 "平均亮屏功耗"）
+            binding.tvHistoryPowerLabel.text = record.getDisplayPowerLabel()
 
-            binding.tvHistorySubInfo.text = "$durationStr • $powerStr • $appCntStr"
-
-            // 4. 电量百分比
-            binding.tvHistoryLevel.text = "${record.levelPercent}%"
-
-            // 5. 点击整行条目触发加载查看
+            // 5. 点击整行条目触发跳转详情查看
             binding.root.setOnClickListener {
                 onItemClick(record)
             }
 
-            // 6. 点击删除图标触发删除确认
-            binding.btnDeleteItem.setOnClickListener {
+            // 6. 长按条目触发删除确认弹窗
+            binding.root.setOnLongClickListener {
                 onDeleteClick(record)
+                true
             }
         }
     }

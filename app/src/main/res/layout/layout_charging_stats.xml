@@ -1,0 +1,702 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/layout_charging_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <!-- 1. 整合版充电核心与USB输入全景大卡片（矢量图标与文字统一颜色） -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/card_charging_hero"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        app:cardBackgroundColor="@color/dialog_card_bg"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="0dp"
+        app:strokeColor="#18888888"
+        app:strokeWidth="1dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="14dp">
+
+            <!-- 左侧：环形电量进度条 + 居中大号电量百分比文字 -->
+            <FrameLayout
+                android:layout_width="106dp"
+                android:layout_height="106dp">
+
+                <com.battery.analysis.ui.view.BatteryCircleProgressView
+                    android:id="@+id/circle_progress_level"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
+
+                <TextView
+                    android:id="@+id/tv_charging_current_percent"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="26sp"
+                    android:textStyle="bold"
+                    tools:text="69%" />
+            </FrameLayout>
+
+            <!-- 中间：垂直细分割线 -->
+            <View
+                android:layout_width="1dp"
+                android:layout_height="120dp"
+                android:layout_marginStart="14dp"
+                android:layout_marginEnd="14dp"
+                android:background="#15888888" />
+
+            <!-- 右侧：状态标题、常亮灯泡图标与核心指标矩阵 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <!-- 标题与屏幕常亮指示行 -->
+                <RelativeLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content">
+
+                    <TextView
+                        android:id="@+id/tv_charging_state_title"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_alignParentStart="true"
+                        android:layout_centerVertical="true"
+                        android:text="@string/charging_status_fast"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="17sp"
+                        android:textStyle="bold"
+                        tools:text="充电中" />
+
+                    <!-- 右上角灯泡图标（控制充电保持屏幕常亮） -->
+                    <ImageView
+                        android:id="@+id/iv_charging_bulb"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_alignParentEnd="true"
+                        android:layout_centerVertical="true"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:clickable="true"
+                        android:contentDescription="充电保持屏幕常亮"
+                        android:focusable="true"
+                        android:padding="2dp"
+                        android:src="@drawable/ic_lightbulb_outline"
+                        app:tint="?android:attr/textColorPrimary" />
+                </RelativeLayout>
+
+                <!-- 核心指标第 1 行：电池功率 + USB充电功率 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="9dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <!-- 电池端功率 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="17dp"
+                            android:layout_height="17dp"
+                            android:src="@drawable/ic_battery_power"
+                            app:tint="?android:attr/textColorPrimary" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_battery_power"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="13sp"
+                            tools:text="-2.70W" />
+                    </LinearLayout>
+
+                    <!-- USB输入充电功率 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="17dp"
+                            android:layout_height="17dp"
+                            android:src="@drawable/ic_plug_power"
+                            app:tint="?android:attr/textColorPrimary" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_usb_power"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="13sp"
+                            tools:text="0.0W?" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 核心指标第 2 行（温度上方新增）：平均充电功率 + 峰值功率 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <!-- 平均充电功率 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="17dp"
+                            android:layout_height="17dp"
+                            android:src="@drawable/ic_avg_power"
+                            app:tint="?android:attr/textColorPrimary" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_avg_power"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="13sp"
+                            tools:text="18.50W" />
+                    </LinearLayout>
+
+                    <!-- 峰值功率 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="17dp"
+                            android:layout_height="17dp"
+                            android:src="@drawable/ic_peak_power"
+                            app:tint="?android:attr/textColorPrimary" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_max_power"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="13sp"
+                            tools:text="33.20W" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 核心指标第 3 行：当前温度 + 充电期间最高温度 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <!-- 当前温度 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="17dp"
+                            android:layout_height="17dp"
+                            android:src="@drawable/ic_flame_temp"
+                            app:tint="?android:attr/textColorPrimary" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_temp"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="13sp"
+                            tools:text="36.0℃" />
+                    </LinearLayout>
+
+                    <!-- 充电最高温度 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="17dp"
+                            android:layout_height="17dp"
+                            android:src="@drawable/ic_max_temp"
+                            app:tint="?android:attr/textColorPrimary" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_max_temp"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="13sp"
+                            tools:text="38.5℃" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 核心指标第 4 行（温度下方新增）：电流 + 电压（原电压移动至电流右侧） -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <!-- 充电瞬时电流 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="17dp"
+                            android:layout_height="17dp"
+                            android:src="@drawable/ic_electric_current"
+                            app:tint="?android:attr/textColorPrimary" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_current"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="13sp"
+                            tools:text="3250mA" />
+                    </LinearLayout>
+
+                    <!-- 电池电压 -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <ImageView
+                            android:layout_width="17dp"
+                            android:layout_height="17dp"
+                            android:src="@drawable/ic_battery_voltage"
+                            app:tint="?android:attr/textColorPrimary" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_voltage"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="13sp"
+                            tools:text="4.096v" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 核心指标第 5 行：循环容量与等效能量 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <ImageView
+                        android:layout_width="17dp"
+                        android:layout_height="17dp"
+                        android:src="@drawable/ic_recycle_capacity"
+                        app:tint="?android:attr/textColorPrimary" />
+
+                    <TextView
+                        android:id="@+id/tv_metric_capacity_energy"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:singleLine="true"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="13sp"
+                        tools:text="8000mAh (≈30.9Wh)" />
+                </LinearLayout>
+
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- 2. 充电时段（日期与时间换行）及亮屏/息屏严格上下对齐底栏卡片 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/card_charging_summary_strip"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        app:cardBackgroundColor="@color/dialog_card_bg"
+        app:cardCornerRadius="12dp"
+        app:cardElevation="0dp"
+        app:strokeColor="#18888888"
+        app:strokeWidth="1dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="11dp">
+
+            <!-- 左侧：日期与起止时间换行呈现，字体颜色统一 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <!-- 日期 -->
+                <TextView
+                    android:id="@+id/tv_charging_date"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:singleLine="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12.5sp"
+                    tools:text="2026-09-07" />
+
+                <!-- 时间区间 -->
+                <TextView
+                    android:id="@+id/tv_charging_time_range"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="5dp"
+                    android:singleLine="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12.5sp"
+                    tools:text="11:28 ~ 11:39" />
+            </LinearLayout>
+
+            <!-- 右侧：亮屏与息屏各指标上下严格对齐（时间格式00:00，百分比与能量上下对齐，无息屏文字） -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- 第一行：亮屏充电时间、亮屏充入百分比、亮屏充入能量 -->
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <!-- 亮屏充电时间（格式 00:00） -->
+                    <TextView
+                        android:id="@+id/tv_charging_screen_on_duration"
+                        android:layout_width="65dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:singleLine="true"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="12.5sp"
+                        tools:text="02:16" />
+
+                    <!-- 亮屏充入百分比 -->
+                    <TextView
+                        android:id="@+id/tv_charging_screen_on_level_gain"
+                        android:layout_width="55dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:singleLine="true"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="12.5sp"
+                        tools:text="+0%" />
+
+                    <!-- 亮屏充入能量 -->
+                    <TextView
+                        android:id="@+id/tv_charging_screen_on_energy_gain"
+                        android:layout_width="65dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:singleLine="true"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="12.5sp"
+                        tools:text="+0.0Wh" />
+                </LinearLayout>
+
+                <!-- 第二行：息屏充电时间、息屏充入百分比、息屏充入能量（与上行严格上下对齐，不显示息屏文字） -->
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="5dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <!-- 息屏充电时间（格式 00:00） -->
+                    <TextView
+                        android:id="@+id/tv_charging_screen_off_duration"
+                        android:layout_width="65dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:singleLine="true"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="12.5sp"
+                        tools:text="08:15" />
+
+                    <!-- 息屏充入百分比 -->
+                    <TextView
+                        android:id="@+id/tv_charging_screen_off_level_gain"
+                        android:layout_width="55dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:singleLine="true"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="12.5sp"
+                        tools:text="+0%" />
+
+                    <!-- 息屏充入能量 -->
+                    <TextView
+                        android:id="@+id/tv_charging_screen_off_energy_gain"
+                        android:layout_width="65dp"
+                        android:layout_height="wrap_content"
+                        android:gravity="end"
+                        android:singleLine="true"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="12.5sp"
+                        tools:text="+0.1Wh" />
+                </LinearLayout>
+            </LinearLayout>
+
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- 3. 三合一充电监测走势图表卡片 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/card_charging_chart"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        app:cardBackgroundColor="@color/dialog_card_bg"
+        app:cardCornerRadius="14dp"
+        app:cardElevation="0dp"
+        app:strokeColor="#18888888"
+        app:strokeWidth="1dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <!-- 卡片标题行：充电监测走势 ? ... 实时采样 -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentStart="true"
+                    android:layout_centerVertical="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/charging_trend_title"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <ImageView
+                        android:id="@+id/btn_charging_chart_help"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_marginStart="6dp"
+                        android:contentDescription="@string/charging_guide_title"
+                        android:padding="2dp"
+                        android:src="@drawable/ic_help_circle" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:layout_centerVertical="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <View
+                        android:layout_width="6dp"
+                        android:layout_height="6dp"
+                        android:background="@drawable/bg_dot_green" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="5dp"
+                        android:text="实时采样更新"
+                        android:textColor="#00C853"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+            </RelativeLayout>
+
+            <!-- 自定义三合一（功率、电量、温度）折线图 -->
+            <com.battery.analysis.ui.view.ChargingChartView
+                android:id="@+id/charging_chart_view"
+                android:layout_width="match_parent"
+                android:layout_height="205dp"
+                android:layout_marginTop="8dp" />
+
+            <!-- 图表正下方图例标识：三色方块 + 标签 + 实时数值看板 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <!-- 1. 电量图例方块（根据要求电量与功率对换位置） -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:orientation="horizontal">
+
+                    <View
+                        android:layout_width="9dp"
+                        android:layout_height="9dp"
+                        android:background="@drawable/bg_square_blue" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="5dp"
+                        android:text="@string/charging_legend_level"
+                        android:textColor="#757575"
+                        android:textSize="11.5sp" />
+
+                    <TextView
+                        android:id="@+id/tv_legend_level"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="4dp"
+                        android:textColor="#2196F3"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        tools:text="78%" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="14dp"
+                    android:background="#15888888" />
+
+                <!-- 2. 功率图例方块 -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:orientation="horizontal">
+
+                    <View
+                        android:layout_width="9dp"
+                        android:layout_height="9dp"
+                        android:background="@drawable/bg_square_green" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="5dp"
+                        android:text="@string/charging_legend_power"
+                        android:textColor="#757575"
+                        android:textSize="11.5sp" />
+
+                    <TextView
+                        android:id="@+id/tv_legend_power"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="4dp"
+                        android:textColor="#00C853"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        tools:text="18.50W" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="14dp"
+                    android:background="#15888888" />
+
+                <!-- 3. 温度图例方块 -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:orientation="horizontal">
+
+                    <View
+                        android:layout_width="9dp"
+                        android:layout_height="9dp"
+                        android:background="@drawable/bg_square_red" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="5dp"
+                        android:text="@string/charging_legend_temp"
+                        android:textColor="#757575"
+                        android:textSize="11.5sp" />
+
+                    <TextView
+                        android:id="@+id/tv_legend_temp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="4dp"
+                        android:textColor="#FF5252"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        tools:text="33.5℃" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+</LinearLayout>

@@ -5,6 +5,7 @@
 
     <!-- 底部导航 -->
     <string name="nav_power">耗电</string>
+    <string name="nav_charging">充电</string>
     <string name="nav_detection">检测</string>
     <string name="nav_history">记录</string>
     <string name="nav_settings">设置</string>
@@ -361,4 +362,69 @@
     <string name="power_history_banner_format">📌 正在查看耗电历史快照：%s</string>
     <string name="power_history_loaded_toast">已加载该条耗电历史快照</string>
     <string name="power_history_app_count_format">%d款应用</string>
+
+    <!-- 充电统计与双模智能切换 -->
+    <string name="tab_power_usage">耗电统计</string>
+    <string name="tab_charging_stats">充电统计</string>
+    <string name="charging_stats_title">充电统计</string>
+    <string name="charging_trend_title">充电监测走势</string>
+    <string name="charging_legend_power">功率</string>
+    <string name="charging_legend_level">电量</string>
+    <string name="charging_legend_temp">温度</string>
+    <string name="charging_metric_power">实时功率</string>
+    <string name="charging_metric_level">当前电量</string>
+    <string name="charging_metric_temp">电池温度</string>
+    <string name="charging_metric_voltage">充电电压</string>
+    <string name="charging_metric_current">充电电流</string>
+    <string name="charging_metric_energy">充入能量</string>
+    <string name="charging_metric_max_power">峰值功率</string>
+    <string name="charging_metric_avg_power">平均功率</string>
+    <string name="charging_metric_max_temp">最高温度</string>
+    <string name="charging_duration_label">充电时长</string>
+    <string name="charging_start_level_label">起始电量</string>
+    <string name="charging_gain_label">累计充入</string>
+    <string name="charging_status_fast">快速充电中</string>
+    <string name="charging_status_standard">标准充电中</string>
+    <string name="charging_status_full">已充满电</string>
+    <string name="charging_status_discharging">未连接充电器</string>
+    <string name="toast_auto_switch_charging">⚡ 已检测到连接电源，已自动显示充电统计</string>
+    <string name="toast_auto_switch_discharging">🔋 已检测到断开电源，已自动显示耗电统计</string>
+    <string name="charging_reset_confirm_title">重置充电统计</string>
+    <string name="charging_reset_confirm_msg">确定要清空当前充电走势图表与统计采样数据吗？</string>
+    <string name="charging_reset_success">充电走势与统计数据已清空重置</string>
+    <string name="charging_guide_title">充电统计全景指南</string>
+    <string name="charging_guide_desc">本界面支持在设备连接充电器时自动智能呈现。三合一折线图表动态绘制绿色功率曲线、蓝色电量曲线与红色温度曲线；图表正下方提供带色块标识的实时读数看板；数据每秒实时采样更新，拔电时自动存档。</string>
+
+    <!-- 充电历史与详情 -->
+    <string name="clear_history">清空记录</string>
+    <string name="charging_history_title">充电历史记录</string>
+    <string name="charging_history_empty_title">暂无充电历史记录</string>
+    <string name="charging_history_empty_desc">每次连接充电器并结束充电时，系统将自动记录该次充电会话的功率与充入能量快照。</string>
+    <string name="charging_history_clear_title">清空充电历史</string>
+    <string name="charging_history_clear_message">确定要清空所有已保存的充电历史记录吗？</string>
+    <string name="charging_detail_title">充电会话详情</string>
+    <string name="charging_detail_total_duration">总充电时长</string>
+    <string name="charging_detail_screen_off_duration">息屏充电时长</string>
+    <string name="charging_detail_battery_section">电量与充入能量</string>
+    <string name="charging_detail_level_change">电量变化</string>
+    <string name="charging_detail_charged_energy">充入能量</string>
+    <string name="charging_detail_power_section">充电功率与温度</string>
+    <string name="charging_detail_avg_power">平均功率</string>
+    <string name="charging_detail_peak_power">峰值功率</string>
+    <string name="charging_detail_max_temp">最高温度</string>
+    <string name="charging_detail_screen_off_section">息屏充电细分统计</string>
+    <string name="charging_detail_screen_off_level">息屏充入电量</string>
+    <string name="charging_detail_screen_off_energy">息屏充入能量</string>
+
+    <!-- 耗电快照详情 -->
+    <string name="power_detail_title">耗电快照详情</string>
+    <string name="power_detail_btn_load">载入主页</string>
+    <string name="power_detail_level">终止电量</string>
+    <string name="power_detail_temp">电池温度</string>
+    <string name="power_detail_voltage">电池电压</string>
+    <string name="power_detail_energy">预估能量</string>
+    <string name="power_detail_metrics_title">核心三维功耗与续航指标</string>
+    <string name="power_detail_chart_title">放电曲线轨迹走势</string>
+    <string name="power_detail_apps_title">应用前台耗电排行</string>
 </resources>
+

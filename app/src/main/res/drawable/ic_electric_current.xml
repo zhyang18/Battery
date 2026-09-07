@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="20dp"
+    android:height="20dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 美化版充电瞬时电流图标：高精度正弦电流波形与流向箭头 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M2,13c2.2,-5.5 4.3,-5.5 6.5,0s4.3,5.5 6.5,0l1.2,1.8 -1.2,1.2c-3.1,5.2 -5.9,5.2 -8.5,0s-4,-5.2 -4.5,-3H2z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M16.5,5h5.5v5.5l-2.2,-2.2 -3.3,3.3 -1.4,-1.4 3.3,-3.3L16.5,5z" />
+</vector>

@@ -241,8 +241,8 @@ class BatteryViewModel : ViewModel() {
      * @param isGranted 是否已成功获取 Shizuku 权限
      */
     fun updateShizukuStatus(statusText: String, isGranted: Boolean) {
-        _shizukuStatus.value = statusText
         _isShizukuGranted.value = isGranted
+        _shizukuStatus.value = statusText
     }
 
     /**

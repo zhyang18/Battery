@@ -49,11 +49,16 @@ class MainActivity : AppCompatActivity() {
      */
     private val requestPermissionResultListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode == SHIZUKU_REQUEST_CODE) {
-            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+            val isGranted = (grantResult == PackageManager.PERMISSION_GRANTED)
+            if (isGranted) {
                 Toast.makeText(this, getString(R.string.toast_shizuku_success), Toast.LENGTH_SHORT).show()
+                val statusText = getString(R.string.shizuku_status_authorized)
+                viewModel.updateShizukuStatus(statusText, true)
                 viewModel.refreshShizuku(this)
             } else {
                 Toast.makeText(this, getString(R.string.toast_shizuku_denied), Toast.LENGTH_SHORT).show()
+                val statusText = getString(R.string.shizuku_status_unauthorized)
+                viewModel.updateShizukuStatus(statusText, false)
             }
             updateShizukuStatusState()
         }
@@ -246,9 +251,18 @@ class MainActivity : AppCompatActivity() {
      */
     override fun onStart() {
         super.onStart()
+        updateShizukuStatusState()
         if (isAutoRefreshEnabled) {
             startAutoRefresh()
         }
+    }
+
+    /**
+     * 界面恢复到前台运行时的生命周期回调，同步检查并更新 Shizuku 连接与授权状态。
+     */
+    override fun onResume() {
+        super.onResume()
+        updateShizukuStatusState()
     }
 
     /**

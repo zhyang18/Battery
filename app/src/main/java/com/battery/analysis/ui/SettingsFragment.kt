@@ -27,6 +27,7 @@ import com.battery.analysis.databinding.FragmentSettingsBinding
 import com.battery.analysis.manager.LanguageManager
 import com.battery.analysis.model.BackupData
 import com.battery.analysis.viewmodel.BatteryViewModel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -102,10 +103,11 @@ class SettingsFragment : Fragment() {
     }
 
     /**
-     * 界面恢复至前台时的生命周期回调，同步最新的耗电模式与采样精度副标题。
+     * 界面恢复至前台时的生命周期回调，同步最新的耗电模式、采样精度副标题及 Shizuku 连接与权限状态。
      */
     override fun onResume() {
         super.onResume()
+        (activity as? MainActivity)?.updateShizukuStatusState()
         val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(requireContext())
         updatePowerModeDisplay(powerManager.getSelectedMode())
         updateSamplingModeDisplay(powerManager.getSamplingMode())
@@ -533,8 +535,9 @@ class SettingsFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.shizukuStatus.collect { status ->
-                    val isGranted = viewModel.isShizukuGranted.value
+                combine(viewModel.shizukuStatus, viewModel.isShizukuGranted) { status, isGranted ->
+                    Pair(status, isGranted)
+                }.collect { (status, isGranted) ->
                     if (isGranted) {
                         binding.tvShizukuStatus.text = getString(R.string.shizuku_status_authorized)
                         binding.tvShizukuStatus.setTextColor(Color.parseColor("#10B981"))

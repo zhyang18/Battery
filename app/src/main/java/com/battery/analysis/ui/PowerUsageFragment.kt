@@ -229,18 +229,54 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 根据用户偏好及当前充电状态动态应用或清除屏幕常亮窗口标志。
+     * 切换充电时保持屏幕常亮设置，并同步更新窗口标志、视图树常亮状态与提示。
+     */
+    private fun toggleKeepScreenOn() {
+        val prefs = context?.getSharedPreferences("charging_stats_prefs", Context.MODE_PRIVATE) ?: return
+        val currentKeepOn = prefs.getBoolean(PREF_KEY_KEEP_SCREEN_ON, false)
+        val newKeepOn = !currentKeepOn
+        prefs.edit().putBoolean(PREF_KEY_KEEP_SCREEN_ON, newKeepOn).apply()
+
+        val isCharging = chargingManager.isCharging()
+        applyKeepScreenOn(isCharging)
+
+        val tip = if (newKeepOn) "已开启充电保持屏幕常亮" else "已关闭充电保持屏幕常亮"
+        Toast.makeText(requireContext(), tip, Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * 根据用户偏好及当前充电状态动态应用或清除屏幕常亮窗口标志与视图常亮状态。
      *
      * @param isCharging 当前是否处于充电状态
      */
     private fun applyKeepScreenOn(isCharging: Boolean) {
         val prefs = context?.getSharedPreferences("charging_stats_prefs", Context.MODE_PRIVATE) ?: return
         val keepOn = prefs.getBoolean(PREF_KEY_KEEP_SCREEN_ON, false)
-        if (isCharging && keepOn) {
+        val shouldKeepOn = isCharging && keepOn
+
+        if (shouldKeepOn) {
             activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            _binding?.root?.keepScreenOn = true
+            _binding?.layoutChargingContent?.layoutChargingRoot?.keepScreenOn = true
         } else {
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            _binding?.root?.keepScreenOn = false
+            _binding?.layoutChargingContent?.layoutChargingRoot?.keepScreenOn = false
         }
+        updateBulbVisual(keepOn)
+    }
+
+    /**
+     * 根据屏幕常亮配置更新灯泡图标高亮色与说明。
+     *
+     * @param isKeepOn 当前是否已启用常亮配置
+     */
+    private fun updateBulbVisual(isKeepOn: Boolean) {
+        if (_binding == null) return
+        val bulb = binding.layoutChargingContent.ivChargingBulb
+        val activeColor = Color.parseColor("#FFC107")
+        val inactiveColor = Color.parseColor("#888888")
+        bulb.imageTintList = android.content.res.ColorStateList.valueOf(if (isKeepOn) activeColor else inactiveColor)
     }
 
     /**
@@ -504,19 +540,9 @@ class PowerUsageFragment : Fragment() {
             }
         }
 
-        // 充电图表帮助问号点击
-        binding.layoutChargingContent.btnChargingChartHelp.setOnClickListener {
-            showChargingGuideDialog()
-        }
-
         // 历史快照横幅恢复实时按钮点击
         binding.btnPowerRestoreRealtime.setOnClickListener {
             restoreLivePowerData()
-        }
-
-        // “使用过程 ?” 问号图标点击
-        binding.btnProcessHelp.setOnClickListener {
-            showPowerProcessGuideDialog()
         }
 
         // “使用场景 ?” 问号图标点击
@@ -559,6 +585,11 @@ class PowerUsageFragment : Fragment() {
         // 功耗时间轴 App 图标点击监听：弹出 App 详细能耗 BottomSheet
         binding.batteryTimelineView.setOnAppEventListener { event ->
             AppEnergyDetailBottomSheetDialog(requireContext(), event).show()
+        }
+
+        // 充电大卡片右上角屏幕常亮灯泡点击监听
+        binding.layoutChargingContent.ivChargingBulb.setOnClickListener {
+            toggleKeepScreenOn()
         }
     }
 
@@ -713,21 +744,8 @@ class PowerUsageFragment : Fragment() {
 
         // 1. 更新三合一走势折线图 (功率: 绿, 电量: 蓝, 温度: 红)
         chargingView.chargingChartView.setData(points)
-        chargingView.chargingChartView.setOnPointSelectedListener(object : ChargingChartView.OnPointSelectedListener {
-            override fun onPointSelected(point: ChargingSamplePoint?) {
-                val targetPoint = point ?: currentPoint
-                chargingView.tvLegendPower.text = String.format(Locale.getDefault(), "%.2fW", targetPoint.powerWatts)
-                chargingView.tvLegendLevel.text = "${targetPoint.batteryLevel}%"
-                chargingView.tvLegendTemp.text = String.format(Locale.getDefault(), "%.1f℃", targetPoint.temperature)
-            }
-        })
 
-        // 2. 更新图表正下方的三色图例标识与实时读数看板（严格符合用户要求）
-        chargingView.tvLegendPower.text = String.format(Locale.getDefault(), "%.2fW", currentPoint.powerWatts)
-        chargingView.tvLegendLevel.text = "${currentPoint.batteryLevel}%"
-        chargingView.tvLegendTemp.text = String.format(Locale.getDefault(), "%.1f℃", currentPoint.temperature)
-
-        // 3. 填充整合版大卡片：环形进度条与中心大字
+        // 2. 填充整合版大卡片：环形进度条与中心大字
         chargingView.circleProgressLevel.setProgress(currentPoint.batteryLevel)
         chargingView.tvChargingCurrentPercent.text = "${currentPoint.batteryLevel}%"
 
@@ -739,22 +757,7 @@ class PowerUsageFragment : Fragment() {
         }
         val prefs = requireContext().getSharedPreferences("charging_stats_prefs", Context.MODE_PRIVATE)
         val isKeepScreenOn = prefs.getBoolean(PREF_KEY_KEEP_SCREEN_ON, false)
-        chargingView.ivChargingBulb.setColorFilter(
-            if (isKeepScreenOn) Color.parseColor("#FFD600") else Color.parseColor("#757575")
-        )
-        chargingView.ivChargingBulb.setOnClickListener {
-            val newKeepOn = !prefs.getBoolean(PREF_KEY_KEEP_SCREEN_ON, false)
-            prefs.edit().putBoolean(PREF_KEY_KEEP_SCREEN_ON, newKeepOn).apply()
-            if (newKeepOn) {
-                activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                chargingView.ivChargingBulb.setColorFilter(Color.parseColor("#FFD600"))
-                Toast.makeText(requireContext(), "已开启充电保持屏幕常亮", Toast.LENGTH_SHORT).show()
-            } else {
-                activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                chargingView.ivChargingBulb.setColorFilter(Color.parseColor("#757575"))
-                Toast.makeText(requireContext(), "已关闭充电保持屏幕常亮", Toast.LENGTH_SHORT).show()
-            }
-        }
+        updateBulbVisual(isKeepScreenOn)
 
         // 5. 核心指标矩阵
         // 行 1：电池实时功率与 USB 充电输入功率
@@ -860,30 +863,70 @@ class PowerUsageFragment : Fragment() {
      * 弹出高颜值充电统计全景指南与图表说明对话框。
      */
     private fun showChargingGuideDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_charging_stats_guide, null)
+        val btnClose = dialogView.findViewById<TextView>(R.id.btn_dialog_charging_guide_close)
+
         val dialog = AlertDialog.Builder(requireContext())
-            .setTitle(getString(R.string.charging_guide_title))
-            .setMessage(getString(R.string.charging_guide_desc))
-            .setPositiveButton(getString(R.string.understood), null)
+            .setView(dialogView)
             .create()
+
+        btnClose.setOnClickListener {
+            dialog.dismiss()
+        }
+
         dialog.show()
         applyDialogWindowStyle(dialog)
     }
 
     /**
-     * 弹出重置充电走势图表与统计数据的二次确认对话框。
+     * 弹出重置充电走势图表与统计数据的二次确认高颜值对话框。
      */
     private fun showChargingClearConfirmDialog() {
-        AlertDialog.Builder(requireContext())
-            .setTitle(getString(R.string.charging_reset_confirm_title))
-            .setMessage(getString(R.string.charging_reset_confirm_msg))
-            .setPositiveButton(getString(R.string.confirm)) { _, _ ->
-                chargingManager.resetChargingStats()
-                binding.layoutChargingContent.chargingChartView.clearData()
-                renderChargingData()
-                Toast.makeText(requireContext(), getString(R.string.charging_reset_success), Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton(getString(R.string.cancel), null)
-            .show()
+        val dialogView = layoutInflater.inflate(R.layout.dialog_charging_reset_confirm, null)
+
+        val tvType = dialogView.findViewById<TextView>(R.id.tv_reset_preview_type)
+        val tvTime = dialogView.findViewById<TextView>(R.id.tv_reset_preview_time)
+        val tvSummary = dialogView.findViewById<TextView>(R.id.tv_reset_preview_summary)
+        val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_reset_cancel)
+        val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_reset_confirm)
+
+        val summary = chargingManager.getCurrentSummary()
+        val points = chargingManager.getSamplePoints()
+
+        val chargeType = if (summary.chargeType.isNotEmpty()) summary.chargeType else "充电监测"
+        tvType.text = "⚡ $chargeType"
+
+        val durationMs = if (summary.endTimestamp >= summary.startTimestamp && summary.startTimestamp > 0L) {
+            summary.endTimestamp - summary.startTimestamp
+        } else {
+            0L
+        }
+        val durationStr = formatDurationColon(durationMs)
+        tvTime.text = "已充电: $durationStr"
+
+        val gain = (summary.currentLevel - summary.startLevel).coerceAtLeast(0)
+        val gainSign = if (gain >= 0) "+$gain%" else "$gain%"
+        val pointCount = points.size
+        tvSummary.text = "🔋 电量 ${summary.startLevel}% → ${summary.currentLevel}% ($gainSign)   •   📊 $pointCount 个采样点"
+
+        val dialog = AlertDialog.Builder(requireContext())
+            .setView(dialogView)
+            .create()
+
+        btnCancel.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        btnConfirm.setOnClickListener {
+            chargingManager.resetChargingStats()
+            binding.layoutChargingContent.chargingChartView.clearData()
+            renderChargingData()
+            Toast.makeText(requireContext(), getString(R.string.charging_reset_success), Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+        }
+
+        dialog.show()
+        applyDialogWindowStyle(dialog)
     }
 
     /**
@@ -918,12 +961,6 @@ class PowerUsageFragment : Fragment() {
         lastRenderedPackage = fullPackage
         val snapshot = fullPackage.batterySnapshot
         val overview = fullPackage.overviewStats
-
-        // 1. 刷新使用过程卡片信息（开始放电电量 → 当前电量）
-        val startLevel = (fullPackage.trendPoints.firstOrNull()?.batteryLevel ?: fullPackage.startLevelPercent)
-            .coerceAtLeast(snapshot.levelPercent)
-        binding.tvBatteryStartPercent.text = "${startLevel}%"
-        binding.tvBatteryPercentHeader.text = "${snapshot.levelPercent}%"
 
         // 构建并绑定功耗时间轴最新状态（多选模式）
         val selectedMetrics = binding.metricSelectorView.getSelectedMetrics()
@@ -1012,19 +1049,37 @@ class PowerUsageFragment : Fragment() {
                 loadSnapshotRecord(record)
             },
             onDeleteClick = { record ->
-                AlertDialog.Builder(requireContext())
-                    .setTitle(getString(R.string.delete))
-                    .setMessage(getString(R.string.toast_delete_success))
-                    .setPositiveButton(getString(R.string.confirm)) { _, _ ->
-                        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-                            historyDb.deleteRecord(record.id)
-                            withContext(Dispatchers.Main) {
-                                reloadHistoryList()
-                            }
+                val deleteView = layoutInflater.inflate(R.layout.dialog_custom_delete_confirm, null)
+                val tvTitle = deleteView.findViewById<TextView>(R.id.tv_dialog_delete_title)
+                val tvDesc = deleteView.findViewById<TextView>(R.id.tv_dialog_delete_desc)
+                val tvCat = deleteView.findViewById<TextView>(R.id.tv_preview_cat)
+                val tvTime = deleteView.findViewById<TextView>(R.id.tv_preview_time)
+                val tvSummary = deleteView.findViewById<TextView>(R.id.tv_preview_summary)
+                val btnCancel = deleteView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
+                val btnConfirm = deleteView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
+
+                tvTitle.text = "确认删除此耗电快照？"
+                tvDesc.text = "删除后该条放电快照记录将从本地永久移除，无法找回。"
+                tvCat.text = if (record.isShizukuRealData) "Shizuku" else "系统模式"
+                tvTime.text = record.recordTime
+                tvSummary.text = "🔋 终止电量 ${record.levelPercent}%   •   ⏱️ 持续 ${record.totalDurationText}"
+
+                val delDialog = AlertDialog.Builder(requireContext())
+                    .setView(deleteView)
+                    .create()
+
+                btnCancel.setOnClickListener { delDialog.dismiss() }
+                btnConfirm.setOnClickListener {
+                    viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                        historyDb.deleteRecord(record.id)
+                        withContext(Dispatchers.Main) {
+                            reloadHistoryList()
+                            delDialog.dismiss()
                         }
                     }
-                    .setNegativeButton(getString(R.string.cancel), null)
-                    .show()
+                }
+                delDialog.show()
+                applyDialogWindowStyle(delDialog)
             }
         )
 
@@ -1036,19 +1091,33 @@ class PowerUsageFragment : Fragment() {
         }
 
         btnClearAll.setOnClickListener {
-            AlertDialog.Builder(requireContext())
-                .setTitle(getString(R.string.power_history_clear_title))
-                .setMessage(getString(R.string.power_history_clear_message))
-                .setPositiveButton(getString(R.string.confirm)) { _, _ ->
-                    viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-                        historyDb.clearAll()
-                        withContext(Dispatchers.Main) {
-                            reloadHistoryList()
-                        }
+            val clearView = layoutInflater.inflate(R.layout.dialog_custom_delete_confirm, null)
+            val tvTitle = clearView.findViewById<TextView>(R.id.tv_dialog_delete_title)
+            val tvDesc = clearView.findViewById<TextView>(R.id.tv_dialog_delete_desc)
+            val layoutPreview = clearView.findViewById<View>(R.id.layout_delete_item_preview)
+            val btnCancel = clearView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
+            val btnConfirm = clearView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
+
+            tvTitle.text = getString(R.string.power_history_clear_title)
+            tvDesc.text = getString(R.string.power_history_clear_message)
+            layoutPreview.visibility = View.GONE
+
+            val clearDialog = AlertDialog.Builder(requireContext())
+                .setView(clearView)
+                .create()
+
+            btnCancel.setOnClickListener { clearDialog.dismiss() }
+            btnConfirm.setOnClickListener {
+                viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                    historyDb.clearAll()
+                    withContext(Dispatchers.Main) {
+                        reloadHistoryList()
+                        clearDialog.dismiss()
                     }
                 }
-                .setNegativeButton(getString(R.string.cancel), null)
-                .show()
+            }
+            clearDialog.show()
+            applyDialogWindowStyle(clearDialog)
         }
 
         reloadHistoryList()
@@ -1113,19 +1182,38 @@ class PowerUsageFragment : Fragment() {
                     .show()
             },
             onDeleteClick = { record ->
-                AlertDialog.Builder(requireContext())
-                    .setTitle(getString(R.string.delete))
-                    .setMessage("确定要删除本次充电记录吗？")
-                    .setPositiveButton(getString(R.string.confirm)) { _, _ ->
-                        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-                            chargingDb.deleteRecord(record.id)
-                            withContext(Dispatchers.Main) {
-                                reloadChargingHistory()
-                            }
+                val deleteView = layoutInflater.inflate(R.layout.dialog_custom_delete_confirm, null)
+                val tvTitle = deleteView.findViewById<TextView>(R.id.tv_dialog_delete_title)
+                val tvDesc = deleteView.findViewById<TextView>(R.id.tv_dialog_delete_desc)
+                val tvCat = deleteView.findViewById<TextView>(R.id.tv_preview_cat)
+                val tvTime = deleteView.findViewById<TextView>(R.id.tv_preview_time)
+                val tvSummary = deleteView.findViewById<TextView>(R.id.tv_preview_summary)
+                val btnCancel = deleteView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
+                val btnConfirm = deleteView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
+
+                tvTitle.text = "确认删除此充电记录？"
+                tvDesc.text = "删除后该条充电历史记录将从本地永久移除，无法找回。"
+                tvCat.text = if (record.chargeType.isNotEmpty()) record.chargeType else "充电记录"
+                tvTime.text = record.recordTime
+                val sign = if (record.levelGain >= 0) "+${record.levelGain}%" else "${record.levelGain}%"
+                tvSummary.text = "⚡ $sign (${record.startLevel}% → ${record.endLevel}%)   •   ⏱️ ${record.getFormattedDuration()}"
+
+                val delDialog = AlertDialog.Builder(requireContext())
+                    .setView(deleteView)
+                    .create()
+
+                btnCancel.setOnClickListener { delDialog.dismiss() }
+                btnConfirm.setOnClickListener {
+                    viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                        chargingDb.deleteRecord(record.id)
+                        withContext(Dispatchers.Main) {
+                            reloadChargingHistory()
+                            delDialog.dismiss()
                         }
                     }
-                    .setNegativeButton(getString(R.string.cancel), null)
-                    .show()
+                }
+                delDialog.show()
+                applyDialogWindowStyle(delDialog)
             }
         )
 
@@ -1137,19 +1225,33 @@ class PowerUsageFragment : Fragment() {
         }
 
         btnClearAll.setOnClickListener {
-            AlertDialog.Builder(requireContext())
-                .setTitle("清空充电历史")
-                .setMessage("确定要清空所有已保存的充电历史记录吗？")
-                .setPositiveButton(getString(R.string.confirm)) { _, _ ->
-                    viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-                        chargingDb.clearAll()
-                        withContext(Dispatchers.Main) {
-                            reloadChargingHistory()
-                        }
+            val clearView = layoutInflater.inflate(R.layout.dialog_custom_delete_confirm, null)
+            val tvTitle = clearView.findViewById<TextView>(R.id.tv_dialog_delete_title)
+            val tvDesc = clearView.findViewById<TextView>(R.id.tv_dialog_delete_desc)
+            val layoutPreview = clearView.findViewById<View>(R.id.layout_delete_item_preview)
+            val btnCancel = clearView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
+            val btnConfirm = clearView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
+
+            tvTitle.text = getString(R.string.charging_history_clear_title)
+            tvDesc.text = getString(R.string.charging_history_clear_message)
+            layoutPreview.visibility = View.GONE
+
+            val clearDialog = AlertDialog.Builder(requireContext())
+                .setView(clearView)
+                .create()
+
+            btnCancel.setOnClickListener { clearDialog.dismiss() }
+            btnConfirm.setOnClickListener {
+                viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                    chargingDb.clearAll()
+                    withContext(Dispatchers.Main) {
+                        reloadChargingHistory()
+                        clearDialog.dismiss()
                     }
                 }
-                .setNegativeButton(getString(R.string.cancel), null)
-                .show()
+            }
+            clearDialog.show()
+            applyDialogWindowStyle(clearDialog)
         }
 
         reloadChargingHistory()

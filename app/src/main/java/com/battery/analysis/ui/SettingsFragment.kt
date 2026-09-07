@@ -94,6 +94,7 @@ class SettingsFragment : Fragment() {
         setupThemeSettings()
         setupRefreshSettings()
         setupPowerModeSettings()
+        setupSamplingModeSettings()
         setupShizukuSettings()
         setupBackupRestoreSettings()
         setupHelpSection()
@@ -101,12 +102,16 @@ class SettingsFragment : Fragment() {
     }
 
     /**
-     * 界面恢复至前台时的生命周期回调，同步最新的耗电模式副标题。
+     * 界面恢复至前台时的生命周期回调，同步最新的耗电模式与采样精度副标题。
      */
     override fun onResume() {
         super.onResume()
         val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(requireContext())
         updatePowerModeDisplay(powerManager.getSelectedMode())
+        updateSamplingModeDisplay(powerManager.getSamplingMode())
+
+        val chargingPrefs = requireContext().getSharedPreferences("charging_stats_prefs", Context.MODE_PRIVATE)
+        binding.switchChargingKeepScreenOn.isChecked = chargingPrefs.getBoolean("pref_charging_keep_screen_on", false)
     }
 
     /**
@@ -184,6 +189,89 @@ class SettingsFragment : Fragment() {
             "⚡ Shizuku"
         } else {
             getString(R.string.power_mode_normal)
+        }
+    }
+
+    /**
+     * 初始化曲线采样精度设置项与下拉气泡弹窗交互。
+     * 点击时弹出气泡菜单，供用户在极限省电模式、标准智能模式与极客高精模式间自由切换。
+     */
+    private fun setupSamplingModeSettings() {
+        val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(requireContext())
+        updateSamplingModeDisplay(powerManager.getSamplingMode())
+
+        binding.layoutSamplingModeSetting.setOnClickListener {
+            val currentMode = powerManager.getSamplingMode()
+
+            val popupView = layoutInflater.inflate(R.layout.popup_sampling_mode_picker, null)
+            val density = resources.displayMetrics.density
+            val popupWidth = (230 * density).toInt()
+
+            val popupWindow = android.widget.PopupWindow(
+                popupView,
+                popupWidth,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                true
+            )
+
+            popupWindow.isOutsideTouchable = true
+            popupWindow.isFocusable = true
+            popupWindow.animationStyle = R.style.Animation_PopupTopRight
+
+            val tvPowerSave = popupView.findViewById<TextView>(R.id.tv_sampling_power_save)
+            val tvBalanced = popupView.findViewById<TextView>(R.id.tv_sampling_balanced)
+            val tvHighPrecision = popupView.findViewById<TextView>(R.id.tv_sampling_high_precision)
+
+            val normalColor = ContextCompat.getColor(requireContext(), R.color.popup_item_text)
+            val activeColor = Color.parseColor("#2196F3")
+
+            tvPowerSave.setTextColor(if (currentMode == com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_POWER_SAVE) activeColor else normalColor)
+            tvBalanced.setTextColor(if (currentMode == com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_BALANCED) activeColor else normalColor)
+            tvHighPrecision.setTextColor(if (currentMode == com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_HIGH_PRECISION) activeColor else normalColor)
+
+            val selectMode = { which: Int ->
+                powerManager.setSamplingMode(which)
+                updateSamplingModeDisplay(which)
+                popupWindow.dismiss()
+                val tip = when (which) {
+                    com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_HIGH_PRECISION -> getString(R.string.sampling_mode_tip_high_precision)
+                    com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_BALANCED -> getString(R.string.sampling_mode_tip_balanced)
+                    else -> getString(R.string.sampling_mode_tip_power_save)
+                }
+                Toast.makeText(requireContext(), tip, Toast.LENGTH_SHORT).show()
+            }
+
+            tvPowerSave.setOnClickListener {
+                selectMode(com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_POWER_SAVE)
+            }
+
+            tvBalanced.setOnClickListener {
+                selectMode(com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_BALANCED)
+            }
+
+            tvHighPrecision.setOnClickListener {
+                selectMode(com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_HIGH_PRECISION)
+            }
+
+            popupWindow.showAsDropDown(
+                binding.layoutSamplingModeSetting,
+                0,
+                (4 * density).toInt(),
+                android.view.Gravity.END
+            )
+        }
+    }
+
+    /**
+     * 更新曲线采样精度副标题展示文本。
+     *
+     * @param mode 当前配置的采样模式常量
+     */
+    private fun updateSamplingModeDisplay(mode: Int) {
+        binding.tvCurrentSamplingMode.text = when (mode) {
+            com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_HIGH_PRECISION -> getString(R.string.sampling_mode_high_precision_short)
+            com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_BALANCED -> getString(R.string.sampling_mode_balanced_short)
+            else -> getString(R.string.sampling_mode_power_save_short)
         }
     }
 
@@ -342,6 +430,16 @@ class SettingsFragment : Fragment() {
         binding.switchAutoRefresh.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean("auto_refresh_enabled", isChecked).apply()
             mainActivity?.setAutoRefreshEnabled(isChecked)
+        }
+
+        val chargingPrefs = requireContext().getSharedPreferences("charging_stats_prefs", Context.MODE_PRIVATE)
+        binding.switchChargingKeepScreenOn.isChecked = chargingPrefs.getBoolean("pref_charging_keep_screen_on", false)
+        binding.switchChargingKeepScreenOn.setOnCheckedChangeListener { _, isChecked ->
+            chargingPrefs.edit().putBoolean("pref_charging_keep_screen_on", isChecked).apply()
+        }
+        binding.layoutChargingKeepScreenOnSetting.setOnClickListener {
+            val newChecked = !binding.switchChargingKeepScreenOn.isChecked
+            binding.switchChargingKeepScreenOn.isChecked = newChecked
         }
 
         binding.layoutIntervalSetting.setOnClickListener { _ ->

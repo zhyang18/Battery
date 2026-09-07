@@ -13,11 +13,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        app:cardBackgroundColor="@color/dialog_card_bg"
-        app:cardCornerRadius="16dp"
+        app:cardBackgroundColor="#14888888"
+        app:cardCornerRadius="14dp"
         app:cardElevation="0dp"
-        app:strokeColor="#18888888"
-        app:strokeWidth="1dp">
+        app:strokeWidth="0dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -83,17 +82,16 @@
                     <!-- 右上角灯泡图标（控制充电保持屏幕常亮） -->
                     <ImageView
                         android:id="@+id/iv_charging_bulb"
-                        android:layout_width="22dp"
-                        android:layout_height="22dp"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
                         android:layout_alignParentEnd="true"
                         android:layout_centerVertical="true"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:clickable="true"
                         android:contentDescription="充电保持屏幕常亮"
                         android:focusable="true"
-                        android:padding="2dp"
-                        android:src="@drawable/ic_lightbulb_outline"
-                        app:tint="?android:attr/textColorPrimary" />
+                        android:padding="6dp"
+                        android:src="@drawable/ic_lightbulb_outline" />
                 </RelativeLayout>
 
                 <!-- 核心指标第 1 行：电池功率 + USB充电功率 -->
@@ -367,11 +365,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        app:cardBackgroundColor="@color/dialog_card_bg"
-        app:cardCornerRadius="12dp"
+        app:cardBackgroundColor="#14888888"
+        app:cardCornerRadius="14dp"
         app:cardElevation="0dp"
-        app:strokeColor="#18888888"
-        app:strokeWidth="1dp">
+        app:strokeWidth="0dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -395,25 +392,27 @@
                     android:layout_height="wrap_content"
                     android:singleLine="true"
                     android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="12.5sp"
-                    tools:text="2026-09-07" />
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    tools:text="2026/09/07" />
 
                 <!-- 时间区间 -->
                 <TextView
                     android:id="@+id/tv_charging_time_range"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="5dp"
+                    android:layout_marginTop="2.5dp"
                     android:singleLine="true"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="12.5sp"
-                    tools:text="11:28 ~ 11:39" />
+                    tools:text="11:28 ~ 11:38" />
             </LinearLayout>
 
             <!-- 右侧：亮屏与息屏各指标上下严格对齐（时间格式00:00，百分比与能量上下对齐，无息屏文字） -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:gravity="end"
                 android:orientation="vertical">
 
                 <!-- 第一行：亮屏充电时间、亮屏充入百分比、亮屏充入能量 -->
@@ -509,89 +508,34 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
-        app:cardBackgroundColor="@color/dialog_card_bg"
+        app:cardBackgroundColor="#14888888"
         app:cardCornerRadius="14dp"
         app:cardElevation="0dp"
-        app:strokeColor="#18888888"
-        app:strokeWidth="1dp">
+        app:strokeWidth="0dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="12dp">
+            android:paddingHorizontal="12dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="10dp">
 
-            <!-- 卡片标题行：充电监测走势 ? ... 实时采样 -->
-            <RelativeLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content">
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_alignParentStart="true"
-                    android:layout_centerVertical="true"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/charging_trend_title"
-                        android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="15sp"
-                        android:textStyle="bold" />
-
-                    <ImageView
-                        android:id="@+id/btn_charging_chart_help"
-                        android:layout_width="22dp"
-                        android:layout_height="22dp"
-                        android:layout_marginStart="6dp"
-                        android:contentDescription="@string/charging_guide_title"
-                        android:padding="2dp"
-                        android:src="@drawable/ic_help_circle" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_alignParentEnd="true"
-                    android:layout_centerVertical="true"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <View
-                        android:layout_width="6dp"
-                        android:layout_height="6dp"
-                        android:background="@drawable/bg_dot_green" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="5dp"
-                        android:text="实时采样更新"
-                        android:textColor="#00C853"
-                        android:textSize="11sp"
-                        android:textStyle="bold" />
-                </LinearLayout>
-            </RelativeLayout>
-
-            <!-- 自定义三合一（功率、电量、温度）折线图 -->
+            <!-- 自定义三合一（功率、电量、温度）折线图（放大尺寸） -->
             <com.battery.analysis.ui.view.ChargingChartView
                 android:id="@+id/charging_chart_view"
                 android:layout_width="match_parent"
-                android:layout_height="205dp"
-                android:layout_marginTop="8dp" />
+                android:layout_height="245dp" />
 
-            <!-- 图表正下方图例标识：三色方块 + 标签 + 实时数值看板 -->
+            <!-- 图表正下方图例标识：三色方块 + 标签（不显示实时数值） -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="8dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
-                <!-- 1. 电量图例方块（根据要求电量与功率对换位置） -->
+                <!-- 1. 电量图例方块 -->
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -610,22 +554,12 @@
                         android:layout_marginStart="5dp"
                         android:text="@string/charging_legend_level"
                         android:textColor="#757575"
-                        android:textSize="11.5sp" />
-
-                    <TextView
-                        android:id="@+id/tv_legend_level"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="4dp"
-                        android:textColor="#2196F3"
-                        android:textSize="12sp"
-                        android:textStyle="bold"
-                        tools:text="78%" />
+                        android:textSize="12sp" />
                 </LinearLayout>
 
                 <View
                     android:layout_width="1dp"
-                    android:layout_height="14dp"
+                    android:layout_height="12dp"
                     android:background="#15888888" />
 
                 <!-- 2. 功率图例方块 -->
@@ -647,22 +581,12 @@
                         android:layout_marginStart="5dp"
                         android:text="@string/charging_legend_power"
                         android:textColor="#757575"
-                        android:textSize="11.5sp" />
-
-                    <TextView
-                        android:id="@+id/tv_legend_power"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="4dp"
-                        android:textColor="#00C853"
-                        android:textSize="12sp"
-                        android:textStyle="bold"
-                        tools:text="18.50W" />
+                        android:textSize="12sp" />
                 </LinearLayout>
 
                 <View
                     android:layout_width="1dp"
-                    android:layout_height="14dp"
+                    android:layout_height="12dp"
                     android:background="#15888888" />
 
                 <!-- 3. 温度图例方块 -->
@@ -684,17 +608,7 @@
                         android:layout_marginStart="5dp"
                         android:text="@string/charging_legend_temp"
                         android:textColor="#757575"
-                        android:textSize="11.5sp" />
-
-                    <TextView
-                        android:id="@+id/tv_legend_temp"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="4dp"
-                        android:textColor="#FF5252"
-                        android:textSize="12sp"
-                        android:textStyle="bold"
-                        tools:text="33.5℃" />
+                        android:textSize="12sp" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>

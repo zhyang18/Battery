@@ -66,7 +66,12 @@ class PowerUsageManager private constructor(private val context: Context) {
         const val MODE_SHIZUKU = 0
         const val MODE_NORMAL = 1
 
+        const val SAMPLING_MODE_POWER_SAVE = 0
+        const val SAMPLING_MODE_BALANCED = 1
+        const val SAMPLING_MODE_HIGH_PRECISION = 2
+
         private const val PREF_KEY_POWER_MODE = "pref_power_stats_mode"
+        private const val PREF_KEY_SAMPLING_MODE = "pref_curve_sampling_mode"
         private const val PREF_KEY_POWER_CONFIGURED = "pref_power_mode_configured"
         const val PREF_KEY_LAST_UNPLUG_TIME = "pref_last_unplug_time"
         const val PREF_KEY_LAST_UNPLUG_LEVEL = "pref_last_unplug_level"
@@ -273,6 +278,24 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
+     * 获取当前配置的曲线采样精度模式（默认极限省电模式）。
+     *
+     * @return 采样模式常量 [SAMPLING_MODE_POWER_SAVE], [SAMPLING_MODE_BALANCED], [SAMPLING_MODE_HIGH_PRECISION]
+     */
+    fun getSamplingMode(): Int {
+        return prefs.getInt(PREF_KEY_SAMPLING_MODE, SAMPLING_MODE_POWER_SAVE)
+    }
+
+    /**
+     * 设置并持久化保存曲线采样精度模式。
+     *
+     * @param mode 目标采样模式常量（[SAMPLING_MODE_POWER_SAVE], [SAMPLING_MODE_BALANCED], [SAMPLING_MODE_HIGH_PRECISION]）
+     */
+    fun setSamplingMode(mode: Int) {
+        prefs.edit().putInt(PREF_KEY_SAMPLING_MODE, mode).apply()
+    }
+
+    /**
      * 检查 Shizuku 服务当前是否正在运行且已连接。
      *
      * @return 若服务正常返回 true，否则返回 false
@@ -457,7 +480,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                         .apply()
                 }
 
-                val durationMs = if (effectiveUnplugTime > 0L && (now - effectiveUnplugTime) < stats.dischargeDurationMs) {
+                val durationMs = if (effectiveUnplugTime in 1..now && (now - effectiveUnplugTime) in 1000L..(48 * 3600_000L)) {
                     (now - effectiveUnplugTime).coerceAtLeast(1000L)
                 } else {
                     stats.dischargeDurationMs.coerceAtLeast(1000L)
@@ -1431,8 +1454,8 @@ class PowerUsageManager private constructor(private val context: Context) {
         val now = System.currentTimeMillis()
         val unplugTime = getLastUnplugTime()
 
-        // 判断是否为历史回放记录（历史记录的 points 结束时间显著早于当前时间）
-        val isHistoryRecord = points.isNotEmpty() && points.last().timestamp < (now - 120_000L)
+        // 判断是否为历史快照记录（只有在显式快照或点集首尾均在24小时以前时）
+        val isHistoryRecord = points.isNotEmpty() && points.last().timestamp < (now - 3600_000L * 24)
 
         // 确定时间轴起点与终点：以开始这次放电时间为起点，当前时间为终点
         val startTs: Long
@@ -1447,26 +1470,28 @@ class PowerUsageManager private constructor(private val context: Context) {
             endTs = max(now, startTs + 1000L)
         }
 
-        // 1. 转换物理采样点
+        // 1. 转换物理采样点（确保 startTs 与 endTs 100% 闭合覆盖）
         val samples = mutableListOf<BatterySample>()
         if (points.isNotEmpty()) {
-            // 若首个采样点晚于放电起点，插入起点插值采样点
-            if (!isHistoryRecord && points.first().timestamp > (startTs + 3000L)) {
-                val initialLevel = getLastUnplugLevel()
-                val firstPt = points.first()
-                samples.add(
-                    BatterySample(
-                        timestamp = startTs,
-                        batteryLevel = initialLevel,
-                        voltageMv = (firstPt.voltageVolts * 1000).toInt(),
-                        currentMa = 500.0,
-                        temperatureC = firstPt.temperature.toDouble(),
-                        powerMw = (firstPt.powerWatts * 1000).toDouble()
-                    )
+            val firstPt = points.first()
+            val initialLevel = getLastUnplugLevel()
+            val snap = fullPackage.batterySnapshot
+            val lastPt = points.last()
+
+            // 必须包含起点采样点 (startTs)
+            samples.add(
+                BatterySample(
+                    timestamp = startTs,
+                    batteryLevel = if (initialLevel in 1..100) initialLevel else firstPt.batteryLevel,
+                    voltageMv = (firstPt.voltageVolts * 1000).toInt(),
+                    currentMa = 500.0,
+                    temperatureC = firstPt.temperature.toDouble(),
+                    powerMw = (firstPt.powerWatts * 1000).toDouble()
                 )
-            }
+            )
+
             for (pt in points) {
-                if (pt.timestamp >= startTs) {
+                if (pt.timestamp > startTs && pt.timestamp < endTs) {
                     val vMv = (pt.voltageVolts * 1000).toInt()
                     val pMw = (pt.powerWatts * 1000).toDouble()
                     val cMa = if (pt.voltageVolts > 0f) (pMw / pt.voltageVolts) else 500.0
@@ -1482,14 +1507,14 @@ class PowerUsageManager private constructor(private val context: Context) {
                     )
                 }
             }
-            // 若最新采样点距离当前时间有间隙，追加当前时刻采样点
-            if (!isHistoryRecord && (endTs - (samples.lastOrNull()?.timestamp ?: 0L)) > 3000L) {
-                val snap = fullPackage.batterySnapshot
+
+            // 必须包含终点采样点 (endTs)
+            if (endTs > startTs) {
                 samples.add(
                     BatterySample(
                         timestamp = endTs,
                         batteryLevel = snap.levelPercent,
-                        voltageMv = (snap.voltageVolts * 1000).toInt(),
+                        voltageMv = if (snap.voltageVolts > 1f) (snap.voltageVolts * 1000).toInt() else (lastPt.voltageVolts * 1000).toInt(),
                         currentMa = 500.0,
                         temperatureC = snap.temperature.toDouble(),
                         powerMw = (fullPackage.overviewStats.avgPowerWatts * 1000).toDouble()

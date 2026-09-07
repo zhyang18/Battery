@@ -72,16 +72,19 @@ class NormalApiProvider : BatteryDataProvider {
         val voltRaw = batteryStatus?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
         val voltage = if (voltRaw > 0) voltRaw.toFloat() else null
 
-        // 6. 获取电池电流（单位转换为 mA）
+        // 6. 获取电池电流（单位转换为 mA，放电为负，充电为正）
+        val isCharging = rawStatus == BatteryManager.BATTERY_STATUS_CHARGING || rawStatus == BatteryManager.BATTERY_STATUS_FULL
         val rawCurrent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
         val currentNow = if (rawCurrent != 0 && rawCurrent != Int.MIN_VALUE) {
             val absCur = Math.abs(rawCurrent)
-            if (absCur < 100000) rawCurrent.toFloat() else rawCurrent / 1000f
+            val curMa = if (absCur < 100000) absCur.toFloat() else absCur / 1000f
+            if (isCharging) curMa else -curMa
         } else null
 
-        // 7. 计算实时功率（单位：W）
+        // 7. 计算实时功率（单位：W，放电为负，充电为正）
         val powerWatts = if (voltage != null && currentNow != null) {
-            Math.abs(voltage * currentNow) / 1000000f
+            val pWatts = (voltage * Math.abs(currentNow)) / 1000000f
+            if (isCharging) pWatts else -pWatts
         } else null
 
         // 8. 获取电池技术类型

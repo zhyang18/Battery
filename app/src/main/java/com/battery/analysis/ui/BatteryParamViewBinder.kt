@@ -50,8 +50,12 @@ object BatteryParamViewBinder {
         binding.tvValCycleCount.text = info.cycleCount?.let { "$it" } ?: unknownText
         binding.tvValTemperature.text = info.temperature?.let { String.format("%.1f℃", it) } ?: unknownText
         binding.tvValVoltage.text = info.voltage?.let { String.format("%.0f mV (%.3f V)", it, it / 1000f) } ?: unknownText
-        binding.tvValCurrent.text = info.currentNow?.let { String.format("%.0f mA", it) } ?: unknownText
-        binding.tvValPower.text = info.powerWatts?.let { String.format("%.2f W", it) } ?: unknownText
+        binding.tvValCurrent.text = info.currentNow?.let {
+            if (it > 0f) String.format("+%.0f mA", it) else String.format("%.0f mA", it)
+        } ?: unknownText
+        binding.tvValPower.text = info.powerWatts?.let {
+            if (it > 0f) String.format("+%.2f W", it) else String.format("%.2f W", it)
+        } ?: unknownText
         binding.tvValDesignCapacity.text = info.designCapacity?.let { String.format("%.1f mAh", it) } ?: unknownText
         binding.tvValFullCapacity.text = info.fullChargeCapacity?.let { String.format("%.1f mAh", it) } ?: unknownText
         binding.tvValCurrentCapacity.text = info.currentCapacity?.let { String.format("%.1f mAh", it) } ?: unknownText

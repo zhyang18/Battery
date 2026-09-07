@@ -266,6 +266,17 @@
     <string name="setting_refresh_interval">Refresh Interval</string>
     <string name="setting_power_mode">Power Stats Detection Mode</string>
     <string name="setting_power_mode_desc">Toggle between Shizuku and standard mode</string>
+    <string name="setting_sampling_mode">Sampling Rate &amp; Precision</string>
+    <string name="setting_sampling_mode_desc">Configure foreground &amp; background sampling frequency for trend curves</string>
+    <string name="sampling_mode_power_save">🍃 Ultra Battery Saver (Default)</string>
+    <string name="sampling_mode_balanced">⚡ Balanced Smart Mode</string>
+    <string name="sampling_mode_high_precision">🔥 Geek High Precision (1s High-rate)</string>
+    <string name="sampling_mode_power_save_short">🍃 Power Saver (Default)</string>
+    <string name="sampling_mode_balanced_short">⚡ Balanced</string>
+    <string name="sampling_mode_high_precision_short">🔥 Geek (1s)</string>
+    <string name="sampling_mode_tip_power_save">Ultra Power Saver enabled: Event-driven + Shizuku native log parsing, 0 extra background power drain</string>
+    <string name="sampling_mode_tip_balanced">Balanced Smart mode enabled: 1.5s sampling in foreground, 5s adaptive sampling when screen on</string>
+    <string name="sampling_mode_tip_high_precision">Geek High Precision mode enabled: 1s continuous high-rate sampling when screen on</string>
     <string name="interval_1s">1 second</string>
     <string name="interval_2s">2 seconds</string>
     <string name="interval_3s">3 seconds</string>

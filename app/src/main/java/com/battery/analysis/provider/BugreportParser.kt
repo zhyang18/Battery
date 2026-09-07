@@ -595,7 +595,11 @@ class BugreportParser {
                     else -> it.toFloat()
                 }
             },
-            currentNow = curVal?.let { if (Math.abs(it) >= 10000L) it / 1000f else it.toFloat() },
+            currentNow = curVal?.let {
+                val raw = if (Math.abs(it) >= 10000L) it / 1000f else it.toFloat()
+                val isCharging = statusVal?.contains("充电") == true || statusVal?.contains("Charging", ignoreCase = true) == true || statusVal?.contains("Full", ignoreCase = true) == true || statusVal?.contains("充满") == true
+                if (isCharging) Math.abs(raw) else -Math.abs(raw)
+            },
             powerWatts = if (voltVal != null && curVal != null) {
                 val mv = when {
                     voltVal in 2500L..9500L -> voltVal.toFloat()
@@ -604,7 +608,9 @@ class BugreportParser {
                     else -> voltVal.toFloat()
                 }
                 val ma = if (Math.abs(curVal) >= 10000L) Math.abs(curVal) / 1000f else Math.abs(curVal).toFloat()
-                (mv / 1000f) * (ma / 1000f)
+                val p = (mv / 1000f) * (ma / 1000f)
+                val isCharging = statusVal?.contains("充电") == true || statusVal?.contains("Charging", ignoreCase = true) == true || statusVal?.contains("Full", ignoreCase = true) == true || statusVal?.contains("充满") == true
+                if (isCharging) p else -p
             } else null,
             isDualCell = null,
             technology = techDisplay,

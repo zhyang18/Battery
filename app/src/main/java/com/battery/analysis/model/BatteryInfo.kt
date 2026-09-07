@@ -100,9 +100,9 @@ data class BatteryInfo(
             循环计数: ${cycleCount ?: "未知"}
             电池温度: ${temperature?.let { String.format("%.1f℃", it) } ?: "未知"}
             电池电压: ${voltage?.let { String.format("%.0f mV", it) } ?: "未知"}
-            电流: ${currentNow?.let { String.format("%.0f mA", it) } ?: "未知"}
+            电流: ${currentNow?.let { if (it > 0f) String.format("+%.0f mA", it) else String.format("%.0f mA", it) } ?: "未知"}
             双电芯: ${isDualCell?.let { if (it) "是" else "否" } ?: "否"}
-            电池功率: ${powerWatts?.let { String.format("%.2f W", it) } ?: "未知"}
+            电池功率: ${powerWatts?.let { if (it > 0f) String.format("+%.2f W", it) else String.format("%.2f W", it) } ?: "未知"}
             设计容量: ${designCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
             充满容量: ${fullChargeCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
             当前容量: ${currentCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
@@ -125,9 +125,9 @@ data class BatteryInfo(
             ${cycleCount ?: "未知"}
             ${temperature?.let { String.format("%.1f℃", it) } ?: "未知"}
             ${voltage?.let { String.format("%.0f mV", it) } ?: "未知"}
-            ${currentNow?.let { String.format("%.0f mA", it) } ?: "未知"}
+            ${currentNow?.let { if (it > 0f) String.format("+%.0f mA", it) else String.format("%.0f mA", it) } ?: "未知"}
             ${isDualCell?.let { if (it) "是" else "否" } ?: "否"}
-            ${powerWatts?.let { String.format("%.2f W", it) } ?: "未知"}
+            ${powerWatts?.let { if (it > 0f) String.format("+%.2f W", it) else String.format("%.2f W", it) } ?: "未知"}
             ${designCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
             ${fullChargeCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
             ${currentCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}

@@ -57,6 +57,11 @@ class ShizukuProvider : BatteryDataProvider {
         val technology = sysfsInfo.technology ?: dumpsysInfo.technology ?: vendorInfo.technology
         val isDualCell = sysfsInfo.isDualCell ?: dumpsysInfo.isDualCell ?: vendorInfo.isDualCell ?: false
 
+        val isCharging = status == "充电中" || status == "已充满" ||
+                status?.contains("Charging", ignoreCase = true) == true ||
+                status?.contains("Full", ignoreCase = true) == true ||
+                status?.contains("充满") == true
+
         // 如果底层未直接解析到电流，尝试从 BatteryManager 读取底层瞬时电流
         if (currentNow == null) {
             try {
@@ -68,6 +73,12 @@ class ShizukuProvider : BatteryDataProvider {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+        }
+
+        // 规范化电流正负号：放电为负，充电为正
+        if (currentNow != null) {
+            val absCur = Math.abs(currentNow)
+            currentNow = if (isCharging) absCur else -absCur
         }
 
         // 如果底层未直接解析到电压或电压超出正常范围(2.5V-9.5V)，尝试从系统粘性广播读取当前电压
@@ -83,9 +94,14 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        // 实时电池功率计算（支持直接读取功率节点或通过电压与电流计算：P = U * I / 10^6）
-        val powerWatts = sysfsInfo.powerWatts ?: if (voltage != null && currentNow != null) {
-            Math.abs(voltage * currentNow) / 1000000f
+        // 实时电池功率计算（支持直接读取功率节点或通过电压与电流计算：P = U * I / 10^6，放电为负，充电为正）
+        val rawPowerWatts = sysfsInfo.powerWatts ?: if (voltage != null && currentNow != null) {
+            (voltage * Math.abs(currentNow)) / 1000000f
+        } else null
+
+        val powerWatts = if (rawPowerWatts != null) {
+            val absPwr = Math.abs(rawPowerWatts)
+            if (isCharging) absPwr else -absPwr
         } else null
 
         // 计算健康度（支持大于 100% 的精确数值计算）

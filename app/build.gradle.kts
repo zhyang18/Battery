@@ -13,8 +13,8 @@ android {
         applicationId = "com.battery.analysis"
         minSdk = 24
         targetSdk = 34
-        versionCode = 25
-        versionName = "1.8.3"
+        versionCode = 26
+        versionName = "1.8.4"
     }
     // 正确位置：splits 必须与 defaultConfig 平级，放在 android 闭包下
     splits {

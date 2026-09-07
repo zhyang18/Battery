@@ -46,18 +46,20 @@ object TimelineScaleCalculator {
      * @param timestamp 目标时间戳（毫秒）
      * @param visibleStartTs 可视区域起始时间戳（毫秒）
      * @param visibleEndTs 可视区域结束时间戳（毫秒）
-     * @param width 画布可视宽度（像素）
+     * @param width 画布可视绘制区宽度（像素）
+     * @param leftMargin 左边距偏移量（像素，默认 0f）
      * @return 对应的画布 X 坐标（像素）
      */
     fun timeToX(
         timestamp: Long,
         visibleStartTs: Long,
         visibleEndTs: Long,
-        width: Float
+        width: Float,
+        leftMargin: Float = 0f
     ): Float {
         val totalSpan = (visibleEndTs - visibleStartTs).coerceAtLeast(1L)
         val progress = (timestamp - visibleStartTs).toFloat() / totalSpan
-        return progress * width
+        return leftMargin + progress * width
     }
 
     /**
@@ -66,23 +68,28 @@ object TimelineScaleCalculator {
      * @param x 画布 X 坐标（像素）
      * @param visibleStartTs 可视区域起始时间戳（毫秒）
      * @param visibleEndTs 可视区域结束时间戳（毫秒）
-     * @param width 画布可视宽度（像素）
+     * @param width 画布可视绘制区宽度（像素）
+     * @param leftMargin 左边距偏移量（像素，默认 0f）
      * @return 对应的物理时间戳（毫秒）
      */
     fun xToTime(
         x: Float,
         visibleStartTs: Long,
         visibleEndTs: Long,
-        width: Float
+        width: Float,
+        leftMargin: Float = 0f
     ): Long {
         if (width <= 0f) return visibleStartTs
-        val ratio = (x / width).coerceIn(0f, 1f)
+        val ratio = ((x - leftMargin) / width).coerceIn(0f, 1f)
         val totalSpan = (visibleEndTs - visibleStartTs).coerceAtLeast(1L)
         return visibleStartTs + (ratio * totalSpan).toLong()
     }
 
     /**
-     * 动态计算当前可视时间范围内最适合展示的时间刻度序列（维持在 3 ~ 6 个不重叠刻度，格式为 HH:mm，不包含秒）。
+     * 动态计算当前可视时间范围内的展示时间刻度序列：
+     * 起点固定显示放电开始时间（visibleStartTs），终点固定显示当前时间点（visibleEndTs），
+     * 中间根据时间跨度自适应分布 0 ~ 3 个不重叠的时间刻度。
+     * 时间格式统一采用 "HH:mm"（跨天则采用 "MM/dd HH:mm"），不显示秒。
      *
      * @param visibleStartTs 可视起始时间戳（毫秒）
      * @param visibleEndTs 可视结束时间戳（毫秒）
@@ -93,11 +100,32 @@ object TimelineScaleCalculator {
         visibleEndTs: Long
     ): List<TimeTick> {
         val duration = (visibleEndTs - visibleStartTs).coerceAtLeast(1000L)
-        val targetTickCount = 4
 
-        // 寻找使屏幕刻度数在 3..6 个之间的最佳步长（最小为 1 分钟，杜绝秒级展示）
+        // 时间格式统一采用 "HH:mm"（跨天则采用 "MM/dd HH:mm"），不显示秒
+        val formatter = if (duration > 24 * 3_600_000L) {
+            SimpleDateFormat("MM/dd HH:mm", Locale.getDefault())
+        } else {
+            SimpleDateFormat("HH:mm", Locale.getDefault())
+        }
+
+        val startLabel = formatter.format(Date(visibleStartTs))
+        val endLabel = formatter.format(Date(visibleEndTs))
+
+        val ticks = mutableListOf<TimeTick>()
+
+        // 1. 固定添加起点（放电开始时间，xRatio = 0.0f）
+        ticks.add(
+            TimeTick(
+                timestamp = visibleStartTs,
+                xRatio = 0.0f,
+                label = startLabel
+            )
+        )
+
+        // 2. 根据时间跨度计算中间最佳刻度（避免与起点和终点重叠）
         var bestInterval = CANDIDATE_INTERVALS_MS[0]
         var minDiff = Int.MAX_VALUE
+        val targetTickCount = 4
 
         for (interval in CANDIDATE_INTERVALS_MS) {
             val count = (duration / interval).toInt()
@@ -108,27 +136,18 @@ object TimelineScaleCalculator {
             }
         }
 
-        // 时间格式统一采用 "HH:mm"（跨天则采用 "MM/dd HH:mm"），不显示秒
-        val formatter = if (duration > 24 * 3_600_000L) {
-            SimpleDateFormat("MM/dd HH:mm", Locale.getDefault())
-        } else {
-            SimpleDateFormat("HH:mm", Locale.getDefault())
-        }
-
-        val ticks = mutableListOf<TimeTick>()
         // 向上对齐到步长整数倍起始时刻
         val firstTickTime = ((visibleStartTs / bestInterval) + 1) * bestInterval
-
         var currentTs = firstTickTime
-        var lastRatio = -1.0f
-        var lastLabel = ""
+        var lastRatio = 0.0f
 
+        val intermediateTicks = mutableListOf<TimeTick>()
         while (currentTs < visibleEndTs) {
             val ratio = (currentTs - visibleStartTs).toFloat() / duration
             val label = formatter.format(Date(currentTs))
-            // 避免刻度贴紧左右边缘，且相邻刻度之间保持至少 15% 的横向距离防重叠，杜绝相同时间文本重复
-            if (ratio in 0.05f..0.95f && (ratio - lastRatio) >= 0.14f && label != lastLabel) {
-                ticks.add(
+            // 确保与起点 (0.0f) 和终点 (1.0f) 保持足够的横向安全距离（至少 18% 间距），且与两端标签不重复
+            if (ratio in 0.18f..0.82f && (ratio - lastRatio) >= 0.18f && label != startLabel && label != endLabel) {
+                intermediateTicks.add(
                     TimeTick(
                         timestamp = currentTs,
                         xRatio = ratio,
@@ -136,31 +155,20 @@ object TimelineScaleCalculator {
                     )
                 )
                 lastRatio = ratio
-                lastLabel = label
             }
             currentTs += bestInterval
         }
 
-        // 若自然对齐产生的刻度不足 2 个，采用均匀分布保底生成 3~4 个时间刻度
-        if (ticks.size < 2) {
-            ticks.clear()
-            val ratios = floatArrayOf(0.12f, 0.40f, 0.68f, 0.90f)
-            lastLabel = ""
-            for (r in ratios) {
-                val ts = visibleStartTs + (duration * r).toLong()
-                val label = formatter.format(Date(ts))
-                if (label != lastLabel) {
-                    ticks.add(
-                        TimeTick(
-                            timestamp = ts,
-                            xRatio = r,
-                            label = label
-                        )
-                    )
-                    lastLabel = label
-                }
-            }
-        }
+        ticks.addAll(intermediateTicks)
+
+        // 3. 固定添加终点（当前时间点，xRatio = 1.0f）
+        ticks.add(
+            TimeTick(
+                timestamp = visibleEndTs,
+                xRatio = 1.0f,
+                label = endLabel
+            )
+        )
 
         return ticks
     }

@@ -180,24 +180,57 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
     }
 
     /**
-     * 弹出删除单条耗电历史记录确认对话框。
+     * 为自定义对话框应用居中、半透明背景及适屏宽度的窗口样式。
+     *
+     * @param dialog 待配置样式的 [AlertDialog] 实例
+     */
+    private fun applyDialogWindowStyle(dialog: AlertDialog) {
+        dialog.window?.let { window ->
+            window.setBackgroundDrawableResource(android.R.color.transparent)
+            val width = (resources.displayMetrics.widthPixels * 0.92).toInt()
+            window.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+            window.setGravity(android.view.Gravity.CENTER)
+        }
+    }
+
+    /**
+     * 弹出删除单条耗电历史记录的高颜值确认对话框。
      */
     private fun showDeleteConfirmDialog() {
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.delete))
-            .setMessage(getString(R.string.power_history_clear_message))
-            .setPositiveButton(getString(R.string.confirm)) { _, _ ->
-                lifecycleScope.launch(Dispatchers.IO) {
-                    val db = PowerUsageDbHelper.getInstance(this@PowerHistoryDetailActivity)
-                    db.deleteRecord(recordId)
-                    withContext(Dispatchers.Main) {
-                        setResult(RESULT_OK)
-                        finish()
-                    }
+        val record = currentRecord ?: return
+        val dialogView = layoutInflater.inflate(R.layout.dialog_custom_delete_confirm, null)
+        val tvTitle = dialogView.findViewById<android.widget.TextView>(R.id.tv_dialog_delete_title)
+        val tvDesc = dialogView.findViewById<android.widget.TextView>(R.id.tv_dialog_delete_desc)
+        val tvPreviewCat = dialogView.findViewById<android.widget.TextView>(R.id.tv_preview_cat)
+        val tvPreviewTime = dialogView.findViewById<android.widget.TextView>(R.id.tv_preview_time)
+        val tvPreviewSummary = dialogView.findViewById<android.widget.TextView>(R.id.tv_preview_summary)
+        val btnCancel = dialogView.findViewById<android.widget.TextView>(R.id.btn_dialog_delete_cancel)
+        val btnConfirm = dialogView.findViewById<android.widget.TextView>(R.id.btn_dialog_delete_confirm)
+
+        tvTitle.text = "确认删除此耗电快照？"
+        tvDesc.text = "删除后该条放电快照记录将从本地永久移除，无法找回。"
+        tvPreviewCat.text = if (record.isShizukuRealData) "Shizuku" else "系统模式"
+        tvPreviewTime.text = record.recordTime
+        tvPreviewSummary.text = "🔋 终止电量 ${record.levelPercent}%   •   ⏱️ 持续 ${record.totalDurationText}"
+
+        val dialog = AlertDialog.Builder(this)
+            .setView(dialogView)
+            .create()
+
+        btnCancel.setOnClickListener { dialog.dismiss() }
+        btnConfirm.setOnClickListener {
+            lifecycleScope.launch(Dispatchers.IO) {
+                val db = PowerUsageDbHelper.getInstance(this@PowerHistoryDetailActivity)
+                db.deleteRecord(recordId)
+                withContext(Dispatchers.Main) {
+                    setResult(RESULT_OK)
+                    finish()
                 }
             }
-            .setNegativeButton(getString(R.string.cancel), null)
-            .show()
+        }
+
+        dialog.show()
+        applyDialogWindowStyle(dialog)
     }
 
     companion object {

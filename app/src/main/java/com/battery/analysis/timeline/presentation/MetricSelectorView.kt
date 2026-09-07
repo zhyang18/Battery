@@ -62,20 +62,23 @@ class MetricSelectorView @JvmOverloads constructor(
         removeAllViews()
         textViews.clear()
 
+        val dp1 = dpToPx(1f)
         val dp4 = dpToPx(4f)
-        val dp8 = dpToPx(8f)
 
         for (item in metricItems) {
             val (metric, title) = item
             val tv = TextView(context).apply {
                 text = "● $title"
-                textSize = 13f
-                setPadding(dp8, dp4, dp8, dp4)
+                textSize = 12f
+                isSingleLine = true
+                maxLines = 1
+                includeFontPadding = false
+                setPadding(dp1, dp4, dp1, dp4)
                 gravity = Gravity.CENTER
                 isClickable = true
                 isFocusable = true
                 layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(dp4, 0, dp4, 0)
+                    setMargins(0, 0, 0, 0)
                 }
                 setOnClickListener {
                     toggleMetric(metric, notify = true)

@@ -629,16 +629,30 @@ class PowerUsageChartView @JvmOverloads constructor(
                 if (isDraggingHorizontally) {
                     isTouching = true
                     val touchX = event.x
-                    val maxHours = 36f
-                    val targetHours = ((touchX - paddingLeft) / chartWidth * maxHours).coerceIn(0f, maxHours)
 
+                    // 根据屏幕坐标直接匹配最近采样点，彻底消除硬编码 36 小时导致的时间轴错位
                     var closestIdx = 0
                     var minDiff = Float.MAX_VALUE
-                    for (i in dataPoints.indices) {
-                        val diff = abs(dataPoints[i].elapsedHours - targetHours)
-                        if (diff < minDiff) {
-                            minDiff = diff
-                            closestIdx = i
+                    if (cachedPointList.size >= dataPoints.size && dataPoints.isNotEmpty()) {
+                        for (i in dataPoints.indices) {
+                            val diff = abs(cachedPointList[i].x - touchX)
+                            if (diff < minDiff) {
+                                minDiff = diff
+                                closestIdx = i
+                            }
+                        }
+                    } else if (dataPoints.isNotEmpty()) {
+                        val startTs = dataPoints.first().timestamp
+                        val endTs = dataPoints.last().timestamp
+                        val totalSpan = max(endTs - startTs, 60000L)
+                        val touchRatio = ((touchX - paddingLeft) / chartWidth).coerceIn(0f, 1f)
+                        val targetTs = (startTs + totalSpan * touchRatio).toLong()
+                        for (i in dataPoints.indices) {
+                            val diff = abs(dataPoints[i].timestamp - targetTs).toFloat()
+                            if (diff < minDiff) {
+                                minDiff = diff
+                                closestIdx = i
+                            }
                         }
                     }
 

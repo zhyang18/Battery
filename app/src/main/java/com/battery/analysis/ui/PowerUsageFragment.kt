@@ -733,13 +733,14 @@ class PowerUsageFragment : Fragment() {
     ) {
         if (_binding == null) return
         val chargingView = binding.layoutChargingContent
+        val liveSnapshot = powerManager.getCurrentBatteryStatus()
         val currentPoint = latestPoint ?: points.lastOrNull() ?: ChargingSamplePoint(
             timestamp = System.currentTimeMillis(),
             powerWatts = summary.maxPowerWatts,
-            batteryLevel = summary.currentLevel,
-            temperature = summary.maxTemperature,
-            voltageVolts = 4.2f,
-            currentMa = 2000f
+            batteryLevel = if (summary.currentLevel > 0) summary.currentLevel else liveSnapshot.levelPercent,
+            temperature = if (summary.maxTemperature > 0f) summary.maxTemperature else liveSnapshot.temperature,
+            voltageVolts = if (liveSnapshot.voltageVolts > 0.5f) liveSnapshot.voltageVolts else 3.85f,
+            currentMa = if (liveSnapshot.voltageVolts > 0.5f && summary.maxPowerWatts > 0f) (summary.maxPowerWatts * 1000f / liveSnapshot.voltageVolts) else 0f
         )
 
         // 1. 更新三合一走势折线图 (功率: 绿, 电量: 蓝, 温度: 红)
@@ -769,11 +770,14 @@ class PowerUsageFragment : Fragment() {
         }
         chargingView.tvMetricBatteryPower.text = batteryPowerText
 
-        val usbPowerText = if (summary.isCharging) {
-            val estimatedUsb = (pWatts + 1.8f).coerceAtLeast(0f)
-            String.format(Locale.getDefault(), "%.1fW?", estimatedUsb)
+        val usbPowerText = if (summary.isCharging && pWatts > 0.05f) {
+            // 开关降压充电电路常规转换效率约为 88%~90%，按物理转换能效折算输入端功率（取代粗暴硬编码 +1.8W）
+            val estimatedUsb = pWatts / 0.88f
+            String.format(Locale.getDefault(), "≈%.1fW", estimatedUsb)
+        } else if (summary.isCharging) {
+            "--"
         } else {
-            "0.0W?"
+            "0.0W"
         }
         chargingView.tvMetricUsbPower.text = usbPowerText
 

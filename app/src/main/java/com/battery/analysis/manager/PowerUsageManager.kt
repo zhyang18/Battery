@@ -1793,7 +1793,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             val directWh = item?.energyWh?.toDouble()
             val directMwh = directWh?.times(1000.0)
             val avgMw = item?.let { it.avgPowerWatts * 1000.0 } ?: 800.0
-            val peakMw = avgMw * 1.6
+            val peakMw = avgMw // 无瞬时时序切片时峰值等于平均功率，杜绝人为乘以 1.6 倍制造假数据
 
             appEvents.add(
                 AppTimelineEvent(
@@ -1808,9 +1808,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                     energyMwh = directMwh,
                     averagePowerMw = avgMw,
                     peakPowerMw = peakMw,
-                    cpuTimeMs = duration / 2,
-                    networkBytes = 1024 * 512,
-                    wakelockTimeMs = duration / 4,
+                    cpuTimeMs = 0L, // 移除 duration / 2 假数据，无独立监控通道时置为 0L 由 UI 规范显示 "--"
+                    networkBytes = 0L, // 移除 512KB 假数据，置为 0L 由 UI 规范显示 "--"
+                    wakelockTimeMs = 0L, // 移除 duration / 4 假数据
                     gpsTimeMs = 0L,
                     confidence = if (fullPackage.isShizukuRealData) ConfidenceLevel.HIGH else ConfidenceLevel.MEDIUM,
                     source = if (fullPackage.isShizukuRealData) EnergySource.BATTERY_STATS else EnergySource.ESTIMATED
@@ -1840,6 +1840,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                     10000
                 }
 
+                val avgMw = (app.avgPowerWatts * 1000.0).toDouble()
                 appEvents.add(
                     AppTimelineEvent(
                         packageName = app.packageName,
@@ -1851,11 +1852,11 @@ class PowerUsageManager private constructor(private val context: Context) {
                         durationMs = duration,
                         screenOn = true,
                         energyMwh = app.energyWh.toDouble() * 1000.0,
-                        averagePowerMw = (app.avgPowerWatts * 1000.0).toDouble(),
-                        peakPowerMw = (app.avgPowerWatts * 1600.0).toDouble(),
-                        cpuTimeMs = duration / 2,
-                        networkBytes = 1024 * 1024 * 2L,
-                        wakelockTimeMs = duration / 5,
+                        averagePowerMw = avgMw,
+                        peakPowerMw = avgMw, // 移除写死的 1.6 倍
+                        cpuTimeMs = 0L, // 移除 duration / 2 假数据
+                        networkBytes = 0L, // 移除 2MB 假数据
+                        wakelockTimeMs = 0L, // 移除 duration / 5 假数据
                         gpsTimeMs = 0L,
                         confidence = if (fullPackage.isShizukuRealData) ConfidenceLevel.HIGH else ConfidenceLevel.MEDIUM,
                         source = if (fullPackage.isShizukuRealData) EnergySource.BATTERY_STATS else EnergySource.ESTIMATED

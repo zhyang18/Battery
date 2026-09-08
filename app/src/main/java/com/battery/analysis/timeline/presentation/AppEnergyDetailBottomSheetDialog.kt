@@ -80,16 +80,20 @@ class AppEnergyDetailBottomSheetDialog(
         val endStr = timeFormatter.format(Date(event.endTime))
         tvTimeRange.text = "$startStr - $endStr (${event.getFormattedDuration()})"
 
-        // 硬件开销
+        // 硬件开销（真实无数据或无权限时显示 --，杜绝人为捏造数值）
         val cpuSeconds = event.cpuTimeMs / 1000
-        tvCpuTime.text = if (cpuSeconds > 0) "${cpuSeconds}s" else "<1s"
+        tvCpuTime.text = if (cpuSeconds > 0) "${cpuSeconds}s" else "--"
 
         val mb = event.networkBytes.toDouble() / (1024 * 1024)
-        tvNetwork.text = if (mb >= 0.1) String.format(Locale.getDefault(), "%.1f MB", mb) else "--"
+        tvNetwork.text = if (mb >= 0.05) String.format(Locale.getDefault(), "%.1f MB", mb) else "--"
 
         val wakeSeconds = event.wakelockTimeMs / 1000
         val gpsSeconds = event.gpsTimeMs / 1000
-        tvWakelockGps.text = "锁: ${wakeSeconds}s | GPS: ${gpsSeconds}s"
+        tvWakelockGps.text = if (wakeSeconds > 0 || gpsSeconds > 0) {
+            "锁: ${wakeSeconds}s | GPS: ${gpsSeconds}s"
+        } else {
+            "--"
+        }
 
         // 数据源
         tvSource.text = event.getSourceLabel()

@@ -89,7 +89,7 @@ object EnergyCalculator {
         if (directMah != null && directMah > 0.0) {
             val energyMwh = directMah * (nominalVoltageMv / 1000.0)
             val avgPowerMw = calculateAveragePowerMw(energyMwh, appDurationMs)
-            val peakPowerMw = avgPowerMw * 1.5 // 估算峰值
+            val peakPowerMw = avgPowerMw // 无时序切片瞬时采样时不人为放大倍率
             return EnergyEstimate(
                 energyMwh = energyMwh,
                 averagePowerMw = avgPowerMw,
@@ -110,7 +110,7 @@ object EnergyCalculator {
         val screenWeight = if (isScreenOn) 0.65 else 0.2
         val estimatedEnergyMwh = totalSystemEnergyMwh * timeRatio * screenWeight
         val avgPowerMw = calculateAveragePowerMw(estimatedEnergyMwh, appDurationMs)
-        val peakPowerMw = avgPowerMw * 1.8
+        val peakPowerMw = avgPowerMw // 移除人为设定的 1.8 倍峰值乘数
 
         return EnergyEstimate(
             energyMwh = estimatedEnergyMwh,

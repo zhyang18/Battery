@@ -178,12 +178,9 @@ class ChargingStatsManager private constructor(private val context: Context) {
         val volt = (info.voltage ?: 4000f) / 1000f
         val curMa = abs(info.currentNow ?: 0f)
         val rawPower = info.powerWatts ?: (if (charging) (volt * curMa / 1000f) else -(volt * curMa / 1000f))
-        var power = if (charging) abs(rawPower) else -abs(rawPower)
+        val power = if (charging) abs(rawPower) else -abs(rawPower)
 
-        // 充电状态下如果电流获取为 0，基于电压与标准充电特性进行保底合理估计
-        if (charging && power < 0.05f) {
-            power = 10.0f
-        }
+        // 彻底移除 hardcoded power = 10.0f 假数据，忠实记录底层传感器与广播测得的真实功率与电流
 
         val point = ChargingSamplePoint(
             timestamp = now,
@@ -240,6 +237,8 @@ class ChargingStatsManager private constructor(private val context: Context) {
 
     /**
      * 根据新加入的采样点动态更新内存中的会话摘要指标，并累加息屏统计数据。
+     * 采用标准的梯形时间数值积分法计算充入能量与时间加权平均功率，避免由于采样间隔不均导致算术平均失真；
+     * 当硬件电流传感器受限导致瞬时功率为 0 但电量实际增长时，基于电量增量与电池有效容量进行物理守恒核算。
      *
      * @param latestPoint 最新采样的物理数据点
      * @param chargeType 当前充电类型
@@ -260,24 +259,56 @@ class ChargingStatsManager private constructor(private val context: Context) {
         if (pointsSnapshot.isEmpty()) return
 
         var maxP = 0f
-        var sumP = 0f
         var maxT = 0f
         var sumT = 0f
 
         for (p in pointsSnapshot) {
             if (p.powerWatts > maxP) maxP = p.powerWatts
-            if (p.powerWatts > 0f) sumP += p.powerWatts
             if (p.temperature > maxT) maxT = p.temperature
             sumT += p.temperature
         }
 
         val count = pointsSnapshot.size
-        val avgP = if (count > 0) sumP / count else 0f
         val avgT = if (count > 0) sumT / count else 0f
 
-        // 计算充入能量 Wh = 平均充电功率 * 持续小时
+        // 1. 采用时序梯形积分法计算累计充入能量 Wh，精准应对亮屏高频与息屏低频采样间隔不一致
+        var integratedEnergyWh = 0.0
+        for (i in 0 until pointsSnapshot.size - 1) {
+            val p1 = pointsSnapshot[i]
+            val p2 = pointsSnapshot[i + 1]
+            val dtHours = (p2.timestamp - p1.timestamp).coerceAtLeast(0L) / 3600000.0
+            if (dtHours in 0.0001..0.5) { // 过滤过大异常断层（>30分钟）
+                val avgSlicePower = (p1.powerWatts.coerceAtLeast(0f) + p2.powerWatts.coerceAtLeast(0f)) / 2.0
+                integratedEnergyWh += avgSlicePower * dtHours
+            }
+        }
+
+        // 2. 若硬件电流传感器不支持或处于握手盲区导致采样积分偏低，结合电量百分比增量与有效电池容量物理核算
+        val levelGain = (latestPoint.batteryLevel - currentSummary.startLevel).coerceAtLeast(0)
         val durationHours = ((latestPoint.timestamp - currentSummary.startTimestamp).coerceAtLeast(0L)) / 3600000.0f
-        val chargedWh = avgP * durationHours
+        val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 5000f
+        val effectiveCapMah = if (designCapMah in 500f..30000f) designCapMah else 5000f
+        val levelGainEnergyWh = (levelGain / 100.0f) * effectiveCapMah * (latestPoint.voltageVolts.coerceIn(3.0f, 4.5f)) / 1000.0f
+
+        // 充入能量优先取采样时间积分，若采样缺失（如设备不支持电流直读）则基于电量增量补充
+        val chargedWh = if (integratedEnergyWh > 0.005) {
+            integratedEnergyWh.toFloat()
+        } else if (levelGain > 0) {
+            levelGainEnergyWh
+        } else {
+            0f
+        }
+
+        // 时间加权平均充电功率
+        val avgP = if (durationHours > 0.002f && chargedWh > 0f) {
+            chargedWh / durationHours
+        } else if (count > 0 && maxP > 0f) {
+            pointsSnapshot.map { it.powerWatts.coerceAtLeast(0f) }.filter { it > 0f }.let { validList ->
+                if (validList.isNotEmpty()) validList.average().toFloat() else 0f
+            }
+        } else {
+            0f
+        }
 
         currentSummary = currentSummary.copy(
             endTimestamp = latestPoint.timestamp,

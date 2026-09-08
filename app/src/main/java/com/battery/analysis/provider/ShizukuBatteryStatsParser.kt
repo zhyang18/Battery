@@ -45,6 +45,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val screenOffDrainMah: Float = 0f,
         val appList: List<AppPowerUsageItem>,
         val historyLevelPoints: List<Pair<Long, Int>> = emptyList(),
+        val historyTempPoints: List<Pair<Long, Float>> = emptyList(),
         val detectedUnplugTs: Long? = null,
         val detectedUnplugLevel: Int? = null
     )
@@ -85,6 +86,16 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         return parseStatsText(rawOutput, batteryVoltageVolts, batteryTempCelsius, uidPkgMap, unplugTime)
     }
 
+    /**
+     * 解析 dumpsys 原始输出字符串。
+     *
+     * @param rawText dumpsys batterystats 原始文本
+     * @param voltageVolts 电池电压
+     * @param tempCelsius 电池温度
+     * @param uidPkgMap 事先通过提权获取的 UID 到包名映射字典
+     * @param unplugTime 最近一次断开充电或手动重置的时间戳（毫秒），默认为 0L
+     * @return 解析完成的 [BatteryStatsResult]
+     */
     /**
      * 解析 dumpsys 原始输出字符串。
      *
@@ -191,12 +202,11 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val pkgDrainMahMap = mutableMapOf<String, Float>()
         val historyPoints = mutableListOf<Pair<Long, Int>>()
         val historyTempList = mutableListOf<Float>()
+        val historyTempPoints = mutableListOf<Pair<Long, Float>>()
         val lines = rawText.split('\n')
         var inPowerUseSection = false
         var inBatteryHistorySection = false
         var inDischargeStepSection = false
-        val baseTempInt = tempCelsius.toInt().coerceIn(25, 45)
-
         var historyBaseTs = if (unplugTime > 0L) unplugTime else (now - dischargeDurationMs)
         var currentHistoryTs = historyBaseTs
 
@@ -281,8 +291,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                     val tempMatcher = REGEX_HISTORY_TEMP.matcher(trimmed)
                     if (tempMatcher.find()) {
                         val rawT = tempMatcher.group(1)?.toFloatOrNull()
-                        if (rawT != null && rawT in 100f..700f) {
-                            historyTempList.add(rawT / 10f)
+                        if (rawT != null && rawT in 0f..800f) {
+                            val tVal = rawT / 10f
+                            historyTempList.add(tVal)
+                            historyTempPoints.add(Pair(currentHistoryTs, tVal))
                         }
                     }
                 }
@@ -326,28 +338,44 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
                         if (!pkgName.isNullOrEmpty()) {
                             pkgDrainMahMap[pkgName] = drainMah
-                            val foregroundMs = parseForegroundTimeFromDetails(extraDetails, dischargeDurationMs, drainMah, capacityMah, isHistoricalDumpsys)
-                            val directEnergyWh = (drainMah * voltageVolts) / 1000f
+                            val (foregroundMs, backgroundMs) = parseAppTimesFromDetails(
+                                extraDetails,
+                                dischargeDurationMs,
+                                isHistoricalDumpsys
+                            )
+                            val totalDirectEnergyWh = (drainMah * voltageVolts) / 1000f
 
-                            val isUserApp = isUserInstalledApp(pkgName)
-                            var effectiveFgMs = if (foregroundMs > 0L) {
-                                foregroundMs
-                            } else if (isUserApp) {
-                                // 用户三方应用若未单独输出前台耗时，依据真实耗电量按 1.5W 常规功耗合理换算等效前台时间
-                                ((directEnergyWh / 1.5f) * 3600000L).toLong().coerceIn(1000L, dischargeDurationMs.coerceAtLeast(1000L))
+                            // 前后台能量拆分：若均有时长，按前台与后台时长权重加权拆分总能量；若仅有单向时长则完全归属该向
+                            val fgEnergyWh: Float
+                            val bgEnergyWh: Float
+                            if (foregroundMs > 0L && backgroundMs > 0L) {
+                                // 赋予前台 3 倍的功耗权重比
+                                val fgWeight = foregroundMs * 3.0
+                                val bgWeight = backgroundMs * 1.0
+                                val totalWeight = fgWeight + bgWeight
+                                fgEnergyWh = (totalDirectEnergyWh * (fgWeight / totalWeight)).toFloat()
+                                bgEnergyWh = (totalDirectEnergyWh - fgEnergyWh).coerceAtLeast(0f)
+                            } else if (foregroundMs > 0L) {
+                                fgEnergyWh = totalDirectEnergyWh
+                                bgEnergyWh = 0f
+                            } else if (backgroundMs > 0L) {
+                                fgEnergyWh = 0f
+                                bgEnergyWh = totalDirectEnergyWh
                             } else {
-                                0L
+                                fgEnergyWh = totalDirectEnergyWh
+                                bgEnergyWh = 0f
                             }
 
-                            val activeHours = effectiveFgMs / 3600000.0
-                            val avgWatts = if (activeHours > 0.0) {
-                                (directEnergyWh / activeHours).toFloat()
+                            // 亮屏平均功耗计算：纯粹取 dumpsys 记录的前台时间与前台能耗，不加人工限制，真实反映计算数据
+                            val fgHours = foregroundMs / 3600000.0
+                            val avgWatts = if (fgHours > 0.0) {
+                                (fgEnergyWh / fgHours).toFloat()
                             } else {
-                                1.2f
+                                0f
                             }
 
-                            val appTemp = baseTempInt
-                            val maxTemp = baseTempInt
+                            val appTemp = tempCelsius
+                            val maxTemp = tempCelsius
 
                             try {
                                 val appInfo = pm.getApplicationInfo(pkgName, 0)
@@ -358,12 +386,15 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                                     packageName = pkgName,
                                     appName = appName,
                                     icon = icon,
-                                    foregroundTimeMs = effectiveFgMs,
+                                    foregroundTimeMs = foregroundMs,
                                     avgPowerWatts = avgWatts,
                                     avgTemperature = appTemp,
                                     maxTemperature = maxTemp,
                                     lastUsedTimeMs = System.currentTimeMillis(),
-                                    directEnergyWh = directEnergyWh
+                                    directEnergyWh = totalDirectEnergyWh,
+                                    backgroundTimeMs = backgroundMs,
+                                    foregroundEnergyWh = fgEnergyWh,
+                                    backgroundEnergyWh = bgEnergyWh
                                 )
                             } catch (_: Exception) {
                                 // 兜底处理：未能获取到特定 ApplicationInfo 时才使用简要包名
@@ -372,12 +403,15 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                                     packageName = pkgName,
                                     appName = simpleName,
                                     icon = pm.defaultActivityIcon,
-                                    foregroundTimeMs = effectiveFgMs,
+                                    foregroundTimeMs = foregroundMs,
                                     avgPowerWatts = avgWatts,
-                                    avgTemperature = baseTempInt,
-                                    maxTemperature = baseTempInt,
+                                    avgTemperature = tempCelsius,
+                                    maxTemperature = tempCelsius,
                                     lastUsedTimeMs = System.currentTimeMillis(),
-                                    directEnergyWh = directEnergyWh
+                                    directEnergyWh = totalDirectEnergyWh,
+                                    backgroundTimeMs = backgroundMs,
+                                    foregroundEnergyWh = fgEnergyWh,
+                                    backgroundEnergyWh = bgEnergyWh
                                 )
                             }
                         }
@@ -388,13 +422,13 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
         // 计算放电周期内的真实电池温度统计指标（平均温度与最高温度）
         val cycleAvgTemp = if (historyTempList.isNotEmpty()) {
-            Math.round(historyTempList.average()).toInt().coerceIn(15, 60)
+            ((Math.round(historyTempList.average() * 10.0) / 10.0).toFloat()).coerceIn(0f, 70f)
         } else {
-            baseTempInt
+            tempCelsius
         }
         val cycleMaxTemp = if (historyTempList.isNotEmpty()) {
             val maxRecorded = historyTempList.maxOrNull() ?: tempCelsius
-            Math.round(maxRecorded).toInt().coerceAtLeast(cycleAvgTemp).coerceIn(15, 60)
+            (Math.round(maxRecorded * 10f) / 10f).coerceAtLeast(cycleAvgTemp).coerceIn(0f, 70f)
         } else {
             cycleAvgTemp
         }
@@ -408,7 +442,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             )
         }
 
-        // 5. 智能融合：结合自拔电以来的基准增量使用数据进行精确校准与补全
+        // 5. 智能融合：仅针对 dumpsys 遗漏但系统确实有前台记录的应用进行补全，不覆盖 dumpsys 原始前台时间与功率
         val userAppList = mergeWithUsageStatsUserApps(parsedAppMap, pkgDrainMahMap, dischargeDurationMs, voltageVolts, cycleAvgTemp, cycleMaxTemp, unplugTime)
 
         // 6. 若仍未匹配到亮屏时长，通过所有前台应用的累计活跃时长进行真实计算
@@ -417,15 +451,17 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             screenOnDurationMs = if (sumFg > 0) sumFg.coerceAtMost(dischargeDurationMs) else (dischargeDurationMs * 0.25f).toLong().coerceAtLeast(0L)
         }
 
-        // 不加亮屏总时长物理限制，上限以本次放电周期的实际总时长 dischargeDurationMs 为准
+        // 上限以本次放电周期的实际总时长 dischargeDurationMs 为准
         val maxAllowedTimeMs = dischargeDurationMs
         val validatedList = userAppList.map { item ->
-            if (item.foregroundTimeMs > maxAllowedTimeMs) {
-                item.copy(foregroundTimeMs = maxAllowedTimeMs)
+            val safeFg = if (item.foregroundTimeMs > maxAllowedTimeMs) maxAllowedTimeMs else item.foregroundTimeMs
+            val safeBg = if (item.backgroundTimeMs > maxAllowedTimeMs) maxAllowedTimeMs else item.backgroundTimeMs
+            if (safeFg != item.foregroundTimeMs || safeBg != item.backgroundTimeMs) {
+                item.copy(foregroundTimeMs = safeFg, backgroundTimeMs = safeBg)
             } else {
                 item
             }
-        }.filter { it.foregroundTimeMs > 0L || it.energyWh > 0.001f }.toMutableList()
+        }.filter { it.foregroundTimeMs > 0L || it.backgroundTimeMs > 0L || it.energyWh > 0.001f }.toMutableList()
 
         // 7. 校验最近一次拔电起点与消除长段充满待机平线
         var finalUnplugTs = detectedUnplugTs
@@ -493,6 +529,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             screenOffDrainMah = screenOffDrainMah,
             appList = validatedList,
             historyLevelPoints = filteredHistoryPoints,
+            historyTempPoints = historyTempPoints,
             detectedUnplugTs = finalUnplugTs,
             detectedUnplugLevel = finalUnplugLevel
         )
@@ -643,13 +680,14 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     }
 
     /**
-     * 结合系统应用使用情况管理器，对 dumpsys 数据进行严格放电周期内的辅助校准与功耗重算。
-     * 严格限制在当前有效放电周期内，杜绝历史跨周期累计时长穿透到当前放电统计中，并重新计算各应用真实功率。
+     * 结合系统应用使用情况管理器，对 dumpsys 数据进行前台时间与能耗辅助补全。
+     * 当 dumpsys 详情中未携带具体前台时间（top/fg 字段缺省）时，通过 UsageStats 增量精准补全前台时长并重新解耦前后台能量与亮屏功耗；
+     * 并对 dumpsys 遗漏但系统确实有前台记录的用户应用进行补充。
      *
      * @param existingMap 已通过 dumpsys batterystats 解析得到的应用映射字典
      * @param pkgDrainMahMap 各应用由 dumpsys 解析得到的真实放电量（mAh）字典
      * @param dischargeMs 本次放电周期的实际放电时长毫秒数
-     * @param voltage 电池电压
+     * @param voltage 电池电压（V）
      * @param cycleAvgTemp 放电周期内测得的电池平均温度（℃）
      * @param cycleMaxTemp 放电周期内测得的电池最高温度（℃）
      * @param unplugTime 最近一次断开充电或手动重置的时间戳（毫秒），默认为 0L
@@ -660,8 +698,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         pkgDrainMahMap: Map<String, Float>,
         dischargeMs: Long,
         voltage: Float,
-        cycleAvgTemp: Int,
-        cycleMaxTemp: Int,
+        cycleAvgTemp: Float,
+        cycleMaxTemp: Float,
         unplugTime: Long = 0L
     ): MutableList<AppPowerUsageItem> {
         val pm = context.packageManager
@@ -670,66 +708,96 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
         val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
         val hasUsageStats = usm != null && com.battery.analysis.manager.PowerUsageManager.getInstance(context).hasUsageStatsPermission()
+        val preciseTimes = if (hasUsageStats && usm != null) {
+            queryPreciseForegroundTimes(usm, startTime, endTime)
+        } else {
+            emptyMap()
+        }
 
-        if (hasUsageStats && usm != null) {
-            // 通过高精度状态机提取当前放电周期内真正活跃的应用及其前台耗时
-            val preciseTimes = queryPreciseForegroundTimes(usm, startTime, endTime)
+        // 1. 对 dumpsys 原本提取的应用进行前台时长与真实亮屏功耗的精准补全
+        val existingKeys = existingMap.keys.toList()
+        for (pkg in existingKeys) {
+            val old = existingMap[pkg] ?: continue
+            var effectiveFg = old.foregroundTimeMs
+            val effectiveBg = old.backgroundTimeMs
 
-            // 1. 对 dumpsys 原本提取的应用进行真实验证与真实功耗重新计算
-            val existingKeys = existingMap.keys.toList()
-            for (pkg in existingKeys) {
+            // 若 dumpsys 详情中没有携带前台活跃时间，从 UsageEvents 精准补齐
+            if (effectiveFg <= 0L) {
                 val realFg = preciseTimes[pkg] ?: 0L
-                val old = existingMap[pkg]!!
                 if (realFg > 0L) {
-                    val fgHours = realFg / 3600000.0
-                    val drainMah = pkgDrainMahMap[pkg] ?: 0f
-                    val newAvgWatts = if (drainMah > 0.001f && fgHours > 0.0) {
-                        ((drainMah * voltage) / (1000f * fgHours)).toFloat()
-                    } else {
-                        old.avgPowerWatts
-                    }
-
-                    // 具备系统权威前台记录，以前台真实记录校准时长和功率
-                    existingMap[pkg] = old.copy(
-                        foregroundTimeMs = realFg,
-                        avgPowerWatts = newAvgWatts
-                    )
-                } else {
-                    // 仅当应用时长明显超出当前放电周期（跨周期历史累加残留，如放电 30 秒 dumpsys 却显示大于 5 分钟）时，才作为历史残留将其前台时间归零；
-                    // 对于当前前台运行的应用（本应用）或时长在合理放电周期范围内的应用，严禁误杀清零
-                    if (pkg == context.packageName) {
-                        // 本应用持续在前台运行，若 UsageEvents 延迟未返回，绝不清零，保留其有效时长
-                    } else if (old.foregroundTimeMs > dischargeMs + 60000L || (dischargeMs < 300000L && old.foregroundTimeMs > 300000L)) {
-                        existingMap[pkg] = old.copy(foregroundTimeMs = 0L)
-                    }
+                    effectiveFg = realFg.coerceAtMost(dischargeMs)
+                } else if (pkg == context.packageName) {
+                    // 本应用持续在前台运行，若 UsageEvents 延迟未返回，以当前放电周期时长作为有效前台时长
+                    effectiveFg = dischargeMs.coerceAtLeast(1000L)
                 }
             }
 
-            // 2. 补充 dumpsys 遗漏但系统事件中确实在前台运行的用户应用
-            for ((pkgName, fgTime) in preciseTimes) {
-                val safeFgTime = fgTime.coerceAtMost(dischargeMs)
-                if (safeFgTime >= 1000L && isUserInstalledApp(pkgName)) {
-                    if (!existingMap.containsKey(pkgName)) {
-                        try {
-                            val appInfo = pm.getApplicationInfo(pkgName, 0)
-                            val appName = pm.getApplicationLabel(appInfo).toString()
-                            val icon = pm.getApplicationIcon(appInfo)
+            // 依据真实补全后的前后台时长，重新解耦前台消耗能量、后台消耗能量以及亮屏平均功耗
+            val totalEnergy = old.directEnergyWh ?: ((pkgDrainMahMap[pkg] ?: 0f) * voltage / 1000f)
+            val fgEnergyWh: Float
+            val bgEnergyWh: Float
+            if (effectiveFg > 0L && effectiveBg > 0L) {
+                val fgWeight = effectiveFg * 3.0
+                val bgWeight = effectiveBg * 1.0
+                val totalWeight = fgWeight + bgWeight
+                fgEnergyWh = (totalEnergy * (fgWeight / totalWeight)).toFloat()
+                bgEnergyWh = (totalEnergy - fgEnergyWh).coerceAtLeast(0f)
+            } else if (effectiveFg > 0L) {
+                fgEnergyWh = totalEnergy
+                bgEnergyWh = 0f
+            } else if (effectiveBg > 0L) {
+                fgEnergyWh = 0f
+                bgEnergyWh = totalEnergy
+            } else {
+                fgEnergyWh = totalEnergy
+                bgEnergyWh = 0f
+            }
 
-                            val hash = abs(pkgName.hashCode())
-                            val baseWatts = ((1.35f + (hash % 85) / 100f) * (voltage / 3.8f)).coerceIn(0.9f, 3.2f)
+            val fgHours = effectiveFg / 3600000.0
+            val avgWatts = if (fgHours > 0.0) {
+                (fgEnergyWh / fgHours).toFloat()
+            } else {
+                0f
+            }
 
-                            existingMap[pkgName] = AppPowerUsageItem(
-                                packageName = pkgName,
-                                appName = appName,
-                                icon = icon,
-                                foregroundTimeMs = safeFgTime,
-                                avgPowerWatts = baseWatts,
-                                avgTemperature = cycleAvgTemp,
-                                maxTemperature = cycleMaxTemp,
-                                lastUsedTimeMs = endTime
-                            )
-                        } catch (_: PackageManager.NameNotFoundException) {
-                        }
+            existingMap[pkg] = old.copy(
+                foregroundTimeMs = effectiveFg,
+                backgroundTimeMs = effectiveBg,
+                foregroundEnergyWh = fgEnergyWh,
+                backgroundEnergyWh = bgEnergyWh,
+                avgPowerWatts = avgWatts
+            )
+        }
+
+        // 2. 补充 dumpsys 遗漏但系统事件中确实在前台运行的用户应用
+        for ((pkgName, fgTime) in preciseTimes) {
+            val safeFgTime = fgTime.coerceAtMost(dischargeMs)
+            if (safeFgTime >= 1000L && isUserInstalledApp(pkgName)) {
+                if (!existingMap.containsKey(pkgName)) {
+                    try {
+                        val appInfo = pm.getApplicationInfo(pkgName, 0)
+                        val appName = pm.getApplicationLabel(appInfo).toString()
+                        val icon = pm.getApplicationIcon(appInfo)
+
+                        val hash = abs(pkgName.hashCode())
+                        val baseWatts = ((1.35f + (hash % 85) / 100f) * (voltage / 3.8f)).coerceIn(0.9f, 3.2f)
+                        val fgEnergy = (baseWatts * (safeFgTime / 3600000f)).coerceAtLeast(0f)
+
+                        existingMap[pkgName] = AppPowerUsageItem(
+                            packageName = pkgName,
+                            appName = appName,
+                            icon = icon,
+                            foregroundTimeMs = safeFgTime,
+                            avgPowerWatts = baseWatts,
+                            avgTemperature = cycleAvgTemp,
+                            maxTemperature = cycleMaxTemp,
+                            lastUsedTimeMs = endTime,
+                            directEnergyWh = fgEnergy,
+                            backgroundTimeMs = 0L,
+                            foregroundEnergyWh = fgEnergy,
+                            backgroundEnergyWh = 0f
+                        )
+                    } catch (_: PackageManager.NameNotFoundException) {
                     }
                 }
             }
@@ -739,24 +807,20 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     }
 
     /**
-     * 从 Uid 详情中严格提取应用在前台的运行活跃耗时（仅提取 top 或 fg 前台时长，不统计后台使用时间）。
+     * 从 Uid 详情中提取应用在前台的运行活跃耗时（top 或 fg）以及后台运行耗时（bg）。
      *
-     * @param details 详情括号内的字符串（如 "cpu=2m15s top=1m10s bg=1m5s"）
-     * @param totalDischargeMs 整机总放电时长
-     * @param drainMah 该 App 消耗的 mAh
-     * @param totalCapMah 电池总容量
+     * @param details 详情括号内的字符串（如 "cpu=2m15s top=1m10s bg=15m5s"）
+     * @param totalDischargeMs 整机总放电时长（毫秒）
      * @param isHistoricalOutput dumpsys 是否包含超越当前周期的历史累积输出
-     * @return 应用前台活跃耗时毫秒数（仅统计前台活跃）
+     * @return 包含前台时长（毫秒）与后台时长（毫秒）的二元组 [Pair<Long, Long>]
      */
-    @Suppress("UNUSED_PARAMETER")
-    private fun parseForegroundTimeFromDetails(
+    private fun parseAppTimesFromDetails(
         details: String,
         totalDischargeMs: Long,
-        drainMah: Float,
-        totalCapMah: Float,
         isHistoricalOutput: Boolean = false
-    ): Long {
+    ): Pair<Long, Long> {
         var fgMs = 0L
+        var bgMs = 0L
 
         // 1. 优先匹配前台运行耗时 top
         val topMatch = REGEX_TOP_TIME.matcher(details)
@@ -778,36 +842,60 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             }
         }
 
-        // 若当前 dumpsys 属于未完全重置的历史账本，且单个应用的 fgMs 明显超过当前放电总时长，
-        // 说明该时间完全来自重置之前的历史周期，不能直接截断算作当前放电周期的前台时长
-        if (isHistoricalOutput && fgMs > totalDischargeMs) {
-            return 0L
+        // 3. 匹配后台运行耗时 bg
+        val bgMatch = REGEX_BG_TIME.matcher(details)
+        if (bgMatch.find()) {
+            val bStr = bgMatch.group(1)
+            if (!bStr.isNullOrBlank()) {
+                bgMs = parseDurationStringToMs(bStr)
+            }
         }
 
-        return fgMs.coerceAtMost(totalDischargeMs)
+        if (isHistoricalOutput) {
+            if (fgMs > totalDischargeMs) fgMs = 0L
+            if (bgMs > totalDischargeMs) bgMs = 0L
+        }
+
+        val safeFg = fgMs.coerceAtMost(totalDischargeMs.coerceAtLeast(1000L))
+        val safeBg = bgMs.coerceAtMost(totalDischargeMs.coerceAtLeast(1000L))
+        return Pair(safeFg, safeBg)
     }
 
     /**
-     * 将持续时间文本（如 "1d 2h 30m 45s" 或 "58m45s" 或 "19m 38s"）解析为毫秒数。
+     * 将持续时间文本（如 "1d 2h 30m 45s"、"58m45s"、"19m 38s" 或 "500ms"）解析为毫秒数。
+     * 使用严谨的正则 Token 匹配，杜绝毫秒 ms 的 'm' 被当做分钟误匹配。
      *
-     * @param durationStr 时间文本
-     * @return 毫秒数值
+     * @param durationStr 时间文本字符串
+     * @return 解析得到的毫秒数值
      */
     fun parseDurationStringToMs(durationStr: String): Long {
         var totalMs = 0L
-        val clean = durationStr.replace(" ", "")
+        val clean = durationStr.trim()
+        if (clean.isBlank()) return 0L
 
-        val dayMatch = Regex("(\\d+)d").find(clean)
-        val hourMatch = Regex("(\\d+)h").find(clean)
-        val minMatch = Regex("(\\d+)m").find(clean)
-        val secMatch = Regex("(\\d+)s").find(clean)
-        val msMatch = Regex("(\\d+)ms").find(clean)
+        // 优先匹配 ms，再匹配 d, h, m, s，防止 ms 的 'm' 被当做分钟误匹配
+        val regex = Regex("(\\d+)\\s*(ms|d|h|m|s)", RegexOption.IGNORE_CASE)
+        val matches = regex.findAll(clean)
+        var matchedAny = false
+        for (match in matches) {
+            matchedAny = true
+            val value = match.groupValues[1].toLongOrNull() ?: continue
+            val unit = match.groupValues[2].lowercase()
+            when (unit) {
+                "d" -> totalMs += value * 86400000L
+                "h" -> totalMs += value * 3600000L
+                "m" -> totalMs += value * 60000L
+                "s" -> totalMs += value * 1000L
+                "ms" -> totalMs += value
+            }
+        }
 
-        if (dayMatch != null) totalMs += dayMatch.groupValues[1].toLong() * 86400000L
-        if (hourMatch != null) totalMs += hourMatch.groupValues[1].toLong() * 3600000L
-        if (minMatch != null) totalMs += minMatch.groupValues[1].toLong() * 60000L
-        if (secMatch != null) totalMs += secMatch.groupValues[1].toLong() * 1000L
-        if (msMatch != null) totalMs += msMatch.groupValues[1].toLong()
+        if (!matchedAny) {
+            val pureNumber = clean.toLongOrNull()
+            if (pureNumber != null) {
+                totalMs = pureNumber
+            }
+        }
 
         return totalMs
     }
@@ -867,10 +955,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         private val REGEX_SCREEN_OFF_DISCHARGE_AMOUNT = Pattern.compile("Amount discharged while screen off:\\s*(\\d+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_IDLE_DRAIN = Pattern.compile("(?:Idle|Device standby):\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_UID_POWER = Pattern.compile("Uid\\s+([\\w]+)(?:\\s*\\(([^\\)]+)\\))?:\\s*([\\d.]+)(?:\\s*\\((.*?)\\))?", Pattern.CASE_INSENSITIVE)
-        private val REGEX_TOP_TIME = Pattern.compile("top=([\\w\\d]+)", Pattern.CASE_INSENSITIVE)
-        private val REGEX_FG_TIME = Pattern.compile("fg=([\\w\\d]+)", Pattern.CASE_INSENSITIVE)
-        private val REGEX_BG_TIME = Pattern.compile("bg=([\\w\\d]+)", Pattern.CASE_INSENSITIVE)
-        private val REGEX_CPU_TIME = Pattern.compile("cpu=([\\w\\d]+)", Pattern.CASE_INSENSITIVE)
+        private val REGEX_TOP_TIME = Pattern.compile("(?:top|fg)[=:]\\s*([\\d\\w\\s]+?)(?=\\s+[a-zA-Z_-]+[=:]|\\)|$)", Pattern.CASE_INSENSITIVE)
+        private val REGEX_FG_TIME = Pattern.compile("fg[=:]\\s*([\\d\\w\\s]+?)(?=\\s+[a-zA-Z_-]+[=:]|\\)|$)", Pattern.CASE_INSENSITIVE)
+        private val REGEX_BG_TIME = Pattern.compile("bg[=:]\\s*([\\d\\w\\s]+?)(?=\\s+[a-zA-Z_-]+[=:]|\\)|$)", Pattern.CASE_INSENSITIVE)
+        private val REGEX_CPU_TIME = Pattern.compile("cpu[=:]\\s*([\\d\\w\\s]+?)(?=\\s+[a-zA-Z_-]+[=:]|\\)|$)", Pattern.CASE_INSENSITIVE)
         private val REGEX_ANDROID_UID = Pattern.compile("^u(\\d+)_?a(\\d+)$", Pattern.CASE_INSENSITIVE)
         private val REGEX_RESET_TIME = Pattern.compile("RESET:TIME:\\s*(\\d{4})-(\\d{2})-(\\d{2})-(\\d{2})-(\\d{2})-(\\d{2})", Pattern.CASE_INSENSITIVE)
         private val REGEX_BATTERY_HISTORY_LINE = Pattern.compile("^(?:([+-]?[\\w\\d]+)\\s+)?\\(\\d+\\)\\s*(\\d{1,3})\\b", Pattern.CASE_INSENSITIVE)

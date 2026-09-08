@@ -98,15 +98,19 @@ data class PowerUsageRecord(
                 val appName = obj.optString("name", pkgName)
                 val timeMs = obj.optLong("time", 0L)
                 val powerW = obj.optDouble("power", 0.0).toFloat()
-                val avgTemp = obj.optInt("avgTemp", 30)
-                val maxTemp = obj.optInt("maxTemp", 35)
+                val avgTemp = obj.optDouble("avgTemp", 30.0).toFloat()
+                val maxTemp = obj.optDouble("maxTemp", 35.0).toFloat()
                 val lastUsed = obj.optLong("lastUsed", 0L)
-
                 val icon: Drawable? = try {
                     pm.getApplicationIcon(pkgName)
                 } catch (_: Exception) {
                     null
                 }
+
+                val bgTime = obj.optLong("bgTime", 0L)
+                val fgEnergy = obj.optDouble("fgEnergy", 0.0).toFloat()
+                val bgEnergy = obj.optDouble("bgEnergy", 0.0).toFloat()
+                val directEnergy = obj.optDouble("directEnergy", (fgEnergy + bgEnergy).toDouble()).toFloat()
 
                 appList.add(
                     AppPowerUsageItem(
@@ -117,7 +121,11 @@ data class PowerUsageRecord(
                         avgPowerWatts = powerW,
                         avgTemperature = avgTemp,
                         maxTemperature = maxTemp,
-                        lastUsedTimeMs = lastUsed
+                        lastUsedTimeMs = lastUsed,
+                        directEnergyWh = directEnergy,
+                        backgroundTimeMs = bgTime,
+                        foregroundEnergyWh = fgEnergy,
+                        backgroundEnergyWh = bgEnergy
                     )
                 )
             }
@@ -315,6 +323,10 @@ data class PowerUsageRecord(
                     put("avgTemp", item.avgTemperature)
                     put("maxTemp", item.maxTemperature)
                     put("lastUsed", item.lastUsedTimeMs)
+                    put("bgTime", item.backgroundTimeMs)
+                    put("fgEnergy", item.foregroundEnergyWh.toDouble())
+                    put("bgEnergy", item.backgroundEnergyWh.toDouble())
+                    put("directEnergy", item.energyWh.toDouble())
                 }
                 appJsonArray.put(obj)
             }

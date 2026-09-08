@@ -67,17 +67,17 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
             tvAppName.text = item.appName
             tvAvgInfo.text = String.format(
                 Locale.getDefault(),
-                "AVG: %.2fW, %d℃",
+                "AVG: %.2fW, %.1f℃",
                 item.avgPowerWatts,
                 item.avgTemperature
             )
-            tvAppEnergy.text = item.getFormattedEnergyWh()
+            tvAppEnergy.text = item.getFormattedCombinedEnergyWh()
             tvMaxTemp.text = String.format(
                 Locale.getDefault(),
-                "MAX: %d℃",
+                "MAX: %.1f℃",
                 item.maxTemperature
             )
-            tvDuration.text = item.getFormattedDuration()
+            tvDuration.text = item.getFormattedCombinedDuration()
         }
     }
 

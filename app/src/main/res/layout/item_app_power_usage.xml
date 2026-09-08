@@ -24,7 +24,7 @@
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:layout_marginStart="14dp"
-        android:layout_marginEnd="12dp"
+        android:layout_marginEnd="8dp"
         android:orientation="vertical">
 
         <!-- 应用名称与活跃圆点 -->
@@ -52,7 +52,7 @@
                 tools:text="系统桌面" />
         </LinearLayout>
 
-        <!-- 功耗与电量消耗参数 -->
+        <!-- 功耗与 MAX 温度参数行 -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -64,46 +64,52 @@
                 android:id="@+id/tv_avg_info"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textColor="#757575"
+                android:textColor="?android:attr/textColorPrimary"
                 android:textSize="12sp"
-                tools:text="AVG: 0.67W, 36℃" />
+                android:maxLines="1"
+                tools:text="AVG: 0.67W, 36.0℃" />
 
-            <!-- 原 MAX 温度位置：现展示应用电量(Wh)消耗 -->
+            <!-- 移动到时间左侧的 MAX 最高运行温度 -->
             <TextView
-                android:id="@+id/tv_app_energy"
+                android:id="@+id/tv_max_temp"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:textColor="#757575"
-                android:textSize="12sp"
-                tools:text="0.25Wh" />
+                android:layout_marginStart="6dp"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="11.5sp"
+                android:maxLines="1"
+                tools:text="MAX: 39.0℃" />
         </LinearLayout>
     </LinearLayout>
 
-    <!-- 右侧两行：前台使用时长及下方 MAX 温度 -->
+    <!-- 右侧两行：上方前后台时长，下方前后台消耗能量 -->
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:gravity="end"
         android:orientation="vertical">
 
+        <!-- 前台时长 | 后台时长 -->
         <TextView
             android:id="@+id/tv_duration"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="#757575"
-            android:textSize="13.5sp"
-            tools:text="6h7m" />
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="12.5sp"
+            android:maxLines="1"
+            tools:text="6h7m | 1h20m" />
 
-        <!-- 移动到时长下方的 MAX 最高运行温度 -->
+        <!-- 移动到时间下方的 前台能量 | 后台能量 -->
         <TextView
-            android:id="@+id/tv_max_temp"
+            android:id="@+id/tv_app_energy"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="2.5dp"
-            android:textColor="#757575"
+            android:textColor="?android:attr/textColorPrimary"
             android:textSize="11.5sp"
-            tools:text="MAX: 39℃" />
+            android:maxLines="1"
+            android:ellipsize="end"
+            tools:text="0.250Wh | 0.080Wh" />
     </LinearLayout>
 
 </LinearLayout>

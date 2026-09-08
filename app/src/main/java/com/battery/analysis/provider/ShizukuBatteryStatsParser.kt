@@ -770,6 +770,15 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         }
 
         // 2. 补充 dumpsys 遗漏但系统事件中确实在前台运行的用户应用
+        // 计算已知应用的前台平均功耗作为参考基准，杜绝使用包名哈希生成虚假功耗
+        val knownFgHours = existingMap.values.sumOf { it.foregroundTimeMs } / 3600000.0
+        val knownFgEnergyWh = existingMap.values.sumOf { it.foregroundEnergyWh.toDouble() }
+        val baselineWatts = if (knownFgHours > 0.02 && knownFgEnergyWh > 0.0) {
+            (knownFgEnergyWh / knownFgHours).toFloat().coerceIn(0.5f, 4.0f)
+        } else {
+            (1.5f * (voltage / 3.85f)).coerceIn(0.8f, 2.5f)
+        }
+
         for ((pkgName, fgTime) in preciseTimes) {
             val safeFgTime = fgTime.coerceAtMost(dischargeMs)
             if (safeFgTime >= 1000L && isUserInstalledApp(pkgName)) {
@@ -779,16 +788,14 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                         val appName = pm.getApplicationLabel(appInfo).toString()
                         val icon = pm.getApplicationIcon(appInfo)
 
-                        val hash = abs(pkgName.hashCode())
-                        val baseWatts = ((1.35f + (hash % 85) / 100f) * (voltage / 3.8f)).coerceIn(0.9f, 3.2f)
-                        val fgEnergy = (baseWatts * (safeFgTime / 3600000f)).coerceAtLeast(0f)
+                        val fgEnergy = (baselineWatts * (safeFgTime / 3600000f)).coerceAtLeast(0f)
 
                         existingMap[pkgName] = AppPowerUsageItem(
                             packageName = pkgName,
                             appName = appName,
                             icon = icon,
                             foregroundTimeMs = safeFgTime,
-                            avgPowerWatts = baseWatts,
+                            avgPowerWatts = baselineWatts,
                             avgTemperature = cycleAvgTemp,
                             maxTemperature = cycleMaxTemp,
                             lastUsedTimeMs = endTime,

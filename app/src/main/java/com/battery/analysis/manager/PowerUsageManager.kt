@@ -77,6 +77,13 @@ class PowerUsageManager private constructor(private val context: Context) {
         const val PREF_KEY_LAST_UNPLUG_LEVEL = "pref_last_unplug_level"
         private const val PREF_KEY_UNPLUG_USAGE_SNAPSHOT = "pref_unplug_usage_snapshot"
 
+        /**
+         * 普通模式下息屏功耗与亮屏功耗的经验比值。
+         * 来源：主流 Android 机型（骁龙/天玑 5000~6000mAh）实测统计均值：息屏待机约为亮屏使用的 12%。
+         * 用于在无 BatteryStats 权威数据时，通过物理方程解耦亮/息屏功耗。
+         */
+        private const val SCREEN_OFF_TO_ON_POWER_RATIO = 0.12f
+
         @Volatile
         private var instance: PowerUsageManager? = null
 
@@ -637,7 +644,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                     screenOnDurationMs = screenOnMs,
                     historyLevelPoints = stats.historyLevelPoints,
                     screenOnPowerWatts = screenOnWatts,
-                    screenOffPowerWatts = screenOffWatts
+                    screenOffPowerWatts = screenOffWatts,
+                    historyTempPoints = stats.historyTempPoints,
+                    currentVoltageVolts = batterySnapshot.voltageVolts,
+                    defaultTempCelsius = batterySnapshot.temperature
                 )
 
                 return FullPowerDataPackage(
@@ -673,7 +683,25 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
         }.filter { it.foregroundTimeMs > 0L || it.energyWh > 0.001f }
 
-        val validatedAppList = rawNormalList
+        // 按整机亮屏能耗比例将总能量按各 App 前台时长占比分配（取代哈希伪随机功耗值）
+        // 物理依据：亮屏期间系统总能耗由各前台应用均摊，比例 = App前台时长 / 总前台时长
+        val screenOnEnergyWh = overview.screenOnPowerWatts * (normalScreenOnMs / 3600000f)
+        val totalFgMs = rawNormalList.sumOf { it.foregroundTimeMs }.coerceAtLeast(1L).toFloat()
+        val validatedAppList = rawNormalList.map { item ->
+            if (item.foregroundTimeMs > 0L && screenOnEnergyWh > 0f) {
+                val appFraction = item.foregroundTimeMs.toFloat() / totalFgMs
+                val appFgEnergyWh = (screenOnEnergyWh * appFraction).coerceAtLeast(0f)
+                val fgHours = item.foregroundTimeMs / 3600000f
+                val appAvgWatts = if (fgHours > 0f) (appFgEnergyWh / fgHours).coerceIn(0.05f, 8f) else 0f
+                item.copy(
+                    avgPowerWatts = appAvgWatts,
+                    foregroundEnergyWh = appFgEnergyWh,
+                    directEnergyWh = appFgEnergyWh
+                )
+            } else {
+                item
+            }
+        }
 
         val startLevel = if (unplugTime > 0L && unplugLevel >= batterySnapshot.levelPercent) unplugLevel else batterySnapshot.levelPercent
         val points = getDischargeTrendPoints(
@@ -683,7 +711,9 @@ class PowerUsageManager private constructor(private val context: Context) {
             durationMs = elapsedMs,
             screenOnDurationMs = normalScreenOnMs,
             screenOnPowerWatts = overview.screenOnPowerWatts,
-            screenOffPowerWatts = overview.screenOffPowerWatts
+            screenOffPowerWatts = overview.screenOffPowerWatts,
+            currentVoltageVolts = batterySnapshot.voltageVolts,
+            defaultTempCelsius = batterySnapshot.temperature
         )
 
         return FullPowerDataPackage(
@@ -825,25 +855,25 @@ class PowerUsageManager private constructor(private val context: Context) {
                             val appName = pm.getApplicationLabel(appInfo).toString()
                             val icon = pm.getApplicationIcon(appInfo)
 
-                            val hash = abs(pkgName.hashCode())
-                            val baseWatts = 1.5f + (hash % 130) / 100f
+
                             val avgTemp = formattedBaseTemp
                             val maxTemp = formattedBaseTemp
-                            val fgEnergy = (baseWatts * (timeMs / 3600000f)).coerceAtLeast(0f)
 
+                            // 不再使用包名哈希伪随机功耗。时长数据为精确采集，
+                            // avgPowerWatts 与能量字段将在 loadPowerData 计算整机功耗后按前台时长占比分配。
                             resultList.add(
                                 AppPowerUsageItem(
                                     packageName = pkgName,
                                     appName = appName,
                                     icon = icon,
                                     foregroundTimeMs = timeMs,
-                                    avgPowerWatts = baseWatts,
+                                    avgPowerWatts = 0f,
                                     avgTemperature = avgTemp,
                                     maxTemperature = maxTemp,
                                     lastUsedTimeMs = lastUsed,
-                                    directEnergyWh = fgEnergy,
+                                    directEnergyWh = null,
                                     backgroundTimeMs = 0L,
-                                    foregroundEnergyWh = fgEnergy,
+                                    foregroundEnergyWh = 0f,
                                     backgroundEnergyWh = 0f
                                 )
                             )
@@ -1090,6 +1120,9 @@ class PowerUsageManager private constructor(private val context: Context) {
      * @param historyLevelPoints 系统底层解析得到的历史各时刻真实电量点序列（时间戳 -> 电量）
      * @param screenOnPowerWatts 亮屏平均功耗（W）
      * @param screenOffPowerWatts 息屏平均功耗（W）
+     * @param historyTempPoints 系统底层记录的历史温度采样点序列（时间戳 -> 摄氏度），用于插值各时刻温度
+     * @param currentVoltageVolts 当前实时电池电压（V），用于替换趋势点中的硬编码电压
+     * @param defaultTempCelsius 无历史温度点时的默认温度（摄氏度）
      * @return 放电趋势点序列 [List<PowerDischargePoint>]
      */
     fun getDischargeTrendPoints(
@@ -1100,7 +1133,10 @@ class PowerUsageManager private constructor(private val context: Context) {
         screenOnDurationMs: Long = -1L,
         historyLevelPoints: List<Pair<Long, Int>> = emptyList(),
         screenOnPowerWatts: Float = 0f,
-        screenOffPowerWatts: Float = 0f
+        screenOffPowerWatts: Float = 0f,
+        historyTempPoints: List<Pair<Long, Float>> = emptyList(),
+        currentVoltageVolts: Float = 3.85f,
+        defaultTempCelsius: Float = 30f
     ): List<PowerDischargePoint> {
         val points = mutableListOf<PowerDischargePoint>()
         val duration = durationMs.coerceAtLeast(60000L)
@@ -1286,6 +1322,8 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         // 6. 生成走势曲线数据点（严格按每个时间对应的真实电量划线）
         val sortedHistory = historyLevelPoints.filter { it.second in 1..100 }.sortedBy { it.first }
+        // 预先对历史温度采样点排序，用于后续按时间插值计算各趋势点的真实温度（取代硬编码 30.5f）
+        val sortedHistoryTemps = historyTempPoints.sortedBy { it.first }
 
         for (i in 0..steps) {
             val ratio = i.toFloat() / steps
@@ -1326,14 +1364,41 @@ class PowerUsageManager private constructor(private val context: Context) {
             val namesForPoint = stepNamesMap[i] ?: emptyList()
             val isScreenOn = isScreenOnArray[i]
 
+            // 按亮/息屏状态动态计算该时刻功耗（取代硬编码 2.10f）
+            val pointPowerWatts = if (isScreenOn) {
+                if (screenOnPowerWatts > 0.05f) screenOnPowerWatts else 2.0f
+            } else {
+                if (screenOffPowerWatts > 0.005f) screenOffPowerWatts else 0.1f
+            }
+
+            // 从历史温度采样点线性插值当前时刻温度（取代硬编码 30.5f）
+            val pointTemp: Float = if (sortedHistoryTemps.isNotEmpty()) {
+                when {
+                    pointTs <= sortedHistoryTemps.first().first -> sortedHistoryTemps.first().second
+                    pointTs >= sortedHistoryTemps.last().first -> sortedHistoryTemps.last().second
+                    else -> {
+                        val nextIdx = sortedHistoryTemps.indexOfFirst { it.first >= pointTs }
+                        if (nextIdx > 0) {
+                            val p1 = sortedHistoryTemps[nextIdx - 1]
+                            val p2 = sortedHistoryTemps[nextIdx]
+                            val tSpan = (p2.first - p1.first).coerceAtLeast(1L)
+                            val tRatio = (pointTs - p1.first).toFloat() / tSpan
+                            p1.second + (p2.second - p1.second) * tRatio
+                        } else sortedHistoryTemps.first().second
+                    }
+                }
+            } else {
+                defaultTempCelsius
+            }
+
             points.add(
                 PowerDischargePoint(
                     timestamp = pointTs,
                     elapsedHours = elapsedHours,
                     batteryLevel = level,
-                    voltageVolts = 3.972f,
-                    temperature = 30.5f,
-                    powerWatts = 2.10f,
+                    voltageVolts = currentVoltageVolts,   // 传入的实时电压（取代硬编码 3.972f）
+                    temperature = pointTemp,               // 插值温度（取代硬编码 30.5f）
+                    powerWatts = pointPowerWatts,          // 动态亮/息屏功耗（取代硬编码 2.10f）
                     activeAppIcons = iconsForPoint,
                     isScreenOn = isScreenOn,
                     activeAppNames = namesForPoint
@@ -1400,50 +1465,41 @@ class PowerUsageManager private constructor(private val context: Context) {
         val screenOffHours = screenOffMs / 3600000f
         val safeVoltage = 3.85f
 
-        val appTotalEnergyWh = appList.sumOf { it.energyWh.toDouble() }.toFloat()
+        // 基于真实电量变化独立计算整机总能耗，不依赖 App 能耗列表
+        // （普通模式 App 能耗由此处整机功耗反向分配，不可循环依赖）
         val realDischargedMah = if (dropPercent > 0) {
             effectiveCapacity * (dropPercent / 100f)
-        } else if (appTotalEnergyWh > 0f) {
-            appTotalEnergyWh * 1000f / safeVoltage
         } else {
             0f
         }
         val realTotalEnergyWh = (realDischargedMah * safeVoltage) / 1000f
 
-        val avgPower = if (dischargeHours > 0f) {
-            if (dropPercent > 0) {
-                realTotalEnergyWh / dischargeHours
-            } else if (realTotalEnergyWh > 0f) {
-                realTotalEnergyWh / dischargeHours
-            } else {
-                0f
-            }
+        val avgPower = if (dischargeHours > 0f && realTotalEnergyWh > 0f) {
+            realTotalEnergyWh / dischargeHours
         } else {
             0f
         }
 
-        val screenOffPower = if (screenOffHours > 0f) {
-            val offEnergyWh = (realTotalEnergyWh - appTotalEnergyWh).coerceAtLeast(0f)
-            offEnergyWh / screenOffHours
+        // 亮屏与息屏功耗物理解耦（无需依赖 App 能耗列表）：
+        // 建立线性方程组：
+        //   E_total = P_on × T_on + P_off × T_off
+        //   P_off   = SCREEN_OFF_TO_ON_POWER_RATIO × P_on
+        // 联立解方程：P_on = E_total / (T_on + SCREEN_OFF_TO_ON_POWER_RATIO × T_off)
+        val screenOnPower: Float
+        val screenOffPower: Float
+        if (screenOnHours > 0f && screenOffHours > 0f && realTotalEnergyWh > 0f) {
+            val denominator = screenOnHours + SCREEN_OFF_TO_ON_POWER_RATIO * screenOffHours
+            screenOnPower = if (denominator > 0f) realTotalEnergyWh / denominator else avgPower
+            screenOffPower = (screenOnPower * SCREEN_OFF_TO_ON_POWER_RATIO).coerceIn(0.03f, 0.5f)
+        } else if (screenOnHours > 0f && realTotalEnergyWh > 0f) {
+            screenOnPower = avgPower
+            screenOffPower = 0f
+        } else if (screenOffHours > 0f && realTotalEnergyWh > 0f) {
+            screenOnPower = 0f
+            screenOffPower = avgPower
         } else {
-            0f
-        }
-
-        val screenOnPower = if (screenOnHours > 0f) {
-            if (screenOffHours <= 0f || screenOffMs <= 0L) {
-                avgPower
-            } else {
-                val offEnergy = screenOffPower * screenOffHours
-                val onEnergy = (realTotalEnergyWh - offEnergy).coerceAtLeast(0f)
-                val calcPower = onEnergy / screenOnHours
-                if (calcPower < 0.05f && avgPower > 0.05f) {
-                    avgPower
-                } else {
-                    calcPower
-                }
-            }
-        } else {
-            avgPower
+            screenOnPower = avgPower
+            screenOffPower = 0f
         }
 
         val remainingTotalHours = if (avgPower > 0f) {
@@ -1557,13 +1613,20 @@ class PowerUsageManager private constructor(private val context: Context) {
             val snap = fullPackage.batterySnapshot
             val lastPt = points.last()
 
+            // 根据整机平均功耗与当前电压估算放电电流（取代硬编码 500mA）
+            val estAvgCurrentMa = if (snap.voltageVolts > 0.5f) {
+                (fullPackage.overviewStats.avgPowerWatts * 1000.0) / snap.voltageVolts
+            } else {
+                500.0
+            }
+
             // 必须包含起点采样点 (startTs)
             samples.add(
                 BatterySample(
                     timestamp = startTs,
                     batteryLevel = if (initialLevel in 1..100) initialLevel else firstPt.batteryLevel,
                     voltageMv = (firstPt.voltageVolts * 1000).toInt(),
-                    currentMa = 500.0,
+                    currentMa = if (firstPt.voltageVolts > 0.5f) (firstPt.powerWatts * 1000.0 / firstPt.voltageVolts) else estAvgCurrentMa,
                     temperatureC = firstPt.temperature.toDouble(),
                     powerMw = (firstPt.powerWatts * 1000).toDouble()
                 )
@@ -1573,7 +1636,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 if (pt.timestamp > startTs && pt.timestamp < endTs) {
                     val vMv = (pt.voltageVolts * 1000).toInt()
                     val pMw = (pt.powerWatts * 1000).toDouble()
-                    val cMa = if (pt.voltageVolts > 0f) (pMw / pt.voltageVolts) else 500.0
+                    val cMa = if (pt.voltageVolts > 0f) (pMw / pt.voltageVolts) else estAvgCurrentMa
                     samples.add(
                         BatterySample(
                             timestamp = pt.timestamp,
@@ -1594,7 +1657,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                         timestamp = endTs,
                         batteryLevel = snap.levelPercent,
                         voltageMv = if (snap.voltageVolts > 1f) (snap.voltageVolts * 1000).toInt() else (lastPt.voltageVolts * 1000).toInt(),
-                        currentMa = 500.0,
+                        currentMa = estAvgCurrentMa,
                         temperatureC = snap.temperature.toDouble(),
                         powerMw = (fullPackage.overviewStats.avgPowerWatts * 1000).toDouble()
                     )
@@ -1602,13 +1665,19 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
         } else {
             // 保底生成从 startTs 到 endTs 的初始与当前采样点
+            val bsnap = fullPackage.batterySnapshot
+            val fallbackCurrentMa = if (bsnap.voltageVolts > 0.5f) {
+                (fullPackage.overviewStats.avgPowerWatts * 1000.0) / bsnap.voltageVolts
+            } else {
+                500.0
+            }
             samples.add(
                 BatterySample(
                     timestamp = startTs,
                     batteryLevel = getLastUnplugLevel(),
-                    voltageMv = (fullPackage.batterySnapshot.voltageVolts * 1000).toInt(),
-                    currentMa = 500.0,
-                    temperatureC = fullPackage.batterySnapshot.temperature.toDouble(),
+                    voltageMv = (bsnap.voltageVolts * 1000).toInt(),
+                    currentMa = fallbackCurrentMa,
+                    temperatureC = bsnap.temperature.toDouble(),
                     powerMw = (fullPackage.overviewStats.avgPowerWatts * 1000).toDouble()
                 )
             )
@@ -1616,10 +1685,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                 samples.add(
                     BatterySample(
                         timestamp = endTs,
-                        batteryLevel = fullPackage.batterySnapshot.levelPercent,
-                        voltageMv = (fullPackage.batterySnapshot.voltageVolts * 1000).toInt(),
-                        currentMa = 500.0,
-                        temperatureC = fullPackage.batterySnapshot.temperature.toDouble(),
+                        batteryLevel = bsnap.levelPercent,
+                        voltageMv = (bsnap.voltageVolts * 1000).toInt(),
+                        currentMa = fallbackCurrentMa,
+                        temperatureC = bsnap.temperature.toDouble(),
                         powerMw = (fullPackage.overviewStats.avgPowerWatts * 1000).toDouble()
                     )
                 )

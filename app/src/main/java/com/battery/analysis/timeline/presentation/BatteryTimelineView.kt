@@ -103,6 +103,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     private val dp20 = dpToPx(20f)
     private val dp22 = dpToPx(22f)
     private val dp24 = dpToPx(24f)
+    private val dp28 = dpToPx(28f)
     private val dp32 = dpToPx(32f)
     private val dp35 = dpToPx(35f)
 
@@ -156,7 +157,7 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     private val screenOffBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.parseColor("#3A3A3C") // 息屏深灰
+        color = Color.parseColor("#FF3B30") // 息屏红（精确到秒）
     }
 
     private val iconBadgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -201,6 +202,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     // 绘制复用 Path 与 Rect
     private val curvePath = Path()
     private val fillPath = Path()
+    private val barClipPath = Path()
     private val tempRectF = RectF()
     private val tempDstRectF = RectF()
     private val tempSrcRect = Rect()
@@ -325,9 +327,38 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 重新计算 App 图标的时间槽平铺与多行纵向堆叠排布。
+     * 测量时间轴 View 尺寸，以图标纵向叠加高度超出为准动态计算并自适应图表高度。
+     *
+     * @param widthMeasureSpec 宽度测量规格
+     * @param heightMeasureSpec 高度测量规格
+     */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val width = MeasureSpec.getSize(widthMeasureSpec)
+        val defaultBaseH = dpToPx(240f).toInt()
+        val maxRow = cachedSlotItems.maxOfOrNull { it.rowIndex } ?: -1
+        val maxRowsCount = maxRow + 1
+
+        // 仅当图标纵向叠加层数极多超出基础高度范围时，才动态扩充高度
+        val iconStackHeight = (maxRowsCount * (dp15 + dp1)).toInt()
+        val requiredHeight = dpToPx(80f).toInt() + iconStackHeight
+        val desiredHeight = maxOf(defaultBaseH, requiredHeight)
+
+        val heightMode = MeasureSpec.getMode(heightMeasureSpec)
+        val heightSize = MeasureSpec.getSize(heightMeasureSpec)
+
+        val finalHeight: Int = when (heightMode) {
+            MeasureSpec.EXACTLY -> if (desiredHeight > heightSize) desiredHeight else heightSize
+            MeasureSpec.AT_MOST -> minOf(desiredHeight, heightSize)
+            else -> desiredHeight
+        }
+        setMeasuredDimension(width, finalHeight)
+    }
+
+    /**
+     * 重新计算 App 图标的时间槽平铺与多行纵向堆叠排布（上下间距 1dp）。
      */
     private fun recalculateLayout() {
+        val previousMaxRow = cachedSlotItems.maxOfOrNull { it.rowIndex } ?: -1
         cachedSlotItems.clear()
         val w = width.toFloat()
         val h = height.toFloat()
@@ -353,11 +384,15 @@ class BatteryTimelineView @JvmOverloads constructor(
             baseBottomY = baseBottomY,
             slotSizePx = dp15,
             slotGapPx = dp2_5,
-            rowGapPx = dp2_5,
-            maxRows = 4,
+            rowGapPx = dp1,
+            maxRows = Int.MAX_VALUE,
             leftMarginPx = contentLeft
         )
         cachedSlotItems.addAll(laidOut)
+        val currentMaxRow = cachedSlotItems.maxOfOrNull { it.rowIndex } ?: -1
+        if (currentMaxRow != previousMaxRow) {
+            requestLayout()
+        }
     }
 
     /**
@@ -376,9 +411,9 @@ class BatteryTimelineView @JvmOverloads constructor(
     /**
      * 核心 Canvas 绘制流程：
      * 1. 左侧绘制功耗 Y 轴数值刻度（0W, 10W, 20W, 30W...）及横向基准虚线；
-     * 2. 多选曲线自适应锚点绘制（功耗面积图、电量阶梯折线及百分比点标、温度阶梯折线及数值点标、电压阶梯折线及数值点标）；
-     * 3. App 活动分槽平铺图标（从下往上纵向堆叠）；
-     * 4. 底部时间轴屏幕状态实线条与无秒级时间刻度文字。
+     * 2. 多选曲线自适应锚点绘制（功耗、电量阶梯折线及百分比点标、温度阶梯折线及数值点标、电压阶梯折线及数值点标）；
+     * 3. App 活动分槽平铺图标（从下往上纵向堆叠，允许与曲线区域产生视觉交叠）；
+     * 4. 底部时间轴屏幕状态实线条与秒级精确时间刻度文字。
      *
      * @param canvas 目标绘制画布 [Canvas]
      */
@@ -404,7 +439,9 @@ class BatteryTimelineView @JvmOverloads constructor(
         val timeTickTop = h - dp18
         val screenBarBottom = timeTickTop - dp2
         val screenBarTop = screenBarBottom - dp3_5
-        val mainChartHeight = screenBarTop - dp35
+
+        // 曲线区域使用完整图表高度，允许与下方纵向堆叠的应用图标产生自然的视觉交叠
+        val mainChartHeight = screenBarTop - dp12
         val topPadding = dp8
         val bottomPadding = dp6
         val availableH = max(1f, mainChartHeight - topPadding - bottomPadding)
@@ -437,7 +474,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         val metrics = timelineState.selectedMetrics
 
         if (metrics.contains(TimelineMetric.POWER)) {
-            drawPowerCurve(canvas, contentLeft, contentWidth, topPadding, availableH, mainChartHeight, visibleStart, visibleEnd, maxScaleW, rawSamples)
+            drawPowerCurve(canvas, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, maxScaleW, rawSamples)
         }
         if (metrics.contains(TimelineMetric.BATTERY)) {
             drawBatteryCurve(canvas, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, rawSamples)
@@ -485,7 +522,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制时间轴网格虚线与底部时间刻度文字。
+     * 绘制时间轴网格虚线与底部时间刻度文字（以对应时间点为中心居中绘制）。
      */
     private fun drawTimeGridAndTicks(
         canvas: Canvas,
@@ -498,19 +535,17 @@ class BatteryTimelineView @JvmOverloads constructor(
         visibleEnd: Long
     ) {
         val ticks = TimelineScaleCalculator.calculateTicks(visibleStart, visibleEnd)
+        val contentRight = contentLeft + contentWidth
         for (tick in ticks) {
             val x = contentLeft + tick.xRatio * contentWidth
             // 垂直虚线网格
             canvas.drawLine(x, dp4, x, mainHeight, gridPaint)
             // 刻度小短线
             canvas.drawLine(x, tickTop, x, tickTop + dp3, gridPaint)
-            // 时间文本绘制：起点左对齐，终点右对齐，中间居中
+            // 时间文本以对应时间点 x 为中心居中绘制，并在边缘处做防溢出保护
             val textWidth = textPaint.measureText(tick.label)
-            val textX = when {
-                tick.xRatio <= 0.01f -> contentLeft
-                tick.xRatio >= 0.99f -> contentLeft + contentWidth - textWidth
-                else -> (x - textWidth / 2f).coerceIn(contentLeft, contentLeft + contentWidth - textWidth)
-            }
+            val halfWidth = textWidth / 2f
+            val textX = (x - halfWidth).coerceIn(contentLeft, contentRight - textWidth)
             canvas.drawText(tick.label, textX, textY, textPaint)
         }
     }
@@ -543,7 +578,17 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制功耗波动折线与渐变阴影填充（淡蓝色，始终自左侧 contentLeft 开始并横跨全宽）。
+     * 绘制功耗波动折线（纯线条无下方阴影，始终自左侧 contentLeft 开始并横跨全宽）。
+     *
+     * @param canvas 目标绘制画布 [Canvas]
+     * @param contentLeft 内容区左边缘 X 坐标
+     * @param contentWidth 内容区宽度
+     * @param topPadding 顶部安全边距
+     * @param availableH 曲线有效绘制高度
+     * @param visibleStart 可视起始时间戳
+     * @param visibleEnd 可视结束时间戳
+     * @param maxScaleW 当前可视区间最大功耗刻度值
+     * @param rawSamples 原始物理采样点集合
      */
     private fun drawPowerCurve(
         canvas: Canvas,
@@ -551,7 +596,6 @@ class BatteryTimelineView @JvmOverloads constructor(
         contentWidth: Float,
         topPadding: Float,
         availableH: Float,
-        mainHeight: Float,
         visibleStart: Long,
         visibleEnd: Long,
         maxScaleW: Double,
@@ -562,26 +606,16 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         val contentRight = contentLeft + contentWidth
         val strokeColor = Color.parseColor("#90CAF9")
-        val fillColorTop = Color.parseColor("#4090CAF9")
 
         linePaint.color = strokeColor
-        fillPaint.shader = LinearGradient(
-            0f, topPadding, 0f, mainHeight,
-            fillColorTop, Color.TRANSPARENT,
-            Shader.TileMode.CLAMP
-        )
-
         curvePath.reset()
-        fillPath.reset()
 
         val firstSample = downsampled.first()
         val firstPW = (abs(firstSample.powerMw) / 1000.0).toFloat().coerceIn(0f, maxScaleW.toFloat())
         val firstY = topPadding + (1f - (firstPW / maxScaleW).toFloat()) * availableH
 
-        // 曲线与阴影始终自最左侧起点 (contentLeft, firstY) 开始
+        // 曲线始终自最左侧起点 (contentLeft, firstY) 开始
         curvePath.moveTo(contentLeft, firstY)
-        fillPath.moveTo(contentLeft, mainHeight)
-        fillPath.lineTo(contentLeft, firstY)
 
         var lastX = contentLeft
         var lastY = firstY
@@ -593,23 +627,16 @@ class BatteryTimelineView @JvmOverloads constructor(
 
             if (x > lastX) {
                 curvePath.lineTo(x, y)
-                fillPath.lineTo(x, y)
                 lastX = x
                 lastY = y
             }
         }
 
-        // 确保功耗曲线与阴影一直延伸至最右侧终点 contentRight
+        // 确保功耗曲线一直延伸至最右侧终点 contentRight
         if (lastX < contentRight) {
             curvePath.lineTo(contentRight, lastY)
-            fillPath.lineTo(contentRight, lastY)
-            lastX = contentRight
         }
 
-        fillPath.lineTo(lastX, mainHeight)
-        fillPath.close()
-
-        canvas.drawPath(fillPath, fillPaint)
         canvas.drawPath(curvePath, linePaint)
     }
 
@@ -674,17 +701,8 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         canvas.drawPath(curvePath, linePaint)
 
-        // 绘制关键节点圆点与电量百分比文字标签
-        for ((x, y, text) in pointMarkers) {
-            canvas.drawCircle(x, y, dp2_5, metricDotPaint)
-            val textWidth = metricLabelPaint.measureText(text)
-            val textX = when {
-                x <= contentLeft + dp4 -> contentLeft
-                x >= contentRight - dp4 -> contentRight - textWidth
-                else -> (x - textWidth / 2f).coerceIn(contentLeft, contentRight - textWidth)
-            }
-            canvas.drawText(text, textX, y - dp4, metricLabelPaint)
-        }
+        // 绘制关键节点圆点与电量百分比文字标签（应用防重叠安全间距避让）
+        drawNonOverlappingMarkers(canvas, pointMarkers, metricLabelPaint, metricDotPaint, contentLeft, contentRight, -dp4, dp20)
     }
 
     /**
@@ -751,17 +769,8 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         canvas.drawPath(curvePath, linePaint)
 
-        // 绘制关键节点圆点与温度文字标签
-        for ((x, y, text) in pointMarkers) {
-            canvas.drawCircle(x, y, dp2_5, metricDotPaint)
-            val textWidth = metricLabelPaint.measureText(text)
-            val textX = when {
-                x <= contentLeft + dp4 -> contentLeft
-                x >= contentRight - dp4 -> contentRight - textWidth
-                else -> (x - textWidth / 2f).coerceIn(contentLeft, contentRight - textWidth)
-            }
-            canvas.drawText(text, textX, y + dp10, metricLabelPaint)
-        }
+        // 绘制关键节点圆点与温度文字标签（应用防重叠安全间距避让）
+        drawNonOverlappingMarkers(canvas, pointMarkers, metricLabelPaint, metricDotPaint, contentLeft, contentRight, dp10, dp24)
     }
 
     /**
@@ -829,21 +838,67 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         canvas.drawPath(curvePath, linePaint)
 
-        // 绘制关键节点圆点与电压文字标签
-        for ((x, y, text) in pointMarkers) {
-            canvas.drawCircle(x, y, dp2_5, metricDotPaint)
-            val textWidth = metricLabelPaint.measureText(text)
-            val textX = when {
-                x <= contentLeft + dp4 -> contentLeft
-                x >= contentRight - dp4 -> contentRight - textWidth
-                else -> (x - textWidth / 2f).coerceIn(contentLeft, contentRight - textWidth)
+        // 绘制关键节点圆点与电压文字标签（应用防重叠安全间距避让）
+        drawNonOverlappingMarkers(canvas, pointMarkers, metricLabelPaint, metricDotPaint, contentLeft, contentRight, -dp4, dp28)
+    }
+
+    /**
+     * 绘制曲线关键节点圆点与数值文字标签，并应用横向安全间距防重叠避让算法。
+     * 确保相邻文字标签之间具有充足的横向间距，彻底消除文字左右重叠。
+     *
+     * @param canvas 绘制目标画布 [Canvas]
+     * @param candidates 候选节点列表（X坐标, Y坐标, 标签文本）
+     * @param paint 文本画笔 [Paint]
+     * @param dotPaint 圆点画笔 [Paint]
+     * @param contentLeft 内容区左边缘 X 坐标
+     * @param contentRight 内容区右边缘 X 坐标
+     * @param yOffset 文本相对于 Y 坐标的纵向偏移像素（向上为负，向下为正）
+     * @param minSpacingPx 相邻标签之间的最小安全横向像素间距
+     */
+    private fun drawNonOverlappingMarkers(
+        canvas: Canvas,
+        candidates: List<Triple<Float, Float, String>>,
+        paint: Paint,
+        dotPaint: Paint,
+        contentLeft: Float,
+        contentRight: Float,
+        yOffset: Float,
+        minSpacingPx: Float = dp32
+    ) {
+        if (candidates.isEmpty()) return
+
+        var lastDrawnRight = -Float.MAX_VALUE
+        for (i in candidates.indices) {
+            val (x, y, text) = candidates[i]
+            val textWidth = paint.measureText(text)
+            val halfW = textWidth / 2f
+            val textLeft = (x - halfW).coerceIn(contentLeft, contentRight - textWidth)
+            val textRight = textLeft + textWidth
+
+            // 判断是否与上一个已绘制的标签发生横向重叠（保留起点和具有足够安全间距的关键拐点）
+            val isFirst = (i == 0)
+            val hasEnoughSpace = (textLeft - lastDrawnRight) >= minSpacingPx
+
+            if (isFirst || hasEnoughSpace) {
+                // 绘制节点小圆点
+                canvas.drawCircle(x, y, dp2_5, dotPaint)
+                // 绘制文本
+                canvas.drawText(text, textLeft, y + yOffset, paint)
+                lastDrawnRight = textRight
             }
-            canvas.drawText(text, textX, y - dp4, metricLabelPaint)
         }
     }
 
     /**
-     * 绘制横贯全宽的固定时间轴屏幕状态条（亮屏绿色，息屏暗灰色）。
+     * 绘制横贯全宽的固定时间轴屏幕状态条（亮屏绿色，息屏红色，精确到秒）。
+     *
+     * @param canvas 绘图画布 [Canvas]
+     * @param contentLeft 图表内容区域左边界 X 坐标（像素）
+     * @param contentRight 图表内容区域右边界 X 坐标（像素）
+     * @param top 屏幕状态条顶部 Y 坐标（像素）
+     * @param bottom 屏幕状态条底部 Y 坐标（像素）
+     * @param visibleStart 当前视窗起始时间戳（毫秒）
+     * @param visibleEnd 当前视窗结束时间戳（毫秒）
      */
     private fun drawScreenStateBar(
         canvas: Canvas,
@@ -857,23 +912,36 @@ class BatteryTimelineView @JvmOverloads constructor(
         val contentWidth = contentRight - contentLeft
         if (contentWidth <= 0f) return
 
-        // 先铺设一条亮屏绿色底线，确保 100% 可见
-        tempRectF.set(contentLeft, top, contentRight, bottom)
-        canvas.drawRoundRect(tempRectF, dp1_5, dp1_5, screenOnBarPaint)
-
         val mergedScreens = TimelineEventMerger.mergeScreenEvents(timelineState.screenEvents)
+        if (mergedScreens.isEmpty()) {
+            tempRectF.set(contentLeft, top, contentRight, bottom)
+            canvas.drawRoundRect(tempRectF, dp1_5, dp1_5, screenOnBarPaint)
+            return
+        }
+
+        // 使用 Path 裁切圆角边界，使左右两端呈现平滑圆角，内部颜色精确无缝分段
+        val saveCount = canvas.save()
+        tempRectF.set(contentLeft, top, contentRight, bottom)
+        barClipPath.reset()
+        barClipPath.addRoundRect(tempRectF, dp1_5, dp1_5, Path.Direction.CW)
+        canvas.clipPath(barClipPath)
+
+        // 默认全铺息屏红底色
+        canvas.drawRect(tempRectF, screenOffBarPaint)
+
+        // 精确绘制每个亮屏/息屏分段（精确到秒）
         for (event in mergedScreens) {
             if (event.endTime < visibleStart || event.startTime > visibleEnd) continue
-            // 仅对息屏区间进行覆盖绘制
-            if (!event.isScreenOn) {
-                val left = (contentLeft + TimelineScaleCalculator.timeToX(event.startTime, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
-                val right = (contentLeft + TimelineScaleCalculator.timeToX(event.endTime, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
-                if (right > left) {
-                    tempRectF.set(left, top, right, bottom)
-                    canvas.drawRect(tempRectF, screenOffBarPaint)
-                }
+            val left = (contentLeft + TimelineScaleCalculator.timeToX(event.startTime, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
+            val right = (contentLeft + TimelineScaleCalculator.timeToX(event.endTime, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
+            if (right > left) {
+                tempRectF.set(left, top, right, bottom)
+                val paint = if (event.isScreenOn) screenOnBarPaint else screenOffBarPaint
+                canvas.drawRect(tempRectF, paint)
             }
         }
+
+        canvas.restoreToCount(saveCount)
     }
 
     /**

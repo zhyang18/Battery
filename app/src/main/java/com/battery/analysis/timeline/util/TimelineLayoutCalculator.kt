@@ -47,7 +47,7 @@ object TimelineLayoutCalculator {
      * @param slotSizePx 每个 App 徽章方块的尺寸（宽高相等，像素）
      * @param slotGapPx 相邻时间槽之间的水平间距（像素）
      * @param rowGapPx 上下行之间的垂直间距（像素）
-     * @param maxRows 允许向上堆叠的最大行数（默认 4 行）
+     * @param maxRows 允许向上堆叠的最大行数（默认不作限制）
      * @param leftMarginPx 左侧起始偏移像素（默认 0f）
      * @return 经过分槽和多行堆叠排布后的徽章渲染单元列表 [List<LaidOutAppSlotItem>]
      */
@@ -59,8 +59,8 @@ object TimelineLayoutCalculator {
         baseBottomY: Float,
         slotSizePx: Float,
         slotGapPx: Float = 3f,
-        rowGapPx: Float = 3f,
-        maxRows: Int = 4,
+        rowGapPx: Float = 1f,
+        maxRows: Int = Int.MAX_VALUE,
         leftMarginPx: Float = 0f
     ): List<LaidOutAppSlotItem> {
         if (events.isEmpty() || canvasWidth <= 0f || visibleEndTs <= visibleStartTs) return emptyList()
@@ -71,7 +71,8 @@ object TimelineLayoutCalculator {
         // 计算当前画布宽度下可容纳的时间槽总数量
         val numSlots = max(1, ((canvasWidth + slotGapPx) / stepX).toInt())
         val totalWidth = numSlots * stepX - slotGapPx
-        val leftOffset = leftMarginPx + max(0f, (canvasWidth - totalWidth) / 2f)
+        // 右对齐锚定到最右侧（当前时间点），使当前活跃应用紧贴最右侧边缘展示
+        val leftOffset = leftMarginPx + max(0f, canvasWidth - totalWidth)
 
         val totalTimeSpan = visibleEndTs - visibleStartTs
         val result = mutableListOf<LaidOutAppSlotItem>()
@@ -89,9 +90,11 @@ object TimelineLayoutCalculator {
             val slotLeft = leftOffset + slotIndex * stepX
             val slotRight = slotLeft + slotSizePx
 
-            // 计算该时间槽对应的精确起始与结束时间戳
-            val slotStartRatio = (slotLeft / canvasWidth).coerceIn(0f, 1f)
-            val slotEndRatio = (slotRight / canvasWidth).coerceIn(0f, 1f)
+            // 基于相对于有效绘图区域的像素偏移精准计算时间槽对应的起始与结束时间戳
+            val slotRelativeLeft = (slotLeft - leftMarginPx).coerceAtLeast(0f)
+            val slotRelativeRight = (slotRight - leftMarginPx).coerceAtMost(canvasWidth)
+            val slotStartRatio = (slotRelativeLeft / canvasWidth).coerceIn(0f, 1f)
+            val slotEndRatio = if (slotIndex == numSlots - 1) 1.0f else (slotRelativeRight / canvasWidth).coerceIn(0f, 1f)
             val slotStartTs = visibleStartTs + (totalTimeSpan * slotStartRatio).toLong()
             val slotEndTs = visibleStartTs + (totalTimeSpan * slotEndRatio).toLong()
 
@@ -111,7 +114,7 @@ object TimelineLayoutCalculator {
                     compareBy<AppTimelineEvent>({ it.startTime }, { it.packageName })
                 )
 
-                // 从 Row 0 向上堆叠排布
+                // 从 Row 0 向上堆叠排布（不限制最多 4 行）
                 for ((rowIndex, event) in sortedEvents.take(maxRows).withIndex()) {
                     val bottom = baseBottomY - rowIndex * (slotSizePx + rowGapPx)
                     val top = bottom - slotSizePx

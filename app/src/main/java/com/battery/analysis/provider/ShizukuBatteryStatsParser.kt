@@ -339,15 +339,6 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                                 0L
                             }
 
-                            // 关键协同对齐：若当前处于拔电初期（小于5分钟）且整机几乎全亮屏（息屏<=3秒），
-                            // 针对当前持续在前台运行的主应用（如电池检测），系统 dumpsys 记录的 top 耗时可能因拔电广播调度存在延迟，
-                            // 将其平滑校准补偿至实际亮屏时长，确保亮屏时间与该前台应用使用时间高度契合
-                            if (pkgName == context.packageName && screenOffDurationMs <= 3000L && screenOnDurationMs > 0L) {
-                                if (effectiveFgMs < screenOnDurationMs) {
-                                    effectiveFgMs = screenOnDurationMs
-                                }
-                            }
-
                             val activeHours = effectiveFgMs / 3600000.0
                             val avgWatts = if (activeHours > 0.0) {
                                 (directEnergyWh / activeHours).toFloat()
@@ -741,35 +732,6 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                         }
                     }
                 }
-            }
-        }
-
-        // 3. 关键保障：若拔电运行处于全亮屏状态（息屏 <= 3秒），确保当前持续在前台的主应用具备与放电/亮屏时长对齐的前台时间
-        val myPkg = context.packageName
-        if (dischargeMs >= 1000L) {
-            val myItem = existingMap[myPkg]
-            val targetFg = dischargeMs
-            if (myItem != null) {
-                if (myItem.foregroundTimeMs < targetFg) {
-                    existingMap[myPkg] = myItem.copy(foregroundTimeMs = targetFg)
-                }
-            } else if (isUserInstalledApp(myPkg)) {
-                // 若 dumpsys 甚至未包含本应用条目，主动添加
-                try {
-                    val appInfo = pm.getApplicationInfo(myPkg, 0)
-                    val appName = pm.getApplicationLabel(appInfo).toString()
-                    val icon = pm.getApplicationIcon(appInfo)
-                    existingMap[myPkg] = AppPowerUsageItem(
-                        packageName = myPkg,
-                        appName = appName,
-                        icon = icon,
-                        foregroundTimeMs = targetFg,
-                        avgPowerWatts = 1.2f,
-                        avgTemperature = cycleAvgTemp,
-                        maxTemperature = cycleMaxTemp,
-                        lastUsedTimeMs = endTime
-                    )
-                } catch (_: Exception) {}
             }
         }
 

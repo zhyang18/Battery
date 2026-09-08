@@ -647,7 +647,7 @@
                             <com.battery.analysis.timeline.presentation.BatteryTimelineView
                                 android:id="@+id/battery_timeline_view"
                                 android:layout_width="match_parent"
-                                android:layout_height="245dp"
+                                android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp" />
 
                             <!-- 底部指标切换选择器（功耗 / 电量 / 温度 / 电压 / 应用） -->

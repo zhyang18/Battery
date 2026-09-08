@@ -35,8 +35,13 @@ class MetricSelectorView @JvmOverloads constructor(
         fun onMetricsChanged(selectedMetrics: Set<TimelineMetric>)
     }
 
-    // 默认勾选“功耗”与“应用”
-    private val selectedMetrics = mutableSetOf(TimelineMetric.POWER, TimelineMetric.APP)
+    companion object {
+        private const val PREFS_NAME = "timeline_metrics_prefs"
+        private const val KEY_SAVED_METRICS = "saved_timeline_metrics"
+    }
+
+    // 默认通过本地持久化恢复用户上次选择（若首次进入则默认勾选“功耗”与“应用”）
+    private val selectedMetrics = mutableSetOf<TimelineMetric>()
     private var listener: OnMetricsChangedListener? = null
 
     private val metricItems = listOf(
@@ -52,7 +57,41 @@ class MetricSelectorView @JvmOverloads constructor(
     init {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER
+        selectedMetrics.addAll(loadSavedMetrics())
         initViews()
+    }
+
+    /**
+     * 从本地持久化存储加载保存的指标集合。
+     *
+     * @return 还原出的指标集合 [Set<TimelineMetric>]
+     */
+    private fun loadSavedMetrics(): Set<TimelineMetric> {
+        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val saved = sp.getStringSet(KEY_SAVED_METRICS, null)
+        if (saved != null && saved.isNotEmpty()) {
+            val result = mutableSetOf<TimelineMetric>()
+            for (name in saved) {
+                try {
+                    result.add(TimelineMetric.valueOf(name))
+                } catch (_: Exception) {}
+            }
+            if (result.isNotEmpty()) {
+                return result
+            }
+        }
+        return setOf(TimelineMetric.POWER, TimelineMetric.APP)
+    }
+
+    /**
+     * 将当前选中的指标集合持久化保存至本地存储。
+     *
+     * @param metrics 待保存的指标集合 [Set<TimelineMetric>]
+     */
+    private fun saveMetrics(metrics: Set<TimelineMetric>) {
+        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val nameSet = metrics.map { it.name }.toSet()
+        sp.edit().putStringSet(KEY_SAVED_METRICS, nameSet).apply()
     }
 
     /**
@@ -91,7 +130,7 @@ class MetricSelectorView @JvmOverloads constructor(
     }
 
     /**
-     * 切换指定指标项的选中/反选状态。
+     * 切换指定指标项的选中/反选状态并自动同步持久化。
      *
      * @param metric 目标指标
      * @param notify 是否通知外部监听器
@@ -103,6 +142,7 @@ class MetricSelectorView @JvmOverloads constructor(
         } else {
             selectedMetrics.add(metric)
         }
+        saveMetrics(selectedMetrics)
         updateSelectionVisuals()
         if (notify) {
             listener?.onMetricsChanged(selectedMetrics.toSet())
@@ -110,7 +150,7 @@ class MetricSelectorView @JvmOverloads constructor(
     }
 
     /**
-     * 设置选中的指标集合。
+     * 设置选中的指标集合并自动同步持久化。
      *
      * @param metrics 目标指标集合
      * @param notify 是否通知外部监听器
@@ -118,6 +158,7 @@ class MetricSelectorView @JvmOverloads constructor(
     fun setSelectedMetrics(metrics: Set<TimelineMetric>, notify: Boolean = false) {
         selectedMetrics.clear()
         selectedMetrics.addAll(metrics)
+        saveMetrics(selectedMetrics)
         updateSelectionVisuals()
         if (notify) {
             listener?.onMetricsChanged(selectedMetrics.toSet())

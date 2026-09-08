@@ -165,11 +165,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                         result[pkg] = Pair(timeMs, now)
                     }
                 }
-                // 关键保底保障：若当前持续在前台运行的是本应用，但由于未发生 Activity 切换事件未被 UsageEvents 捕获
-                val myPkg = context.packageName
-                if (unplugTime > 0L && elapsedSinceUnplug >= 1000L && (result[myPkg]?.first ?: 0L) < 1000L) {
-                    result[myPkg] = Pair(elapsedSinceUnplug, now)
-                }
                 return result
             }
 
@@ -204,16 +199,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val lastUsed = if (usage.lastTimeUsed > 0L) usage.lastTimeUsed else now
                 if (finalDelta > 0L) {
                     result[pkg] = Pair(finalDelta, lastUsed)
-                }
-            }
-
-            // 兜底保障：若本应用当前一直处于前台运行，且系统 UsageStats 磁盘刷写存在几秒延迟，
-            // 确保当前前台运行的应用至少具备拔电以来的实际活跃时长
-            val myPkg = context.packageName
-            if (unplugTime > 0L && elapsedSinceUnplug > 3000L) {
-                val myDelta = result[myPkg]?.first ?: 0L
-                if (myDelta < 3000L) {
-                    result[myPkg] = Pair(elapsedSinceUnplug, now)
                 }
             }
         } catch (e: Exception) {
@@ -615,45 +600,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                     }
                 }.filter { it.foregroundTimeMs > 0L || it.energyWh > 0.001f }
 
-                // 关键保底保障：若拔电初期处于全亮屏状态（息屏 <= 3秒），确保当前持续在前台的主应用具备与亮屏/放电时长对齐的前台时间
-                val myPkg = context.packageName
-                val isMostlyScreenOn = (screenOffMs <= 3000L || screenOnMs >= durationMs * 0.8f) && durationMs >= 1000L
-                val validatedAppList = if (isMostlyScreenOn) {
-                    val targetFg = screenOnMs.coerceAtLeast(1000L)
-                    val found = rawAppList.any { it.packageName == myPkg }
-                    if (found) {
-                        rawAppList.map {
-                            if (it.packageName == myPkg && it.foregroundTimeMs < targetFg) {
-                                it.copy(foregroundTimeMs = targetFg)
-                            } else {
-                                it
-                            }
-                        }
-                    } else {
-                        try {
-                            val pm = context.packageManager
-                            val appInfo = pm.getApplicationInfo(myPkg, 0)
-                            val appName = pm.getApplicationLabel(appInfo).toString()
-                            val icon = pm.getApplicationIcon(appInfo)
-                            val directEnergyWh = (overview.screenOnPowerWatts * (targetFg / 3600000f)).coerceAtLeast(0.001f)
-                            rawAppList + AppPowerUsageItem(
-                                packageName = myPkg,
-                                appName = appName,
-                                icon = icon,
-                                foregroundTimeMs = targetFg,
-                                avgPowerWatts = overview.screenOnPowerWatts.coerceAtLeast(1.0f),
-                                avgTemperature = batterySnapshot.temperature.toInt(),
-                                maxTemperature = batterySnapshot.temperature.toInt(),
-                                lastUsedTimeMs = now,
-                                directEnergyWh = directEnergyWh
-                            )
-                        } catch (_: Exception) {
-                            rawAppList
-                        }
-                    }
-                } else {
-                    rawAppList
-                }
+                val validatedAppList = rawAppList
 
                 val points = getDischargeTrendPoints(
                     startLevel = startLevel,
@@ -699,45 +646,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
         }.filter { it.foregroundTimeMs > 0L || it.energyWh > 0.001f }
 
-        // 普通模式全亮屏保障
-        val myPkg = context.packageName
-        val isMostlyScreenOnNormal = (normalScreenOnMs >= elapsedMs * 0.8f) && elapsedMs >= 1000L
-        val validatedAppList = if (isMostlyScreenOnNormal) {
-            val targetFg = normalScreenOnMs.coerceAtLeast(1000L)
-            val found = rawNormalList.any { it.packageName == myPkg }
-            if (found) {
-                rawNormalList.map {
-                    if (it.packageName == myPkg && it.foregroundTimeMs < targetFg) {
-                        it.copy(foregroundTimeMs = targetFg)
-                    } else {
-                        it
-                    }
-                }
-            } else {
-                try {
-                    val pm = context.packageManager
-                    val appInfo = pm.getApplicationInfo(myPkg, 0)
-                    val appName = pm.getApplicationLabel(appInfo).toString()
-                    val icon = pm.getApplicationIcon(appInfo)
-                    val directEnergyWh = (overview.screenOnPowerWatts * (targetFg / 3600000f)).coerceAtLeast(0.001f)
-                    rawNormalList + AppPowerUsageItem(
-                        packageName = myPkg,
-                        appName = appName,
-                        icon = icon,
-                        foregroundTimeMs = targetFg,
-                        avgPowerWatts = overview.screenOnPowerWatts.coerceAtLeast(1.0f),
-                        avgTemperature = batterySnapshot.temperature.toInt(),
-                        maxTemperature = batterySnapshot.temperature.toInt(),
-                        lastUsedTimeMs = now,
-                        directEnergyWh = directEnergyWh
-                    )
-                } catch (_: Exception) {
-                    rawNormalList
-                }
-            }
-        } else {
-            rawNormalList
-        }
+        val validatedAppList = rawNormalList
 
         val startLevel = if (unplugTime > 0L && unplugLevel >= batterySnapshot.levelPercent) unplugLevel else batterySnapshot.levelPercent
         val points = getDischargeTrendPoints(
@@ -948,6 +857,9 @@ class PowerUsageManager private constructor(private val context: Context) {
 
                 when (event.eventType) {
                     UsageEvents.Event.ACTIVITY_RESUMED -> {
+                        if (screenOnStart == null) {
+                            screenOnStart = ts
+                        }
                         if (!pkg.isNullOrEmpty()) {
                             if (currentForegroundPkg != null) {
                                 val activeStart = maxOf(currentForegroundStartTs, startTime)
@@ -1547,9 +1459,57 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
         }
 
-        // 2. 转换屏幕状态区间
+        // 2. 查询高精度前台应用与屏幕状态区间
+        val (appIntervals, screenIntervals) = queryUsageIntervals(startTs, endTs)
+
+        // 3. 构建高精度屏幕状态区间（亮屏绿色 / 息屏红色，精确到秒）
         val screenEvents = mutableListOf<ScreenEvent>()
-        if (points.isNotEmpty()) {
+        val onIntervals = mutableListOf<Pair<Long, Long>>()
+        for (s in screenIntervals) {
+            val st = maxOf(s.startTs, startTs)
+            val et = minOf(s.endTs, endTs)
+            if (et > st) onIntervals.add(Pair(st, et))
+        }
+        for (a in appIntervals) {
+            val st = maxOf(a.startTs, startTs)
+            val et = minOf(a.endTs, endTs)
+            if (et > st) onIntervals.add(Pair(st, et))
+        }
+
+        if (onIntervals.isNotEmpty()) {
+            val sortedOn = onIntervals.sortedBy { it.first }
+            val mergedOn = mutableListOf<Pair<Long, Long>>()
+            var cur = sortedOn[0]
+            for (i in 1 until sortedOn.size) {
+                val nxt = sortedOn[i]
+                if (nxt.first <= cur.second + 1000L) {
+                    cur = Pair(cur.first, maxOf(cur.second, nxt.second))
+                } else {
+                    mergedOn.add(cur)
+                    cur = nxt
+                }
+            }
+            mergedOn.add(cur)
+
+            var cursor = startTs
+            for (onSpan in mergedOn) {
+                if (onSpan.first > cursor) {
+                    // 息屏区间（精确到秒）
+                    screenEvents.add(ScreenEvent(cursor, onSpan.first, false))
+                }
+                val onStart = maxOf(onSpan.first, cursor)
+                if (onSpan.second > onStart) {
+                    // 亮屏区间（精确到秒）
+                    screenEvents.add(ScreenEvent(onStart, onSpan.second, true))
+                }
+                cursor = maxOf(cursor, onSpan.second)
+            }
+            if (cursor < endTs) {
+                // 尾部息屏区间
+                screenEvents.add(ScreenEvent(cursor, endTs, false))
+            }
+        } else if (points.isNotEmpty()) {
+            // 回退到 points 中的亮/息屏标记
             var currentScreenOn = points[0].isScreenOn
             var segmentStart = startTs
             for (i in 1 until points.size) {
@@ -1566,13 +1526,11 @@ class PowerUsageManager private constructor(private val context: Context) {
             screenEvents.add(ScreenEvent(startTs, endTs, true))
         }
 
-        // 3. 构建 App 活动时间轴事件列表
+        // 4. 构建 App 活动时间轴事件列表
         val appMap = fullPackage.appList.associateBy { it.packageName }
         val pm = context.packageManager
         val appEvents = mutableListOf<AppTimelineEvent>()
 
-        // 方案 1：优先从 UsageStats 事件区间提取
-        val (appIntervals, _) = queryUsageIntervals(startTs, endTs)
         for (interval in appIntervals) {
             val pkg = interval.packageName
             val item = appMap[pkg]

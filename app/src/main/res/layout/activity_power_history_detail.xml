@@ -401,7 +401,7 @@
                     <com.battery.analysis.timeline.presentation.BatteryTimelineView
                         android:id="@+id/battery_timeline_view"
                         android:layout_width="match_parent"
-                        android:layout_height="240dp"
+                        android:layout_height="wrap_content"
                         android:layout_marginTop="10dp" />
 
                     <com.battery.analysis.timeline.presentation.MetricSelectorView

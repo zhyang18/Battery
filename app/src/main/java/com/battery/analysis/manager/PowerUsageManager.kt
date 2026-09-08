@@ -652,37 +652,67 @@ class PowerUsageManager private constructor(private val context: Context) {
                     } else {
                         item
                     }
-                }.filter { it.foregroundTimeMs > 0L || it.energyWh > 0.001f }
+                }.filter { it.foregroundTimeMs > 0L || it.backgroundTimeMs > 0L || it.energyWh > 0.001f }
 
-                // 物理完善：将整机亮屏期间的屏幕面板显示与前台系统底座能耗（扣除纯核心算力后的共享基底功率）
-                // 客观赋予在前台点亮屏幕运行的应用，使每个 App 的平均功耗完整真实反映前台亮屏综合放电功耗
-                // 彻底杜绝多应用或系统进程累计时长导致分母无限增大、将屏幕功耗稀释至仅 0.3W 的数学稀释缺陷
+                // 物理完善：将整机亮屏期间的屏幕面板显示与前台系统底座能耗（扣除纯前台核心算力后的共享基底功率）
+                // 客观赋予在前台点亮屏幕运行的应用，使每个 App 的平均功耗完整真实反映前台亮屏综合放电功耗。
+                // 彻底杜绝纯后台守护进程误计入前台导致屏幕池被吞噬，以及多进程重叠稀释屏幕功耗的缺陷
+                val fgApps = rawAppList.filter { it.foregroundTimeMs > 0L }
                 val totalScreenOnEnergyWh = screenOnWatts * (screenOnMs / 3600000f)
-                val totalCoreFgEnergyWh = rawAppList.sumOf { it.foregroundEnergyWh.toDouble() }.toFloat()
+                val totalCoreFgEnergyWh = fgApps.sumOf { it.foregroundEnergyWh.toDouble() }.toFloat()
                 val sharedScreenEnergyWh = (totalScreenOnEnergyWh - totalCoreFgEnergyWh).coerceAtLeast(0f)
                 val hwScreenEnergyWh = if (stats.screenDrainMah > 0f) (stats.screenDrainMah * safeVoltage) / 1000f else 0f
                 val effectiveScreenEnergyWh = maxOf(sharedScreenEnergyWh, hwScreenEnergyWh)
-                val screenBaseWatts = if (screenOnHours > 0f && effectiveScreenEnergyWh > 0f) {
-                    (effectiveScreenEnergyWh / screenOnHours).coerceAtLeast(0f)
+
+                // 物理模型分解：屏幕总共享池 = 基础屏幕显示功率 (0.9W 恒定发光底座) + 动态 GPU 3D 渲染能耗池
+                // 屏幕面板在点亮状态下具有恒定显示基础功率（以 dumpsys 测得或约 0.9W 为基准，受限于当前总能量池）
+                val maxBaseDisplayWatts = if (screenOnHours > 0f) (effectiveScreenEnergyWh / screenOnHours) else 0f
+                val baseDisplayWatts = if (stats.screenDrainMah > 0f && screenOnHours > 0f) {
+                    ((stats.screenDrainMah * safeVoltage) / (1000f * screenOnHours)).coerceAtMost(maxBaseDisplayWatts)
                 } else {
-                    0f
+                    0.9f.coerceAtMost(maxBaseDisplayWatts)
+                }
+                val baseDisplayEnergyWh = baseDisplayWatts * screenOnHours
+                val dynamicGpuEnergyWh = (effectiveScreenEnergyWh - baseDisplayEnergyWh).coerceAtLeast(0f)
+
+                // 动态 GPU 渲染权重：游戏应用（3D 引擎管线与持续 60/120fps 着色器渲染）权重设为 3.0，普通 2D 界面静态应用权重为 1.0
+                // GPU 能耗客观按前台渲染时间与应用渲染特征加权分配，普通非游戏场景（全 1.0）退化为纯时间比例分配
+                val totalRenderWeight = fgApps.sumOf { item ->
+                    val isGame = isGameApp(item.packageName)
+                    val weight = if (isGame) 3.0 else 1.0
+                    weight * (item.foregroundTimeMs / 3600000.0)
                 }
 
                 val enrichedAppList = rawAppList.map { item ->
                     if (item.foregroundTimeMs > 0L) {
                         val fgHours = item.foregroundTimeMs / 3600000f
                         val appCoreWatts = if (fgHours > 0f) (item.foregroundEnergyWh / fgHours) else item.avgPowerWatts
-                        // 亮屏基底功率为屏幕恒定工作功率，前台应用在前台交互期间屏幕全程点亮：
-                        // 综合平均功耗 = 核心算力功耗 + 亮屏基底功率（杜绝被多进程重叠时长稀释）
-                        val combinedAvgWatts = (appCoreWatts + screenBaseWatts).coerceAtLeast(0f)
+                        val isGame = isGameApp(item.packageName)
+                        val appWeight = (if (isGame) 3.0 else 1.0) * fgHours
+                        val appGpuEnergy = if (totalRenderWeight > 0.0) {
+                            (dynamicGpuEnergyWh * (appWeight / totalRenderWeight)).toFloat()
+                        } else {
+                            0f
+                        }
+                        val appGpuWatts = if (fgHours > 0f) (appGpuEnergy / fgHours) else 0f
+
+                        // 综合平均功耗 = CPU 核心算力功耗 + 屏幕发光基底功率 + 动态 GPU 渲染功耗
+                        val combinedAvgWatts = (appCoreWatts + baseDisplayWatts + appGpuWatts).coerceAtLeast(0f)
                         val combinedFgEnergy = combinedAvgWatts * fgHours
                         item.copy(
                             avgPowerWatts = combinedAvgWatts,
                             foregroundEnergyWh = combinedFgEnergy,
-                            directEnergyWh = (item.directEnergyWh ?: 0f) + (screenBaseWatts * fgHours)
+                            directEnergyWh = combinedFgEnergy + item.backgroundEnergyWh
                         )
                     } else {
-                        item
+                        // 纯后台应用：平均功耗依其实际后台运行能耗与后台活跃时长计算
+                        val bgHours = item.backgroundTimeMs / 3600000f
+                        val bgWatts = if (bgHours > 0f && item.backgroundEnergyWh > 0f) {
+                            (item.backgroundEnergyWh / bgHours).coerceAtLeast(0f)
+                        } else {
+                            0f
+                        }
+                        item.copy(avgPowerWatts = bgWatts)
                     }
                 }
 
@@ -803,6 +833,35 @@ class PowerUsageManager private constructor(private val context: Context) {
             !isSystem || isUpdatedSystem || hasLauncher
         } catch (_: Exception) {
             false
+        }
+    }
+
+    /**
+     * 判断指定包名是否为游戏应用。
+     * 优先通过 PackageManager 检查系统内置类别 CATEGORY_GAME 或应用清单中的 FLAG_IS_GAME 标识；
+     * 并容错检查常见游戏特质包名（如包含 .game、.clash 等）。
+     *
+     * @param packageName 目标应用包名
+     * @return 若为游戏应用返回 true，否则返回 false
+     */
+    @Suppress("DEPRECATION")
+    fun isGameApp(packageName: String): Boolean {
+        if (packageName.isBlank()) return false
+        return try {
+            val pm = context.packageManager
+            val appInfo = pm.getApplicationInfo(packageName, 0)
+            val isCatGame = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                appInfo.category == ApplicationInfo.CATEGORY_GAME
+            } else {
+                false
+            }
+            val isFlagGame = (appInfo.flags and ApplicationInfo.FLAG_IS_GAME) != 0
+            val isNameGame = packageName.contains(".game", ignoreCase = true) ||
+                    packageName.contains(".clash", ignoreCase = true)
+            isCatGame || isFlagGame || isNameGame
+        } catch (_: Exception) {
+            packageName.contains(".game", ignoreCase = true) ||
+                    packageName.contains(".clash", ignoreCase = true)
         }
     }
 

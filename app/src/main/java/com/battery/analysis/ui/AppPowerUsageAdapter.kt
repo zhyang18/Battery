@@ -64,11 +64,23 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
                 ivAppIcon.setImageResource(R.mipmap.ic_launcher)
             }
 
+            // 前后台状态标识圆点：前台运行应用显示绿色，纯后台应用显示蓝色
+            if (item.foregroundTimeMs > 0L) {
+                viewStatusDot.setBackgroundResource(R.drawable.bg_dot_green)
+            } else {
+                viewStatusDot.setBackgroundResource(R.drawable.bg_dot_blue)
+            }
+
             tvAppName.text = item.appName
+            val pwrStr = if (item.avgPowerWatts >= 0.05f) {
+                String.format(Locale.getDefault(), "%.2fW", item.avgPowerWatts)
+            } else {
+                "--"
+            }
             tvAvgInfo.text = String.format(
                 Locale.getDefault(),
-                "AVG: %.2fW, %.1f℃",
-                item.avgPowerWatts,
+                "AVG: %s, %.1f℃",
+                pwrStr,
                 item.avgTemperature
             )
             tvAppEnergy.text = item.getFormattedCombinedEnergyWh()

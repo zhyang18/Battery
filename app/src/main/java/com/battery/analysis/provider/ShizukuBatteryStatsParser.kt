@@ -387,18 +387,20 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             } else if (foregroundMs > 0L) {
                                 fgEnergyWh = totalDirectEnergyWh
                                 bgEnergyWh = 0f
-                            } else if (backgroundMs > 0L) {
+                            } else {
+                                // 纯后台应用（前台时长为 0）：能量 100% 归属于后台能量，前台能量严格为 0f，
+                                // 彻底杜绝纯后台常驻守护进程能耗误算为前台能耗并侵吞整机屏幕基底功率池
                                 fgEnergyWh = 0f
                                 bgEnergyWh = totalDirectEnergyWh
-                            } else {
-                                fgEnergyWh = totalDirectEnergyWh
-                                bgEnergyWh = 0f
                             }
 
-                            // 亮屏平均功耗计算：纯粹取 dumpsys 记录的前台时间与前台能耗，不加人工限制，真实反映计算数据
+                            // 运行平均功耗计算：若有前台活跃按前台能耗与前台时长计算；若为纯后台应用且有明确后台运行耗时，按后台运行能耗与时长计算
                             val fgHours = foregroundMs / 3600000.0
+                            val bgHours = backgroundMs / 3600000.0
                             val avgWatts = if (fgHours > 0.0) {
                                 (fgEnergyWh / fgHours).toFloat()
+                            } else if (bgHours > 0.0 && bgEnergyWh > 0f) {
+                                (bgEnergyWh / bgHours).toFloat()
                             } else {
                                 0f
                             }
@@ -777,17 +779,18 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             } else if (effectiveFg > 0L) {
                 fgEnergyWh = totalEnergy
                 bgEnergyWh = 0f
-            } else if (effectiveBg > 0L) {
+            } else {
+                // 纯后台应用：前台为 0，能量 100% 归属于后台
                 fgEnergyWh = 0f
                 bgEnergyWh = totalEnergy
-            } else {
-                fgEnergyWh = totalEnergy
-                bgEnergyWh = 0f
             }
 
             val fgHours = effectiveFg / 3600000.0
+            val bgHours = effectiveBg / 3600000.0
             val avgWatts = if (fgHours > 0.0) {
                 (fgEnergyWh / fgHours).toFloat()
+            } else if (bgHours > 0.0 && bgEnergyWh > 0f) {
+                (bgEnergyWh / bgHours).toFloat()
             } else {
                 0f
             }
@@ -915,8 +918,20 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         }
 
         val safeFg = fgMs.coerceAtMost(totalDischargeMs.coerceAtLeast(1000L))
-        val safeBg = bgMs.coerceAtMost(totalDischargeMs.coerceAtLeast(1000L))
+        var safeBg = bgMs.coerceAtMost(totalDischargeMs.coerceAtLeast(1000L))
         val safeCpu = cpuMs.coerceAtLeast(0L)
+
+        // 若底层 dumpsys 未明确输出 bg= 字段（Android 对常驻系统服务与后台广播通常仅以 cpu= 记录计算耗时），
+        // 且前台耗时为 0（纯后台服务进程），则将其 CPU 计算耗时客观确认为其后台活跃运行时间；
+        // 若既有前台时间又有 CPU 耗时且 cpuMs > safeFg，超出的计算耗时即为后台计算时间
+        if (safeBg <= 0L) {
+            if (safeFg <= 0L && safeCpu > 0L) {
+                safeBg = safeCpu.coerceAtMost(totalDischargeMs.coerceAtLeast(1000L))
+            } else if (safeCpu > safeFg) {
+                safeBg = (safeCpu - safeFg).coerceAtMost(totalDischargeMs.coerceAtLeast(1000L))
+            }
+        }
+
         return Triple(safeFg, safeBg, safeCpu)
     }
 

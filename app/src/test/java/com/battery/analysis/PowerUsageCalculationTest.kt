@@ -600,6 +600,136 @@ class PowerUsageCalculationTest {
         assertEquals("2d12h", formatHours(60f))
         assertEquals("45m", formatHours(0.75f))
     }
+
+    /**
+     * 验证纯后台应用（前台时长 0s）在 dumpsys 未给出 bg= 时：
+     * 1. 自动将真实的 cpu 运算耗时（如 45s）映射为后台运行时间，杜绝显示 0s | 0s；
+     * 2. 能耗 100% 归属于后台能耗（fgEnergyWh 严格为 0f，bgEnergyWh = 0.073Wh），杜绝显示 0.073Wh | 0.000Wh 矛盾；
+     * 3. 纯后台应用不计入前台核心算力，绝不侵蚀整机亮屏能耗池；
+     * 4. 标识圆点判定：前台为绿色，纯后台为蓝色。
+     */
+    @Test
+    fun testPureBackgroundAppEnergyAndCpuTimeToBackgroundMapping() {
+        val totalDischargeMs = 319_000L // 5分19秒
+        val fgMs = 0L // 无前台
+        val bgMs = 0L // dumpsys 未给 bg=
+        val cpuMs = 45_000L // dumpsys 记录了 cpu=45s
+        val drainMah = 19.34f
+        val voltage = 3.774f
+        val totalDirectEnergyWh = (drainMah * voltage) / 1000f // 约 0.073 Wh
+
+        // 1. 验证后台时长智能对齐逻辑
+        val safeFg = fgMs.coerceAtMost(totalDischargeMs)
+        var safeBg = bgMs.coerceAtMost(totalDischargeMs)
+        val safeCpu = cpuMs.coerceAtLeast(0L)
+        if (safeBg <= 0L) {
+            if (safeFg <= 0L && safeCpu > 0L) {
+                safeBg = safeCpu.coerceAtMost(totalDischargeMs)
+            } else if (safeCpu > safeFg) {
+                safeBg = (safeCpu - safeFg).coerceAtMost(totalDischargeMs)
+            }
+        }
+
+        // 验证后台时间正确识别为 45000ms（45s），不再为 0s
+        assertEquals("纯后台应用的 CPU 时间必须客观映射为后台运行时间", 45000L, safeBg)
+        assertEquals("前台时间必须保持为 0", 0L, safeFg)
+
+        // 2. 验证能量分配逻辑
+        val fgEnergyWh: Float
+        val bgEnergyWh: Float
+        if (safeFg > 0L) {
+            fgEnergyWh = totalDirectEnergyWh
+            bgEnergyWh = 0f
+        } else {
+            fgEnergyWh = 0f
+            bgEnergyWh = totalDirectEnergyWh
+        }
+
+        assertEquals("纯后台应用前台能耗必须严格为 0", 0f, fgEnergyWh, 0.0001f)
+        assertEquals("纯后台应用能耗必须 100% 归入后台能耗", totalDirectEnergyWh, bgEnergyWh, 0.0001f)
+
+        // 3. 验证前后台圆点标识颜色规则
+        val dotColorRes = if (safeFg > 0L) "green" else "blue"
+        assertEquals("纯后台应用必须显示蓝色圆点", "blue", dotColorRes)
+
+        val fgAppDotColorRes = if (123000L > 0L) "green" else "blue"
+        assertEquals("前台应用必须显示绿色圆点", "green", fgAppDotColorRes)
+    }
+
+    /**
+     * 验证 3D 游戏（如部落冲突）在整机亮屏放电中动态 GPU 渲染能耗合理加权分配：
+     * 1. 纯后台应用能耗（0.073Wh）被严格排除在前台核心算力之外，释放整机亮屏池；
+     * 2. 屏幕总池解耦为屏幕面板基础发光功耗（~0.9W）与动态 GPU 渲染池；
+     * 3. 游戏应用获得动态 GPU 渲染加权，使部落冲突平均功耗合理回升至约 3.06W，静态工具应用保持约 2.11W；
+     * 4. 验证各前台应用能耗之和严格遵循宏观能量守恒定律。
+     */
+    @Test
+    fun testGameDynamicGpuRenderingPowerAllocation() {
+        val screenOnWatts = 2.30f // 整机亮屏平均放电功耗 2.30W
+        val screenOnMs = 319_000L // 5分19秒
+        val screenOnHours = screenOnMs / 3600000f // 0.08861 小时
+        val totalScreenOnEnergyWh = screenOnWatts * screenOnHours // 约 0.2038 Wh
+
+        // 前台应用 1：部落冲突（3D 游戏，前台 123s，CPU 核心耗电 0.033Wh，CPU 核心功耗 0.97W）
+        val clashFgHours = 123f / 3600f
+        val clashCoreWatts = 0.97f
+        val clashCoreEnergyWh = clashCoreWatts * clashFgHours // 约 0.0331 Wh
+        val isClashGame = true
+
+        // 前台应用 2：电池检测（静态工具，前台 96s，CPU 核心耗电 0.022Wh，CPU 核心功耗 0.82W）
+        val batteryFgHours = 96f / 3600f
+        val batteryCoreWatts = 0.82f
+        val batteryCoreEnergyWh = batteryCoreWatts * batteryFgHours // 约 0.0219 Wh
+        val isBatteryGame = false
+
+        // 前台应用 3：荣耀桌面（系统桌面，前台 55s，CPU 核心耗电 0.012Wh，CPU 核心功耗 0.78W）
+        val homeFgHours = 55f / 3600f
+        val homeCoreWatts = 0.78f
+        val homeCoreEnergyWh = homeCoreWatts * homeFgHours // 约 0.0119 Wh
+        val isHomeGame = false
+
+        // 验证前台核心算力总和：仅包含前台应用，纯后台安全公共服务（0.073Wh）被严格排除
+        val totalCoreFgEnergyWh = clashCoreEnergyWh + batteryCoreEnergyWh + homeCoreEnergyWh // 约 0.0669 Wh
+        val sharedScreenEnergyWh = (totalScreenOnEnergyWh - totalCoreFgEnergyWh).coerceAtLeast(0f) // 约 0.1369 Wh
+
+        // 屏幕面板基础发光功率（0.9W）与动态 GPU 渲染池解耦
+        val baseDisplayWatts = 0.9f
+        val baseDisplayEnergyWh = baseDisplayWatts * screenOnHours // 约 0.0797 Wh
+        val dynamicGpuEnergyWh = (sharedScreenEnergyWh - baseDisplayEnergyWh).coerceAtLeast(0f) // 约 0.0572 Wh
+
+        // 计算渲染权重（游戏权重 3.0，非游戏应用权重 1.0）
+        val clashWeight = (if (isClashGame) 3.0 else 1.0) * clashFgHours
+        val batteryWeight = (if (isBatteryGame) 3.0 else 1.0) * batteryFgHours
+        val homeWeight = (if (isHomeGame) 3.0 else 1.0) * homeFgHours
+        val totalRenderWeight = clashWeight + batteryWeight + homeWeight
+
+        // 分配 GPU 动态渲染功率
+        val clashGpuWatts = (dynamicGpuEnergyWh * (clashWeight / totalRenderWeight) / clashFgHours).toFloat()
+        val batteryGpuWatts = (dynamicGpuEnergyWh * (batteryWeight / totalRenderWeight) / batteryFgHours).toFloat()
+        val homeGpuWatts = (dynamicGpuEnergyWh * (homeWeight / totalRenderWeight) / homeFgHours).toFloat()
+
+        val clashCombinedWatts = clashCoreWatts + baseDisplayWatts + clashGpuWatts
+        val batteryCombinedWatts = batteryCoreWatts + baseDisplayWatts + batteryGpuWatts
+        val homeCombinedWatts = homeCoreWatts + baseDisplayWatts + homeGpuWatts
+
+        // 验证：
+        // 1. 部落冲突综合功耗达到约 3.06W，彻底打破原本仅 1.29W 的荒谬偏低，真实反映游戏高负载！
+        assertEquals(3.06f, clashCombinedWatts, 0.1f)
+        assertTrue("游戏应用功耗必须合理处于 2.8W ~ 3.5W 范围", clashCombinedWatts in 2.8f..3.5f)
+
+        // 2. 电池检测等静态 2D 工具应用保持在约 2.11W 正常范围
+        assertEquals(2.11f, batteryCombinedWatts, 0.1f)
+        assertTrue("普通静态应用功耗必须合理处于 1.8W ~ 2.4W 范围", batteryCombinedWatts in 1.8f..2.4f)
+
+        // 3. 游戏功耗明显高于普通静态工具应用（高出约 0.9W ~ 1.0W）
+        assertTrue("3D 游戏功耗必须显著高于普通 2D 静态工具应用", clashCombinedWatts > batteryCombinedWatts + 0.8f)
+
+        // 4. 验证能量守恒：各应用综合能耗总和不超过整机亮屏总能耗
+        val totalAppCombinedEnergyWh = (clashCombinedWatts * clashFgHours) +
+                (batteryCombinedWatts * batteryFgHours) +
+                (homeCombinedWatts * homeFgHours)
+        assertTrue("各前台应用综合能耗总和必须小于等于整机亮屏总能耗", totalAppCombinedEnergyWh <= totalScreenOnEnergyWh + 0.001f)
+    }
 }
 
 

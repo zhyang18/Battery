@@ -65,14 +65,12 @@ object TimelineLayoutCalculator {
     ): List<LaidOutAppSlotItem> {
         if (events.isEmpty() || canvasWidth <= 0f || visibleEndTs <= visibleStartTs) return emptyList()
 
-        val stepX = slotSizePx + slotGapPx
-        if (stepX <= 0f) return emptyList()
+        val targetStep = slotSizePx + slotGapPx
+        if (targetStep <= 0f) return emptyList()
 
-        // 计算当前画布宽度下可容纳的时间槽总数量
-        val numSlots = max(1, ((canvasWidth + slotGapPx) / stepX).toInt())
-        val totalWidth = numSlots * stepX - slotGapPx
-        // 右对齐锚定到最右侧（当前时间点），使当前活跃应用紧贴最右侧边缘展示
-        val leftOffset = leftMarginPx + max(0f, canvasWidth - totalWidth)
+        // 水平全铺满计算时间槽数量与步长：确保 Slot 0 严格对齐左侧 contentLeft，最末 Slot 严格对齐右侧 contentRight
+        val numSlots = max(1, kotlin.math.round((canvasWidth - slotSizePx) / targetStep).toInt() + 1)
+        val actualStepX = if (numSlots > 1) (canvasWidth - slotSizePx) / (numSlots - 1) else 0f
 
         val totalTimeSpan = visibleEndTs - visibleStartTs
         val result = mutableListOf<LaidOutAppSlotItem>()
@@ -87,16 +85,12 @@ object TimelineLayoutCalculator {
         if (visibleEvents.isEmpty()) return emptyList()
 
         for (slotIndex in 0 until numSlots) {
-            val slotLeft = leftOffset + slotIndex * stepX
+            val slotLeft = leftMarginPx + slotIndex * actualStepX
             val slotRight = slotLeft + slotSizePx
 
-            // 基于相对于有效绘图区域的像素偏移精准计算时间槽对应的起始与结束时间戳
-            val slotRelativeLeft = (slotLeft - leftMarginPx).coerceAtLeast(0f)
-            val slotRelativeRight = (slotRight - leftMarginPx).coerceAtMost(canvasWidth)
-            val slotStartRatio = (slotRelativeLeft / canvasWidth).coerceIn(0f, 1f)
-            val slotEndRatio = if (slotIndex == numSlots - 1) 1.0f else (slotRelativeRight / canvasWidth).coerceIn(0f, 1f)
-            val slotStartTs = visibleStartTs + (totalTimeSpan * slotStartRatio).toLong()
-            val slotEndTs = visibleStartTs + (totalTimeSpan * slotEndRatio).toLong()
+            // 均等切分可视时间范围，确保全时段连续覆盖
+            val slotStartTs = visibleStartTs + (totalTimeSpan * (slotIndex.toDouble() / numSlots)).toLong()
+            val slotEndTs = visibleStartTs + (totalTimeSpan * ((slotIndex + 1).toDouble() / numSlots)).toLong()
 
             // 查找在该时间槽区间内处于活跃状态的应用
             val activeEvents = visibleEvents.filter {

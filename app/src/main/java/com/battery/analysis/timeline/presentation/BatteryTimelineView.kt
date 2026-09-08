@@ -133,6 +133,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = sp9_5
         color = Color.parseColor("#9E9E9E")
+        textAlign = Paint.Align.CENTER
     }
 
     private val yAxisTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -442,7 +443,7 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         // 曲线区域使用完整图表高度，允许与下方纵向堆叠的应用图标产生自然的视觉交叠
         val mainChartHeight = screenBarTop - dp12
-        val topPadding = dp8
+        val topPadding = dp22
         val bottomPadding = dp6
         val availableH = max(1f, mainChartHeight - topPadding - bottomPadding)
 
@@ -467,7 +468,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         // 1. 绘制左侧 Y 轴功耗数值刻度与横向基准网格虚线
         drawYAxisAndGrid(canvas, contentLeft, contentRight, topPadding, availableH, maxScaleW)
 
-        // 2. 绘制垂直时间网格虚线与底部时间刻度文字
+        // 2. 绘制垂直时间网格虚线与底部时间刻度文字（以时间点为中心严格居中对齐）
         drawTimeGridAndTicks(canvas, contentLeft, contentWidth, mainChartHeight, screenBarBottom, timeTextY, visibleStart, visibleEnd)
 
         // 3. 多选/反选模式：根据选中的指标集合依次绘制各曲线（支持自动计算画线锚点与阶梯展示）
@@ -491,17 +492,24 @@ class BatteryTimelineView @JvmOverloads constructor(
             drawAppEventsLayer(canvas)
         }
 
-        // 5. 绘制横贯全宽的固定底图时间轴屏幕状态实线条（亮屏绿 / 息屏暗灰）
+        // 5. 绘制横贯全宽的固定底图时间轴屏幕状态实线条（亮屏绿 / 息屏红）
         drawScreenStateBar(canvas, contentLeft, contentRight, screenBarTop, screenBarBottom, visibleStart, visibleEnd)
 
-        // 6. 若长按处于活跃状态，绘制十字游标与悬浮气泡
+        // 6. 若长按处于活跃状态，绘制垂直游标并将信息固定在图表顶部展示（无遮挡弹框）
         if (isCursorActive) {
-            drawCursorAndTooltip(canvas, contentLeft, contentRight, contentWidth, screenBarTop, visibleStart, visibleEnd)
+            drawCursorAndHeaderInfo(canvas, contentLeft, contentRight, contentWidth, screenBarTop, visibleStart, visibleEnd)
         }
     }
 
     /**
      * 绘制图表左侧功耗 Y 轴数值刻度（如 30W, 20W, 10W, 0W）与横向网格虚线。
+     *
+     * @param canvas 绘图画布 [Canvas]
+     * @param contentLeft 图表左边界 X 坐标
+     * @param contentRight 图表右边界 X 坐标
+     * @param topPadding 顶部安全间距
+     * @param availableH 有效高度
+     * @param maxScaleW 最大功耗刻度值
      */
     private fun drawYAxisAndGrid(
         canvas: Canvas,
@@ -522,7 +530,16 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制时间轴网格虚线与底部时间刻度文字（以对应时间点为中心居中绘制）。
+     * 绘制时间轴网格虚线与底部时间刻度文字（以对应时间点为中心严格居中对齐）。
+     *
+     * @param canvas 绘图画布 [Canvas]
+     * @param contentLeft 图表左边界 X 坐标
+     * @param contentWidth 图表有效宽度
+     * @param mainHeight 曲线主体高度
+     * @param tickTop 刻度短线上边缘 Y 坐标
+     * @param textY 时间文字基线 Y 坐标
+     * @param visibleStart 视窗起始时间戳
+     * @param visibleEnd 视窗结束时间戳
      */
     private fun drawTimeGridAndTicks(
         canvas: Canvas,
@@ -535,17 +552,17 @@ class BatteryTimelineView @JvmOverloads constructor(
         visibleEnd: Long
     ) {
         val ticks = TimelineScaleCalculator.calculateTicks(visibleStart, visibleEnd)
-        val contentRight = contentLeft + contentWidth
+        val w = width.toFloat()
         for (tick in ticks) {
             val x = contentLeft + tick.xRatio * contentWidth
             // 垂直虚线网格
-            canvas.drawLine(x, dp4, x, mainHeight, gridPaint)
+            canvas.drawLine(x, dp22, x, mainHeight, gridPaint)
             // 刻度小短线
             canvas.drawLine(x, tickTop, x, tickTop + dp3, gridPaint)
-            // 时间文本以对应时间点 x 为中心居中绘制，并在边缘处做防溢出保护
+            // 时间文本以对应时间点 x 为中心严格居中对齐绘制，并在屏幕边缘做安全防截断
             val textWidth = textPaint.measureText(tick.label)
             val halfWidth = textWidth / 2f
-            val textX = (x - halfWidth).coerceIn(contentLeft, contentRight - textWidth)
+            val textX = x.coerceIn(halfWidth + dp2, w - halfWidth - dp2)
             canvas.drawText(tick.label, textX, textY, textPaint)
         }
     }
@@ -642,6 +659,15 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     /**
      * 绘制电量阶梯曲线、拐点圆点及百分比数值标签（鲜绿色，始终自左侧 contentLeft 起步并贯穿整个时间轴）。
+     *
+     * @param canvas 绘图画布 [Canvas]
+     * @param contentLeft 内容区左边界 X 坐标
+     * @param contentWidth 内容区宽度
+     * @param topPadding 顶部安全间距
+     * @param availableH 曲线有效可用高度
+     * @param visibleStart 视窗起始时间戳
+     * @param visibleEnd 视窗结束时间戳
+     * @param rawSamples 原始采样点数据列表
      */
     private fun drawBatteryCurve(
         canvas: Canvas,
@@ -665,7 +691,9 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         curvePath.reset()
         val firstSample = downsampled.first()
-        val firstY = topPadding + (1f - (firstSample.batteryLevel / 100f).coerceIn(0f, 1f)) * availableH
+        // 电量曲线分布在图表上方区间 (0.05 ~ 0.45)，与下方功耗曲线天然隔离
+        val firstNorm = (firstSample.batteryLevel / 100f).coerceIn(0f, 1f) * 0.45f + 0.50f
+        val firstY = topPadding + (1f - firstNorm) * availableH
 
         // 无论处于何种时间跨度，折线始终从最左侧起点 (contentLeft, firstY) 开始
         curvePath.moveTo(contentLeft, firstY)
@@ -680,7 +708,8 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         for (s in downsampled) {
             val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
-            val y = topPadding + (1f - (s.batteryLevel / 100f).coerceIn(0f, 1f)) * availableH
+            val norm = (s.batteryLevel / 100f).coerceIn(0f, 1f) * 0.45f + 0.50f
+            val y = topPadding + (1f - norm) * availableH
 
             if (x > lastX) {
                 curvePath.lineTo(x, lastY)
@@ -707,6 +736,15 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     /**
      * 绘制温度阶梯折线、拐点圆点及摄氏度数值标签（珊瑚橙色，始终自左侧 contentLeft 起步并贯穿整个时间轴）。
+     *
+     * @param canvas 绘图画布 [Canvas]
+     * @param contentLeft 内容区左边界 X 坐标
+     * @param contentWidth 内容区宽度
+     * @param topPadding 顶部安全间距
+     * @param availableH 曲线有效可用高度
+     * @param visibleStart 视窗起始时间戳
+     * @param visibleEnd 视窗结束时间戳
+     * @param rawSamples 原始采样点数据列表
      */
     private fun drawTemperatureCurve(
         canvas: Canvas,
@@ -730,7 +768,8 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         curvePath.reset()
         val firstSample = downsampled.first()
-        val firstNorm = ((firstSample.temperatureC - 20.0) / 30.0).coerceIn(0.05, 0.95).toFloat()
+        // 将 15℃ ~ 45℃ 映射至中上层区间 (0.45 ~ 0.85)，彻底避免与底部待机低功耗线条发生视觉黏连与重叠
+        val firstNorm = (((firstSample.temperatureC - 15.0) / 30.0).coerceIn(0.0, 1.0) * 0.40 + 0.45).toFloat()
         val firstY = topPadding + (1f - firstNorm) * availableH
 
         // 折线始终从最左侧起点 (contentLeft, firstY) 开始
@@ -746,7 +785,7 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         for (s in downsampled) {
             val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
-            val norm = ((s.temperatureC - 20.0) / 30.0).coerceIn(0.05, 0.95).toFloat()
+            val norm = (((s.temperatureC - 15.0) / 30.0).coerceIn(0.0, 1.0) * 0.40 + 0.45).toFloat()
             val y = topPadding + (1f - norm) * availableH
 
             if (x > lastX) {
@@ -775,6 +814,15 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     /**
      * 绘制电压阶梯折线、拐点圆点及伏特数值标签（金黄色，始终自左侧 contentLeft 起步并贯穿整个时间轴）。
+     *
+     * @param canvas 绘图画布 [Canvas]
+     * @param contentLeft 内容区左边界 X 坐标
+     * @param contentWidth 内容区宽度
+     * @param topPadding 顶部安全间距
+     * @param availableH 曲线有效可用高度
+     * @param visibleStart 视窗起始时间戳
+     * @param visibleEnd 视窗结束时间戳
+     * @param rawSamples 原始采样点数据列表
      */
     private fun drawVoltageCurve(
         canvas: Canvas,
@@ -799,7 +847,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         curvePath.reset()
         val firstSample = downsampled.first()
         val firstVoltV = firstSample.voltageMv / 1000f
-        val firstNorm = ((firstVoltV - 3.4f) / (4.4f - 3.4f)).coerceIn(0.1f, 0.9f)
+        // 将 3.4V ~ 4.4V 电压映射至中层区间 (0.35 ~ 0.70)
+        val firstNorm = (((firstVoltV - 3.4f) / 1.0f).coerceIn(0f, 1f) * 0.35f + 0.35f)
         val firstY = topPadding + (1f - firstNorm) * availableH
 
         // 折线始终从最左侧起点 (contentLeft, firstY) 开始
@@ -816,7 +865,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         for (s in downsampled) {
             val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
             val voltV = s.voltageMv / 1000f
-            val norm = ((voltV - 3.4f) / (4.4f - 3.4f)).coerceIn(0.1f, 0.9f)
+            val norm = (((voltV - 3.4f) / 1.0f).coerceIn(0f, 1f) * 0.35f + 0.35f)
             val y = topPadding + (1f - norm) * availableH
 
             if (x > lastX) {
@@ -945,9 +994,17 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制长按垂直十字游标与信息悬浮气泡卡片。
+     * 绘制长按垂直游标线并将探查到的时间、电量、功耗、温度、电压与前台应用信息固定绘制在图表顶部（无遮挡弹框）。
+     *
+     * @param canvas 绘图画布 [Canvas]
+     * @param contentLeft 图表左边界 X 坐标
+     * @param contentRight 图表右边界 X 坐标
+     * @param contentWidth 图表内容有效宽度
+     * @param mainHeight 曲线区域高度
+     * @param visibleStart 视窗起始时间戳
+     * @param visibleEnd 视窗结束时间戳
      */
-    private fun drawCursorAndTooltip(
+    private fun drawCursorAndHeaderInfo(
         canvas: Canvas,
         contentLeft: Float,
         contentRight: Float,
@@ -957,8 +1014,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         visibleEnd: Long
     ) {
         val clampedX = cursorX.coerceIn(contentLeft, contentRight)
-        // 1. 垂直虚线
-        canvas.drawLine(clampedX, 0f, clampedX, mainHeight + dp6, cursorPaint)
+        // 1. 垂直虚线游标
+        canvas.drawLine(clampedX, dp20, clampedX, mainHeight + dp6, cursorPaint)
 
         // 2. 查询当前游标时刻对应的数据
         val curTs = TimelineScaleCalculator.xToTime(clampedX, visibleStart, visibleEnd, contentWidth, contentLeft)
@@ -969,34 +1026,31 @@ class BatteryTimelineView @JvmOverloads constructor(
         val powerStr = curSample?.let {
             val pWatts = it.getPowerWatts()
             val signedPower = if (pWatts > 0) -pWatts else pWatts
-            String.format(Locale.getDefault(), "功耗: %.2fW", signedPower)
+            String.format(Locale.getDefault(), "功耗:%.2fW", signedPower)
         } ?: ""
-        val levelStr = curSample?.let { "电量: ${it.batteryLevel}%" } ?: ""
-        val voltStr = curSample?.let { String.format(Locale.getDefault(), "电压: %.3fV", it.getVoltageVolts()) } ?: ""
-        val tempStr = curSample?.let { String.format(Locale.getDefault(), "温度: %.1f℃", it.temperatureC) } ?: ""
-        val appStr = curApp?.let { "应用: ${it.appName}" } ?: ""
+        val levelStr = curSample?.let { "电量:${it.batteryLevel}%" } ?: ""
+        val voltStr = curSample?.let { String.format(Locale.getDefault(), "电压:%.2fV", it.getVoltageVolts()) } ?: ""
+        val tempStr = curSample?.let { String.format(Locale.getDefault(), "温度:%.1f℃", it.temperatureC) } ?: ""
+        val appStr = curApp?.let { "应用:${it.appName}" } ?: ""
 
-        val line1 = "$timeStr  $levelStr"
-        val line2 = "$powerStr  $voltStr"
-        val line3 = if (appStr.isNotEmpty()) "$tempStr  $appStr" else tempStr
+        val infoItems = listOfNotNull(
+            timeStr.takeIf { it.isNotEmpty() },
+            levelStr.takeIf { it.isNotEmpty() },
+            powerStr.takeIf { it.isNotEmpty() },
+            tempStr.takeIf { it.isNotEmpty() },
+            voltStr.takeIf { it.isNotEmpty() },
+            appStr.takeIf { it.isNotEmpty() }
+        )
+        val fullInfoText = infoItems.joinToString("  ")
 
-        // 3. 计算气泡尺寸与位置
-        val padding = dp8
-        val textH = sp10_5 * 1.3f
-        val boxWidth = dp14 * 10
-        val boxHeight = textH * 3 + padding * 2
+        // 3. 固定在图表顶部展示，绘制背景胶囊横条与信息文本
+        val headerTop = dp2
+        val headerBottom = dp18
+        val textY = headerTop + sp9_5 * 1.15f
+        tooltipRect.set(contentLeft, headerTop, contentRight, headerBottom)
+        canvas.drawRoundRect(tooltipRect, dp4, dp4, tooltipBgPaint)
 
-        var boxLeft = clampedX - boxWidth / 2f
-        if (boxLeft < contentLeft) boxLeft = contentLeft
-        if (boxLeft + boxWidth > contentRight) boxLeft = contentRight - boxWidth
-        val boxTop = dp4
-
-        tooltipRect.set(boxLeft, boxTop, boxLeft + boxWidth, boxTop + boxHeight)
-        canvas.drawRoundRect(tooltipRect, dp6, dp6, tooltipBgPaint)
-
-        canvas.drawText(line1, boxLeft + padding, boxTop + padding + textH, tooltipTextPaint)
-        canvas.drawText(line2, boxLeft + padding, boxTop + padding + textH * 2, tooltipTextPaint)
-        canvas.drawText(line3, boxLeft + padding, boxTop + padding + textH * 3, tooltipTextPaint)
+        canvas.drawText(fullInfoText, contentLeft + dp6, textY, tooltipTextPaint)
     }
 
     /**

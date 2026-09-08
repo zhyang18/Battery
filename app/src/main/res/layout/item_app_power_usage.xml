@@ -52,37 +52,19 @@
                 tools:text="系统桌面" />
         </LinearLayout>
 
-        <!-- 功耗与 MAX 温度参数行 -->
-        <LinearLayout
+        <!-- 功耗与 AVG 温度参数行 -->
+        <TextView
+            android:id="@+id/tv_avg_info"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="3dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/tv_avg_info"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="?android:attr/textColorPrimary"
-                android:textSize="12sp"
-                android:maxLines="1"
-                tools:text="AVG: 0.67W, 36.0℃" />
-
-            <!-- 移动到时间左侧的 MAX 最高运行温度 -->
-            <TextView
-                android:id="@+id/tv_max_temp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:textColor="?android:attr/textColorPrimary"
-                android:textSize="11.5sp"
-                android:maxLines="1"
-                tools:text="MAX: 39.0℃" />
-        </LinearLayout>
+            android:layout_marginTop="3.5dp"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="12sp"
+            android:maxLines="1"
+            tools:text="AVG: 0.67W, 36.0℃" />
     </LinearLayout>
 
-    <!-- 右侧两行：上方前后台时长，下方前后台消耗能量 -->
+    <!-- 右侧三行：上方前后台时长，中间前后台消耗能量，下方 MAX 最高温度 -->
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -110,6 +92,17 @@
             android:maxLines="1"
             android:ellipsize="end"
             tools:text="0.250Wh | 0.080Wh" />
+
+        <!-- 移动到能量下方的 MAX 最高运行温度 -->
+        <TextView
+            android:id="@+id/tv_max_temp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="11.5sp"
+            android:maxLines="1"
+            tools:text="MAX: 39.0℃" />
     </LinearLayout>
 
 </LinearLayout>

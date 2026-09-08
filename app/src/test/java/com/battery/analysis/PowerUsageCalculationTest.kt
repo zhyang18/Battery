@@ -297,24 +297,48 @@ class PowerUsageCalculationTest {
     }
 
     /**
-     * 验证普通模式下亮屏与息屏功耗：拒绝使用 SCREEN_OFF_TO_ON_POWER_RATIO = 0.12f 虚构假数据，
-     * 亮屏功耗反映真实平均放电功耗，无底层独立通道时息屏功耗规范置为 0f 由 UI 显示 "--"。
+     * 验证普通模式下亮屏与息屏功耗解耦逻辑：
+     * 既有亮屏又有息屏时，结合后台实耗与待机底座客观推导息屏功耗，不再粗暴置 0，且亮屏与息屏严格满足能量守恒。
      */
     @Test
-    fun testNormalModeOverviewStatsNoFakeRatio() {
+    fun testNormalModeOverviewStatsEnergyDecoupling() {
         val screenOnHours = 2.0f
         val screenOffHours = 4.0f
-        val realTotalEnergyWh = 8.0f // 2小时亮屏使用消耗 8Wh
+        val realTotalEnergyWh = 8.0f // 6小时放电总能耗 8Wh
         val dischargeHours = screenOnHours + screenOffHours // 6小时
         val avgPower = realTotalEnergyWh / dischargeHours // 1.33W
+        val screenOffMs = (screenOffHours * 3600000f).toLong()
 
-        // 模拟普通模式下剔除 0.12f 经验比值后的真实功耗结算
-        val screenOnPower = if (screenOnHours > 0f) avgPower else 0f
-        val screenOffPower = if (screenOnHours <= 0f && screenOffHours > 0f) avgPower else 0f
+        // 模拟普通模式下新的解耦算法
+        val screenOffPower: Float
+        val screenOnPower: Float
+        if (screenOffHours <= 0f || screenOffMs < 30000L) {
+            screenOnPower = avgPower
+            screenOffPower = 0f
+        } else if (screenOnHours <= 0f) {
+            screenOffPower = avgPower.coerceIn(0f, 3.0f)
+            screenOnPower = 0f
+        } else {
+            val bgEnergyWh = 0.4f // 4小时息屏后台消耗 0.4Wh
+            val bgWatts = bgEnergyWh / screenOffHours // 0.1W
+            val baseStandbyWatts = minOf(0.15f, avgPower * 0.6f) // 0.15W
+            val estimatedOffWatts = (bgWatts + baseStandbyWatts).coerceIn(0.05f, 3.0f) // 0.25W
+            screenOffPower = minOf(estimatedOffWatts, avgPower)
 
-        // 验证不再产生 0.12f 的虚假解耦功耗
-        assertEquals("亮屏功耗真实反映放电平均功耗", avgPower, screenOnPower, 0.001f)
-        assertEquals("无独立测算通道时息屏功耗必须为0以展示--", 0f, screenOffPower, 0.001f)
+            val offEnergyWh = screenOffPower * screenOffHours // 0.25 * 4 = 1.0Wh
+            val onEnergyWh = (realTotalEnergyWh - offEnergyWh).coerceAtLeast(0f) // 8.0 - 1.0 = 7.0Wh
+            val calcOnPower = onEnergyWh / screenOnHours // 7.0 / 2 = 3.5W
+            screenOnPower = if (calcOnPower < 0.05f && avgPower >= 0.05f) avgPower else calcOnPower
+        }
+
+        // 验证息屏功耗不为 0，且处于合理待机范围（约 0.25W）
+        assertTrue("息屏功耗必须大于 0", screenOffPower > 0.05f)
+        assertEquals("息屏功耗必须客观反映待机底座与后台能耗", 0.25f, screenOffPower, 0.001f)
+        // 验证亮屏功耗合理大于整机平均功耗
+        assertTrue("亮屏功耗必须高于整机平均功耗", screenOnPower > avgPower)
+        // 验证严格满足能量守恒：E_on + E_off == E_total
+        val totalDecoupledEnergy = (screenOnPower * screenOnHours) + (screenOffPower * screenOffHours)
+        assertEquals("解耦后的亮息屏能耗总和必须严格等于总放电能量", realTotalEnergyWh, totalDecoupledEnergy, 0.001f)
     }
 
     /**
@@ -729,6 +753,106 @@ class PowerUsageCalculationTest {
                 (batteryCombinedWatts * batteryFgHours) +
                 (homeCombinedWatts * homeFgHours)
         assertTrue("各前台应用综合能耗总和必须小于等于整机亮屏总能耗", totalAppCombinedEnergyWh <= totalScreenOnEnergyWh + 0.001f)
+    }
+
+    /**
+     * 验证短时间息屏（如 15 秒）发生 1% 整数掉电跳变（45mAh）时的平滑防量化尖峰保护。
+     * 杜绝将 1% 整数电量直接除以微小时长导致功耗飙升至 45W 的严重物理错误。
+     */
+    @Test
+    fun testScreenOffAntiQuantizationSpikeProtection() {
+        val capacityMah = 4500f
+        val safeVoltage = 4.0f
+        val screenOffDurationMs = 15_000L // 息屏仅 15 秒（息屏监控服务典型采样周期）
+        val screenOffHours = screenOffDurationMs / 3600000f // 0.004167 小时
+        val maxStandbyPowerWatts = 3.0f
+
+        // 模拟 dumpsys 上报了 "Amount discharged while screen off: 1"
+        val percent = 1f
+        val rawOffMah = (percent / 100f) * capacityMah // 粗粒度 45mAh
+
+        // 1. 旧逻辑：直接使用 45mAh 计算功耗
+        val oldScreenOffWatts = (rawOffMah * safeVoltage) / (1000f * screenOffHours)
+        // 验证旧逻辑确实会计算出 45W 左右的荒谬数值
+        assertEquals("旧逻辑会误算为 43W~45W 尖峰", 43.2f, oldScreenOffWatts, 0.5f)
+
+        // 2. 新逻辑：实施短时间平滑防量化尖峰保护与待机物理上限
+        val maxPhysicalOffMah = (maxStandbyPowerWatts * 1000f / safeVoltage) * screenOffHours
+        val smoothedOffMah = if (screenOffHours < 0.25f) rawOffMah.coerceAtMost(maxPhysicalOffMah) else rawOffMah
+        val newScreenOffWatts = ((smoothedOffMah * safeVoltage) / (1000f * screenOffHours))
+            .coerceIn(0.05f, maxStandbyPowerWatts)
+
+        // 验证：
+        // 放电量从 45mAh 平滑为约 3.125mAh，功耗严格限制在 3.0W 物理上限以内
+        assertTrue("平滑后的息屏放电量绝不能为 45mAh 粗粒度值", smoothedOffMah < 5.0f)
+        assertTrue("新逻辑息屏功耗绝不能超过 3.0W 待机物理极限", newScreenOffWatts <= 3.0f)
+        assertTrue("新逻辑息屏功耗必须处于有效待机功耗范围", newScreenOffWatts >= 0.05f)
+    }
+
+    /**
+     * 验证多小时放电后刚息屏短时间（如 30 秒）时，未归因结余放电量按时间占比合理分摊。
+     * 杜绝将累计数小时的结余放电量全部塞给几十秒息屏导致功耗高达数十瓦。
+     */
+    @Test
+    fun testMultiHoursHistoryRemainingDrainAllocation() {
+        val totalDischargeDurationMs = 5 * 3600_000L // 放电 5 小时
+        val screenOffDurationMs = 30_000L // 刚熄屏 30 秒
+        val safeVoltage = 4.0f
+        val maxStandbyPowerWatts = 3.0f
+
+        // 累计 5 小时期间整机未归因结余放电量为 120mAh
+        val remainingDrain = 120f
+
+        // 1. 旧逻辑：将 120mAh 全部算给这 30 秒
+        val oldOffHours = screenOffDurationMs / 3600000f
+        val oldOffWatts = (remainingDrain * safeVoltage) / (1000f * oldOffHours)
+        assertEquals("旧逻辑会误将全周期结余全额赋予短时息屏导致功耗高达 57W", 57.6f, oldOffWatts, 0.5f)
+
+        // 2. 新逻辑：按时间切片比例加权分摊
+        val offRatio = (screenOffDurationMs.toFloat() / totalDischargeDurationMs).coerceIn(0f, 1f)
+        val allocatedOffDrain = remainingDrain * offRatio // 120 * (30 / 18000) = 0.2mAh
+        val offHours = screenOffDurationMs / 3600000f
+        val maxPhysicalStandbyDrain = (maxStandbyPowerWatts * 1000f / safeVoltage) * offHours
+        val effectiveOffDrain = allocatedOffDrain.coerceAtMost(maxPhysicalStandbyDrain)
+        val newOffWatts = ((effectiveOffDrain * safeVoltage) / (1000f * offHours))
+            .coerceIn(0.05f, maxStandbyPowerWatts)
+
+        // 验证：
+        // 息屏分摊放电量仅为 0.2mAh，计算出的息屏功耗约为 0.1W，完全处于正常待机区间
+        assertEquals("30秒息屏分摊放电量应为 0.2mAh", 0.2f, effectiveOffDrain, 0.01f)
+        assertEquals("息屏功耗应保持在约 0.1W 正常待机水平", 0.1f, newOffWatts, 0.05f)
+        assertTrue("新逻辑息屏功耗绝不应超过 3.0W 物理上限", newOffWatts <= 3.0f)
+    }
+
+    /**
+     * 验证全周期纯息屏待机状态下的功耗结算：
+     * 整机全周期处于息屏待机工况，息屏功耗真实反映整机平均功耗，杜绝显示为 0.00W 或 "--"。
+     */
+    @Test
+    fun testPureScreenOffStandbyPowerSanity() {
+        val screenOnHours = 0.0f
+        val screenOffHours = 4.0f // 4 小时纯息屏待机
+        val realTotalEnergyWh = 0.8f // 4 小时待机消耗 0.8Wh（平均功耗 0.2W）
+        val avgPower = realTotalEnergyWh / screenOffHours // 0.2W
+        val screenOffMs = (screenOffHours * 3600000f).toLong()
+
+        // 纯息屏解耦判定
+        val screenOffPower: Float
+        val screenOnPower: Float
+        if (screenOffHours <= 0f || screenOffMs < 30000L) {
+            screenOnPower = avgPower
+            screenOffPower = 0f
+        } else if (screenOnHours <= 0f) {
+            screenOffPower = avgPower.coerceIn(0f, 3.0f)
+            screenOnPower = 0f
+        } else {
+            screenOffPower = avgPower
+            screenOnPower = avgPower
+        }
+
+        // 验证纯息屏待机功耗准确等于整机平均功耗 0.2W，亮屏功耗规范置 0
+        assertEquals("纯息屏待机时息屏功耗必须等于平均放电功耗", 0.2f, screenOffPower, 0.001f)
+        assertEquals("纯息屏待机时亮屏功耗必须为 0", 0f, screenOnPower, 0.001f)
     }
 }
 

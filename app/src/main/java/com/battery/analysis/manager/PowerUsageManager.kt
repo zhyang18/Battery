@@ -652,23 +652,33 @@ class PowerUsageManager private constructor(private val context: Context) {
                     0f
                 }
 
-                // 2. 统计真实息屏记录功耗（底层息屏数据优先；若无单独息屏统计，按总能量扣除前台应用实耗能量严格计算）
-                val screenOffWatts = if (screenOffHours > 0f) {
-                    if (stats.screenOffDrainMah > 0f) {
-                        (stats.screenOffDrainMah * safeVoltage) / (1000f * screenOffHours)
-                    } else {
-                        val fgEnergyWh = stats.appList.sumOf { it.energyWh.toDouble() }.toFloat()
-                        val offEnergyWh = (realTotalEnergyWh - fgEnergyWh).coerceAtLeast(0f)
-                        val computedOffWatts = offEnergyWh / screenOffHours
-                        if (computedOffWatts >= 0.05f) computedOffWatts else 0f
-                    }
+                // 2. 统计真实息屏记录功耗与亮屏功耗解耦（严格遵循能量守恒与待机物理合理性约束，杜绝 45W 尖峰与误判为 0）
+                val screenOffWatts: Float
+                if (screenOffHours <= 0f || screenOffMs < 30000L) {
+                    // 若无有效息屏时长或息屏不足 30 秒，按纯亮屏处理，息屏功耗置 0f（UI 规范展示为 "--"）
+                    screenOffWatts = 0f
+                } else if (screenOnHours <= 0f) {
+                    // 全周期均为纯息屏待机状态，整机平均功耗即为息屏功耗，施加 3.0W 物理上限保护
+                    screenOffWatts = avgWatts.coerceIn(0f, ShizukuBatteryStatsParser.MAX_STANDBY_POWER_WATTS)
                 } else {
-                    0f
+                    // 既有亮屏又有息屏：优先使用系统底层独立的息屏放电量，并施加短时防尖峰与物理上限平滑保护
+                    if (stats.screenOffDrainMah > 0f) {
+                        val rawOffWatts = (stats.screenOffDrainMah * safeVoltage) / (1000f * screenOffHours)
+                        val maxAllowedOffWatts = if (avgWatts > 0.05f) minOf(ShizukuBatteryStatsParser.MAX_STANDBY_POWER_WATTS, avgWatts) else ShizukuBatteryStatsParser.MAX_STANDBY_POWER_WATTS
+                        screenOffWatts = rawOffWatts.coerceIn(0.05f, maxAllowedOffWatts)
+                    } else {
+                        // 底层无独立息屏统计通道时，结合纯后台应用实耗能耗与系统基础待机底座功率客观推导，杜绝误报为 0 或因整机结余除以短时间飙高
+                        val bgEnergyWh = stats.appList.filter { it.foregroundTimeMs <= 0L }.sumOf { it.energyWh.toDouble() }.toFloat()
+                        val bgPowerWatts = if (screenOffHours > 0f) (bgEnergyWh / screenOffHours) else 0f
+                        val baseStandbyWatts = if (avgWatts > 0.05f) minOf(ShizukuBatteryStatsParser.DEFAULT_STANDBY_BASE_WATTS, avgWatts * 0.6f) else 0.12f
+                        val estimatedOffWatts = (bgPowerWatts + baseStandbyWatts).coerceIn(0.05f, ShizukuBatteryStatsParser.MAX_STANDBY_POWER_WATTS)
+                        screenOffWatts = if (avgWatts > 0.05f) minOf(estimatedOffWatts, avgWatts) else estimatedOffWatts
+                    }
                 }
 
                 // 3. 依据物理能量严格守恒解耦亮屏功耗：E_on = E_total - E_off, P_on = E_on / T_on
                 val screenOnWatts = if (screenOnHours > 0f) {
-                    if (screenOffHours <= 0f || screenOffMs <= 0L) {
+                    if (screenOffHours <= 0f || screenOffMs < 30000L || screenOffWatts <= 0f) {
                         // 若全周期均为亮屏状态，亮屏平均放电功耗即等同于整机放电平均功耗
                         avgWatts
                     } else {
@@ -1719,10 +1729,32 @@ class PowerUsageManager private constructor(private val context: Context) {
             0f
         }
 
-        // 亮屏与息屏功耗：普通模式在无底层独立息屏通道时，若有亮屏使用，avgPower 真实反映亮屏平均放电功耗；
-        // 息屏功耗因无独立通道测量置为 0f（UI 规范展示为 "--"），彻底杜绝使用 12% 等虚假写死比例
-        val screenOnPower = if (screenOnHours > 0f) avgPower else 0f
-        val screenOffPower = if (screenOnHours <= 0f && screenOffHours > 0f) avgPower else 0f
+        // 亮屏与息屏功耗物理守恒解耦：
+        // 拒绝粗暴将息屏功耗置 0，根据纯后台应用实耗与待机底座客观推导息屏功耗，再反解亮屏功耗，严格保持能量守恒
+        val screenOffPower: Float
+        val screenOnPower: Float
+        if (screenOffHours <= 0f || screenOffMs < 30000L) {
+            // 纯亮屏场景（息屏不足 30 秒）
+            screenOnPower = avgPower
+            screenOffPower = 0f
+        } else if (screenOnHours <= 0f) {
+            // 纯息屏场景（全周期未点亮屏幕）
+            screenOffPower = avgPower.coerceIn(0f, ShizukuBatteryStatsParser.MAX_STANDBY_POWER_WATTS)
+            screenOnPower = 0f
+        } else {
+            // 既有亮屏又有息屏场景：结合纯后台应用能耗与系统基础待机底座功率客观推导息屏功耗
+            val bgEnergyWh = appList.filter { it.foregroundTimeMs <= 0L }.sumOf { it.energyWh.toDouble() }.toFloat()
+            val bgWatts = if (screenOffHours > 0f) (bgEnergyWh / screenOffHours) else 0f
+            val baseStandbyWatts = if (avgPower > 0.05f) minOf(ShizukuBatteryStatsParser.DEFAULT_STANDBY_BASE_WATTS, avgPower * 0.6f) else 0.12f
+            val estimatedOffWatts = (bgWatts + baseStandbyWatts).coerceIn(0.05f, ShizukuBatteryStatsParser.MAX_STANDBY_POWER_WATTS)
+            screenOffPower = if (avgPower > 0.05f) minOf(estimatedOffWatts, avgPower) else estimatedOffWatts
+
+            // 依据能量守恒解耦亮屏功耗：E_on = E_total - E_off, P_on = E_on / T_on
+            val offEnergyWh = screenOffPower * screenOffHours
+            val onEnergyWh = (realTotalEnergyWh - offEnergyWh).coerceAtLeast(0f)
+            val calcOnPower = onEnergyWh / screenOnHours
+            screenOnPower = if (calcOnPower < 0.05f && avgPower >= 0.05f) avgPower else calcOnPower
+        }
 
         val remainingTotalHours = if (avgPower >= 0.05f) {
             ((effectiveCapacity * (currentLevel / 100f) * safeVoltage) / 1000f) / avgPower

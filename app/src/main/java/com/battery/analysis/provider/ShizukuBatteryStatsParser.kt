@@ -194,7 +194,15 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             if (amountMatcher.find()) {
                 val percent = amountMatcher.group(1)?.toFloatOrNull() ?: 0f
                 if (percent > 0f) {
-                    screenOffDrainMah = (percent / 100f) * capacityMah
+                    val rawOffMah = (percent / 100f) * capacityMah
+                    // 若息屏时长较短（<15分钟），实施基于物理最大待机功耗（3.0W）的平滑防量化尖峰保护，杜绝 45W 虚高
+                    val offHours = screenOffDurationMs / 3600000f
+                    if (screenOffDurationMs > 0L && offHours < 0.25f) {
+                        val maxPhysicalMah = (MAX_STANDBY_POWER_WATTS * 1000f / voltageVolts.coerceAtLeast(3.7f)) * offHours
+                        screenOffDrainMah = rawOffMah.coerceAtMost(maxPhysicalMah)
+                    } else {
+                        screenOffDrainMah = rawOffMah
+                    }
                 }
             }
         }
@@ -540,13 +548,29 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         }
 
         // 9. 若底层未直接给出息屏放电量，但已有明确的息屏时长（>=30秒）以及整机总放电量，
-        // 则整机总放电量扣除前台亮屏应用与屏幕显示所消耗电量后的结余放电量作为息屏待机放电量
+        // 则整机总放电量扣除前台亮屏应用与屏幕显示所消耗电量后的结余放电量按时间占比分摊作为息屏待机放电量
         if (screenOffDrainMah <= 0f && screenOffDurationMs >= 30000L && computedDrainMah > 0f) {
             val totalFgDrain = validatedList.sumOf { (it.energyWh * 1000f / voltageVolts.coerceAtLeast(3.7f)).toDouble() }.toFloat()
-            val remainingDrain = computedDrainMah - totalFgDrain - screenDrainMah
-            if (remainingDrain > 0.05f) {
-                screenOffDrainMah = remainingDrain
+            val remainingDrain = (computedDrainMah - totalFgDrain - screenDrainMah).coerceAtLeast(0f)
+            val offRatio = if (dischargeDurationMs > 0L) {
+                (screenOffDurationMs.toFloat() / dischargeDurationMs).coerceIn(0f, 1f)
+            } else {
+                0f
             }
+            val allocatedOffDrain = remainingDrain * offRatio
+            val offHours = screenOffDurationMs / 3600000f
+            val maxPhysicalStandbyDrain = (MAX_STANDBY_POWER_WATTS * 1000f / voltageVolts.coerceAtLeast(3.7f)) * offHours
+            val effectiveOffDrain = allocatedOffDrain.coerceAtMost(maxPhysicalStandbyDrain)
+            if (effectiveOffDrain > 0.05f) {
+                screenOffDrainMah = effectiveOffDrain
+            }
+        }
+
+        // 统一物理合理性保护：息屏放电量绝不能超过待机状态下的最大物理放电量（防止底层 dumpsys 脏数据或微小时长导致功耗超标）
+        if (screenOffDurationMs > 0L && screenOffDrainMah > 0f) {
+            val offHours = screenOffDurationMs / 3600000f
+            val maxPhysicalMah = (MAX_STANDBY_POWER_WATTS * 1000f / voltageVolts.coerceAtLeast(3.7f)) * offHours
+            screenOffDrainMah = screenOffDrainMah.coerceAtMost(maxPhysicalMah)
         }
 
         // 10. 排序策略：用户安装的常用三方应用（带启动图标或非系统应用）排在最前，系统底层进程排在后方
@@ -1040,5 +1064,11 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         private val REGEX_BATTERY_HISTORY_LINE = Pattern.compile("^(?:([+-]?[\\w\\d]+)\\s+)?\\(\\d+\\)\\s*(\\d{1,3})\\b", Pattern.CASE_INSENSITIVE)
         private val REGEX_HISTORY_TEMP = Pattern.compile("(?:^|\\s)[+-]?temp=(\\d+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_DISCHARGE_STEP = Pattern.compile("#\\d+:\\s*\\+([\\w\\d]+)\\s+to\\s+(\\d{1,3})", Pattern.CASE_INSENSITIVE)
+
+        /** 息屏待机状态下的绝对最大物理放电功耗上限（单位：W），手机在熄灭屏幕与GPU休眠时功耗绝不应超过该极限 */
+        const val MAX_STANDBY_POWER_WATTS = 3.0f
+
+        /** 手机息屏待机状态下的典型底座基础功率（单位：W），客观反映基带待机与系统基础唤醒保活底噪 */
+        const val DEFAULT_STANDBY_BASE_WATTS = 0.15f
     }
 }

@@ -77,8 +77,10 @@ class ChargingChartView @JvmOverloads constructor(
     private val timeFormatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     private val axisTimeFormatter = SimpleDateFormat("HH:mm", Locale.getDefault())
 
-    // 颜色配置（绿色: 功率, 蓝色: 电量, 红色: 温度）
-    val colorPower = Color.parseColor("#00C853")
+    // 颜色配置（绿色: 充电功率, 橙色: 放电功率, 蓝色: 电量, 红色: 温度）
+    val colorPowerCharge = Color.parseColor("#00C853")
+    val colorPowerDischarge = Color.parseColor("#FF9800")
+    val colorPower = colorPowerCharge
     val colorLevel = Color.parseColor("#2196F3")
     val colorTemp = Color.parseColor("#FF5252")
 
@@ -88,7 +90,22 @@ class ChargingChartView @JvmOverloads constructor(
         strokeWidth = dp2_2
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
-        color = colorPower
+        color = colorPowerCharge
+    }
+
+    // 0W 充放电分界基准虚线画笔
+    private val zeroLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp1
+        color = Color.parseColor("#40888888")
+        pathEffect = DashPathEffect(floatArrayOf(dp4, dp2), 0f)
+    }
+
+    // 0W 标识文字画笔
+    private val zeroTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp9
+        color = Color.parseColor("#888888")
+        textAlign = Paint.Align.LEFT
     }
 
     // 绘制画笔：电量曲线
@@ -121,6 +138,7 @@ class ChargingChartView @JvmOverloads constructor(
     private val axisTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = sp9_5
         color = Color.parseColor("#888888")
+        textAlign = Paint.Align.CENTER
     }
 
     // 手势探查垂直标尺画笔
@@ -287,21 +305,47 @@ class ChargingChartView @JvmOverloads constructor(
             return
         }
 
-        // 3. 统计各维度数据范围
+        // 3. 统计各维度数据范围（分别统计充电正功率与放电负功率）
         val minTs = dataPoints.first().timestamp
         val maxTs = if (dataPoints.size > 1) dataPoints.last().timestamp else (minTs + 60000L)
         val tsRange = (maxTs - minTs).coerceAtLeast(60000L).toFloat()
 
-        var maxP = 20f
+        var maxChargeP = 0f
+        var maxDischargeP = 0f
         var maxT = 45f
         for (p in dataPoints) {
-            if (p.powerWatts > maxP) maxP = p.powerWatts
+            if (p.powerWatts > 0f) {
+                if (p.powerWatts > maxChargeP) maxChargeP = p.powerWatts
+            } else if (p.powerWatts < 0f) {
+                val absP = abs(p.powerWatts)
+                if (absP > maxDischargeP) maxDischargeP = absP
+            }
             if (p.temperature > maxT) maxT = p.temperature
         }
-        maxP = (maxP * 1.15f).coerceAtLeast(10f)
+        val hasCharge = maxChargeP > 0.05f
+        val hasDischarge = maxDischargeP > 0.05f
+
+        val safeMaxChargeP = (maxChargeP * 1.15f).coerceAtLeast(5f)
+        val safeMaxDischargeP = (maxDischargeP * 1.15f).coerceAtLeast(3f)
         maxT = (maxT * 1.15f).coerceAtLeast(40f)
 
-        // 4. 计算各曲线在屏幕上的映射坐标点
+        // 功率波段在归一化纵向坐标系中的范围（0.02 ~ 0.45）
+        val powerBandBottom = 0.02f
+        val powerBandTop = 0.45f
+
+        // 计算 0W 基准线位置：若全为充电锚定在底部，若全为放电锚定在顶部，兼具时根据充放电最大功率比例分配
+        val zeroPowerNorm = when {
+            hasCharge && !hasDischarge -> powerBandBottom + 0.01f
+            !hasCharge && hasDischarge -> powerBandTop - 0.03f
+            hasCharge && hasDischarge -> {
+                val ratio = safeMaxDischargeP / (safeMaxChargeP + safeMaxDischargeP)
+                (powerBandBottom + ratio * (powerBandTop - powerBandBottom)).coerceIn(0.10f, 0.32f)
+            }
+            else -> powerBandBottom + 0.01f
+        }
+        val zeroPowerY = chartTop + chartHeight * (1f - zeroPowerNorm)
+
+        // 4. 计算各曲线在屏幕上的防重叠纵向分层映射坐标点
         powerPoints.clear()
         levelPoints.clear()
         tempPoints.clear()
@@ -314,23 +358,57 @@ class ChargingChartView @JvmOverloads constructor(
                 paddingLeft + chartWidth * ((p.timestamp - minTs).toFloat() / tsRange)
             }
 
-            // 电量曲线：0%~100% 映射
-            val levelRatio = (p.batteryLevel / 100f).coerceIn(0f, 1f)
-            val levelY = chartTop + chartHeight * (1f - levelRatio)
+            // 电量曲线：映射至顶部区间 (0.05 ~ 0.45)，防止与中间温度和底部功率重叠
+            val levelNorm = (p.batteryLevel / 100f).coerceIn(0f, 1f) * 0.40f + 0.55f
+            val levelY = chartTop + chartHeight * (1f - levelNorm)
             levelPoints.add(PointF(x, levelY))
 
-            // 功率曲线：0 ~ maxP 映射
-            val powerRatio = (p.powerWatts / maxP).coerceIn(0f, 1f)
-            val powerY = chartTop + chartHeight * (1f - powerRatio)
-            powerPoints.add(PointF(x, powerY))
-
-            // 温度曲线：20℃ ~ maxT 映射
-            val tempRatio = ((p.temperature - 20f) / (maxT - 20f)).coerceIn(0f, 1f)
-            val tempY = chartTop + chartHeight * (1f - tempRatio)
+            // 温度曲线：映射至中层区间 (0.35 ~ 0.65)
+            val tempNorm = (((p.temperature - 20f) / (maxT - 20f)).coerceIn(0f, 1f) * 0.30f + 0.35f)
+            val tempY = chartTop + chartHeight * (1f - tempNorm)
             tempPoints.add(PointF(x, tempY))
+
+            // 功率曲线：充电(>=0W)向上延展至功率上限；放电(<0W)向下延展，耗电越大越往下走
+            val powerNorm = if (p.powerWatts >= 0f) {
+                val ratio = (p.powerWatts / safeMaxChargeP).coerceIn(0f, 1f)
+                zeroPowerNorm + ratio * (powerBandTop - zeroPowerNorm)
+            } else {
+                val ratio = (abs(p.powerWatts) / safeMaxDischargeP).coerceIn(0f, 1f)
+                zeroPowerNorm - ratio * (zeroPowerNorm - powerBandBottom)
+            }
+            val powerY = chartTop + chartHeight * (1f - powerNorm)
+            powerPoints.add(PointF(x, powerY))
         }
 
-        // 5. 平滑绘制三色曲线
+        // 当存在放电数据时，绘制 0W 辅助基准虚线与标识
+        if (hasDischarge) {
+            gridPath.reset()
+            gridPath.moveTo(paddingLeft, zeroPowerY)
+            gridPath.lineTo(w - paddingRight, zeroPowerY)
+            canvas.drawPath(gridPath, zeroLinePaint)
+            canvas.drawText("0W", paddingLeft + dp2, zeroPowerY - dp2, zeroTextPaint)
+        }
+
+        // 5. 根据充放电分布动态配置功率折线画笔颜色与渐变
+        if (hasCharge && hasDischarge) {
+            val pTopY = chartTop + chartHeight * (1f - powerBandTop)
+            val pBottomY = chartTop + chartHeight * (1f - powerBandBottom)
+            val zeroFrac = ((zeroPowerY - pTopY) / (pBottomY - pTopY)).coerceIn(0.01f, 0.99f)
+            powerPaint.shader = android.graphics.LinearGradient(
+                0f, pTopY, 0f, pBottomY,
+                intArrayOf(colorPowerCharge, colorPowerCharge, colorPowerDischarge, colorPowerDischarge),
+                floatArrayOf(0f, zeroFrac, zeroFrac, 1f),
+                android.graphics.Shader.TileMode.CLAMP
+            )
+        } else if (!hasCharge && hasDischarge) {
+            powerPaint.shader = null
+            powerPaint.color = colorPowerDischarge
+        } else {
+            powerPaint.shader = null
+            powerPaint.color = colorPowerCharge
+        }
+
+        // 平滑绘制三色曲线
         drawSmoothCurve(canvas, powerPoints, powerPath, powerPaint)
         drawSmoothCurve(canvas, levelPoints, levelPath, levelPaint)
         drawSmoothCurve(canvas, tempPoints, tempPath, tempPaint)
@@ -338,14 +416,29 @@ class ChargingChartView @JvmOverloads constructor(
         // 6. 在曲线的关键位置绘制峰谷值小数字
         drawPeakAndValleyBadges(canvas, chartTop, chartBottom, paddingLeft, w - paddingRight)
 
-        // 7. 绘制 X 轴起止时间刻度
-        axisTextPaint.textAlign = Paint.Align.LEFT
-        val startTimeText = axisTimeFormatter.format(Date(minTs))
-        canvas.drawText(startTimeText, paddingLeft, h - dp6, axisTextPaint)
+        // 7. 绘制 X 轴时间刻度线与时间刻度文字（严格对应时间轴刻度居中显示）
+        val timeStepCount = 4
+        for (step in 0..timeStepCount) {
+            val ratio = step.toFloat() / timeStepCount
+            val tickX = paddingLeft + chartWidth * ratio
+            val tickTs = minTs + (tsRange * ratio).toLong()
+            val timeText = axisTimeFormatter.format(Date(tickTs))
 
-        axisTextPaint.textAlign = Paint.Align.RIGHT
-        val endTimeText = axisTimeFormatter.format(Date(maxTs))
-        canvas.drawText(endTimeText, w - paddingRight, h - dp6, axisTextPaint)
+            // 垂直虚线网格
+            gridPath.reset()
+            gridPath.moveTo(tickX, chartTop)
+            gridPath.lineTo(tickX, chartBottom)
+            canvas.drawPath(gridPath, gridPaint)
+
+            // 刻度小短线
+            canvas.drawLine(tickX, chartBottom, tickX, chartBottom + dp3, gridPaint)
+
+            // 文字以刻度点 tickX 为中心严格居中对齐，并在左右屏幕物理边缘做防截断保护
+            val textWidth = axisTextPaint.measureText(timeText)
+            val halfW = textWidth / 2f
+            val textX = tickX.coerceIn(halfW + dp2, w - halfW - dp2)
+            canvas.drawText(timeText, textX, h - dp6, axisTextPaint)
+        }
 
         // 8. 绘制触控标尺（取消浮动弹框，仅保留垂直十字标尺线与曲线上高亮点）
         if (isTouching && selectedIndex in dataPoints.indices) {
@@ -389,7 +482,16 @@ class ChargingChartView @JvmOverloads constructor(
 
         val timeStr = timeFormatter.format(Date(point.timestamp))
         val levelStr = "${point.batteryLevel}%"
-        val powerStr = String.format(Locale.getDefault(), "%.2fW", point.powerWatts)
+        val pWatts = point.powerWatts
+        val pLabel: String
+        val pColor: Int
+        if (pWatts >= 0f) {
+            pLabel = String.format(Locale.getDefault(), "充电 +%.2fW", pWatts)
+            pColor = colorPowerCharge
+        } else {
+            pLabel = String.format(Locale.getDefault(), "放电 -%.2fW", abs(pWatts))
+            pColor = colorPowerDischarge
+        }
         val tempStr = String.format(Locale.getDefault(), "%.1f℃", point.temperature)
 
         val totalHeaderWidth = w - paddingLeft - paddingRight
@@ -406,9 +508,9 @@ class ChargingChartView @JvmOverloads constructor(
         headerTextPaint.color = colorLevel
         canvas.drawText("电量 $levelStr", paddingLeft + colWidth * 1.5f, textY, headerTextPaint)
 
-        // 列 3：功率（绿色）
-        headerTextPaint.color = colorPower
-        canvas.drawText("功率 $powerStr", paddingLeft + colWidth * 2.5f, textY, headerTextPaint)
+        // 列 3：功率（充电绿色/放电橙色）
+        headerTextPaint.color = pColor
+        canvas.drawText(pLabel, paddingLeft + colWidth * 2.5f, textY, headerTextPaint)
 
         // 列 4：温度（红色）
         headerTextPaint.color = colorTemp
@@ -451,6 +553,7 @@ class ChargingChartView @JvmOverloads constructor(
 
     /**
      * 计算并绘制功率、电量与温度三条走势曲线上的峰值（Max）和谷值（Min）小数字。
+     * 功率维度自动区分充电峰值（绿色正数）与放电峰值（橙色负数）。
      *
      * @param canvas 画布
      * @param chartTop 图表绘制有效区顶部
@@ -467,34 +570,67 @@ class ChargingChartView @JvmOverloads constructor(
     ) {
         if (dataPoints.isEmpty() || powerPoints.isEmpty()) return
 
-        // 1. 功率曲线峰谷值寻找与绘制
-        var maxPIdx = 0
-        var minPIdx = 0
-        var maxPVal = dataPoints[0].powerWatts
-        var minPVal = dataPoints[0].powerWatts
+        // 1. 功率曲线：寻找充电正向峰值/谷值与放电负向峰值/谷值
+        var maxPosPIdx = -1
+        var maxPosPVal = 0f
+        var minPosPIdx = -1
+        var minPosPVal = Float.MAX_VALUE
+
+        var maxNegPIdx = -1
+        var maxNegPVal = 0f // 绝对值最大放电耗电点
+        var minNegPIdx = -1
+        var minNegPVal = Float.MAX_VALUE // 绝对值最小放电耗电点
 
         for (i in dataPoints.indices) {
             val p = dataPoints[i].powerWatts
-            if (p > maxPVal) {
-                maxPVal = p
-                maxPIdx = i
-            }
-            if (p < minPVal) {
-                minPVal = p
-                minPIdx = i
+            if (p >= 0f) {
+                if (p > maxPosPVal) {
+                    maxPosPVal = p
+                    maxPosPIdx = i
+                }
+                if (p < minPosPVal) {
+                    minPosPVal = p
+                    minPosPIdx = i
+                }
+            } else {
+                val absP = abs(p)
+                if (absP > maxNegPVal) {
+                    maxNegPVal = absP
+                    maxNegPIdx = i
+                }
+                if (absP < minNegPVal) {
+                    minNegPVal = absP
+                    minNegPIdx = i
+                }
             }
         }
 
-        // 绘制功率峰值
-        val peakPowerText = String.format(Locale.getDefault(), "%.1fW", maxPVal)
-        val peakPPoint = powerPoints[maxPIdx]
-        drawSingleBadge(canvas, peakPowerText, peakPPoint.x, peakPPoint.y, colorPower, true, chartTop, chartBottom, chartLeft, chartRight)
+        // 绘制充电正向最高功率峰值（波峰向上）
+        if (maxPosPIdx >= 0 && maxPosPVal > 0.05f) {
+            val peakPowerText = String.format(Locale.getDefault(), "+%.1fW", maxPosPVal)
+            val peakPPoint = powerPoints[maxPosPIdx]
+            drawSingleBadge(canvas, peakPowerText, peakPPoint.x, peakPPoint.y, colorPowerCharge, true, chartTop, chartBottom, chartLeft, chartRight)
 
-        // 若峰谷值存在明显落差且不是同一个点，绘制功率谷值
-        if (maxPIdx != minPIdx && abs(maxPVal - minPVal) >= 0.3f) {
-            val valleyPowerText = String.format(Locale.getDefault(), "%.1fW", minPVal)
-            val valleyPPoint = powerPoints[minPIdx]
-            drawSingleBadge(canvas, valleyPowerText, valleyPPoint.x, valleyPPoint.y, colorPower, false, chartTop, chartBottom, chartLeft, chartRight)
+            // 若全为充电点且存在明显落差，绘制充电低谷点
+            if (maxNegPIdx < 0 && minPosPIdx >= 0 && minPosPIdx != maxPosPIdx && (maxPosPVal - minPosPVal) >= 0.5f) {
+                val valleyPowerText = String.format(Locale.getDefault(), "+%.1fW", minPosPVal)
+                val valleyPPoint = powerPoints[minPosPIdx]
+                drawSingleBadge(canvas, valleyPowerText, valleyPPoint.x, valleyPPoint.y, colorPowerCharge, false, chartTop, chartBottom, chartLeft, chartRight)
+            }
+        }
+
+        // 绘制放电负向最大耗电点（波谷向下）
+        if (maxNegPIdx >= 0 && maxNegPVal > 0.05f) {
+            val maxDrainText = String.format(Locale.getDefault(), "-%.1fW", maxNegPVal)
+            val maxDrainPoint = powerPoints[maxNegPIdx]
+            drawSingleBadge(canvas, maxDrainText, maxDrainPoint.x, maxDrainPoint.y, colorPowerDischarge, false, chartTop, chartBottom, chartLeft, chartRight)
+
+            // 若全为放电点且存在明显落差，绘制最小耗电点
+            if (maxPosPIdx < 0 && minNegPIdx >= 0 && minNegPIdx != maxNegPIdx && (maxNegPVal - minNegPVal) >= 0.5f) {
+                val minDrainText = String.format(Locale.getDefault(), "-%.1fW", minNegPVal)
+                val minDrainPoint = powerPoints[minNegPIdx]
+                drawSingleBadge(canvas, minDrainText, minDrainPoint.x, minDrainPoint.y, colorPowerDischarge, true, chartTop, chartBottom, chartLeft, chartRight)
+            }
         }
 
         // 2. 电量曲线峰谷值寻找与绘制
@@ -636,7 +772,10 @@ class ChargingChartView @JvmOverloads constructor(
         val levelY = levelPoints[selectedIndex].y
         val tempY = tempPoints[selectedIndex].y
 
-        drawHighLightDot(canvas, pX, powerY, colorPower)
+        val curPoint = dataPoints[selectedIndex]
+        val pColor = if (curPoint.powerWatts >= 0f) colorPowerCharge else colorPowerDischarge
+
+        drawHighLightDot(canvas, pX, powerY, pColor)
         drawHighLightDot(canvas, pX, levelY, colorLevel)
         drawHighLightDot(canvas, pX, tempY, colorTemp)
     }

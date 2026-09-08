@@ -762,10 +762,10 @@ class PowerUsageFragment : Fragment() {
         // 5. 核心指标矩阵
         // 行 1：电池实时功率与 USB 充电输入功率
         val pWatts = currentPoint.powerWatts
-        val batteryPowerText = if (!summary.isCharging && pWatts > 0f) {
-            String.format(Locale.getDefault(), "-%.2fW", pWatts)
+        val batteryPowerText = if (pWatts < 0f || (!summary.isCharging && pWatts > 0f)) {
+            String.format(Locale.getDefault(), "-%.2fW", abs(pWatts))
         } else {
-            String.format(Locale.getDefault(), "%.2fW", pWatts)
+            String.format(Locale.getDefault(), "+%.2fW", pWatts)
         }
         chargingView.tvMetricBatteryPower.text = batteryPowerText
 

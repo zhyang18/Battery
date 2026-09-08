@@ -104,8 +104,10 @@ class BatteryTimelineView @JvmOverloads constructor(
     private val dp22 = dpToPx(22f)
     private val dp24 = dpToPx(24f)
     private val dp28 = dpToPx(28f)
+    private val dp30 = dpToPx(30f)
     private val dp32 = dpToPx(32f)
     private val dp35 = dpToPx(35f)
+    private val dp36 = dpToPx(36f)
 
     private val sp8_5 = spToPx(8.5f)
     private val sp9_5 = spToPx(9.5f)
@@ -443,7 +445,7 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         // 曲线区域使用完整图表高度，允许与下方纵向堆叠的应用图标产生自然的视觉交叠
         val mainChartHeight = screenBarTop - dp12
-        val topPadding = dp22
+        val topPadding = dp36
         val bottomPadding = dp6
         val availableH = max(1f, mainChartHeight - topPadding - bottomPadding)
 
@@ -556,7 +558,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         for (tick in ticks) {
             val x = contentLeft + tick.xRatio * contentWidth
             // 垂直虚线网格
-            canvas.drawLine(x, dp22, x, mainHeight, gridPaint)
+            canvas.drawLine(x, dp36, x, mainHeight, gridPaint)
             // 刻度小短线
             canvas.drawLine(x, tickTop, x, tickTop + dp3, gridPaint)
             // 时间文本以对应时间点 x 为中心严格居中对齐绘制，并在屏幕边缘做安全防截断
@@ -994,7 +996,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制长按垂直游标线并将探查到的时间、电量、功耗、温度、电压与前台应用信息固定绘制在图表顶部（无遮挡弹框）。
+     * 绘制长按垂直游标线并将探查到的时间、电量、功耗、温度、电压与前台应用信息分两行换行固定绘制在图表顶部（无遮挡弹框）。
      *
      * @param canvas 绘图画布 [Canvas]
      * @param contentLeft 图表左边界 X 坐标
@@ -1015,7 +1017,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     ) {
         val clampedX = cursorX.coerceIn(contentLeft, contentRight)
         // 1. 垂直虚线游标
-        canvas.drawLine(clampedX, dp20, clampedX, mainHeight + dp6, cursorPaint)
+        canvas.drawLine(clampedX, dp32, clampedX, mainHeight + dp6, cursorPaint)
 
         // 2. 查询当前游标时刻对应的数据
         val curTs = TimelineScaleCalculator.xToTime(clampedX, visibleStart, visibleEnd, contentWidth, contentLeft)
@@ -1026,31 +1028,39 @@ class BatteryTimelineView @JvmOverloads constructor(
         val powerStr = curSample?.let {
             val pWatts = it.getPowerWatts()
             val signedPower = if (pWatts > 0) -pWatts else pWatts
-            String.format(Locale.getDefault(), "功耗:%.2fW", signedPower)
+            String.format(Locale.getDefault(), "功耗: %.2fW", signedPower)
         } ?: ""
-        val levelStr = curSample?.let { "电量:${it.batteryLevel}%" } ?: ""
-        val voltStr = curSample?.let { String.format(Locale.getDefault(), "电压:%.2fV", it.getVoltageVolts()) } ?: ""
-        val tempStr = curSample?.let { String.format(Locale.getDefault(), "温度:%.1f℃", it.temperatureC) } ?: ""
-        val appStr = curApp?.let { "应用:${it.appName}" } ?: ""
+        val levelStr = curSample?.let { "电量: ${it.batteryLevel}%" } ?: ""
+        val voltStr = curSample?.let { String.format(Locale.getDefault(), "电压: %.3fV", it.getVoltageVolts()) } ?: ""
+        val tempStr = curSample?.let { String.format(Locale.getDefault(), "温度: %.1f℃", it.temperatureC) } ?: ""
+        val appStr = curApp?.let { "应用: ${it.appName}" } ?: ""
 
-        val infoItems = listOfNotNull(
+        // 3. 将信息分两行换行排布：第 1 行为时间、电量、功耗；第 2 行为温度、电压、前台应用
+        val line1Items = listOfNotNull(
             timeStr.takeIf { it.isNotEmpty() },
             levelStr.takeIf { it.isNotEmpty() },
-            powerStr.takeIf { it.isNotEmpty() },
+            powerStr.takeIf { it.isNotEmpty() }
+        )
+        val line2Items = listOfNotNull(
             tempStr.takeIf { it.isNotEmpty() },
             voltStr.takeIf { it.isNotEmpty() },
             appStr.takeIf { it.isNotEmpty() }
         )
-        val fullInfoText = infoItems.joinToString("  ")
+        val line1Text = line1Items.joinToString("   ")
+        val line2Text = line2Items.joinToString("   ")
 
-        // 3. 固定在图表顶部展示，绘制背景胶囊横条与信息文本
+        // 4. 固定在图表顶部绘制两行背景胶囊与文本
         val headerTop = dp2
-        val headerBottom = dp18
-        val textY = headerTop + sp9_5 * 1.15f
+        val headerBottom = dp32
         tooltipRect.set(contentLeft, headerTop, contentRight, headerBottom)
         canvas.drawRoundRect(tooltipRect, dp4, dp4, tooltipBgPaint)
 
-        canvas.drawText(fullInfoText, contentLeft + dp6, textY, tooltipTextPaint)
+        val line1Y = headerTop + sp9_5 * 1.15f + dp2
+        val line2Y = line1Y + sp9_5 * 1.35f
+        canvas.drawText(line1Text, contentLeft + dp8, line1Y, tooltipTextPaint)
+        if (line2Text.isNotEmpty()) {
+            canvas.drawText(line2Text, contentLeft + dp8, line2Y, tooltipTextPaint)
+        }
     }
 
     /**

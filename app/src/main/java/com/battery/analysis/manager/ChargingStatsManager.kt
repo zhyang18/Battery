@@ -177,7 +177,8 @@ class ChargingStatsManager private constructor(private val context: Context) {
         val temp = info.temperature ?: 25f
         val volt = (info.voltage ?: 4000f) / 1000f
         val curMa = abs(info.currentNow ?: 0f)
-        var power = info.powerWatts ?: (volt * curMa / 1000f)
+        val rawPower = info.powerWatts ?: (if (charging) (volt * curMa / 1000f) else -(volt * curMa / 1000f))
+        var power = if (charging) abs(rawPower) else -abs(rawPower)
 
         // 充电状态下如果电流获取为 0，基于电压与标准充电特性进行保底合理估计
         if (charging && power < 0.05f) {
@@ -204,7 +205,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
             if (lastSampleTimestamp > 0L) {
                 val dt = (now - lastSampleTimestamp).coerceIn(0L, 120000L)
                 deltaScreenOffMs = dt
-                deltaScreenOffEnergy = (power * (dt / 3600000.0f)).coerceAtLeast(0f)
+                deltaScreenOffEnergy = (power.coerceAtLeast(0f) * (dt / 3600000.0f)).coerceAtLeast(0f)
             }
             if (lastSampleLevel in 0..100 && level > lastSampleLevel) {
                 deltaScreenOffGain = level - lastSampleLevel
@@ -265,7 +266,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
 
         for (p in pointsSnapshot) {
             if (p.powerWatts > maxP) maxP = p.powerWatts
-            sumP += p.powerWatts
+            if (p.powerWatts > 0f) sumP += p.powerWatts
             if (p.temperature > maxT) maxT = p.temperature
             sumT += p.temperature
         }
@@ -274,7 +275,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
         val avgP = if (count > 0) sumP / count else 0f
         val avgT = if (count > 0) sumT / count else 0f
 
-        // 计算充入能量 Wh = 平均功率 * 持续小时
+        // 计算充入能量 Wh = 平均充电功率 * 持续小时
         val durationHours = ((latestPoint.timestamp - currentSummary.startTimestamp).coerceAtLeast(0L)) / 3600000.0f
         val chargedWh = avgP * durationHours
 

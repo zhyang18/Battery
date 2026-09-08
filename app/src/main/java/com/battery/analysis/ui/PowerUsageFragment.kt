@@ -209,6 +209,11 @@ class PowerUsageFragment : Fragment() {
                 loadData()
             }
         }
+        com.battery.analysis.receiver.BatteryUnplugReceiver.onPowerConnectedListener = {
+            if (isResumed) {
+                onDevicePowerConnected()
+            }
+        }
     }
 
     /**
@@ -285,6 +290,9 @@ class PowerUsageFragment : Fragment() {
     override fun onResume() {
         super.onResume()
 
+        chargingManager.checkAndReconcileChargingState()
+        powerManager.checkAndReconcileDischargeState()
+
         val pending = pendingSnapshotRecord
         if (pending != null) {
             pendingSnapshotRecord = null
@@ -330,6 +338,7 @@ class PowerUsageFragment : Fragment() {
         } catch (_: Exception) {
         }
         com.battery.analysis.receiver.BatteryUnplugReceiver.onPowerUsageRecordedListener = null
+        com.battery.analysis.receiver.BatteryUnplugReceiver.onPowerConnectedListener = null
         try {
             Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
             Shizuku.removeBinderReceivedListener(shizukuBinderReceivedListener)

@@ -436,5 +436,26 @@
     <string name="power_detail_metrics_title">Discharge Metrics &amp; Life</string>
     <string name="power_detail_chart_title">Discharge Curve Trend</string>
     <string name="power_detail_apps_title">App Foreground Usage</string>
+
+    <!-- Background Service & Keep Alive -->
+    <string name="service_notification_channel_name">Battery Realtime Monitor</string>
+    <string name="service_notification_channel_desc">Maintains background operation to accurately detect power plug/unplug and record charging stats.</string>
+    <string name="service_notification_charging_title">⚡ Charging (%1$d%%) · %2$.1fW</string>
+    <string name="service_notification_discharging_title">🔋 Discharging (%1$d%%)</string>
+    <string name="service_notification_content">Voltage: %1$.2fV | Temp: %2$.1f℃</string>
+    <string name="settings_keep_alive_category">Background &amp; Protection</string>
+    <string name="settings_keep_alive_title">Persistent Notification Monitor</string>
+    <string name="settings_keep_alive_desc">Display status in notification bar to prevent app from being killed in background, ensuring 100% accurate unplug &amp; charge detection.</string>
+    <string name="settings_boot_start_title">Auto-start on Boot</string>
+    <string name="settings_boot_start_desc">Automatically resume background monitor when device reboots.</string>
+    <string name="settings_battery_optimization_title">Ignore Battery Optimization</string>
+    <string name="settings_battery_optimization_desc">Request whitelist to prevent being killed during lock screen doze.</string>
+    <string name="settings_battery_optimization_btn">Settings</string>
+    <string name="settings_lock_recents_title">Lock in Recents &amp; Keep Alive Guide</string>
+    <string name="settings_lock_recents_desc">How to lock app in recent tasks and whitelist on Xiaomi, Huawei, OPPO, vivo, etc.</string>
+    <string name="dialog_lock_recents_title">Background Keep-Alive Guide</string>
+    <string name="dialog_lock_recents_content">To ensure external power plug and unplug events are reliably detected even if recents are cleared:\n\n1. Lock App in Recents: Open recent tasks, pull down or long press this card and tap the lock icon;\n\n2. Allow Auto-start: Enable autostart permission in system app settings;\n\n3. Unrestricted Battery: Set battery management to No Restrictions;\n\n4. Enable Persistent Notification: Turn on the switch above to run foreground service.</string>
+    <string name="toast_battery_optimization_granted">Battery optimization ignored</string>
+    <string name="toast_battery_optimization_request">Please tap Allow in the upcoming prompt to whitelist the app.</string>
 </resources>
 

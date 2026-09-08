@@ -8,10 +8,16 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import com.battery.analysis.R
+import com.battery.analysis.db.ChargingHistoryDbHelper
 import com.battery.analysis.db.HistoryDbHelper
+import com.battery.analysis.db.PowerUsageDbHelper
+import com.battery.analysis.manager.ChargingStatsManager
+import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.HistoryRecord
+import com.battery.analysis.model.PowerUsageRecord
 import com.battery.analysis.provider.NormalApiProvider
 import com.battery.analysis.provider.ShizukuProvider
+import com.battery.analysis.service.BatteryMonitorService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,9 +28,11 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 电池断开外部电源（拔掉电池/充电器）广播接收器。
- * 监听系统 [Intent.ACTION_POWER_DISCONNECTED] 广播，在拔掉充电线或断开电源供电的瞬间，
- * 自动提取当前电池核心参数并持久化存入历史检测记录数据库中，同时通知前台刷新展示。
+ * 电池电源状态广播接收器。
+ * 静态监听系统电源连接 [Intent.ACTION_POWER_CONNECTED]、断开 [Intent.ACTION_POWER_DISCONNECTED]
+ * 以及开机广播 [Intent.ACTION_BOOT_COMPLETED]。
+ * 实现插电瞬间结算上一个放电周期并开启充电采样，拔电瞬间固化保存充电历史记录并开启全新放电周期，
+ * 彻底解决 App 被杀或离线期间充放电事件无法检测与账本丢失的问题。
  */
 class BatteryUnplugReceiver : BroadcastReceiver() {
 
@@ -36,8 +44,81 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
      */
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
-        if (action == Intent.ACTION_POWER_DISCONNECTED) {
-            handlePowerDisconnected(context)
+        when (action) {
+            Intent.ACTION_POWER_CONNECTED -> {
+                handlePowerConnected(context)
+            }
+            Intent.ACTION_POWER_DISCONNECTED -> {
+                handlePowerDisconnected(context)
+            }
+            Intent.ACTION_BOOT_COMPLETED -> {
+                handleBootCompleted(context)
+            }
+        }
+    }
+
+    /**
+     * 执行连接外部电源后的防抖校验与充电统计会话初始化。
+     *
+     * @param context 应用程序上下文
+     */
+    private fun handlePowerConnected(context: Context) {
+        val appContext = context.applicationContext
+        val currentTime = System.currentTimeMillis()
+
+        synchronized(lock) {
+            if (currentTime - lastConnectedTimestamp < DEBOUNCE_INTERVAL_MS) {
+                return
+            }
+            lastConnectedTimestamp = currentTime
+        }
+
+        val pendingResult = goAsync()
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                recordOnPowerConnected(appContext, currentTime)
+            } finally {
+                pendingResult.finish()
+            }
+        }
+    }
+
+    /**
+     * 异步处理连接外部电源事件：归档上一个放电账本并开启全新充电统计会话。
+     *
+     * @param context 应用程序上下文
+     * @param timestamp 触发插电时的时间戳毫秒值
+     */
+    private fun recordOnPowerConnected(context: Context, timestamp: Long) {
+        try {
+            val powerManager = PowerUsageManager.getInstance(context)
+            val chargingManager = ChargingStatsManager.getInstance(context)
+            val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
+
+            // 1. 归档上一个放电周期的耗电账本快照（若放电持续时间大于 30 秒）
+            val lastUnplugTime = powerManager.getLastUnplugTime()
+            if (lastUnplugTime in 1 until timestamp && (timestamp - lastUnplugTime) > 30000L) {
+                val currentMode = powerManager.getSelectedMode()
+                val fullPackage = powerManager.loadPowerData(currentMode)
+                val powerRecord = PowerUsageRecord.fromFullPowerPackage(
+                    fullPackage = fullPackage,
+                    recordTime = timeStr,
+                    id = timestamp
+                )
+                PowerUsageDbHelper.getInstance(context).insertRecord(powerRecord)
+            }
+
+            // 2. 开启全新充电会话
+            val currentBattery = powerManager.getCurrentBatteryStatus()
+            val (_, chargeType) = chargingManager.checkCurrentSystemChargingState()
+            chargingManager.onPowerConnected(currentBattery.levelPercent, chargeType)
+
+            // 3. 通知前台界面（若当前处于前台活跃状态）
+            mainHandler.post {
+                onPowerConnectedListener?.invoke()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -79,6 +160,14 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
         val noteText = context.getString(R.string.note_auto_unplug)
         val recordsToInsert = mutableListOf<HistoryRecord>()
 
+        // 0. 关键闭环：当断开充电器时，固化并保存本次充电历史记录入库
+        try {
+            val chargingManager = ChargingStatsManager.getInstance(context)
+            chargingManager.onPowerDisconnected()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         // 1. 采集系统原生 API 电池快照数据
         val normalProvider = NormalApiProvider()
         val normalInfo = normalProvider.getBatteryInfo(context)
@@ -117,15 +206,15 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
 
         // 3. 采集断开前耗电统计完整账本快照并存入 PowerUsageDbHelper 数据库，随后重置开启新放电周期
         try {
-            val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(context)
+            val powerManager = PowerUsageManager.getInstance(context)
             val currentMode = powerManager.getSelectedMode()
             val fullPackage = powerManager.loadPowerData(currentMode)
-            val powerRecord = com.battery.analysis.model.PowerUsageRecord.fromFullPowerPackage(
+            val powerRecord = PowerUsageRecord.fromFullPowerPackage(
                 fullPackage = fullPackage,
                 recordTime = timeStr,
                 id = timestamp
             )
-            val powerDbHelper = com.battery.analysis.db.PowerUsageDbHelper.getInstance(context)
+            val powerDbHelper = PowerUsageDbHelper.getInstance(context)
             powerDbHelper.insertRecord(powerRecord)
 
             // 关键步骤：开启全新放电统计周期，记录断电电量与时刻，重置底层 batterystats
@@ -154,9 +243,33 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
         }
     }
 
+    /**
+     * 处理设备开机启动事件，执行状态自愈核对，并在配置了自启时唤醒后台监控服务。
+     *
+     * @param context 应用程序上下文
+     */
+    private fun handleBootCompleted(context: Context) {
+        val appContext = context.applicationContext
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                // 1. 执行充放电状态自愈对齐
+                ChargingStatsManager.getInstance(appContext).checkAndReconcileChargingState()
+                PowerUsageManager.getInstance(appContext).checkAndReconcileDischargeState()
+
+                // 2. 若用户开启了后台常驻服务与开机自启，恢复启动前台监控服务
+                if (BatteryMonitorService.isServiceEnabled(appContext) && BatteryMonitorService.isBootAutoStartEnabled(appContext)) {
+                    BatteryMonitorService.start(appContext)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     companion object {
         private const val DEBOUNCE_INTERVAL_MS = 3000L
         private var lastRecordedTimestamp = 0L
+        private var lastConnectedTimestamp = 0L
         private val lock = Any()
 
         private val coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -170,6 +283,12 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
         /**
          * 监听断开电源自动保存耗电历史记录的回调监听器（供前台 PowerUsageFragment 注册实时更新列表）。
          */
-        var onPowerUsageRecordedListener: ((com.battery.analysis.model.PowerUsageRecord) -> Unit)? = null
+        var onPowerUsageRecordedListener: ((PowerUsageRecord) -> Unit)? = null
+
+        /**
+         * 监听连接电源的回调监听器（供前台界面实时感知并更新）。
+         */
+        var onPowerConnectedListener: (() -> Unit)? = null
     }
 }
+

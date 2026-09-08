@@ -5,10 +5,10 @@
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:paddingStart="4dp"
-    android:paddingEnd="4dp"
-    android:paddingTop="10dp"
-    android:paddingBottom="10dp">
+    android:paddingStart="3dp"
+    android:paddingEnd="3dp"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp">
 
     <!-- 应用图标 -->
     <com.google.android.material.imageview.ShapeableImageView
@@ -23,7 +23,7 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:layout_marginStart="14dp"
+        android:layout_marginStart="10dp"
         android:layout_marginEnd="8dp"
         android:orientation="vertical">
 
@@ -78,7 +78,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textColor="?android:attr/textColorPrimary"
-            android:textSize="12.5sp"
+            android:textSize="12sp"
             android:maxLines="1"
             tools:text="6h7m | 1h20m" />
 
@@ -87,9 +87,8 @@
             android:id="@+id/tv_app_energy"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2.5dp"
             android:textColor="?android:attr/textColorPrimary"
-            android:textSize="11.5sp"
+            android:textSize="12sp"
             android:maxLines="1"
             android:ellipsize="end"
             tools:text="0.250Wh | 0.080Wh" />
@@ -99,9 +98,8 @@
             android:id="@+id/tv_max_temp"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
             android:textColor="?android:attr/textColorPrimary"
-            android:textSize="11.5sp"
+            android:textSize="12sp"
             android:maxLines="1"
             tools:text="MAX: 39.0℃" />
     </LinearLayout>

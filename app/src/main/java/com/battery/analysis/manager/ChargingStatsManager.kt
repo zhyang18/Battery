@@ -71,6 +71,135 @@ class ChargingStatsManager private constructor(private val context: Context) {
         loadSavedChargingSession()
         // 检测系统当前初始充电状态
         checkCurrentSystemChargingState()
+        // 执行充放电状态自愈对齐检测
+        checkAndReconcileChargingState()
+    }
+
+    /**
+     * 校验并自愈充放电状态断层。
+     * 当应用被强杀、进程被杀死或设备重启后再次启动时，比对持久化的充电摘要状态与当前系统底层实际电源状态：
+     * 1. 若持久化显示处于充电中（isCharging == true），但当前系统实际已断开外部电源，
+     *    说明在应用离线期间发生了断开电源事件，自动将未闭合的充电会话以合理指标归档存入数据库；
+     * 2. 若当前系统正处于充电中，但内存会话标记为未充电，自动根据系统状态补齐开启充电采样；
+     * 3. 若处于未充电状态，但自上次离线记录以来电量发生了跳跃式大幅增加（增量 >= 3%），
+     *    说明应用在离线被杀期间曾插上充过电且已被拔掉，自动合成并归档一条“离线补齐充电记录”。
+     *
+     * @return 若检测并执行了状态自愈修复返回 true，否则返回 false
+     */
+    fun checkAndReconcileChargingState(): Boolean {
+        val (nowCharging, currentChargeType) = checkCurrentSystemChargingState()
+        val provider = NormalApiProvider()
+        val info = provider.getBatteryInfo(context)
+        val currentLevel = info.level ?: 50
+        val now = System.currentTimeMillis()
+        var reconciled = false
+
+        // 场景 1：持久化显示还在充电中，但实际已经拔掉充电器
+        if (currentSummary.isCharging && !nowCharging) {
+            val duration = (now - currentSummary.startTimestamp).coerceAtLeast(1000L)
+            val levelGain = (currentLevel - currentSummary.startLevel).coerceAtLeast(0)
+            val finalChargedEnergyWh = if (currentSummary.chargedEnergyWh > 0.005f) {
+                currentSummary.chargedEnergyWh
+            } else if (levelGain > 0) {
+                val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 5000f
+                val effectiveCapMah = if (designCapMah in 500f..30000f) designCapMah else 5000f
+                (levelGain / 100.0f) * effectiveCapMah * 3.85f / 1000.0f
+            } else {
+                0f
+            }
+
+            if (duration >= 10000L || finalChargedEnergyWh > 0.005f || levelGain > 0) {
+                try {
+                    val recordTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(now))
+                    val record = ChargingHistoryRecord(
+                        id = now,
+                        recordTime = recordTime,
+                        startTimestamp = currentSummary.startTimestamp,
+                        endTimestamp = now,
+                        durationMs = duration,
+                        startLevel = currentSummary.startLevel,
+                        endLevel = currentLevel,
+                        levelGain = levelGain,
+                        chargedEnergyWh = finalChargedEnergyWh,
+                        avgPowerWatts = currentSummary.avgPowerWatts,
+                        maxPowerWatts = currentSummary.maxPowerWatts,
+                        maxTemperature = currentSummary.maxTemperature,
+                        chargeType = currentSummary.chargeType,
+                        screenOffDurationMs = currentSummary.screenOffDurationMs,
+                        screenOffLevelGain = currentSummary.screenOffLevelGain,
+                        screenOffEnergyWh = currentSummary.screenOffEnergyWh
+                    )
+                    ChargingHistoryDbHelper.getInstance(context).insertRecord(record)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            currentSummary = currentSummary.copy(
+                endTimestamp = now,
+                currentLevel = currentLevel,
+                isCharging = false,
+                chargedEnergyWh = finalChargedEnergyWh
+            )
+            saveChargingSessionToPrefs()
+            reconciled = true
+        } else if (!currentSummary.isCharging && nowCharging) {
+            // 场景 2：当前实际在充电，但上次记录为未充电
+            onPowerConnected(currentLevel, currentChargeType)
+            reconciled = true
+        } else if (!currentSummary.isCharging && !nowCharging) {
+            // 场景 3：均未充电，但离线期间电量跳增（说明在 App 被杀期间充过电）
+            val lastRecordedLevel = currentSummary.currentLevel
+            if (lastRecordedLevel in 1..99 && currentLevel > lastRecordedLevel + 2) {
+                val levelGain = currentLevel - lastRecordedLevel
+                val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 5000f
+                val effectiveCapMah = if (designCapMah in 500f..30000f) designCapMah else 5000f
+                val offlineEnergyWh = (levelGain / 100.0f) * effectiveCapMah * 3.85f / 1000.0f
+                val recordTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(now))
+                val intervalMs = (now - currentSummary.endTimestamp).coerceIn(60000L, 7200000L)
+                val calcAvgWatts = if (intervalMs > 0L) {
+                    (offlineEnergyWh / (intervalMs / 3600000.0f)).coerceIn(5.0f, 65.0f)
+                } else {
+                    15.0f
+                }
+
+                try {
+                    val record = ChargingHistoryRecord(
+                        id = now,
+                        recordTime = recordTime,
+                        startTimestamp = currentSummary.endTimestamp.coerceAtLeast(now - 3600000L),
+                        endTimestamp = now,
+                        durationMs = intervalMs,
+                        startLevel = lastRecordedLevel,
+                        endLevel = currentLevel,
+                        levelGain = levelGain,
+                        chargedEnergyWh = offlineEnergyWh,
+                        avgPowerWatts = calcAvgWatts,
+                        maxPowerWatts = 18.0f,
+                        maxTemperature = info.temperature ?: 30f,
+                        chargeType = "离线补齐充电",
+                        screenOffDurationMs = 0L,
+                        screenOffLevelGain = levelGain,
+                        screenOffEnergyWh = offlineEnergyWh
+                    )
+                    ChargingHistoryDbHelper.getInstance(context).insertRecord(record)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
+                currentSummary = currentSummary.copy(
+                    endTimestamp = now,
+                    currentLevel = currentLevel,
+                    startLevel = lastRecordedLevel,
+                    isCharging = false,
+                    chargedEnergyWh = offlineEnergyWh
+                )
+                saveChargingSessionToPrefs()
+                reconciled = true
+            }
+        }
+
+        return reconciled
     }
 
     /**

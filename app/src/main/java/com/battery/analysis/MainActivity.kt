@@ -81,6 +81,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Android 13+ 系统通知权限请求 Launcher。
+     */
+    private val requestNotificationPermissionLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted && com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(this)) {
+            com.battery.analysis.service.BatteryMonitorService.start(this)
+        }
+    }
+
+    /**
      * 活动创建入口，负责界面视图绑定、底部导航栏联动、监听器注册及初始刷新。
      *
      * @param savedInstanceState 状态恢复 Bundle
@@ -114,8 +125,11 @@ class MainActivity : AppCompatActivity() {
         Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
         Shizuku.addBinderDeadListener(binderDeadListener)
 
-        // 4. 动态注册拔电广播接收器（前台双保险，防止部分机型后台静态广播被阻断）
-        val unplugFilter = android.content.IntentFilter(android.content.Intent.ACTION_POWER_DISCONNECTED)
+        // 4. 动态注册充拔电广播接收器（前台双保险，防止部分机型后台静态广播被阻断）
+        val unplugFilter = android.content.IntentFilter().apply {
+            addAction(android.content.Intent.ACTION_POWER_DISCONNECTED)
+            addAction(android.content.Intent.ACTION_POWER_CONNECTED)
+        }
         registerReceiver(batteryUnplugReceiver, unplugFilter)
 
         // 5. 初始只刷新系统普通 API（因为默认处于系统 API 视图）
@@ -126,6 +140,33 @@ class MainActivity : AppCompatActivity() {
         BatteryUnplugReceiver.onRecordInsertedListener = {
             viewModel.loadHistoryRecords(this)
         }
+
+        // 7. 执行充放电断层自愈对齐检测
+        com.battery.analysis.manager.ChargingStatsManager.getInstance(this).checkAndReconcileChargingState()
+        com.battery.analysis.manager.PowerUsageManager.getInstance(this).checkAndReconcileDischargeState()
+
+        // 8. 检查并按需启动后台电池监控前台服务
+        checkAndStartBatteryMonitorService()
+    }
+
+    /**
+     * 检查并按需启动后台电池实时监控前台服务，兼容 Android 13+ 运行时通知权限校验。
+     */
+    fun checkAndStartBatteryMonitorService() {
+        if (!com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(this)) {
+            return
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(
+                    this,
+                    android.Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestNotificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                return
+            }
+        }
+        com.battery.analysis.service.BatteryMonitorService.start(this)
     }
 
     /**
@@ -258,11 +299,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 界面恢复到前台运行时的生命周期回调，同步检查并更新 Shizuku 连接与授权状态。
+     * 界面恢复到前台运行时的生命周期回调，同步检查并更新 Shizuku 连接与授权状态，并执行自愈校准。
      */
     override fun onResume() {
         super.onResume()
         updateShizukuStatusState()
+        com.battery.analysis.manager.ChargingStatsManager.getInstance(this).checkAndReconcileChargingState()
+        com.battery.analysis.manager.PowerUsageManager.getInstance(this).checkAndReconcileDischargeState()
+        val isCharging = com.battery.analysis.manager.ChargingStatsManager.getInstance(this).isCharging()
+        updateBottomNavPowerTab(isCharging)
     }
 
     /**

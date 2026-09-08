@@ -124,6 +124,73 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
+     * 校验并自愈放电统计断层状态。
+     * 当应用被强杀或长时间离线再次启动时：
+     * 1. 若当前设备未在充电，且当前电量大于先前记录的拔电基准电量（发生离线充电且未被捕捉到拔电），
+     *    自动将拔电基准电量校准为当前电量（或通过 Shizuku 回溯真实拔电时刻），并刷新应用使用基准快照，
+     *    防止因负掉电量导致放电功耗失真；
+     * 2. 若拔电时间戳距离当前已超过 48 小时且无底层 dumpsys 支撑，自动平滑对齐基准。
+     *
+     * @return 若执行了自愈校准返回 true，否则返回 false
+     */
+    fun checkAndReconcileDischargeState(): Boolean {
+        val batterySnapshot = getCurrentBatteryStatus()
+        val currentLevel = batterySnapshot.levelPercent
+        val isCharging = batterySnapshot.isCharging
+        val lastUnplugTime = getLastUnplugTime()
+        val lastUnplugLevel = getLastUnplugLevel()
+        val now = System.currentTimeMillis()
+        var reconciled = false
+
+        if (!isCharging) {
+            // 异常场景：离线期间充过电，导致当前电量高于上次记录的拔电电量
+            if (currentLevel > lastUnplugLevel) {
+                // 尝试通过 Shizuku 探测真实拔电时刻与电量
+                var syncedViaShizuku = false
+                if (isShizukuAuthorized()) {
+                    try {
+                        val stats = shizukuParser.parseChargedBatteryStats(
+                            batterySnapshot.voltageVolts,
+                            batterySnapshot.temperature,
+                            lastUnplugTime
+                        )
+                        if (stats.detectedUnplugLevel != null && stats.detectedUnplugLevel >= currentLevel) {
+                            val detectedTime = if (stats.detectedUnplugTs != null && stats.detectedUnplugTs > 0L) {
+                                stats.detectedUnplugTs
+                            } else {
+                                now - stats.dischargeDurationMs
+                            }
+                            prefs.edit()
+                                .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, stats.detectedUnplugLevel)
+                                .putLong(PREF_KEY_LAST_UNPLUG_TIME, detectedTime)
+                                .apply()
+                            saveUnplugUsageSnapshot()
+                            syncedViaShizuku = true
+                            reconciled = true
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+
+                if (!syncedViaShizuku) {
+                    // 普通模式兜底自愈：重置基准电量为当前电量，拔电时间重置为当前时刻
+                    onPowerDisconnected(currentLevel)
+                    reconciled = true
+                }
+            } else if (lastUnplugTime <= 0L || (now - lastUnplugTime) > 48 * 3600000L) {
+                // 长期未更新拔电时间，自动修正基准
+                if (!isShizukuAuthorized()) {
+                    onPowerDisconnected(currentLevel)
+                    reconciled = true
+                }
+            }
+        }
+
+        return reconciled
+    }
+
+    /**
      * 保存断开外部电源瞬间系统所有应用的前台使用时长基准快照。
      */
     fun saveUnplugUsageSnapshot() {

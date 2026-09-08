@@ -10,6 +10,12 @@
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
 
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <queries>
         <package android:name="moe.shizuku.privileged.api" />
     </queries>
@@ -56,13 +62,26 @@
             android:exported="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
-        <!-- 监听拔掉充电器/断开外部电源系统广播 -->
+        <!-- 后台电池实时监控前台服务 -->
+        <service
+            android:name=".service.BatteryMonitorService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Real-time battery charging and discharging monitoring" />
+        </service>
+
+        <!-- 监听系统插电、拔电与开机广播 -->
         <receiver
             android:name=".receiver.BatteryUnplugReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
+                <action android:name="android.intent.action.ACTION_POWER_CONNECTED" />
                 <action android:name="android.intent.action.ACTION_POWER_DISCONNECTED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
 

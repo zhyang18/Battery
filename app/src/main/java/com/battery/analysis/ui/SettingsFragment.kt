@@ -1,10 +1,14 @@
 package com.battery.analysis.ui
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -97,6 +101,7 @@ class SettingsFragment : Fragment() {
         setupPowerModeSettings()
         setupSamplingModeSettings()
         setupShizukuSettings()
+        setupKeepAliveSettings()
         setupBackupRestoreSettings()
         setupHelpSection()
         setupAboutSection()
@@ -114,6 +119,10 @@ class SettingsFragment : Fragment() {
 
         val chargingPrefs = requireContext().getSharedPreferences("charging_stats_prefs", Context.MODE_PRIVATE)
         binding.switchChargingKeepScreenOn.isChecked = chargingPrefs.getBoolean("pref_charging_keep_screen_on", false)
+
+        binding.switchKeepAliveService.isChecked = com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())
+        binding.switchBootAutoStart.isChecked = com.battery.analysis.service.BatteryMonitorService.isBootAutoStartEnabled(requireContext())
+        updateBatteryOptimizationDisplay()
     }
 
     /**
@@ -721,6 +730,100 @@ class SettingsFragment : Fragment() {
             "1.0.0"
         }
         binding.tvAppVersion.text = "v$versionName"
+    }
+
+    /**
+     * 初始化后台常驻与保活防杀设置交互逻辑。
+     * 绑定前台服务监控开关、开机自启动开关、电池优化白名单申请与防杀加锁教程弹窗。
+     */
+    private fun setupKeepAliveSettings() {
+        binding.switchKeepAliveService.isChecked = com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())
+        binding.switchKeepAliveService.setOnCheckedChangeListener { _, isChecked ->
+            com.battery.analysis.service.BatteryMonitorService.setServiceEnabled(requireContext(), isChecked)
+            if (isChecked) {
+                (activity as? MainActivity)?.checkAndStartBatteryMonitorService()
+            } else {
+                com.battery.analysis.service.BatteryMonitorService.stop(requireContext())
+            }
+        }
+
+        binding.switchBootAutoStart.isChecked = com.battery.analysis.service.BatteryMonitorService.isBootAutoStartEnabled(requireContext())
+        binding.switchBootAutoStart.setOnCheckedChangeListener { _, isChecked ->
+            com.battery.analysis.service.BatteryMonitorService.setBootAutoStartEnabled(requireContext(), isChecked)
+        }
+
+        updateBatteryOptimizationDisplay()
+        binding.layoutBatteryOptimization.setOnClickListener {
+            requestIgnoreBatteryOptimization()
+        }
+
+        binding.layoutLockRecentsGuide.setOnClickListener {
+            showLockRecentsGuideDialog()
+        }
+    }
+
+    /**
+     * 更新系统电池优化白名单状态文字与高亮颜色展示。
+     */
+    private fun updateBatteryOptimizationDisplay() {
+        val isIgnoring = isIgnoringBatteryOptimizations()
+        if (isIgnoring) {
+            binding.tvBatteryOptimizationStatus.text = getString(R.string.toast_battery_optimization_granted)
+            binding.tvBatteryOptimizationStatus.setTextColor(Color.parseColor("#10B981"))
+        } else {
+            binding.tvBatteryOptimizationStatus.text = getString(R.string.settings_battery_optimization_btn)
+            binding.tvBatteryOptimizationStatus.setTextColor(ContextCompat.getColor(requireContext(), R.color.nav_item_selected))
+        }
+    }
+
+    /**
+     * 检测当前应用是否已处于系统忽略电池优化（即已加入电池优化白名单）状态。
+     *
+     * @return 若已在白名单中返回 true，否则返回 false
+     */
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = requireContext().getSystemService(Context.POWER_SERVICE) as? PowerManager
+            return pm?.isIgnoringBatteryOptimizations(requireContext().packageName) ?: false
+        }
+        return true
+    }
+
+    /**
+     * 主动发起申请加入系统电池优化白名单弹窗或跳转至设置页。
+     */
+    private fun requestIgnoreBatteryOptimization() {
+        if (isIgnoringBatteryOptimizations()) {
+            Toast.makeText(requireContext(), getString(R.string.toast_battery_optimization_granted), Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                Toast.makeText(requireContext(), getString(R.string.toast_battery_optimization_request), Toast.LENGTH_SHORT).show()
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${requireContext().packageName}")
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                try {
+                    val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    startActivity(fallbackIntent)
+                } catch (_: Exception) {
+                    Toast.makeText(requireContext(), e.message ?: "", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * 弹出各主流手机厂商后台防杀与多任务卡片加锁图文教程对话框。
+     */
+    private fun showLockRecentsGuideDialog() {
+        AlertDialog.Builder(requireContext())
+            .setTitle(R.string.dialog_lock_recents_title)
+            .setMessage(R.string.dialog_lock_recents_content)
+            .setPositiveButton(R.string.understood, null)
+            .show()
     }
 
     /**

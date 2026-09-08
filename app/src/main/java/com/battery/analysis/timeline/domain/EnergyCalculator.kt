@@ -81,7 +81,7 @@ object EnergyCalculator {
         appDurationMs: Long,
         totalDurationMs: Long,
         totalSystemEnergyMwh: Double,
-        isScreenOn: Boolean,
+        @Suppress("UNUSED_PARAMETER") isScreenOn: Boolean = true,
         directMah: Double? = null,
         nominalVoltageMv: Int = 3850
     ): EnergyEstimate {
@@ -99,18 +99,16 @@ object EnergyCalculator {
             )
         }
 
-        // 2. 否则基于时间占比和屏幕状态权重估算（MEDIUM / ESTIMATED）
+        // 2. 否则基于客观时间占比估算（MEDIUM / ESTIMATED），杜绝使用写死的人工权重倍率
         val timeRatio = if (totalDurationMs > 0L) {
             (appDurationMs.toDouble() / totalDurationMs.toDouble()).coerceIn(0.0, 1.0)
         } else {
             0.0
         }
 
-        // 前台亮屏应用承担基础前台开销（扣除整机屏幕与待机基底）
-        val screenWeight = if (isScreenOn) 0.65 else 0.2
-        val estimatedEnergyMwh = totalSystemEnergyMwh * timeRatio * screenWeight
+        val estimatedEnergyMwh = totalSystemEnergyMwh * timeRatio
         val avgPowerMw = calculateAveragePowerMw(estimatedEnergyMwh, appDurationMs)
-        val peakPowerMw = avgPowerMw // 移除人为设定的 1.8 倍峰值乘数
+        val peakPowerMw = avgPowerMw
 
         return EnergyEstimate(
             energyMwh = estimatedEnergyMwh,

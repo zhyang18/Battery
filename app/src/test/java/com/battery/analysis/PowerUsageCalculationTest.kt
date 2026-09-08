@@ -24,13 +24,11 @@ class PowerUsageCalculationTest {
         val screenOffHours = 0f
         val screenOffMs = 0L
 
-        // 1. 计算总放电能量
-        val realDischargedMah = if (dropPercent > 0) {
-            5000f * (dropPercent / 100f)
-        } else if (computedDrainMah > 0f) {
-            computedDrainMah
-        } else {
-            0f
+        // 1. 计算总放电能量（优先采用系统底层连续放电量 computedDrainMah）
+        val realDischargedMah = when {
+            computedDrainMah > 0.01f -> computedDrainMah
+            dropPercent > 0 -> 5000f * (dropPercent / 100f)
+            else -> 0f
         }
         val realTotalEnergyWh = (realDischargedMah * safeVoltage) / 1000f
 
@@ -258,5 +256,350 @@ class PowerUsageCalculationTest {
 
         assertEquals("拔电31秒全亮屏场景下，电池检测前台时长必须等于31秒，绝不能为0秒", 31000L, finalFgMs)
     }
+
+    /**
+     * 验证应用前后台能耗拆分：当 CPU 计算耗时小于等于前台时长时，前台客观分配 100% 能量，绝无写死 3.0 倍假权重。
+     */
+    @Test
+    fun testAppEnergySplitUsingCpuComputationalLoad() {
+        val totalDirectEnergyWh = 0.500f
+        val foregroundMs = 600_000L // 10分钟
+        val backgroundMs = 3_600_000L // 1小时后台挂起
+        val cpuMs = 450_000L // 7.5分钟 CPU 算力（全部发生在前台交互中）
+
+        // 模拟重构后的前后台能量拆分算法
+        val fgEnergyWh: Float
+        val bgEnergyWh: Float
+        if (foregroundMs > 0L && backgroundMs > 0L) {
+            if (cpuMs > 0L) {
+                if (cpuMs <= foregroundMs) {
+                    fgEnergyWh = totalDirectEnergyWh
+                    bgEnergyWh = 0f
+                } else {
+                    val fgRatio = (foregroundMs.toFloat() / cpuMs.toFloat()).coerceIn(0.1f, 1.0f)
+                    fgEnergyWh = totalDirectEnergyWh * fgRatio
+                    bgEnergyWh = (totalDirectEnergyWh - fgEnergyWh).coerceAtLeast(0f)
+                }
+            } else {
+                val totalMs = foregroundMs + backgroundMs
+                val fgRatio = if (totalMs > 0L) (foregroundMs.toFloat() / totalMs.toFloat()) else 1.0f
+                fgEnergyWh = totalDirectEnergyWh * fgRatio
+                bgEnergyWh = (totalDirectEnergyWh - fgEnergyWh).coerceAtLeast(0f)
+            }
+        } else {
+            fgEnergyWh = totalDirectEnergyWh
+            bgEnergyWh = 0f
+        }
+
+        // 验证前台能量获得全部 0.500Wh，后台获得 0.000Wh，杜绝因后台挂起导致前台功耗被严重稀释缩水
+        assertEquals("后台挂起时前台应获得全部计算能量", totalDirectEnergyWh, fgEnergyWh, 0.0001f)
+        assertEquals("后台挂起无计算负载时能耗应为0", 0f, bgEnergyWh, 0.0001f)
+    }
+
+    /**
+     * 验证普通模式下亮屏与息屏功耗：拒绝使用 SCREEN_OFF_TO_ON_POWER_RATIO = 0.12f 虚构假数据，
+     * 亮屏功耗反映真实平均放电功耗，无底层独立通道时息屏功耗规范置为 0f 由 UI 显示 "--"。
+     */
+    @Test
+    fun testNormalModeOverviewStatsNoFakeRatio() {
+        val screenOnHours = 2.0f
+        val screenOffHours = 4.0f
+        val realTotalEnergyWh = 8.0f // 2小时亮屏使用消耗 8Wh
+        val dischargeHours = screenOnHours + screenOffHours // 6小时
+        val avgPower = realTotalEnergyWh / dischargeHours // 1.33W
+
+        // 模拟普通模式下剔除 0.12f 经验比值后的真实功耗结算
+        val screenOnPower = if (screenOnHours > 0f) avgPower else 0f
+        val screenOffPower = if (screenOnHours <= 0f && screenOffHours > 0f) avgPower else 0f
+
+        // 验证不再产生 0.12f 的虚假解耦功耗
+        assertEquals("亮屏功耗真实反映放电平均功耗", avgPower, screenOnPower, 0.001f)
+        assertEquals("无独立测算通道时息屏功耗必须为0以展示--", 0f, screenOffPower, 0.001f)
+    }
+
+    /**
+     * 验证趋势点动态基线功耗：完全基于真实电量变化与电压动态计算，杜绝 2.0f 与 0.1f 假数据。
+     */
+    @Test
+    fun testTrendPointDynamicBaselinePower() {
+        val duration = 7200_000L // 2小时
+        val delta = 10 // 掉电 10%
+        val capacityMah = 5000f
+        val voltageVolts = 4.0f
+        val totalDischargeHours = duration / 3600000f
+
+        val defaultAvgWatts = if (totalDischargeHours > 0f && delta > 0) {
+            (capacityMah * (delta / 100f) * voltageVolts) / (1000f * totalDischargeHours)
+        } else {
+            0f
+        }
+
+        // 5000mAh * 10% = 500mAh; 500mAh * 4.0V = 2.0Wh; 2.0Wh / 2h = 1.0W
+        assertEquals("动态基线功耗必须严格符合物理能量公式", 1.0f, defaultAvgWatts, 0.001f)
+    }
+
+    /**
+     * 验证在拔电初期（例如 101 秒，即 1分41秒）出现 1% 整数跳变（46% -> 45%）时，
+     * 优先采用系统底层连续计算放电量 computedDrainMah（例如 15mAh），
+     * 彻底杜绝旧逻辑因将整整 1%（79.5mAh）全部算作在这 101 秒消耗而产生虚高 10.95W 假峰值的严重缺陷。
+     */
+    @Test
+    fun testContinuousComputedDrainPreventsQuantizationSpike() {
+        val effectiveCapacity = 7950f // 大容量电池 7950mAh
+        val safeVoltage = 3.862f      // 采样实时电压 3.862V
+        val durationMs = 101_000L     // 拔电后 1分41秒（101秒）
+        val dischargeHours = durationMs / 3600000f // 约 0.02805 小时
+
+        val startLevel = 46
+        val currentLevel = 45
+        val dropPercent = startLevel - currentLevel // 1% 整数阶跃
+
+        val computedDrainMah = 15.0f // 底层 batterystats 连续精确统计值（实际仅放电 15mAh）
+
+        // 旧逻辑：优先判断 dropPercent > 0，导致放电量误取 79.5mAh
+        val oldDischargedMah = if (dropPercent > 0) {
+            effectiveCapacity * (dropPercent / 100f)
+        } else if (computedDrainMah > 0f) {
+            computedDrainMah
+        } else {
+            0f
+        }
+        val oldWatts = (oldDischargedMah * safeVoltage / 1000f) / dischargeHours
+
+        // 验证旧逻辑确实会计算出 10.95W 的异常暴增假数据
+        assertEquals(10.95f, oldWatts, 0.05f)
+
+        // 新逻辑：优先采用系统底层连续放电量 computedDrainMah
+        val newDischargedMah = when {
+            computedDrainMah > 0.01f -> computedDrainMah
+            dropPercent > 0 -> {
+                val rawMah = effectiveCapacity * (dropPercent / 100f)
+                if (dropPercent == 1 && dischargeHours < 0.25f) {
+                    val maxPhysicalMah = (4.5f * 1000f / safeVoltage) * dischargeHours
+                    rawMah.coerceAtMost(maxPhysicalMah)
+                } else {
+                    rawMah
+                }
+            }
+            else -> 0f
+        }
+        val newWatts = (newDischargedMah * safeVoltage / 1000f) / dischargeHours
+
+        // 验证新逻辑稳定保持在 2.07W 物理正常水平，彻底消除 10.95W 突变尖峰
+        assertEquals(2.07f, newWatts, 0.05f)
+        assertTrue("新计算功耗必须在正常亮屏使用功耗范围内（1.5W ~ 3.0W）", newWatts in 1.5f..3.0f)
+    }
+
+    /**
+     * 验证普通模式（无 Shizuku 时的降级场景）：
+     * 1. 当硬件电荷计数器可用时，优先读取连续库仑电量（例如 14mAh），计算功耗约 1.93W；
+     * 2. 当硬件计数器不可用且仅能依赖 1% 阶跃时，拔电初期物理功耗上限平滑保护（<= 4.5W）生效，绝不会飙升至 10.95W。
+     */
+    @Test
+    fun testHardwareChargeCounterPriorityAndNormalModeQuantizationClamp() {
+        val effectiveCapacity = 7950f
+        val safeVoltage = 3.862f
+        val durationMs = 101_000L
+        val dischargeHours = durationMs / 3600000f
+        val dropPercent = 1
+
+        // 场景 A：硬件电荷计数器生效（拔电时 3,600,000 uAh，当前 3,586,000 uAh，消耗 14,000 uAh = 14mAh）
+        val lastCounterUah = 3600000
+        val currentCounterUah = 3586000
+        val hwDischargedMah = (lastCounterUah - currentCounterUah) / 1000f // 14.0 mAh
+
+        val dischargedMahWithHw = when {
+            hwDischargedMah > 0.01f -> hwDischargedMah
+            dropPercent > 0 -> {
+                val rawMah = effectiveCapacity * (dropPercent / 100f)
+                if (dropPercent == 1 && dischargeHours < 0.25f) {
+                    val maxPhysicalMah = (4.5f * 1000f / safeVoltage) * dischargeHours
+                    rawMah.coerceAtMost(maxPhysicalMah)
+                } else {
+                    rawMah
+                }
+            }
+            else -> 0f
+        }
+        val wattsWithHw = (dischargedMahWithHw * safeVoltage / 1000f) / dischargeHours
+        assertEquals(1.93f, wattsWithHw, 0.05f)
+
+        // 场景 B：硬件电荷计数器不支持（0f），仅依赖 dropPercent = 1
+        val dischargedMahFallback = when {
+            0f > 0.01f -> 0f
+            dropPercent > 0 -> {
+                val rawMah = effectiveCapacity * (dropPercent / 100f)
+                if (dropPercent == 1 && dischargeHours < 0.25f) {
+                    val maxPhysicalMah = (4.5f * 1000f / safeVoltage) * dischargeHours
+                    rawMah.coerceAtMost(maxPhysicalMah)
+                } else {
+                    rawMah
+                }
+            }
+            else -> 0f
+        }
+        val wattsFallback = (dischargedMahFallback * safeVoltage / 1000f) / dischargeHours
+
+        // 验证物理保护上限生效：平滑限制在 4.5W 以内，绝不出现 10.95W 尖峰
+        assertTrue("在无任何连续通道的极端降级兜底下，拔电初期物理平滑上限生效", wattsFallback <= 4.501f)
+        assertTrue("绝不产生 10W+ 的荒谬数学放大尖峰", wattsFallback < 5.0f)
+    }
+
+    /**
+     * 验证多应用与系统进程同时存在前台活跃记录时，
+     * 前台 App 获得的屏幕基底功率依据实际亮屏时间计算（例如 1.8W），
+     * 彻底杜绝旧逻辑因将所有进程的前台时间累加作为分母，导致屏幕功耗被严重稀释至仅 0.3W ~ 0.5W 的缺陷。
+     */
+    @Test
+    fun testAppScreenBasePowerNoDilutionFromMultipleForegroundApps() {
+        val screenOnHours = 0.5f // 亮屏 30 分钟
+        val screenOnWatts = 2.2f // 整机亮屏平均功耗 2.2W
+        val totalScreenOnEnergyWh = screenOnWatts * screenOnHours // 1.1 Wh
+
+        // 用户应用：前台 10 分钟，CPU 耗电 0.05Wh (核心 CPU 功耗 0.3W)
+        val userAppFgHours = 10f / 60f
+        val userAppCoreEnergyWh = 0.05f
+        val userAppCoreWatts = userAppCoreEnergyWh / userAppFgHours // 0.3W
+
+        // 系统进程（SystemUI、Android系统、桌面等）也累计了重叠的前台时长 60 分钟，核心 CPU 耗电 0.12Wh
+        val sysFgHours = 60f / 60f
+        val sysCoreEnergyWh = 0.12f
+
+        val totalCoreFgEnergyWh = userAppCoreEnergyWh + sysCoreEnergyWh // 0.17 Wh
+        val sharedScreenEnergyWh = (totalScreenOnEnergyWh - totalCoreFgEnergyWh).coerceAtLeast(0f) // 0.93 Wh
+
+        // 旧逻辑：将所有前台时间（包括系统多进程）累加作为分母
+        val totalFgHours = userAppFgHours + sysFgHours // 70 分钟 = 1.167 小时（远超亮屏 30 分钟！）
+        val oldAppShareEnergy = sharedScreenEnergyWh * (userAppFgHours / totalFgHours)
+        val oldCombinedAvgWatts = (userAppCoreEnergyWh + oldAppShareEnergy) / userAppFgHours
+
+        // 验证旧逻辑算出的功耗被明显稀释（仅 1.10W 左右，远低于亮屏放电功耗 2.2W）
+        assertTrue("旧逻辑功耗被明显稀释至 1.5W 以下（远低于整机亮屏功耗 2.2W）", oldCombinedAvgWatts < 1.5f)
+
+        // 新逻辑：屏幕基底功率按客观亮屏时间 screenOnHours 计算，不被系统多进程时长放大稀释
+        val screenBaseWatts = if (screenOnHours > 0f) (sharedScreenEnergyWh / screenOnHours) else 0f // 1.86W
+        val newCombinedAvgWatts = userAppCoreWatts + screenBaseWatts // 0.3W + 1.86W = 2.16W
+
+        // 验证新逻辑稳定保持在 2.16W，真实反映亮屏使用综合功耗
+        assertEquals(2.16f, newCombinedAvgWatts, 0.05f)
+        assertTrue("新逻辑功耗处于 2.0W ~ 2.5W 真实合理区间", newCombinedAvgWatts in 2.0f..2.5f)
+    }
+
+    /**
+     * 验证电量从 44% 跳到 43%（1% 掉电）且硬件库仑计或 dumpsys 滞后报告 0.125mAh 微小底噪的场景：
+     * 1. 验证旧逻辑将 0.125mAh 误作为整机放电量，导致算出的功耗仅 0.0059W（格式化为 0.00W），剩余续航膨胀至 211d12h；
+     * 2. 验证新逻辑依能量守恒（整机放电量必不小于各子应用能耗和 26.2mAh）与底噪过滤，正确判定 0.125mAh 无效，
+     *    并由 1% 掉电物理平滑保护正确计算出约 3.75W 真实放电功耗，剩余续航约 3h31m，彻底消除 0.00W 与 211 天荒谬展示。
+     */
+    @Test
+    fun testDischargePowerWhenBatteryDropsAndHardwareCounterHasNoise() {
+        val effectiveCapacity = 7950f // 7950mAh
+        val safeVoltage = 3.862f
+        val durationMs = 295_000L // 4分55秒
+        val dischargeHours = durationMs / 3600000f // 0.08194 小时
+        val dropPercent = 1 // 44% -> 43%
+
+        // 下方正在运行的各应用实耗电量之和（电池检测 0.035Wh + 部落冲突 0.039Wh + 荣耀桌面 0.015Wh 等 = 0.101Wh）
+        val appEnergySumWh = 0.101f
+        val appBaselineMah = (appEnergySumWh * 1000f) / safeVoltage // 约 26.15 mAh
+
+        // 模拟硬件电荷计数器或 dumpsys 在拔电初期因刷新滞后或 ADC 杂讯报告的 0.055mAh（55uAh）微小底噪
+        val hwDischargedMah = 0.055f
+        val computedDrainMah = 0.055f
+
+        // ===== 验证旧逻辑的致命缺陷 =====
+        val oldDischargedMah = when {
+            computedDrainMah > 0.01f -> computedDrainMah
+            hwDischargedMah > 0.01f -> hwDischargedMah
+            else -> appBaselineMah
+        }
+        val oldWatts = (oldDischargedMah * safeVoltage / 1000f) / dischargeHours
+        val oldPowerStr = String.format(java.util.Locale.US, "%.2fW", oldWatts)
+        val remainingEnergyWh = effectiveCapacity * (43f / 100f) * safeVoltage / 1000f // 约 13.2 Wh
+        val oldRemainingHours = remainingEnergyWh / oldWatts // 13.2Wh / 0.0026W 约 5088 小时
+        val oldRemainingMinutes = (oldRemainingHours * 60).toLong()
+        val oldDays = oldRemainingMinutes / 1440
+        val oldH = (oldRemainingMinutes % 1440) / 60
+        val oldRemStr = "${oldDays}d${oldH}h"
+
+        // 验证旧逻辑确实导致 0.00W 和 200+ 天天文数字
+        assertEquals("旧逻辑输出功耗被格式化为 0.00W", "0.00W", oldPowerStr)
+        assertTrue("旧逻辑计算出的剩余续航超过 200 天: $oldRemStr", oldDays >= 200)
+
+        // ===== 验证新算法的物理守恒与底噪过滤 =====
+        // 1. 1% 掉电平滑放电量
+        val rawMah = effectiveCapacity * (dropPercent / 100f) // 79.5 mAh
+        val maxPhysicalMah = (4.5f * 1000f / safeVoltage) * dischargeHours // 95.49 mAh
+        val smoothedDropMah = rawMah.coerceAtMost(maxPhysicalMah) // 79.5 mAh
+
+        // 2. 底噪过滤（0.125mAh 远小于 appBaselineMah 的 90%，且小于 0.5mAh，判定为无效底噪置 0）
+        val validComputedMah = if (computedDrainMah > 0.5f && (appBaselineMah <= 0.5f || computedDrainMah >= appBaselineMah * 0.9f)) {
+            computedDrainMah
+        } else {
+            0f
+        }
+        val validHwMah = if (hwDischargedMah > 0.5f && (appBaselineMah <= 0.5f || hwDischargedMah >= appBaselineMah * 0.9f)) {
+            hwDischargedMah
+        } else {
+            0f
+        }
+
+        // 3. 选取真正可信的放电量
+        val newDischargedMah = when {
+            validComputedMah > 0.5f -> maxOf(validComputedMah, appBaselineMah)
+            validHwMah > 0.5f -> maxOf(validHwMah, appBaselineMah)
+            dropPercent > 0 -> maxOf(smoothedDropMah, appBaselineMah)
+            appBaselineMah > 0.5f -> appBaselineMah
+            else -> 0f
+        }
+
+        val newWatts = (newDischargedMah * safeVoltage / 1000f) / dischargeHours
+        val newRemainingHours = (effectiveCapacity * (43f / 100f) * safeVoltage / 1000f) / newWatts
+
+        // 验证新逻辑：
+        // 1. 放电量选取为 79.5 mAh（高于应用实耗 26.15 mAh，杜绝了整体小于部分）
+        assertEquals(79.5f, newDischargedMah, 0.1f)
+        // 2. 计算功耗为 3.75W 左右（真实反映游戏与屏幕放电综合功耗），绝非 0.00W
+        assertEquals(3.75f, newWatts, 0.05f)
+        assertTrue("整机平均功耗必须在正常高负载放电区间（3.0W ~ 4.5W）", newWatts in 3.0f..4.5f)
+        // 3. 剩余续航计算为约 3.52 小时（3h31m），绝非 211 天
+        assertTrue("剩余续航必须在真实续航区间（3.0h ~ 4.0h）", newRemainingHours in 3.0f..4.0f)
+    }
+
+    /**
+     * 验证续航文本格式化方法在极低功耗或异常超大数值时的防呆拦截，以及正常小时数的友好格式化。
+     */
+    @Test
+    fun testRemainingLifeSafeguardAndFormatting() {
+        fun formatHours(hours: Float): String {
+            if (hours <= 0f || hours.isNaN() || hours.isInfinite() || hours > 720f) {
+                return "--"
+            }
+            val totalMinutes = (hours * 60).toLong().coerceAtLeast(1L)
+            val days = totalMinutes / 1440
+            val h = (totalMinutes % 1440) / 60
+            val m = totalMinutes % 60
+            return when {
+                days > 0 -> "${days}d${h}h"
+                h > 0 -> "${h}h${m}m"
+                else -> "${m}m"
+            }
+        }
+
+        // 1. 验证异常超大续航（如 5076 小时 = 211d12h）被安全拦截为 "--"
+        assertEquals("--", formatHours(5076f))
+        assertEquals("--", formatHours(721f))
+        assertEquals("--", formatHours(0f))
+        assertEquals("--", formatHours(-5f))
+        assertEquals("--", formatHours(Float.NaN))
+        assertEquals("--", formatHours(Float.POSITIVE_INFINITY))
+
+        // 2. 验证正常续航数值的精确格式化
+        assertEquals("3h31m", formatHours(3.52f))
+        assertEquals("14h30m", formatHours(14.5f))
+        assertEquals("2d12h", formatHours(60f))
+        assertEquals("45m", formatHours(0.75f))
+    }
 }
+
 

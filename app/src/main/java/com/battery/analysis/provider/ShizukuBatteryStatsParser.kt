@@ -31,6 +31,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * @property screenOnDurationMs 自断开充电以来的真实亮屏时长（毫秒）
      * @property screenOffDurationMs 自断开充电以来的真实息屏时长（毫秒）
      * @property screenOffDrainMah 自断开充电以来的真实息屏放电量（mAh）
+     * @property screenDrainMah 自断开充电以来的真实屏幕硬件放电量（mAh）
      * @property appList 解析得到的应用耗电实体列表
      * @property historyLevelPoints 解析得到的系统权威电量历史时间点与电量百分比序列列表 [List<Pair<Long, Int>>]
      * @property detectedUnplugTs 从底层历史账本中精确探测到的最近一次断开充电器的物理时间戳（毫秒，可选）
@@ -44,6 +45,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val screenOffDurationMs: Long = 0L,
         val screenOffDrainMah: Float = 0f,
         val appList: List<AppPowerUsageItem>,
+        val screenDrainMah: Float = 0f,
         val historyLevelPoints: List<Pair<Long, Int>> = emptyList(),
         val historyTempPoints: List<Pair<Long, Float>> = emptyList(),
         val detectedUnplugTs: Long? = null,
@@ -116,6 +118,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val pm = context.packageManager
         var capacityMah = 4500f
         var computedDrainMah = 0f
+        var screenDrainMah = 0f
         var dischargeDurationMs = 0L
         var screenOnDurationMs = 0L
 
@@ -124,6 +127,11 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         if (capMatcher.find()) {
             capacityMah = capMatcher.group(1)?.toFloatOrNull() ?: capacityMah
             computedDrainMah = capMatcher.group(2)?.toFloatOrNull() ?: 0f
+        } else {
+            val compAloneMatcher = REGEX_COMPUTED_DRAIN_ALONE.matcher(rawText)
+            if (compAloneMatcher.find()) {
+                computedDrainMah = compAloneMatcher.group(1)?.toFloatOrNull() ?: 0f
+            }
         }
 
         // 2. 匹配自断电以来的总放电耗时
@@ -318,6 +326,15 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                     }
                 }
 
+                // 提取屏幕硬件单独放电量（如 "Screen: 25.1"）
+                val screenDrainMatcher = REGEX_SCREEN_DRAIN_LINE.matcher(trimmed)
+                if (screenDrainMatcher.find()) {
+                    val sDrain = screenDrainMatcher.group(1)?.toFloatOrNull() ?: 0f
+                    if (sDrain > screenDrainMah) {
+                        screenDrainMah = sDrain
+                    }
+                }
+
                 // 兼容匹配：Uid 10234: 345.2、Uid 10234 (com.tencent.mobileqq): 345.2、Uid u0_a234 (com.tencent.mm): 156.2 ( cpu=120 ) 等各种真实格式
                 val uidMatcher = REGEX_UID_POWER.matcher(trimmed)
                 if (uidMatcher.find()) {
@@ -338,23 +355,35 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
                         if (!pkgName.isNullOrEmpty()) {
                             pkgDrainMahMap[pkgName] = drainMah
-                            val (foregroundMs, backgroundMs) = parseAppTimesFromDetails(
+                            val (foregroundMs, backgroundMs, cpuMs) = parseAppTimesFromDetails(
                                 extraDetails,
                                 dischargeDurationMs,
                                 isHistoricalDumpsys
                             )
                             val totalDirectEnergyWh = (drainMah * voltageVolts) / 1000f
 
-                            // 前后台能量拆分：若均有时长，按前台与后台时长权重加权拆分总能量；若仅有单向时长则完全归属该向
+                            // 前后台能量拆分：基于真实 CPU 算力与物理活跃时长客观分配总能量，彻底废除写死 3.0 倍假权重
                             val fgEnergyWh: Float
                             val bgEnergyWh: Float
                             if (foregroundMs > 0L && backgroundMs > 0L) {
-                                // 赋予前台 3 倍的功耗权重比
-                                val fgWeight = foregroundMs * 3.0
-                                val bgWeight = backgroundMs * 1.0
-                                val totalWeight = fgWeight + bgWeight
-                                fgEnergyWh = (totalDirectEnergyWh * (fgWeight / totalWeight)).toFloat()
-                                bgEnergyWh = (totalDirectEnergyWh - fgEnergyWh).coerceAtLeast(0f)
+                                if (cpuMs > 0L) {
+                                    if (cpuMs <= foregroundMs) {
+                                        // 应用总 CPU 算力均发生在前台活跃期间（后台处于挂起休眠状态，无计算功耗），前台承担全部能量
+                                        fgEnergyWh = totalDirectEnergyWh
+                                        bgEnergyWh = 0f
+                                    } else {
+                                        // 后台存在真实持续计算负载（超出部分为后台算力），按前台与后台真实算力占比分配
+                                        val fgRatio = (foregroundMs.toFloat() / cpuMs.toFloat()).coerceIn(0.1f, 1.0f)
+                                        fgEnergyWh = totalDirectEnergyWh * fgRatio
+                                        bgEnergyWh = (totalDirectEnergyWh - fgEnergyWh).coerceAtLeast(0f)
+                                    }
+                                } else {
+                                    // 未解析到 cpu 字段时，按前后台真实物理时长占比客观切分
+                                    val totalMs = foregroundMs + backgroundMs
+                                    val fgRatio = if (totalMs > 0L) (foregroundMs.toFloat() / totalMs.toFloat()) else 1.0f
+                                    fgEnergyWh = totalDirectEnergyWh * fgRatio
+                                    bgEnergyWh = (totalDirectEnergyWh - fgEnergyWh).coerceAtLeast(0f)
+                                }
                             } else if (foregroundMs > 0L) {
                                 fgEnergyWh = totalDirectEnergyWh
                                 bgEnergyWh = 0f
@@ -448,7 +477,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         // 6. 若仍未匹配到亮屏时长，通过所有前台应用的累计活跃时长进行真实计算
         if (screenOnDurationMs <= 0L) {
             val sumFg = userAppList.map { it.foregroundTimeMs }.sum()
-            screenOnDurationMs = if (sumFg > 0) sumFg.coerceAtMost(dischargeDurationMs) else (dischargeDurationMs * 0.25f).toLong().coerceAtLeast(0L)
+            screenOnDurationMs = if (sumFg > 0) sumFg.coerceAtMost(dischargeDurationMs) else 0L
         }
 
         // 上限以本次放电周期的实际总时长 dischargeDurationMs 为准
@@ -499,17 +528,20 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             }
         }
 
-        // 8. 总放电量累加：若 dumpsys 未直接给出整机 computedDrainMah，通过各应用实际消耗的 mAh（energyWh * 1000 / V）累加
-        if (computedDrainMah <= 0f && validatedList.isNotEmpty()) {
-            val totalWh = validatedList.sumOf { it.energyWh.toDouble() }.toFloat()
-            computedDrainMah = (totalWh * 1000f) / voltageVolts.coerceAtLeast(3.7f)
+        // 8. 总放电量累加：若 dumpsys 未直接给出整机 computedDrainMah，或由于 dumpsys 刷新滞后导致其值小于已运行子应用及屏幕的实际能耗总和，
+        // 则依宏观物理能量守恒定律强制对齐下限（整机总放电量必不小于各子应用实耗之和），彻底杜绝微小底噪杂讯导致整体小于部分的物理悖论
+        val totalAppWh = validatedList.sumOf { it.energyWh.toDouble() }.toFloat()
+        val appMah = (totalAppWh * 1000f) / voltageVolts.coerceAtLeast(3.7f)
+        val minPhysicalDrainMah = appMah + screenDrainMah
+        if (validatedList.isNotEmpty() && (computedDrainMah <= 0f || computedDrainMah < minPhysicalDrainMah * 0.9f)) {
+            computedDrainMah = maxOf(computedDrainMah, minPhysicalDrainMah)
         }
 
         // 9. 若底层未直接给出息屏放电量，但已有明确的息屏时长（>=30秒）以及整机总放电量，
-        // 则整机总放电量扣除前台亮屏应用所消耗电量后的结余放电量作为息屏待机放电量
+        // 则整机总放电量扣除前台亮屏应用与屏幕显示所消耗电量后的结余放电量作为息屏待机放电量
         if (screenOffDrainMah <= 0f && screenOffDurationMs >= 30000L && computedDrainMah > 0f) {
             val totalFgDrain = validatedList.sumOf { (it.energyWh * 1000f / voltageVolts.coerceAtLeast(3.7f)).toDouble() }.toFloat()
-            val remainingDrain = computedDrainMah - totalFgDrain
+            val remainingDrain = computedDrainMah - totalFgDrain - screenDrainMah
             if (remainingDrain > 0.05f) {
                 screenOffDrainMah = remainingDrain
             }
@@ -528,6 +560,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             screenOffDurationMs = screenOffDurationMs,
             screenOffDrainMah = screenOffDrainMah,
             appList = validatedList,
+            screenDrainMah = screenDrainMah,
             historyLevelPoints = filteredHistoryPoints,
             historyTempPoints = historyTempPoints,
             detectedUnplugTs = finalUnplugTs,
@@ -737,10 +770,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             val fgEnergyWh: Float
             val bgEnergyWh: Float
             if (effectiveFg > 0L && effectiveBg > 0L) {
-                val fgWeight = effectiveFg * 3.0
-                val bgWeight = effectiveBg * 1.0
-                val totalWeight = fgWeight + bgWeight
-                fgEnergyWh = (totalEnergy * (fgWeight / totalWeight)).toFloat()
+                val totalMs = effectiveFg + effectiveBg
+                val fgRatio = if (totalMs > 0L) (effectiveFg.toFloat() / totalMs.toFloat()) else 1.0f
+                fgEnergyWh = totalEnergy * fgRatio
                 bgEnergyWh = (totalEnergy - fgEnergyWh).coerceAtLeast(0f)
             } else if (effectiveFg > 0L) {
                 fgEnergyWh = totalEnergy
@@ -770,13 +802,21 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         }
 
         // 2. 补充 dumpsys 遗漏但系统事件中确实在前台运行的用户应用
-        // 计算已知应用的前台平均功耗作为参考基准，杜绝使用包名哈希生成虚假功耗
+        // 计算已知应用的前台平均功耗作为参考基准，杜绝使用写死常数
         val knownFgHours = existingMap.values.sumOf { it.foregroundTimeMs } / 3600000.0
         val knownFgEnergyWh = existingMap.values.sumOf { it.foregroundEnergyWh.toDouble() }
-        val baselineWatts = if (knownFgHours > 0.02 && knownFgEnergyWh > 0.0) {
-            (knownFgEnergyWh / knownFgHours).toFloat().coerceIn(0.5f, 4.0f)
+        val sysAvgWatts = if (dischargeMs > 0L) {
+            val totalMah = pkgDrainMahMap.values.sum()
+            if (totalMah > 0f) (totalMah * voltage / 1000f) / (dischargeMs / 3600000f) else 0f
         } else {
-            (1.5f * (voltage / 3.85f)).coerceIn(0.8f, 2.5f)
+            0f
+        }
+        val baselineWatts = if (knownFgHours > 0.02 && knownFgEnergyWh > 0.0) {
+            (knownFgEnergyWh / knownFgHours).toFloat()
+        } else if (sysAvgWatts > 0f) {
+            sysAvgWatts
+        } else {
+            0f
         }
 
         for ((pkgName, fgTime) in preciseTimes) {
@@ -814,20 +854,21 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     }
 
     /**
-     * 从 Uid 详情中提取应用在前台的运行活跃耗时（top 或 fg）以及后台运行耗时（bg）。
+     * 从 Uid 详情中提取应用在前台的运行活跃耗时（top 或 fg）、后台运行耗时（bg）以及实际 CPU 算力耗时（cpu）。
      *
      * @param details 详情括号内的字符串（如 "cpu=2m15s top=1m10s bg=15m5s"）
      * @param totalDischargeMs 整机总放电时长（毫秒）
      * @param isHistoricalOutput dumpsys 是否包含超越当前周期的历史累积输出
-     * @return 包含前台时长（毫秒）与后台时长（毫秒）的二元组 [Pair<Long, Long>]
+     * @return 包含前台时长、后台时长与 CPU 耗时的三元组 [Triple<Long, Long, Long>]
      */
     private fun parseAppTimesFromDetails(
         details: String,
         totalDischargeMs: Long,
         isHistoricalOutput: Boolean = false
-    ): Pair<Long, Long> {
+    ): Triple<Long, Long, Long> {
         var fgMs = 0L
         var bgMs = 0L
+        var cpuMs = 0L
 
         // 1. 优先匹配前台运行耗时 top
         val topMatch = REGEX_TOP_TIME.matcher(details)
@@ -858,14 +899,25 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             }
         }
 
+        // 4. 匹配 CPU 真实计算耗时 cpu
+        val cpuMatch = REGEX_CPU_TIME.matcher(details)
+        if (cpuMatch.find()) {
+            val cStr = cpuMatch.group(1)
+            if (!cStr.isNullOrBlank()) {
+                cpuMs = parseDurationStringToMs(cStr)
+            }
+        }
+
         if (isHistoricalOutput) {
             if (fgMs > totalDischargeMs) fgMs = 0L
             if (bgMs > totalDischargeMs) bgMs = 0L
+            if (cpuMs > totalDischargeMs * 8) cpuMs = 0L
         }
 
         val safeFg = fgMs.coerceAtMost(totalDischargeMs.coerceAtLeast(1000L))
         val safeBg = bgMs.coerceAtMost(totalDischargeMs.coerceAtLeast(1000L))
-        return Pair(safeFg, safeBg)
+        val safeCpu = cpuMs.coerceAtLeast(0L)
+        return Triple(safeFg, safeBg, safeCpu)
     }
 
     /**
@@ -953,6 +1005,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
     companion object {
         private val REGEX_CAP_DRAIN = Pattern.compile("Capacity:\\s*([\\d.]+).*?Computed drain:\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
+        private val REGEX_COMPUTED_DRAIN_ALONE = Pattern.compile("Computed drain:\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
+        private val REGEX_SCREEN_DRAIN_LINE = Pattern.compile("^\\s*Screen:\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_TIME_ON_BATTERY = Pattern.compile("Time on battery:\\s*([^\\n\\(]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_DISCHARGE_TIME = Pattern.compile("Discharge:\\s*([^\\n\\(]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_SCREEN_ON = Pattern.compile("Screen on:\\s*([^\\n\\(]+)", Pattern.CASE_INSENSITIVE)

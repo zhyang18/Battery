@@ -796,7 +796,8 @@ class PowerUsageFragment : Fragment() {
         // 行 5：电池容量与等效能量（如 8000mAh (≈30.9Wh)）
         val capacityMah = NormalApiProvider.getDesignCapacity(requireContext())
         val safeCap = if (capacityMah != null && capacityMah > 100f) capacityMah else 5000f
-        val safeWh = (safeCap * 3.86f) / 1000f
+        val safeVoltage = if (currentPoint.voltageVolts > 2.5f) currentPoint.voltageVolts else 3.85f
+        val safeWh = (safeCap * safeVoltage) / 1000f
         chargingView.tvMetricCapacityEnergy.text = "${safeCap.toInt()}mAh (≈${String.format(Locale.getDefault(), "%.1f", safeWh)}Wh)"
 
         // 6. 填充下方条形底栏卡片：左侧日期与时间范围换行，右侧亮屏与息屏指标上下严格对齐
@@ -986,14 +987,18 @@ class PowerUsageFragment : Fragment() {
             getString(R.string.power_status_unplugged)
         }
 
-        // 2. 刷新核心功耗指标卡片（三大卡片三行精准对应呈现）
-        val onPowerStr = if (overview.screenOnPowerWatts > 0.001f) {
+        // 2. 刷新核心功耗指标卡片（三大卡片三行精准对应呈现，低于 0.05W 统一规范展示为 "--" 杜绝显示 0.00W 误导用户）
+        val onPowerStr = if (overview.screenOnPowerWatts >= 0.05f) {
             String.format(Locale.getDefault(), "%.2fW", overview.screenOnPowerWatts)
         } else {
             "--"
         }
-        val avgPowerStr = String.format(Locale.getDefault(), "%.2fW", overview.avgPowerWatts)
-        val offPowerStr = if (overview.screenOffPowerWatts > 0.001f) {
+        val avgPowerStr = if (overview.avgPowerWatts >= 0.05f) {
+            String.format(Locale.getDefault(), "%.2fW", overview.avgPowerWatts)
+        } else {
+            "--"
+        }
+        val offPowerStr = if (overview.screenOffPowerWatts >= 0.05f) {
             String.format(Locale.getDefault(), "%.2fW", overview.screenOffPowerWatts)
         } else {
             "--"

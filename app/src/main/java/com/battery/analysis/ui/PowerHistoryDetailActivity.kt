@@ -148,10 +148,10 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         binding.tvDetailVoltage.text = String.format(Locale.getDefault(), "%.2f V", record.voltageVolts)
         binding.tvDetailEnergy.text = String.format(Locale.getDefault(), "%.1f Wh", record.energyWh)
 
-        // 2. 卡片 2：三维指标
-        val onPwrStr = if (record.screenOnPowerWatts > 0.001f) String.format(Locale.getDefault(), "%.2fW", record.screenOnPowerWatts) else "--"
-        val avgPwrStr = String.format(Locale.getDefault(), "%.2fW", record.avgPowerWatts)
-        val offPwrStr = if (record.screenOffPowerWatts > 0.001f) String.format(Locale.getDefault(), "%.2fW", record.screenOffPowerWatts) else "--"
+        // 2. 卡片 2：三维指标（低于 0.05W 统一规范展示为 "--" 杜绝显示 0.00W 误导用户）
+        val onPwrStr = if (record.screenOnPowerWatts >= 0.05f) String.format(Locale.getDefault(), "%.2fW", record.screenOnPowerWatts) else "--"
+        val avgPwrStr = if (record.avgPowerWatts >= 0.05f) String.format(Locale.getDefault(), "%.2fW", record.avgPowerWatts) else "--"
+        val offPwrStr = if (record.screenOffPowerWatts >= 0.05f) String.format(Locale.getDefault(), "%.2fW", record.screenOffPowerWatts) else "--"
 
         binding.tvMetricPowerScreenOn.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), onPwrStr)
         binding.tvMetricPowerAvg.text = String.format(Locale.getDefault(), getString(R.string.power_format_avg), avgPwrStr)

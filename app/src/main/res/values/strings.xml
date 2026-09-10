@@ -29,6 +29,7 @@
     <string name="power_format_avg_with_energy">全局 %1$s (%2$s)</string>
     <string name="power_format_background_with_energy">后台 %1$s (%2$s)</string>
     <string name="power_metric_power_label">功耗：</string>
+    <string name="power_metric_energy_label">能量：</string>
     <string name="power_metric_time_label">时间：</string>
     <string name="power_metric_remaining_label">续航：</string>
     <string name="power_header_screen_on">亮屏</string>

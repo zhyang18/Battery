@@ -191,78 +191,7 @@
                                 android:text="@string/power_header_background" />
                         </LinearLayout>
 
-                        <!-- 第一行 功耗：数值(能量) / 数值(能量) / 数值(能量) / 数值(能量) -->
-                        <LinearLayout
-                            android:id="@+id/layout_metrics_power_row"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="5dp"
-                            android:orientation="horizontal">
-
-                            <TextView
-                                android:layout_width="38dp"
-                                android:layout_height="wrap_content"
-                                android:gravity="start"
-                                android:singleLine="true"
-                                android:textColor="?android:attr/textColorSecondary"
-                                android:textSize="11.5sp"
-                                android:textStyle="bold"
-                                android:text="@string/power_metric_power_label" />
-
-                            <TextView
-                                android:id="@+id/tv_power_screen_on"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="start"
-                                android:maxLines="2"
-                                android:ellipsize="end"
-                                android:textColor="?android:attr/textColorPrimary"
-                                android:textSize="11.5sp"
-                                android:textStyle="bold"
-                                tools:text="1.73W\n(0.14Wh)" />
-
-                            <TextView
-                                android:id="@+id/tv_power_avg"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="start"
-                                android:maxLines="2"
-                                android:ellipsize="end"
-                                android:textColor="?android:attr/textColorPrimary"
-                                android:textSize="11.5sp"
-                                android:textStyle="bold"
-                                tools:text="1.73W\n(0.14Wh)" />
-
-                            <TextView
-                                android:id="@+id/tv_power_screen_off"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="start"
-                                android:maxLines="2"
-                                android:ellipsize="end"
-                                android:textColor="?android:attr/textColorPrimary"
-                                android:textSize="11.5sp"
-                                android:textStyle="bold"
-                                tools:text="--" />
-
-                            <TextView
-                                android:id="@+id/tv_power_background"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="start"
-                                android:maxLines="2"
-                                android:ellipsize="end"
-                                android:textColor="?android:attr/textColorPrimary"
-                                android:textSize="11.5sp"
-                                android:textStyle="bold"
-                                tools:text="--\n(0.11Wh)" />
-                        </LinearLayout>
-
-                        <!-- 第二行 时间：数值 / 数值 / 数值 / 数值 -->
+                        <!-- 第一行 时间：数值 / 数值 / 数值 / 数值 -->
                         <LinearLayout
                             android:id="@+id/layout_metrics_time_row"
                             android:layout_width="match_parent"
@@ -331,6 +260,148 @@
                                 android:textSize="11.5sp"
                                 android:textStyle="bold"
                                 tools:text="0m0s" />
+                        </LinearLayout>
+
+                        <!-- 第二行 功耗：数值 / 数值 / 数值 / 数值 -->
+                        <LinearLayout
+                            android:id="@+id/layout_metrics_power_row"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="5dp"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="38dp"
+                                android:layout_height="wrap_content"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:textColor="?android:attr/textColorSecondary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                android:text="@string/power_metric_power_label" />
+
+                            <TextView
+                                android:id="@+id/tv_power_screen_on"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:ellipsize="end"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                tools:text="1.73W" />
+
+                            <TextView
+                                android:id="@+id/tv_power_avg"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:ellipsize="end"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                tools:text="1.73W" />
+
+                            <TextView
+                                android:id="@+id/tv_power_screen_off"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:ellipsize="end"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                tools:text="--" />
+
+                            <TextView
+                                android:id="@+id/tv_power_background"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:ellipsize="end"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                tools:text="0.64W" />
+                        </LinearLayout>
+
+                        <!-- 第三行 能量：数值 / 数值 / 数值 / 数值 -->
+                        <LinearLayout
+                            android:id="@+id/layout_metrics_energy_row"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="5dp"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="38dp"
+                                android:layout_height="wrap_content"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:textColor="?android:attr/textColorSecondary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                android:text="@string/power_metric_energy_label" />
+
+                            <TextView
+                                android:id="@+id/tv_energy_screen_on"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:ellipsize="end"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                tools:text="0.14Wh" />
+
+                            <TextView
+                                android:id="@+id/tv_energy_avg"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:ellipsize="end"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                tools:text="0.14Wh" />
+
+                            <TextView
+                                android:id="@+id/tv_energy_screen_off"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:ellipsize="end"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                tools:text="--" />
+
+                            <TextView
+                                android:id="@+id/tv_energy_background"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:ellipsize="end"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                tools:text="0.11Wh" />
                         </LinearLayout>
 
                         <!-- 第三行 续航：数值 / 数值 / 数值 / 数值 -->
@@ -446,80 +517,10 @@
                         android:paddingEnd="10dp"
                         android:paddingBottom="8dp">
 
-                        <!-- 第一行 功耗：数值 / 数值 / 数值 / 数值 -->
+                        <!-- 第一行 时间：数值 / 数值 / 数值 / 数值 -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:orientation="horizontal">
-
-                            <TextView
-                                android:layout_width="38dp"
-                                android:layout_height="wrap_content"
-                                android:gravity="start"
-                                android:singleLine="true"
-                                android:textColor="?android:attr/textColorSecondary"
-                                android:textSize="11.5sp"
-                                android:textStyle="bold"
-                                android:text="@string/power_metric_power_label" />
-
-                            <TextView
-                                android:id="@+id/tv_mini_power_screen_on"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="start"
-                                android:maxLines="2"
-                                android:ellipsize="end"
-                                android:textColor="?android:attr/textColorPrimary"
-                                android:textSize="11.5sp"
-                                android:textStyle="bold"
-                                tools:text="1.73W\n(0.14Wh)" />
-
-                            <TextView
-                                android:id="@+id/tv_mini_power_avg"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="start"
-                                android:maxLines="2"
-                                android:ellipsize="end"
-                                android:textColor="?android:attr/textColorPrimary"
-                                android:textSize="11.5sp"
-                                android:textStyle="bold"
-                                tools:text="1.73W\n(0.14Wh)" />
-
-                            <TextView
-                                android:id="@+id/tv_mini_power_screen_off"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="start"
-                                android:maxLines="2"
-                                android:ellipsize="end"
-                                android:textColor="?android:attr/textColorPrimary"
-                                android:textSize="11.5sp"
-                                android:textStyle="bold"
-                                tools:text="--" />
-
-                            <TextView
-                                android:id="@+id/tv_mini_power_background"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="start"
-                                android:maxLines="2"
-                                android:ellipsize="end"
-                                android:textColor="?android:attr/textColorPrimary"
-                                android:textSize="11.5sp"
-                                android:textStyle="bold"
-                                tools:text="--\n(0.11Wh)" />
-                        </LinearLayout>
-
-                        <!-- 第二行 时间：数值 / 数值 / 数值 / 数值 -->
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
                             android:orientation="horizontal">
 
                             <TextView
@@ -583,6 +584,76 @@
                                 android:textSize="11.5sp"
                                 android:textStyle="bold"
                                 tools:text="0m0s" />
+                        </LinearLayout>
+
+                        <!-- 第二行 功耗：数值 / 数值 / 数值 / 数值（不显示能量） -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:layout_width="38dp"
+                                android:layout_height="wrap_content"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:textColor="?android:attr/textColorSecondary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                android:text="@string/power_metric_power_label" />
+
+                            <TextView
+                                android:id="@+id/tv_mini_power_screen_on"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:ellipsize="end"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                tools:text="1.73W" />
+
+                            <TextView
+                                android:id="@+id/tv_mini_power_avg"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:ellipsize="end"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                tools:text="1.73W" />
+
+                            <TextView
+                                android:id="@+id/tv_mini_power_screen_off"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:ellipsize="end"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                tools:text="--" />
+
+                            <TextView
+                                android:id="@+id/tv_mini_power_background"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="start"
+                                android:singleLine="true"
+                                android:ellipsize="end"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                tools:text="0.64W" />
                         </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>

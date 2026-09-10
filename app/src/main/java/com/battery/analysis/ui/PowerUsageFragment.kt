@@ -1137,7 +1137,7 @@ class PowerUsageFragment : Fragment() {
             getString(R.string.power_status_unplugged)
         }
 
-        // 2. 刷新核心功耗指标卡片（四大行精准对应呈现，低于 0.05W 统一规范展示为 "--" 杜绝显示 0.00W 误导用户）
+        // 2. 刷新核心功耗指标卡片（按：时间 -> 功耗 -> 能量 -> 续航，低于 0.05W 统一规范展示为 "--" 杜绝显示 0.00W 误导用户）
         val onEnergyStr = formatOverviewEnergy(overview.screenOnEnergyWh)
         val totalEnergyStr = formatOverviewEnergy(overview.totalEnergyWh)
         val offEnergyStr = formatOverviewEnergy(overview.screenOffEnergyWh)
@@ -1164,50 +1164,40 @@ class PowerUsageFragment : Fragment() {
             "--"
         }
 
-        binding.tvPowerScreenOn.text = if (onPowerStr != "--" || overview.screenOnEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), onPowerStr, onEnergyStr)
-        } else {
-            "--"
-        }
-
-        binding.tvPowerAvg.text = if (avgPowerStr != "--" || overview.totalEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), avgPowerStr, totalEnergyStr)
-        } else {
-            "--"
-        }
-
-        binding.tvPowerScreenOff.text = if (offPowerStr != "--" || overview.screenOffEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), offPowerStr, offEnergyStr)
-        } else {
-            "--"
-        }
-
-        binding.tvPowerBackground.text = if (bgPowerStr != "--" || overview.backgroundEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), bgPowerStr, bgEnergyStr)
-        } else {
-            "--"
-        }
-
+        // 第一行：时间
         binding.tvTimeScreenOn.text = overview.screenOnDurationText
         binding.tvTimeTotal.text = overview.totalDurationText
         binding.tvTimeScreenOff.text = overview.screenOffDurationText
         binding.tvTimeBackground.text = overview.backgroundDurationText
 
+        // 第二行：纯功耗（W）
+        binding.tvPowerScreenOn.text = onPowerStr
+        binding.tvPowerAvg.text = avgPowerStr
+        binding.tvPowerScreenOff.text = offPowerStr
+        binding.tvPowerBackground.text = bgPowerStr
+
+        // 第三行：能量（Wh）
+        binding.tvEnergyScreenOn.text = onEnergyStr
+        binding.tvEnergyAvg.text = totalEnergyStr
+        binding.tvEnergyScreenOff.text = offEnergyStr
+        binding.tvEnergyBackground.text = bgEnergyStr
+
+        // 第四行：预估续航
         binding.tvRemainingScreenOn.text = overview.remainingScreenOnText
         binding.tvRemainingComposite.text = overview.remainingCompositeText
         binding.tvRemainingScreenOff.text = overview.remainingScreenOffText
         binding.tvRemainingBackground.text = overview.remainingBackgroundText
 
-        // 同步刷新折叠吸顶 mini 指标卡片数据（仅包含功率行与时间行）
-        binding.tvMiniPowerScreenOn.text = binding.tvPowerScreenOn.text
-        binding.tvMiniPowerAvg.text = binding.tvPowerAvg.text
-        binding.tvMiniPowerScreenOff.text = binding.tvPowerScreenOff.text
-        binding.tvMiniPowerBackground.text = binding.tvPowerBackground.text
-
+        // 同步刷新折叠吸顶 mini 指标卡片数据（第一行时间，第二行纯功耗，不包含能量）
         binding.tvMiniTimeScreenOn.text = binding.tvTimeScreenOn.text
         binding.tvMiniTimeTotal.text = binding.tvTimeTotal.text
         binding.tvMiniTimeScreenOff.text = binding.tvTimeScreenOff.text
         binding.tvMiniTimeBackground.text = binding.tvTimeBackground.text
+
+        binding.tvMiniPowerScreenOn.text = onPowerStr
+        binding.tvMiniPowerAvg.text = avgPowerStr
+        binding.tvMiniPowerScreenOff.text = offPowerStr
+        binding.tvMiniPowerBackground.text = bgPowerStr
 
         // 3. 刷新应用场景列表
         adapter.submitList(fullPackage.appList)

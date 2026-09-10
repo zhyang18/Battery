@@ -1,33 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical">
+    android:layout_height="match_parent">
 
-    <!-- 顶级 ViewPager2 容器：承载“检测”、“记录”、“设置”三大顶级页面 -->
+    <!-- 顶级 ViewPager2 容器：承载“耗电/充电”、“检测”、“设置”三大顶级页面 -->
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/main_view_pager"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_height="match_parent" />
 
-    <!-- 底部分割线 -->
-    <View
+    <!-- 底部导航容器（包含底部分割线与导航栏，支持整体平滑联动平移下沉隐藏与上浮显示） -->
+    <LinearLayout
+        android:id="@+id/layout_bottom_nav_container"
         android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="#14888888" />
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:orientation="vertical">
 
-    <!-- 底部 Material 3 导航栏 -->
-    <com.google.android.material.bottomnavigation.BottomNavigationView
-        android:id="@+id/bottom_navigation"
-        android:layout_width="match_parent"
-        android:layout_height="60dp"
-        android:background="?android:attr/colorBackground"
-        app:elevation="8dp"
-        app:itemIconTint="@color/selector_nav_item_color"
-        app:itemTextColor="@color/selector_nav_item_color"
-        app:labelVisibilityMode="unlabeled"
-        app:menu="@menu/bottom_nav_menu" />
+        <!-- 底部分割线 -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#14888888" />
 
-</LinearLayout>
+        <!-- 底部 Material 3 导航栏 -->
+        <com.google.android.material.bottomnavigation.BottomNavigationView
+            android:id="@+id/bottom_navigation"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:background="?android:attr/colorBackground"
+            app:elevation="8dp"
+            app:itemIconTint="@color/selector_nav_item_color"
+            app:itemTextColor="@color/selector_nav_item_color"
+            app:labelVisibilityMode="unlabeled"
+            app:menu="@menu/bottom_nav_menu" />
+    </LinearLayout>
+
+</RelativeLayout>

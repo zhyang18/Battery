@@ -215,6 +215,7 @@ class MainActivity : AppCompatActivity() {
         binding.mainViewPager.offscreenPageLimit = 2
 
         binding.bottomNavigation.setOnItemSelectedListener { item ->
+            setBottomNavigationVisibility(true)
             when (item.itemId) {
                 R.id.nav_power -> {
                     binding.mainViewPager.setCurrentItem(0, false)
@@ -237,6 +238,28 @@ class MainActivity : AppCompatActivity() {
         // 根据初始充放电状态动态适配首个页签的标题与图标
         val chargingManager = com.battery.analysis.manager.ChargingStatsManager.getInstance(this)
         updateBottomNavPowerTab(chargingManager.isCharging())
+    }
+
+    private var isBottomNavVisible: Boolean = true
+
+    /**
+     * 设置底部导航栏联动显隐状态，配合平滑动效实现滑入或滑出。
+     *
+     * @param visible 是否显示底部导航栏（true 为显示，false 为隐藏）
+     */
+    fun setBottomNavigationVisibility(visible: Boolean) {
+        if (isBottomNavVisible == visible) return
+        isBottomNavVisible = visible
+        val targetTranslationY = if (visible) {
+            0f
+        } else {
+            binding.layoutBottomNavContainer.height.toFloat().takeIf { it > 0f } ?: 200f
+        }
+        binding.layoutBottomNavContainer.animate()
+            .translationY(targetTranslationY)
+            .setDuration(250L)
+            .setInterpolator(androidx.interpolator.view.animation.FastOutSlowInInterpolator())
+            .start()
     }
 
     /**

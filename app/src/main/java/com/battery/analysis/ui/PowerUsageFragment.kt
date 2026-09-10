@@ -188,6 +188,7 @@ class PowerUsageFragment : Fragment() {
         setupSwipeRefresh()
         setupClickListeners()
         setupFirstTimeGuideUI()
+        setupCoordinatorScroll()
 
         checkFirstTimeConfiguration()
 
@@ -217,6 +218,92 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
+     * 配置 CoordinatorLayout、AppBarLayout 与 NestedScrollView 原生联动滑动折叠效果。
+     * 监听列表滑动方向联动控制 MainActivity 底部页签栏显隐，
+     * 并平滑折叠隐藏顶部耗电统计栏与大指标卡片，在顶部固定吸顶展示功率与时间两行指标。
+     */
+    private fun setupCoordinatorScroll() {
+        // 清除外层 AppBarLayout 与 Toolbar 默认背景及 Scrim，确保吸顶卡片外围无多余背景色
+        binding.appbarPower.background = null
+        binding.appbarPower.stateListAnimator = null
+        binding.collapsingToolbar.background = null
+        binding.collapsingToolbar.setContentScrimColor(android.graphics.Color.TRANSPARENT)
+        binding.collapsingToolbar.setStatusBarScrimColor(android.graphics.Color.TRANSPARENT)
+        binding.toolbarCollapsed.background = null
+
+        // 1. 顶部 AppBarLayout 偏移联动：渐变淡出完整区域、淡入吸顶 mini 卡片
+        binding.appbarPower.addOnOffsetChangedListener { appBarLayout, verticalOffset ->
+            if (currentDisplayTab == 1) {
+                // 充电模式下完全禁用联动折叠动效，固定常驻完整展开标题栏
+                binding.layoutExpandedHeader.alpha = 1f
+                binding.layoutExpandedHeader.visibility = View.VISIBLE
+                binding.cardCollapsedMetrics.visibility = View.GONE
+                binding.cardCollapsedMetrics.alpha = 0f
+                binding.swipeRefreshLayout.isEnabled = false
+                return@addOnOffsetChangedListener
+            }
+
+            val totalRange = appBarLayout.totalScrollRange
+            if (totalRange > 0) {
+                val fraction = abs(verticalOffset).toFloat() / totalRange.toFloat()
+
+                // 展开区域（标题栏 + 完整大卡片）：在前半程平滑淡出
+                val expandedAlpha = (1f - fraction * 1.5f).coerceIn(0f, 1f)
+                binding.layoutExpandedHeader.alpha = expandedAlpha
+                binding.layoutExpandedHeader.visibility = if (expandedAlpha > 0f) View.VISIBLE else View.INVISIBLE
+
+                // 折叠吸顶 mini 卡片：在后半程平滑淡入（仅在耗电模式大卡片可见的前提下）
+                val isMetricsActive = binding.cardPowerMetrics.visibility == View.VISIBLE || binding.cardCollapsedMetrics.visibility == View.VISIBLE
+                val collapsedAlpha = ((fraction - 0.4f) * 1.67f).coerceIn(0f, 1f)
+                binding.cardCollapsedMetrics.alpha = collapsedAlpha
+                if (collapsedAlpha > 0f && isMetricsActive) {
+                    binding.cardCollapsedMetrics.visibility = View.VISIBLE
+                } else {
+                    binding.cardCollapsedMetrics.visibility = View.INVISIBLE
+                }
+            } else {
+                binding.layoutExpandedHeader.alpha = 1f
+                binding.layoutExpandedHeader.visibility = View.VISIBLE
+                binding.cardCollapsedMetrics.alpha = 0f
+                binding.cardCollapsedMetrics.visibility = View.INVISIBLE
+            }
+
+            // 下拉刷新防误触：仅当 AppBarLayout 处于完全展开位置（verticalOffset == 0）且列表在顶部时才允许下拉刷新
+            val isAtTop = verticalOffset == 0 && binding.nestedScrollView.scrollY == 0
+            if (currentDisplayTab == 0) {
+                binding.swipeRefreshLayout.isEnabled = isAtTop
+            }
+        }
+
+        // 2. 列表滚动监听：联动控制底部页签栏显隐与下拉刷新启用状态
+        binding.nestedScrollView.setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
+            if (currentDisplayTab == 1) {
+                // 充电模式下完全禁用手势联动，底部导航栏保持显示，不触发任何显隐与刷新
+                (activity as? MainActivity)?.setBottomNavigationVisibility(true)
+                return@setOnScrollChangeListener
+            }
+
+            val dy = scrollY - oldScrollY
+            if (scrollY <= 0) {
+                // 滚动至列表最顶端，强制恢复底部页签栏展示
+                (activity as? MainActivity)?.setBottomNavigationVisibility(true)
+            } else if (dy > 15) {
+                // 手指向上滑动列表，隐藏底部页签栏
+                (activity as? MainActivity)?.setBottomNavigationVisibility(false)
+            } else if (dy < -15) {
+                // 手指向下滑动列表，显示底部页签栏
+                (activity as? MainActivity)?.setBottomNavigationVisibility(true)
+            }
+
+            // 动态控制下拉刷新手势使能
+            val isAppBarExpanded = binding.appbarPower.top >= 0
+            if (currentDisplayTab == 0) {
+                binding.swipeRefreshLayout.isEnabled = (scrollY <= 0 && isAppBarExpanded)
+            }
+        }
+    }
+
+    /**
      * 检查用户是否已配置过耗电模式：若为初次进入则展示模式引导，若已配置则展示耗电/充电详情。
      */
     private fun checkFirstTimeConfiguration() {
@@ -228,6 +315,7 @@ class PowerUsageFragment : Fragment() {
             binding.layoutFirstTimeSetup.visibility = View.VISIBLE
             binding.layoutPowerContent.visibility = View.GONE
             binding.cardPowerMetrics.visibility = View.GONE
+            binding.cardCollapsedMetrics.visibility = View.GONE
             binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
             updateSetupCardSelection(tempSelectedSetupMode)
         }
@@ -639,6 +727,7 @@ class PowerUsageFragment : Fragment() {
             binding.layoutFirstTimeSetup.visibility = View.VISIBLE
             binding.layoutPowerContent.visibility = View.GONE
             binding.cardPowerMetrics.visibility = View.GONE
+            binding.cardCollapsedMetrics.visibility = View.GONE
             binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
             return
         }
@@ -647,13 +736,26 @@ class PowerUsageFragment : Fragment() {
 
         if (isCharging) {
             // 智能呈现【充电统计】界面并根据设置开启屏幕常亮
+            currentDisplayTab = 1
             applyKeepScreenOn(true)
             binding.swipeRefreshLayout.isEnabled = false
             binding.swipeRefreshLayout.isRefreshing = false
             binding.tvPowerTitle.text = getString(R.string.charging_stats_title)
             binding.layoutPowerContent.visibility = View.GONE
             binding.cardPowerMetrics.visibility = View.GONE
+            binding.cardCollapsedMetrics.visibility = View.GONE
+            binding.cardCollapsedMetrics.alpha = 0f
             binding.layoutChargingContent.layoutChargingRoot.visibility = View.VISIBLE
+
+            // 充电状态下完全禁用联动折叠：展开并锁定 AppBarLayout，恢复底部页签栏常驻展示
+            binding.appbarPower.setExpanded(true, false)
+            (binding.collapsingToolbar.layoutParams as? com.google.android.material.appbar.AppBarLayout.LayoutParams)?.let { params ->
+                params.scrollFlags = 0
+                binding.collapsingToolbar.layoutParams = params
+            }
+            binding.layoutExpandedHeader.alpha = 1f
+            binding.layoutExpandedHeader.visibility = View.VISIBLE
+            (activity as? MainActivity)?.setBottomNavigationVisibility(true)
 
             renderChargingData()
             startChargingPolling()
@@ -663,6 +765,7 @@ class PowerUsageFragment : Fragment() {
             }
         } else {
             // 智能呈现【耗电统计】界面并恢复屏幕休眠
+            currentDisplayTab = 0
             applyKeepScreenOn(false)
             binding.swipeRefreshLayout.isEnabled = true
             stopChargingPolling()
@@ -670,6 +773,13 @@ class PowerUsageFragment : Fragment() {
             binding.layoutPowerContent.visibility = View.VISIBLE
             binding.cardPowerMetrics.visibility = View.VISIBLE
             binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
+
+            // 耗电模式下恢复原生联动折叠效果
+            (binding.collapsingToolbar.layoutParams as? com.google.android.material.appbar.AppBarLayout.LayoutParams)?.let { params ->
+                params.scrollFlags = com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_SCROLL or
+                        com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_EXIT_UNTIL_COLLAPSED
+                binding.collapsingToolbar.layoutParams = params
+            }
 
             loadData()
 
@@ -1087,6 +1197,17 @@ class PowerUsageFragment : Fragment() {
         binding.tvRemainingComposite.text = overview.remainingCompositeText
         binding.tvRemainingScreenOff.text = overview.remainingScreenOffText
         binding.tvRemainingBackground.text = overview.remainingBackgroundText
+
+        // 同步刷新折叠吸顶 mini 指标卡片数据（仅包含功率行与时间行）
+        binding.tvMiniPowerScreenOn.text = binding.tvPowerScreenOn.text
+        binding.tvMiniPowerAvg.text = binding.tvPowerAvg.text
+        binding.tvMiniPowerScreenOff.text = binding.tvPowerScreenOff.text
+        binding.tvMiniPowerBackground.text = binding.tvPowerBackground.text
+
+        binding.tvMiniTimeScreenOn.text = binding.tvTimeScreenOn.text
+        binding.tvMiniTimeTotal.text = binding.tvTimeTotal.text
+        binding.tvMiniTimeScreenOff.text = binding.tvTimeScreenOff.text
+        binding.tvMiniTimeBackground.text = binding.tvTimeBackground.text
 
         // 3. 刷新应用场景列表
         adapter.submitList(fullPackage.appList)

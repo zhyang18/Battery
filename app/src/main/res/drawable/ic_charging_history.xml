@@ -6,9 +6,9 @@
     android:viewportHeight="24">
     <!-- 充电历史记录图标：时钟外圈 + 居中充电闪电 -->
     <path
-        android:fillColor="#888888"
+        android:fillColor="?android:attr/textColorPrimary"
         android:pathData="M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zm0,18c-4.41,0 -8,-3.59 -8,-8s3.59,-8 8,-8 8,3.59 8,8 -3.59,8 -8,8z" />
     <path
-        android:fillColor="#888888"
+        android:fillColor="?android:attr/textColorPrimary"
         android:pathData="M11.5,6L7.5,13h3.5v5l4,-7h-3.5z" />
 </vector>

@@ -1168,7 +1168,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                             val maxTemp = formattedBaseTemp
 
                             val serviceBgMs = bgServiceTimes[pkgName] ?: 0L
-                            val effectiveBgMs = if (serviceBgMs > 0L) serviceBgMs else (elapsedMs - timeMs).coerceAtLeast(0L)
+                            val effectiveBgMs = serviceBgMs
 
                             // 不再使用包名哈希伪随机功耗。时长数据为精确采集，
                             // avgPowerWatts 与能量字段将在 loadPowerData 计算整机功耗后按前台时长占比分配。

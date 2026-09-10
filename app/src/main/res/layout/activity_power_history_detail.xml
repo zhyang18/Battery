@@ -267,144 +267,263 @@
                         android:textSize="13sp"
                         android:textStyle="bold" />
 
-                    <!-- 功耗行 -->
+                    <!-- 列头：亮屏 / 全局 / 息屏 / 后台 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
+                        android:layout_marginTop="10dp"
                         android:orientation="horizontal">
+
+                        <!-- 左侧留白占位，对应下方行标题（功耗：/时间：/续航：）宽度 -->
+                        <View
+                            android:layout_width="38dp"
+                            android:layout_height="0dp" />
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold"
+                            android:text="@string/power_header_screen_on" />
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold"
+                            android:text="@string/power_header_global" />
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold"
+                            android:text="@string/power_header_screen_off" />
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold"
+                            android:text="@string/power_header_background" />
+                    </LinearLayout>
+
+                    <!-- 功耗行（第一行：功耗：数值 / 数值 / 数值 / 数值） -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="5dp"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="38dp"
+                            android:layout_height="wrap_content"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold"
+                            android:text="@string/power_metric_power_label" />
 
                         <TextView
                             android:id="@+id/tv_metric_power_screen_on"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
+                            android:gravity="start"
+                            android:maxLines="2"
+                            android:ellipsize="end"
                             android:textColor="?android:attr/textColorPrimary"
-                            android:textSize="13sp"
-                            tools:text="亮屏: 2.48W" />
+                            android:textSize="11.5sp"
+                            android:textStyle="bold"
+                            tools:text="2.48W\n(0.52Wh)" />
 
                         <TextView
                             android:id="@+id/tv_metric_power_avg"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
+                            android:gravity="start"
+                            android:maxLines="2"
+                            android:ellipsize="end"
                             android:textColor="?android:attr/textColorPrimary"
-                            android:textSize="13sp"
-                            tools:text="平均: 1.85W" />
+                            android:textSize="11.5sp"
+                            android:textStyle="bold"
+                            tools:text="1.85W\n(3.60Wh)" />
 
                         <TextView
                             android:id="@+id/tv_metric_power_screen_off"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
+                            android:gravity="start"
+                            android:maxLines="2"
+                            android:ellipsize="end"
                             android:textColor="?android:attr/textColorPrimary"
-                            android:textSize="13sp"
-                            tools:text="息屏: 0.12W" />
-                    </LinearLayout>
-
-                    <!-- 时长行 -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:id="@+id/tv_metric_time_screen_on"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:textColor="?android:attr/textColorSecondary"
-                            android:textSize="12.5sp"
-                            tools:text="亮屏: 3h20m" />
-
-                        <TextView
-                            android:id="@+id/tv_metric_time_total"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:textColor="?android:attr/textColorSecondary"
-                            android:textSize="12.5sp"
-                            tools:text="总计: 8h35m" />
-
-                        <TextView
-                            android:id="@+id/tv_metric_time_screen_off"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:textColor="?android:attr/textColorSecondary"
-                            android:textSize="12.5sp"
-                            tools:text="息屏: 5h15m" />
-                    </LinearLayout>
-
-                    <!-- 理论续航行 -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:id="@+id/tv_metric_rem_screen_on"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:textColor="?android:attr/textColorSecondary"
-                            android:textSize="12.5sp"
-                            tools:text="亮屏: 6h10m" />
-
-                        <TextView
-                            android:id="@+id/tv_metric_rem_composite"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:textColor="?android:attr/textColorSecondary"
-                            android:textSize="12.5sp"
-                            tools:text="综合: 14h20m" />
-
-                        <TextView
-                            android:id="@+id/tv_metric_rem_screen_off"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:textColor="?android:attr/textColorSecondary"
-                            android:textSize="12.5sp"
-                            tools:text="息屏: 48h" />
-                    </LinearLayout>
-
-                    <!-- 后台指标行 -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:orientation="horizontal">
+                            android:textSize="11.5sp"
+                            android:textStyle="bold"
+                            tools:text="0.12W" />
 
                         <TextView
                             android:id="@+id/tv_metric_power_background"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
+                            android:gravity="start"
+                            android:maxLines="2"
+                            android:ellipsize="end"
                             android:textColor="?android:attr/textColorPrimary"
-                            android:textSize="13sp"
-                            tools:text="后台: 0.12W" />
+                            android:textSize="11.5sp"
+                            android:textStyle="bold"
+                            tools:text="0.10W\n(0.85Wh)" />
+                    </LinearLayout>
+
+                    <!-- 时长行（第二行：时间：数值 / 数值 / 数值 / 数值） -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="5dp"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="38dp"
+                            android:layout_height="wrap_content"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold"
+                            android:text="@string/power_metric_time_label" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_time_screen_on"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="11.5sp"
+                            tools:text="3h20m" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_time_total"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="11.5sp"
+                            tools:text="8h35m" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_time_screen_off"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="11.5sp"
+                            tools:text="5h15m" />
 
                         <TextView
                             android:id="@+id/tv_metric_time_background"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="11.5sp"
+                            tools:text="5h15m" />
+                    </LinearLayout>
+
+                    <!-- 理论续航行（第三行：续航：数值 / 数值 / 数值 / 数值） -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="5dp"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="38dp"
+                            android:layout_height="wrap_content"
+                            android:gravity="start"
+                            android:singleLine="true"
                             android:textColor="?android:attr/textColorSecondary"
-                            android:textSize="12.5sp"
-                            tools:text="后台: 5h15m" />
+                            android:textSize="11.5sp"
+                            android:textStyle="bold"
+                            android:text="@string/power_metric_remaining_label" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_rem_screen_on"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="11.5sp"
+                            tools:text="6h10m" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_rem_composite"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="11.5sp"
+                            tools:text="14h20m" />
+
+                        <TextView
+                            android:id="@+id/tv_metric_rem_screen_off"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="11.5sp"
+                            tools:text="48h" />
 
                         <TextView
                             android:id="@+id/tv_metric_rem_background"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:textColor="?android:attr/textColorSecondary"
-                            android:textSize="12.5sp"
-                            tools:text="后台: 48h" />
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="11.5sp"
+                            tools:text="48h" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>

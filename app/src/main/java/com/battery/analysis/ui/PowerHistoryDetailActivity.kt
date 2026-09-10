@@ -176,38 +176,38 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         val bgPwrStr = if (record.backgroundPowerWatts >= 0.05f) String.format(Locale.getDefault(), "%.2fW", record.backgroundPowerWatts) else "--"
 
         binding.tvMetricPowerScreenOn.text = if (onPwrStr != "--" || record.screenOnEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_format_screen_on_with_energy), onPwrStr, onEnergyStr)
+            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), onPwrStr, onEnergyStr)
         } else {
-            String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), "--")
+            "--"
         }
 
         binding.tvMetricPowerAvg.text = if (avgPwrStr != "--" || record.totalEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_format_avg_with_energy), avgPwrStr, totalEnergyStr)
+            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), avgPwrStr, totalEnergyStr)
         } else {
-            String.format(Locale.getDefault(), getString(R.string.power_format_avg), "--")
+            "--"
         }
 
         binding.tvMetricPowerScreenOff.text = if (offPwrStr != "--" || record.screenOffEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_format_screen_off_with_energy), offPwrStr, offEnergyStr)
+            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), offPwrStr, offEnergyStr)
         } else {
-            String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), "--")
+            "--"
         }
 
         binding.tvMetricPowerBackground.text = if (bgPwrStr != "--" || record.backgroundEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_format_background_with_energy), bgPwrStr, bgEnergyStr)
+            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), bgPwrStr, bgEnergyStr)
         } else {
-            String.format(Locale.getDefault(), getString(R.string.power_format_background), "--")
+            "--"
         }
 
-        binding.tvMetricTimeScreenOn.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), record.screenOnDurationText)
-        binding.tvMetricTimeTotal.text = String.format(Locale.getDefault(), getString(R.string.power_format_total), record.totalDurationText)
-        binding.tvMetricTimeScreenOff.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), record.screenOffDurationText)
-        binding.tvMetricTimeBackground.text = String.format(Locale.getDefault(), getString(R.string.power_format_background), record.backgroundDurationText)
+        binding.tvMetricTimeScreenOn.text = record.screenOnDurationText
+        binding.tvMetricTimeTotal.text = record.totalDurationText
+        binding.tvMetricTimeScreenOff.text = record.screenOffDurationText
+        binding.tvMetricTimeBackground.text = record.backgroundDurationText
 
-        binding.tvMetricRemScreenOn.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), record.remainingScreenOnText)
-        binding.tvMetricRemComposite.text = String.format(Locale.getDefault(), getString(R.string.power_format_composite), record.remainingCompositeText)
-        binding.tvMetricRemScreenOff.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), record.remainingScreenOffText)
-        binding.tvMetricRemBackground.text = String.format(Locale.getDefault(), getString(R.string.power_format_background), record.remainingBackgroundText)
+        binding.tvMetricRemScreenOn.text = record.remainingScreenOnText
+        binding.tvMetricRemComposite.text = record.remainingCompositeText
+        binding.tvMetricRemScreenOff.text = record.remainingScreenOffText
+        binding.tvMetricRemBackground.text = record.remainingBackgroundText
 
         // 3. 卡片 3 与 4：反序列化全量数据包加载功耗时间轴与应用排行榜
         lifecycleScope.launch(Dispatchers.IO) {

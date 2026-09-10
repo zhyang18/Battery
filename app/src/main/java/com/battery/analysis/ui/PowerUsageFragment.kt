@@ -1037,38 +1037,38 @@ class PowerUsageFragment : Fragment() {
         }
 
         binding.tvPowerScreenOn.text = if (onPowerStr != "--" || overview.screenOnEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_format_screen_on_with_energy), onPowerStr, onEnergyStr)
+            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), onPowerStr, onEnergyStr)
         } else {
-            String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), "--")
+            "--"
         }
 
         binding.tvPowerAvg.text = if (avgPowerStr != "--" || overview.totalEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_format_avg_with_energy), avgPowerStr, totalEnergyStr)
+            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), avgPowerStr, totalEnergyStr)
         } else {
-            String.format(Locale.getDefault(), getString(R.string.power_format_avg), "--")
+            "--"
         }
 
         binding.tvPowerScreenOff.text = if (offPowerStr != "--" || overview.screenOffEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_format_screen_off_with_energy), offPowerStr, offEnergyStr)
+            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), offPowerStr, offEnergyStr)
         } else {
-            String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), "--")
+            "--"
         }
 
         binding.tvPowerBackground.text = if (bgPowerStr != "--" || overview.backgroundEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_format_background_with_energy), bgPowerStr, bgEnergyStr)
+            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), bgPowerStr, bgEnergyStr)
         } else {
-            String.format(Locale.getDefault(), getString(R.string.power_format_background), "--")
+            "--"
         }
 
-        binding.tvTimeScreenOn.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), overview.screenOnDurationText)
-        binding.tvTimeTotal.text = String.format(Locale.getDefault(), getString(R.string.power_format_total), overview.totalDurationText)
-        binding.tvTimeScreenOff.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), overview.screenOffDurationText)
-        binding.tvTimeBackground.text = String.format(Locale.getDefault(), getString(R.string.power_format_background), overview.backgroundDurationText)
+        binding.tvTimeScreenOn.text = overview.screenOnDurationText
+        binding.tvTimeTotal.text = overview.totalDurationText
+        binding.tvTimeScreenOff.text = overview.screenOffDurationText
+        binding.tvTimeBackground.text = overview.backgroundDurationText
 
-        binding.tvRemainingScreenOn.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), overview.remainingScreenOnText)
-        binding.tvRemainingComposite.text = String.format(Locale.getDefault(), getString(R.string.power_format_composite), overview.remainingCompositeText)
-        binding.tvRemainingScreenOff.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), overview.remainingScreenOffText)
-        binding.tvRemainingBackground.text = String.format(Locale.getDefault(), getString(R.string.power_format_background), overview.remainingBackgroundText)
+        binding.tvRemainingScreenOn.text = overview.remainingScreenOnText
+        binding.tvRemainingComposite.text = overview.remainingCompositeText
+        binding.tvRemainingScreenOff.text = overview.remainingScreenOffText
+        binding.tvRemainingBackground.text = overview.remainingBackgroundText
 
         // 3. 刷新应用场景列表
         adapter.submitList(fullPackage.appList)

@@ -1,0 +1,557 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog_card"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="16dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="16dp">
+
+        <!-- 顶部拖拽把手指示条 -->
+        <View
+            android:layout_width="36dp"
+            android:layout_height="4dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="10dp"
+            android:background="@drawable/bg_history_badge" />
+
+        <!-- 头部：应用图标与名称、包名、运行状态徽章 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <com.google.android.material.imageview.ShapeableImageView
+                android:id="@+id/iv_detail_icon"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:scaleType="centerCrop"
+                tools:src="@mipmap/ic_launcher" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tv_detail_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    tools:text="百度输入法荣耀版" />
+
+                <TextView
+                    android:id="@+id/tv_detail_package"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:textColor="#888888"
+                    android:textSize="11.5sp"
+                    tools:text="com.baidu.input_hihonor (UID: 10099)" />
+            </LinearLayout>
+
+            <!-- 运行工况状态标签 -->
+            <TextView
+                android:id="@+id/tv_detail_status_badge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_history_badge"
+                android:paddingHorizontal="7dp"
+                android:paddingVertical="2.5dp"
+                android:textColor="#2196F3"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                tools:text="纯后台运行" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginVertical="9dp"
+            android:background="#15888888" />
+
+        <!-- 核心能耗指标矩阵（三大卡片列，前后台换行展示，移除分割符） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <!-- 消耗能量 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="消耗能量"
+                    android:textColor="#888888"
+                    android:textSize="11.5sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_energy_primary"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="#34C759"
+                    android:textSize="15.5sp"
+                    android:textStyle="bold"
+                    tools:text="6.400 mWh" />
+
+                <TextView
+                    android:id="@+id/tv_detail_energy_fg"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="#888888"
+                    android:textSize="10sp"
+                    tools:text="前: 0.000 mWh" />
+
+                <TextView
+                    android:id="@+id/tv_detail_energy_bg"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:textColor="#888888"
+                    android:textSize="10sp"
+                    tools:text="后: 6.400 mWh" />
+            </LinearLayout>
+
+            <!-- 平均功耗 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="平均功耗"
+                    android:textColor="#888888"
+                    android:textSize="11.5sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_power_primary"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="#2196F3"
+                    android:textSize="15.5sp"
+                    android:textStyle="bold"
+                    tools:text="1.10 W" />
+
+                <TextView
+                    android:id="@+id/tv_detail_power_fg"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="#888888"
+                    android:textSize="10sp"
+                    tools:text="前: --" />
+
+                <TextView
+                    android:id="@+id/tv_detail_power_bg"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:textColor="#888888"
+                    android:textSize="10sp"
+                    tools:text="后: 1.10 W" />
+            </LinearLayout>
+
+            <!-- 运行温度 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="运行温度"
+                    android:textColor="#888888"
+                    android:textSize="11.5sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_temp_primary"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="#FF9800"
+                    android:textSize="15.5sp"
+                    android:textStyle="bold"
+                    tools:text="38.0 ℃" />
+
+                <TextView
+                    android:id="@+id/tv_detail_temp_avg"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="#888888"
+                    android:textSize="10sp"
+                    tools:text="平均: 38.0 ℃" />
+
+                <TextView
+                    android:id="@+id/tv_detail_temp_max"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:textColor="#888888"
+                    android:textSize="10sp"
+                    tools:text="最高: 38.0 ℃" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginVertical="9dp"
+            android:background="#15888888" />
+
+        <!-- 详细数据分类清单（紧凑高度，明确区分前台与后台） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- 小标题：工况运行时长 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="4dp"
+                android:text="工况运行时长"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="12.5sp"
+                android:textStyle="bold" />
+
+            <!-- 前台使用时长 -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="3.5dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="前台亮屏时长"
+                    android:textColor="#888888"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_fg_duration"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    tools:text="--" />
+            </RelativeLayout>
+
+            <!-- 后台运行耗时 -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="3.5dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="后台运行耗时"
+                    android:textColor="#888888"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_bg_duration"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    tools:text="20s" />
+            </RelativeLayout>
+
+            <!-- 运行时长总计 -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="运行时长总计"
+                    android:textColor="#888888"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_total_duration"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    tools:text="20s" />
+            </RelativeLayout>
+
+            <!-- 小标题：电量消耗分配 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="4dp"
+                android:text="电量消耗分配"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="12.5sp"
+                android:textStyle="bold" />
+
+            <!-- 前台消耗能量 -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="3.5dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="前台消耗电量"
+                    android:textColor="#888888"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_fg_energy"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    tools:text="0.000 mWh (0.0%)" />
+            </RelativeLayout>
+
+            <!-- 后台消耗能量 -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="3.5dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="后台消耗电量"
+                    android:textColor="#888888"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_bg_energy"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    tools:text="6.400 mWh (100.0%)" />
+            </RelativeLayout>
+
+            <!-- 总计消耗电量 -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="总计消耗电量"
+                    android:textColor="#888888"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_total_energy"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    tools:text="6.400 mWh" />
+            </RelativeLayout>
+
+            <!-- 小标题：硬件系统开销 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="4dp"
+                android:text="硬件资源开销"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="12.5sp"
+                android:textStyle="bold" />
+
+            <!-- CPU 运行时间 -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="3.5dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="CPU 计算时间"
+                    android:textColor="#888888"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_cpu_time"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    tools:text="--" />
+            </RelativeLayout>
+
+            <!-- 网络流量 -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="3.5dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="网络数据传输"
+                    android:textColor="#888888"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_network"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    tools:text="--" />
+            </RelativeLayout>
+
+            <!-- 唤醒锁 / 定位 -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Wakelock / 定位"
+                    android:textColor="#888888"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_wakelock_gps"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    tools:text="--" />
+            </RelativeLayout>
+
+            <!-- 小标题：时序与数据来源 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="4dp"
+                android:text="记录与来源"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="12.5sp"
+                android:textStyle="bold" />
+
+            <!-- 统计时间区间（最近使用时间上方） -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="3.5dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="统计时间区间"
+                    android:textColor="#888888"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_period_range"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    tools:text="10:20:00 - 12:21:23 (20s)" />
+            </RelativeLayout>
+
+            <!-- 最近使用时间 -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="3.5dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="最近使用时间"
+                    android:textColor="#888888"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_last_used"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    tools:text="2026-09-10 12:21:23" />
+            </RelativeLayout>
+
+            <!-- 数据来源 -->
+            <RelativeLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="数据来源"
+                    android:textColor="#888888"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tv_detail_source"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    tools:text="BatteryStats (系统底座)" />
+            </RelativeLayout>
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</androidx.core.widget.NestedScrollView>

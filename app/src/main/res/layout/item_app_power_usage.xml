@@ -5,10 +5,13 @@
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:paddingStart="3dp"
-    android:paddingEnd="3dp"
-    android:paddingTop="2dp"
-    android:paddingBottom="2dp">
+    android:background="?android:attr/selectableItemBackground"
+    android:clickable="true"
+    android:focusable="true"
+    android:paddingStart="6dp"
+    android:paddingEnd="6dp"
+    android:paddingTop="5dp"
+    android:paddingBottom="5dp">
 
     <!-- 应用图标 -->
     <com.google.android.material.imageview.ShapeableImageView

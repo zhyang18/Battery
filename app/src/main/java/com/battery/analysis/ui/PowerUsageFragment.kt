@@ -407,11 +407,25 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 初始化应用耗电 RecyclerView 列表。
+     * 初始化应用耗电 RecyclerView 列表，并注册列表项点击弹出前后台深度能耗详情 BottomSheet 弹窗监听。
      */
     private fun setupRecyclerView() {
         binding.recyclerAppUsage.layoutManager = LinearLayoutManager(requireContext())
         binding.recyclerAppUsage.adapter = adapter
+        adapter.onItemClickListener = { item ->
+            val isShizuku = currentMode == PowerUsageManager.MODE_SHIZUKU && powerManager.isShizukuAuthorized()
+            val timeFormatter = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+            val periodRange = lastRenderedPackage?.let { pkg ->
+                val points = pkg.trendPoints
+                if (points.isNotEmpty()) {
+                    val sStr = timeFormatter.format(java.util.Date(points.first().timestamp))
+                    val eStr = timeFormatter.format(java.util.Date(points.last().timestamp))
+                    val durText = pkg.overviewStats.usedDurationText
+                    if (durText.isNotBlank()) "$sStr - $eStr ($durText)" else "$sStr - $eStr"
+                } else null
+            }
+            AppUsageDetailBottomSheetDialog(requireContext(), item, isShizuku, periodRange).show()
+        }
     }
 
     /**

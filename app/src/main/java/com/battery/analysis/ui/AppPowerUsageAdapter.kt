@@ -18,8 +18,13 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
 
     private val items = mutableListOf<AppPowerUsageItem>()
 
-    // 排序模式：0-按使用时长降序，1-按平均功耗降序，2-按应用名称升序
+    // 排序模式：0-按使用时长降序，1-按平均功耗降序，2-按消耗电量(Wh)降序，3-按应用名称升序
     private var sortMode: Int = 0
+
+    /**
+     * 列表项点击事件回调监听器，向调用方传递被点击的应用使用场景数据实体。
+     */
+    var onItemClickListener: ((AppPowerUsageItem) -> Unit)? = null
 
     /**
      * 视图持有者，绑定 item_app_power_usage 视图层级。
@@ -57,6 +62,9 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
      */
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = items[position]
+        holder.itemView.setOnClickListener {
+            onItemClickListener?.invoke(item)
+        }
         with(holder.binding) {
             if (item.icon != null) {
                 ivAppIcon.setImageDrawable(item.icon)

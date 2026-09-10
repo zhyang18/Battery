@@ -60,10 +60,17 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
     }
 
     /**
-     * 初始化应用耗电排行榜列表控件与适配器。
+     * 初始化应用耗电排行榜列表控件与适配器，并注册列表项点击弹出前后台深度能耗详情 BottomSheet 弹窗监听。
      */
     private fun setupAppRecyclerView() {
         appAdapter = AppPowerUsageAdapter()
+        appAdapter.onItemClickListener = { item ->
+            val isShizuku = currentRecord?.isShizukuRealData ?: true
+            val rangeStr = currentRecord?.let { record ->
+                "${record.getFormattedTimeRange()} (${record.totalDurationText})"
+            }
+            AppUsageDetailBottomSheetDialog(this, item, isShizuku, rangeStr).show()
+        }
         binding.recyclerAppUsage.layoutManager = LinearLayoutManager(this)
         binding.recyclerAppUsage.adapter = appAdapter
     }

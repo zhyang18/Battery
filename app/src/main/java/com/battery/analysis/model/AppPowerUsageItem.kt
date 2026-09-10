@@ -23,6 +23,8 @@ import android.graphics.drawable.Drawable
  * @property networkBytes 网络数据传输总量（单位：字节 Byte，默认 0L）
  * @property wakelockTimeMs 持有唤醒锁时长（单位：毫秒，默认 0L）
  * @property gpsTimeMs GPS 定位使用时长（单位：毫秒，默认 0L）
+ * @property foregroundPowerWatts 前台活跃点亮屏幕综合平均放电功耗（单位：瓦特 W，默认 0f）
+ * @property backgroundPowerWatts 后台运行活跃放电平均功耗（单位：瓦特 W，默认 0f）
  */
 data class AppPowerUsageItem(
     val packageName: String,
@@ -40,17 +42,19 @@ data class AppPowerUsageItem(
     val cpuTimeMs: Long = 0L,
     val networkBytes: Long = 0L,
     val wakelockTimeMs: Long = 0L,
-    val gpsTimeMs: Long = 0L
+    val gpsTimeMs: Long = 0L,
+    val foregroundPowerWatts: Float = 0f,
+    val backgroundPowerWatts: Float = 0f
 ) {
     /**
      * 计算该应用消耗的总电量（单位：瓦时 Wh）。
-     * 优先使用前后台消耗能量之和，其次使用 directEnergyWh，若均无直接测量值则基于平均功耗与前台时长计算。
+     * 优先使用前后台消耗能量之和，其次使用 directEnergyWh，若均无直接测量值则基于平均功耗与运行总时长计算。
      */
     val energyWh: Float
         get() = if (foregroundEnergyWh > 0f || backgroundEnergyWh > 0f) {
             foregroundEnergyWh + backgroundEnergyWh
         } else {
-            directEnergyWh ?: (avgPowerWatts * (foregroundTimeMs / 3600000f)).coerceAtLeast(0f)
+            directEnergyWh ?: (avgPowerWatts * ((foregroundTimeMs + backgroundTimeMs) / 3600000f)).coerceAtLeast(0f)
         }
 
     /**
@@ -102,12 +106,35 @@ data class AppPowerUsageItem(
 
     /**
      * 获取前台与后台组合能量消耗展示文本（格式："前台能量 | 后台能量"，如 "0.25Wh | 0.08Wh"）。
+     * 如实反映系统真实测得的前台与后台能耗；当底层仅提供未分拆总能耗时，依据实际活动时长客观归属，杜绝将后台能耗误计入前台。
      *
      * @return 格式化后的组合能量文本
      */
     fun getFormattedCombinedEnergyWh(): String {
-        val fg = if (foregroundEnergyWh > 0f) foregroundEnergyWh else (if (backgroundEnergyWh <= 0f) energyWh else 0f)
-        val bg = backgroundEnergyWh
+        val (fg, bg) = if (foregroundEnergyWh > 0f || backgroundEnergyWh > 0f) {
+            // 如实反映真测的前台与后台能量
+            Pair(foregroundEnergyWh, backgroundEnergyWh)
+        } else {
+            val total = energyWh
+            if (total <= 0f) {
+                Pair(0f, 0f)
+            } else if (foregroundTimeMs <= 0L && backgroundTimeMs > 0L) {
+                // 实测仅在后台运行，总能量如实归属于后台
+                Pair(0f, total)
+            } else if (foregroundTimeMs > 0L && backgroundTimeMs <= 0L) {
+                // 实测仅在前台运行，总能量如实归属于前台
+                Pair(total, 0f)
+            } else if (foregroundTimeMs > 0L && backgroundTimeMs > 0L) {
+                // 均有时长记录，按实测时长比例客观分配
+                val totalTime = (foregroundTimeMs + backgroundTimeMs).toDouble()
+                val fgRatio = (foregroundTimeMs / totalTime).toFloat()
+                val fgVal = total * fgRatio
+                Pair(fgVal, (total - fgVal).coerceAtLeast(0f))
+            } else {
+                // 均无活动时长，默认归属于后台基础底噪
+                Pair(0f, total)
+            }
+        }
         val fgStr = formatSingleEnergyWh(fg)
         val bgStr = formatSingleEnergyWh(bg)
         return "$fgStr | $bgStr"
@@ -141,5 +168,51 @@ data class AppPowerUsageItem(
         val bgStr = formatDurationMs(backgroundTimeMs)
         return "$fgStr | $bgStr"
     }
+
+    /**
+     * 格式化指定的瓦特功率值为人类可读文本（如 "1.44W" 或 "--"）。
+     * 当功率低于有效统计门槛（0.05W）时显示为 "--"，杜绝微小底噪误报。
+     *
+     * @param watts 待格式化的功率值（单位：W）
+     * @return 格式化后的功率文本
+     */
+    private fun formatWatts(watts: Float): String {
+        return if (watts >= 0.05f) {
+            String.format(java.util.Locale.getDefault(), "%.2fW", watts)
+        } else {
+            "--"
+        }
+    }
+
+    /**
+     * 获取前台亮屏平均功耗与后台活跃放电平均功耗的组合展示文本（格式："前台AVG | 后台AVG"，如 "1.44W | 0.08W"、"1.44W | --"、"-- | 0.12W"、"-- | --"）。
+     * 如实区分前台点亮屏幕运行工况与后台活跃放电工况；当应用在对应场景未运行或时长不足有效统计门槛（1秒）时，如实显示为 "--"。
+     *
+     * @return 格式化后的组合平均功耗展示文本
+     */
+    fun getFormattedCombinedAvgWatts(): String {
+        val fgPwr = if (foregroundPowerWatts > 0f) {
+            foregroundPowerWatts
+        } else if (foregroundTimeMs >= 1000L && foregroundEnergyWh > 0f) {
+            (foregroundEnergyWh / (foregroundTimeMs / 3600000f)).coerceAtLeast(0f)
+        } else if (foregroundTimeMs >= 1000L && avgPowerWatts > 0f) {
+            avgPowerWatts
+        } else {
+            0f
+        }
+
+        val bgPwr = if (backgroundPowerWatts > 0f) {
+            backgroundPowerWatts
+        } else if (backgroundTimeMs >= 1000L && backgroundEnergyWh > 0f) {
+            (backgroundEnergyWh / (backgroundTimeMs / 3600000f)).coerceAtLeast(0f)
+        } else if (foregroundTimeMs <= 0L && backgroundTimeMs >= 1000L && avgPowerWatts > 0f) {
+            avgPowerWatts
+        } else {
+            0f
+        }
+
+        return "${formatWatts(fgPwr)} | ${formatWatts(bgPwr)}"
+    }
 }
+
 

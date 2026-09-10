@@ -72,11 +72,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
             }
 
             tvAppName.text = item.appName
-            val pwrStr = if (item.avgPowerWatts >= 0.05f) {
-                String.format(Locale.getDefault(), "%.2fW", item.avgPowerWatts)
-            } else {
-                "--"
-            }
+            val pwrStr = item.getFormattedCombinedAvgWatts()
             tvAvgInfo.text = String.format(
                 Locale.getDefault(),
                 "AVG: %s, %.1f℃",

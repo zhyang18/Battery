@@ -447,16 +447,12 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             )
                             val effectiveBackgroundMs = safeBgMs
 
-                            // 运行平均功耗计算：若有前台活跃按前台能耗与前台时长计算；若为纯后台应用且有明确后台运行耗时，按后台运行能耗与时长计算
-                            val fgHours = foregroundMs / 3600000.0
-                            val bgHours = effectiveBackgroundMs / 3600000.0
-                            val avgWatts = if (fgHours > 0.0) {
-                                (fgEnergyWh / fgHours).toFloat()
-                            } else if (bgHours > 0.0 && bgEnergyWh > 0f) {
-                                (bgEnergyWh / bgHours).toFloat()
-                            } else {
-                                0f
-                            }
+                            // 运行平均功耗计算：独立核算前台与后台，并避免微小时长除法放大
+                            val fgHours = if (foregroundMs >= 1000L) foregroundMs / 3600000.0 else 0.0
+                            val bgHours = if (effectiveBackgroundMs >= 1000L) effectiveBackgroundMs / 3600000.0 else 0.0
+                            val fgWatts = if (fgHours > 0.0 && fgEnergyWh > 0f) (fgEnergyWh / fgHours).toFloat() else 0f
+                            val bgWatts = if (bgHours > 0.0 && bgEnergyWh > 0f) (bgEnergyWh / bgHours).toFloat() else 0f
+                            val avgWatts = if (fgWatts > 0f) fgWatts else bgWatts
 
                             val appTemp = tempCelsius
                             val maxTemp = tempCelsius
@@ -486,7 +482,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                                     cpuTimeMs = realCpuMs,
                                     networkBytes = realNetBytes,
                                     wakelockTimeMs = realWakeMs,
-                                    gpsTimeMs = realGpsMs
+                                    gpsTimeMs = realGpsMs,
+                                    foregroundPowerWatts = fgWatts,
+                                    backgroundPowerWatts = bgWatts
                                 )
                             } catch (_: Exception) {
                                 // 兜底处理：未能获取到特定 ApplicationInfo 时才使用简要包名
@@ -507,7 +505,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                                     cpuTimeMs = realCpuMs,
                                     networkBytes = realNetBytes,
                                     wakelockTimeMs = realWakeMs,
-                                    gpsTimeMs = realGpsMs
+                                    gpsTimeMs = realGpsMs,
+                                    foregroundPowerWatts = fgWatts,
+                                    backgroundPowerWatts = bgWatts
                                 )
                             }
                         }
@@ -882,15 +882,11 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             )
             val effectiveFinalBg = safeBgMs
 
-            val fgHours = effectiveFg / 3600000.0
-            val bgHours = effectiveFinalBg / 3600000.0
-            val avgWatts = if (fgHours > 0.0) {
-                (fgEnergyWh / fgHours).toFloat()
-            } else if (bgHours > 0.0 && bgEnergyWh > 0f) {
-                (bgEnergyWh / bgHours).toFloat()
-            } else {
-                0f
-            }
+            val fgHours = if (effectiveFg >= 1000L) effectiveFg / 3600000.0 else 0.0
+            val bgHours = if (effectiveFinalBg >= 1000L) effectiveFinalBg / 3600000.0 else 0.0
+            val fgWatts = if (fgHours > 0.0 && fgEnergyWh > 0f) (fgEnergyWh / fgHours).toFloat() else 0f
+            val bgWatts = if (bgHours > 0.0 && bgEnergyWh > 0f) (bgEnergyWh / bgHours).toFloat() else 0f
+            val avgWatts = if (fgWatts > 0f) fgWatts else bgWatts
 
             var netBytes = if (hw != null && hw.networkBytes > 0L) hw.networkBytes else old.networkBytes
             if (netBytes <= 0L && uid > 0) {
@@ -903,6 +899,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 foregroundEnergyWh = fgEnergyWh,
                 backgroundEnergyWh = bgEnergyWh,
                 avgPowerWatts = avgWatts,
+                foregroundPowerWatts = fgWatts,
+                backgroundPowerWatts = bgWatts,
                 cpuTimeMs = realCpuMs,
                 networkBytes = netBytes,
                 wakelockTimeMs = hw?.wakelockMs ?: old.wakelockTimeMs,
@@ -969,7 +967,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             cpuTimeMs = realCpu,
                             networkBytes = netBytes,
                             wakelockTimeMs = realWake,
-                            gpsTimeMs = realGps
+                            gpsTimeMs = realGps,
+                            foregroundPowerWatts = baselineWatts,
+                            backgroundPowerWatts = 0f
                         )
                     } catch (_: PackageManager.NameNotFoundException) {
                     }

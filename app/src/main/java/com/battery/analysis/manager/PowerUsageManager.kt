@@ -762,7 +762,13 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val rawAppList = stats.appList.map { item ->
                     if (item.foregroundTimeMs > maxAllowedMs) {
                         if (effectiveUnplugTime > 0L && (now - effectiveUnplugTime) < 300000L && item.foregroundTimeMs > 300000L) {
-                            item.copy(foregroundTimeMs = 0L)
+                            val totalE = item.energyWh
+                            item.copy(
+                                foregroundTimeMs = 0L,
+                                foregroundEnergyWh = 0f,
+                                backgroundEnergyWh = totalE,
+                                directEnergyWh = totalE
+                            )
                         } else {
                             item.copy(foregroundTimeMs = maxAllowedMs)
                         }
@@ -801,11 +807,13 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
 
                 val enrichedAppList = rawAppList.map { item ->
-                    if (item.foregroundTimeMs > 0L) {
-                        val fgHours = item.foregroundTimeMs / 3600000f
-                        val isGame = isGameApp(item.packageName)
+                    val fgHours = if (item.foregroundTimeMs >= 1000L) item.foregroundTimeMs / 3600000f else 0f
+                    val bgHours = if (item.backgroundTimeMs >= 1000L) item.backgroundTimeMs / 3600000f else 0f
+                    val isGame = isGameApp(item.packageName)
+                    val totalAppEnergy = item.energyWh
+
+                    if (item.foregroundTimeMs >= 1000L) {
                         // 若传入的应用前台核心能耗明显超标（如微信 20W），进行物理合理性重构
-                        val totalAppEnergy = item.energyWh
                         val (safeFgEnergy, safeBgEnergy, safeBgMs) = shizukuParser.decoupleAppEnergyAndTimes(
                             totalEnergy = totalAppEnergy,
                             foregroundMs = item.foregroundTimeMs,
@@ -826,22 +834,38 @@ class PowerUsageManager private constructor(private val context: Context) {
                         // 综合平均功耗 = CPU 核心算力功耗 + 屏幕发光基底功率 + 动态 GPU 渲染功耗
                         val combinedAvgWatts = (appCoreWatts + baseDisplayWatts + appGpuWatts).coerceAtLeast(0f)
                         val combinedFgEnergy = combinedAvgWatts * fgHours
+                        val safeBgHours = if (safeBgMs >= 1000L) safeBgMs / 3600000f else 0f
+                        val bgWatts = if (safeBgHours > 0f && safeBgEnergy > 0f) {
+                            (safeBgEnergy / safeBgHours).coerceAtLeast(0f)
+                        } else {
+                            0f
+                        }
+
                         item.copy(
                             avgPowerWatts = combinedAvgWatts,
+                            foregroundPowerWatts = combinedAvgWatts,
+                            backgroundPowerWatts = bgWatts,
                             backgroundTimeMs = safeBgMs,
                             foregroundEnergyWh = combinedFgEnergy,
                             backgroundEnergyWh = safeBgEnergy,
                             directEnergyWh = combinedFgEnergy + safeBgEnergy
                         )
                     } else {
-                        // 纯后台应用：平均功耗依其实际后台运行能耗与后台活跃时长计算
-                        val bgHours = item.backgroundTimeMs / 3600000f
-                        val bgWatts = if (bgHours > 0f && item.backgroundEnergyWh > 0f) {
-                            (item.backgroundEnergyWh / bgHours).coerceAtLeast(0f)
+                        // 纯后台应用：真测多少就是多少，忠实反映后台实际能耗与后台平均功耗
+                        val actualBgEnergy = if (item.backgroundEnergyWh > 0f) item.backgroundEnergyWh else (item.directEnergyWh ?: item.energyWh)
+                        val bgWatts = if (bgHours > 0f && actualBgEnergy > 0f) {
+                            (actualBgEnergy / bgHours).coerceAtLeast(0f)
                         } else {
                             0f
                         }
-                        item.copy(avgPowerWatts = bgWatts)
+                        item.copy(
+                            avgPowerWatts = bgWatts,
+                            foregroundPowerWatts = 0f,
+                            backgroundPowerWatts = bgWatts,
+                            foregroundEnergyWh = 0f,
+                            backgroundEnergyWh = actualBgEnergy,
+                            directEnergyWh = actualBgEnergy
+                        )
                     }
                 }
 
@@ -949,25 +973,31 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         val validatedAppList = rawNormalList.map { item ->
-            if (item.foregroundTimeMs > 0L) {
-                val fgHours = item.foregroundTimeMs / 3600000f
+            val fgHours = if (item.foregroundTimeMs >= 1000L) item.foregroundTimeMs / 3600000f else 0f
+            val bgHours = if (item.backgroundTimeMs >= 1000L) item.backgroundTimeMs / 3600000f else 0f
+            if (item.foregroundTimeMs >= 1000L) {
                 val appFgEnergyWh = (normalScreenWatts * fgHours).coerceAtLeast(0f)
-                val bgHours = item.backgroundTimeMs / 3600000f
                 val appBgEnergyWh = if (bgHours > 0f) (normalScreenOffWatts * bgHours * 0.3f).coerceAtLeast(0f) else item.backgroundEnergyWh
+                val bgWatts = if (bgHours > 0f && appBgEnergyWh > 0f) (appBgEnergyWh / bgHours).coerceAtLeast(0f) else 0f
                 item.copy(
                     avgPowerWatts = normalScreenWatts,
+                    foregroundPowerWatts = normalScreenWatts,
+                    backgroundPowerWatts = bgWatts,
                     foregroundEnergyWh = appFgEnergyWh,
                     backgroundEnergyWh = appBgEnergyWh,
                     directEnergyWh = appFgEnergyWh + appBgEnergyWh
                 )
             } else {
-                val bgHours = item.backgroundTimeMs / 3600000f
                 val bgWatts = if (bgHours > 0f && item.backgroundEnergyWh > 0f) {
                     (item.backgroundEnergyWh / bgHours).coerceAtLeast(0f)
                 } else {
-                    normalScreenOffWatts * 0.3f
+                    0f
                 }
-                item.copy(avgPowerWatts = bgWatts)
+                item.copy(
+                    avgPowerWatts = bgWatts,
+                    foregroundPowerWatts = 0f,
+                    backgroundPowerWatts = bgWatts
+                )
             }
         }
 
@@ -1255,11 +1285,14 @@ class PowerUsageManager private constructor(private val context: Context) {
                 maxTemp = formattedTemp
             }
 
-            // 2. 真实前台平均功耗：优先继承已融合屏幕与硬件底座能耗后的综合平均功耗
-            val fgHours = item.foregroundTimeMs / 3600000f
-            val bgHours = item.backgroundTimeMs / 3600000f
-            val finalAvgWatts = if (item.foregroundTimeMs > 0L) {
-                if (item.avgPowerWatts > 0f) {
+            // 2. 真实前台与后台平均功耗：独立核验并避免微小时长除法放大
+            val fgHours = if (item.foregroundTimeMs >= 1000L) item.foregroundTimeMs / 3600000f else 0f
+            val bgHours = if (item.backgroundTimeMs >= 1000L) item.backgroundTimeMs / 3600000f else 0f
+
+            val finalFgWatts = if (item.foregroundTimeMs >= 1000L) {
+                if (item.foregroundPowerWatts > 0f) {
+                    item.foregroundPowerWatts
+                } else if (item.avgPowerWatts > 0f) {
                     item.avgPowerWatts
                 } else if (item.foregroundEnergyWh > 0f && fgHours > 0f) {
                     (item.foregroundEnergyWh / fgHours).coerceAtLeast(0f)
@@ -1267,27 +1300,40 @@ class PowerUsageManager private constructor(private val context: Context) {
                     0f
                 }
             } else {
-                // 纯后台应用：保留其后台运行平均放电功耗
-                if (item.avgPowerWatts > 0f) {
-                    item.avgPowerWatts
+                0f
+            }
+
+            val finalBgWatts = if (item.backgroundTimeMs >= 1000L) {
+                if (item.backgroundPowerWatts > 0f) {
+                    item.backgroundPowerWatts
                 } else if (item.backgroundEnergyWh > 0f && bgHours > 0f) {
                     (item.backgroundEnergyWh / bgHours).coerceAtLeast(0f)
+                } else if (item.foregroundTimeMs <= 0L && item.avgPowerWatts > 0f) {
+                    item.avgPowerWatts
                 } else {
                     0f
                 }
+            } else {
+                0f
             }
 
-            // 3. 计算前台能量：优先使用已融合的综合前台能量，其次由平均功耗与前台时长计算
-            val updatedFgEnergy = if (item.foregroundEnergyWh > 0f) {
+            val finalAvgWatts = if (finalFgWatts > 0f) finalFgWatts else finalBgWatts
+
+            // 3. 计算前台能量：真测多少就是多少；若实测前台无运行时间，前台能量为 0f
+            val updatedFgEnergy = if (item.foregroundTimeMs <= 0L) {
+                0f
+            } else if (item.foregroundEnergyWh > 0f) {
                 item.foregroundEnergyWh
-            } else if (finalAvgWatts > 0f && fgHours > 0f) {
-                (finalAvgWatts * fgHours).coerceAtLeast(0f)
+            } else if (finalFgWatts > 0f && fgHours > 0f) {
+                (finalFgWatts * fgHours).coerceAtLeast(0f)
             } else {
                 0f
             }
 
             item.copy(
                 avgPowerWatts = finalAvgWatts,
+                foregroundPowerWatts = finalFgWatts,
+                backgroundPowerWatts = finalBgWatts,
                 avgTemperature = avgTemp,
                 maxTemperature = maxTemp,
                 foregroundEnergyWh = updatedFgEnergy

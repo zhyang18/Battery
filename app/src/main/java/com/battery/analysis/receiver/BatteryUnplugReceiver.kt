@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
-import com.battery.analysis.db.PowerUsageDbHelper
 import com.battery.analysis.manager.ChargingStatsManager
 import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.PowerUsageRecord
@@ -14,9 +13,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * 电池电源状态广播接收器。
@@ -75,7 +71,8 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
     }
 
     /**
-     * 异步处理连接外部电源事件：归档上一个放电账本并开启全新充电统计会话。
+     * 执行连接电源后的结算处理：归档上一个放电周期的耗电账本，并开启全新充电会话。
+     * 采用 PowerUsageManager.archiveDischargeSession 进行原子防重归档，避免并发双份记录。
      *
      * @param context 应用程序上下文
      * @param timestamp 触发插电时的时间戳毫秒值
@@ -84,20 +81,9 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
         try {
             val powerManager = PowerUsageManager.getInstance(context)
             val chargingManager = ChargingStatsManager.getInstance(context)
-            val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
 
-            // 1. 归档上一个放电周期的耗电账本快照（若放电持续时间大于 30 秒）
-            val lastUnplugTime = powerManager.getLastUnplugTime()
-            if (lastUnplugTime in 1 until timestamp && (timestamp - lastUnplugTime) > 30000L) {
-                val currentMode = powerManager.getSelectedMode()
-                val fullPackage = powerManager.loadPowerData(currentMode)
-                val powerRecord = PowerUsageRecord.fromFullPowerPackage(
-                    fullPackage = fullPackage,
-                    recordTime = timeStr,
-                    id = timestamp
-                )
-                PowerUsageDbHelper.getInstance(context).insertRecord(powerRecord)
-            }
+            // 1. 归档上一个放电周期的耗电账本快照（若放电持续时间大于 30 秒且未归档过）
+            val powerRecord = powerManager.archiveDischargeSession(timestamp)
 
             // 2. 开启全新充电会话
             val currentBattery = powerManager.getCurrentBatteryStatus()
@@ -106,6 +92,9 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
 
             // 3. 通知前台界面（若当前处于前台活跃状态）
             mainHandler.post {
+                if (powerRecord != null) {
+                    onPowerUsageRecordedListener?.invoke(powerRecord)
+                }
                 onPowerConnectedListener?.invoke()
             }
         } catch (e: Exception) {
@@ -133,7 +122,7 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                recordBatterySnapshotOnUnplug(appContext, currentTime)
+                recordBatterySnapshotOnUnplug(appContext)
             } finally {
                 pendingResult.finish()
             }
@@ -141,15 +130,13 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
     }
 
     /**
-     * 执行断开电源后的充放电结算处理：固化上一个充电周期的历史账本，采集断电前耗电统计快照，并重置开启全新放电统计周期。
+     * 执行断开电源后的充放电结算处理：固化上一个充电周期的历史账本，并重置开启全新放电统计周期。
      * 健康度快照仅在用户主动于电池健康页检测时保存，充放电过程不自动生成健康度记录。
+     * 拔电作为放电统计周期的起点，不生成耗电快照，耗电历史账本仅在下次插电（放电周期结束）时归档结算。
      *
      * @param context 应用程序上下文
-     * @param timestamp 触发断电时的时间戳毫秒值
      */
-    private fun recordBatterySnapshotOnUnplug(context: Context, timestamp: Long) {
-        val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
-
+    private fun recordBatterySnapshotOnUnplug(context: Context) {
         // 1. 关键闭环：当断开充电器时，固化并保存本次充电历史记录入库
         try {
             val chargingManager = ChargingStatsManager.getInstance(context)
@@ -158,26 +145,11 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
             e.printStackTrace()
         }
 
-        // 2. 采集断开前耗电统计完整账本快照并存入 PowerUsageDbHelper 数据库，随后重置开启新放电周期
+        // 2. 关键步骤：开启全新放电统计周期，记录断电电量与时刻，重置底层 batterystats
         try {
             val powerManager = PowerUsageManager.getInstance(context)
-            val currentMode = powerManager.getSelectedMode()
-            val fullPackage = powerManager.loadPowerData(currentMode)
-            val powerRecord = PowerUsageRecord.fromFullPowerPackage(
-                fullPackage = fullPackage,
-                recordTime = timeStr,
-                id = timestamp
-            )
-            val powerDbHelper = PowerUsageDbHelper.getInstance(context)
-            powerDbHelper.insertRecord(powerRecord)
-
-            // 关键步骤：开启全新放电统计周期，记录断电电量与时刻，重置底层 batterystats
             val currentBattery = powerManager.getCurrentBatteryStatus()
             powerManager.onPowerDisconnected(currentBattery.levelPercent)
-
-            mainHandler.post {
-                onPowerUsageRecordedListener?.invoke(powerRecord)
-            }
         } catch (e: Exception) {
             e.printStackTrace()
         }

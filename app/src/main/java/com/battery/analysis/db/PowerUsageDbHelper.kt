@@ -42,7 +42,14 @@ class PowerUsageDbHelper private constructor(context: Context) :
                 $COL_IS_SHIZUKU_REAL_DATA INTEGER,
                 $COL_APP_COUNT INTEGER,
                 $COL_TREND_POINTS_JSON TEXT,
-                $COL_APP_LIST_JSON TEXT
+                $COL_APP_LIST_JSON TEXT,
+                $COL_BACKGROUND_POWER_WATTS REAL DEFAULT 0,
+                $COL_BACKGROUND_DURATION TEXT DEFAULT '',
+                $COL_REM_BACKGROUND TEXT DEFAULT '',
+                $COL_SCREEN_ON_ENERGY_WH REAL DEFAULT 0,
+                $COL_TOTAL_ENERGY_WH REAL DEFAULT 0,
+                $COL_SCREEN_OFF_ENERGY_WH REAL DEFAULT 0,
+                $COL_BACKGROUND_ENERGY_WH REAL DEFAULT 0
             )
         """.trimIndent()
         db.execSQL(createSql)
@@ -50,26 +57,40 @@ class PowerUsageDbHelper private constructor(context: Context) :
     }
 
     /**
-     * 数据库升级回调。
+     * 数据库升级回调，按版本平滑迁移历史表结构。
      *
      * @param db 数据库实例
      * @param oldVersion 旧版本号
      * @param newVersion 新版本号
      */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // 当前为初版，暂无需升级迁移
+        if (oldVersion < 2) {
+            try {
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_BACKGROUND_POWER_WATTS REAL DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_BACKGROUND_DURATION TEXT DEFAULT ''")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_REM_BACKGROUND TEXT DEFAULT ''")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_SCREEN_ON_ENERGY_WH REAL DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_TOTAL_ENERGY_WH REAL DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_SCREEN_OFF_ENERGY_WH REAL DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_BACKGROUND_ENERGY_WH REAL DEFAULT 0")
+            } catch (_: Exception) {}
+        }
     }
 
     /**
      * 插入一条新的耗电历史记录。
+     * 具备防重检测机制：若数据库中已存在时间极相近（< 30 秒）且电量、总时长相同的记录，
+     * 自动更新覆写已有记录，避免并发归档生成重复数据。
      *
      * @param record 待持久化的耗电历史实体对象
-     * @return 插入成功返回行 ID，失败返回 -1
+     * @return 插入或更新成功返回行 ID，失败返回 -1
      */
     fun insertRecord(record: PowerUsageRecord): Long {
         val db = writableDatabase
+        val existingId = findDuplicateRecordId(db, record)
+
         val values = ContentValues().apply {
-            put(COL_ID, record.id)
+            put(COL_ID, if (existingId != null && existingId > 0L) existingId else record.id)
             put(COL_RECORD_TIME, record.recordTime)
             put(COL_LEVEL_PERCENT, record.levelPercent)
             put(COL_VOLTAGE_VOLTS, record.voltageVolts)
@@ -89,16 +110,142 @@ class PowerUsageDbHelper private constructor(context: Context) :
             put(COL_APP_COUNT, record.appCount)
             put(COL_TREND_POINTS_JSON, record.trendPointsJson)
             put(COL_APP_LIST_JSON, record.appListJson)
+            put(COL_BACKGROUND_POWER_WATTS, record.backgroundPowerWatts)
+            put(COL_BACKGROUND_DURATION, record.backgroundDurationText)
+            put(COL_REM_BACKGROUND, record.remainingBackgroundText)
+            put(COL_SCREEN_ON_ENERGY_WH, record.screenOnEnergyWh)
+            put(COL_TOTAL_ENERGY_WH, record.totalEnergyWh)
+            put(COL_SCREEN_OFF_ENERGY_WH, record.screenOffEnergyWh)
+            put(COL_BACKGROUND_ENERGY_WH, record.backgroundEnergyWh)
         }
-        return db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+
+        return if (existingId != null && existingId > 0L) {
+            val updated = db.update(TABLE_NAME, values, "$COL_ID = ?", arrayOf(existingId.toString()))
+            if (updated > 0) existingId else db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        } else {
+            db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        }
+    }
+
+    /**
+     * 检索数据库中是否已存在与待插入记录同属单次放电周期的重复记录 ID。
+     * 判定准则（满足任一即视为重复）：
+     * 1. 结束时间戳相差在 60 秒以内，且终止电量与总时长相同；
+     * 2. 或结束时间戳相差在 30 秒以内，且终止电量或总时长相同；
+     * 3. 或格式化时间字符串完全一致。
+     *
+     * @param db SQLite 数据库实例
+     * @param record 待比较的耗电记录实体
+     * @return 匹配到的重复记录 ID，若无则返回 null
+     */
+    private fun findDuplicateRecordId(db: SQLiteDatabase, record: PowerUsageRecord): Long? {
+        val cursor = db.query(
+            TABLE_NAME,
+            arrayOf(COL_ID, COL_LEVEL_PERCENT, COL_TOTAL_DURATION, COL_RECORD_TIME),
+            null,
+            null,
+            null,
+            null,
+            "$COL_ID DESC",
+            "30"
+        )
+
+        cursor.use {
+            while (it.moveToNext()) {
+                val existingId = it.getLong(0)
+                val existingLevel = it.getInt(1)
+                val existingDuration = it.getString(2) ?: ""
+                val existingTime = it.getString(3) ?: ""
+
+                val timeDiff = kotlin.math.abs(record.id - existingId)
+                val isSameStats = existingLevel == record.levelPercent && existingDuration == record.totalDurationText
+                val isDuplicate = (timeDiff < 60000L && isSameStats) ||
+                        (timeDiff < 30000L && (existingLevel == record.levelPercent || existingDuration == record.totalDurationText)) ||
+                        (existingTime.isNotEmpty() && existingTime == record.recordTime)
+
+                if (isDuplicate) {
+                    return existingId
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * 自动检索并清洗历史已存在的成对重复耗电记录。
+     * 识别时间相差在 60 秒以内且终止电量、总耗时文本相近的相邻项，仅保留最新一条，净化历史数据。
+     *
+     * @return 清理移除的重复数据条数
+     */
+    fun deduplicateRecords(): Int {
+        val db = writableDatabase
+        var deletedCount = 0
+        val cursor = db.query(
+            TABLE_NAME,
+            arrayOf(COL_ID, COL_LEVEL_PERCENT, COL_TOTAL_DURATION, COL_RECORD_TIME),
+            null,
+            null,
+            null,
+            null,
+            "$COL_ID DESC"
+        )
+
+        val idToDelete = mutableListOf<Long>()
+        val keptList = mutableListOf<Array<String>>()
+
+        cursor.use {
+            while (it.moveToNext()) {
+                val id = it.getLong(0)
+                val level = it.getInt(1)
+                val duration = it.getString(2) ?: ""
+                val recordTime = it.getString(3) ?: ""
+
+                var isDuplicate = false
+                for (kept in keptList) {
+                    val keptId = kept[0].toLongOrNull() ?: 0L
+                    val keptLevel = kept[1].toIntOrNull() ?: 0
+                    val keptDuration = kept[2]
+                    val keptRecordTime = kept[3]
+
+                    val timeDiff = kotlin.math.abs(id - keptId)
+                    val isSameStats = level == keptLevel && duration == keptDuration
+                    if ((timeDiff < 60000L && isSameStats) ||
+                        (timeDiff < 30000L && (level == keptLevel || duration == keptDuration)) ||
+                        (recordTime.isNotEmpty() && recordTime == keptRecordTime)
+                    ) {
+                        isDuplicate = true
+                        break
+                    }
+                }
+
+                if (isDuplicate) {
+                    idToDelete.add(id)
+                } else {
+                    keptList.add(arrayOf(id.toString(), level.toString(), duration, recordTime))
+                }
+            }
+        }
+
+        for (delId in idToDelete) {
+            val rows = db.delete(TABLE_NAME, "$COL_ID = ?", arrayOf(delId.toString()))
+            if (rows > 0) deletedCount++
+        }
+
+        return deletedCount
     }
 
     /**
      * 查询所有已持久化的耗电历史记录，按时间从近到远倒序排列。
+     * 查询前自动执行轻量去重自愈检测，保障列表呈现纯净无冗余。
      *
      * @return 耗电历史快照记录列表
      */
     fun getAllRecords(): List<PowerUsageRecord> {
+        // 轻量去重自愈
+        try {
+            deduplicateRecords()
+        } catch (_: Exception) {}
+
         val list = mutableListOf<PowerUsageRecord>()
         val db = readableDatabase
         val cursor = db.query(
@@ -132,6 +279,13 @@ class PowerUsageDbHelper private constructor(context: Context) :
                 val idxAppCnt = c.getColumnIndexOrThrow(COL_APP_COUNT)
                 val idxPts = c.getColumnIndexOrThrow(COL_TREND_POINTS_JSON)
                 val idxApps = c.getColumnIndexOrThrow(COL_APP_LIST_JSON)
+                val idxBgPwr = c.getColumnIndex(COL_BACKGROUND_POWER_WATTS)
+                val idxBgDur = c.getColumnIndex(COL_BACKGROUND_DURATION)
+                val idxRemBg = c.getColumnIndex(COL_REM_BACKGROUND)
+                val idxOnWh = c.getColumnIndex(COL_SCREEN_ON_ENERGY_WH)
+                val idxTotWh = c.getColumnIndex(COL_TOTAL_ENERGY_WH)
+                val idxOffWh = c.getColumnIndex(COL_SCREEN_OFF_ENERGY_WH)
+                val idxBgWh = c.getColumnIndex(COL_BACKGROUND_ENERGY_WH)
 
                 do {
                     list.add(
@@ -155,7 +309,14 @@ class PowerUsageDbHelper private constructor(context: Context) :
                             isShizukuRealData = c.getInt(idxShizuku) == 1,
                             appCount = c.getInt(idxAppCnt),
                             trendPointsJson = c.getString(idxPts) ?: "[]",
-                            appListJson = c.getString(idxApps) ?: "[]"
+                            appListJson = c.getString(idxApps) ?: "[]",
+                            backgroundPowerWatts = if (idxBgPwr >= 0) c.getFloat(idxBgPwr) else 0f,
+                            backgroundDurationText = if (idxBgDur >= 0) c.getString(idxBgDur) ?: "" else "",
+                            remainingBackgroundText = if (idxRemBg >= 0) c.getString(idxRemBg) ?: "" else "",
+                            screenOnEnergyWh = if (idxOnWh >= 0) c.getFloat(idxOnWh) else 0f,
+                            totalEnergyWh = if (idxTotWh >= 0) c.getFloat(idxTotWh) else 0f,
+                            screenOffEnergyWh = if (idxOffWh >= 0) c.getFloat(idxOffWh) else 0f,
+                            backgroundEnergyWh = if (idxBgWh >= 0) c.getFloat(idxBgWh) else 0f
                         )
                     )
                 } while (c.moveToNext())
@@ -187,7 +348,7 @@ class PowerUsageDbHelper private constructor(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "power_usage_history.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
         private const val TABLE_NAME = "power_usage_history"
 
         private const val COL_ID = "id"
@@ -210,6 +371,13 @@ class PowerUsageDbHelper private constructor(context: Context) :
         private const val COL_APP_COUNT = "app_count"
         private const val COL_TREND_POINTS_JSON = "trend_points_json"
         private const val COL_APP_LIST_JSON = "app_list_json"
+        private const val COL_BACKGROUND_POWER_WATTS = "background_power_watts"
+        private const val COL_BACKGROUND_DURATION = "background_duration"
+        private const val COL_REM_BACKGROUND = "rem_background"
+        private const val COL_SCREEN_ON_ENERGY_WH = "screen_on_energy_wh"
+        private const val COL_TOTAL_ENERGY_WH = "total_energy_wh"
+        private const val COL_SCREEN_OFF_ENERGY_WH = "screen_off_energy_wh"
+        private const val COL_BACKGROUND_ENERGY_WH = "background_energy_wh"
 
         @Volatile
         private var instance: PowerUsageDbHelper? = null

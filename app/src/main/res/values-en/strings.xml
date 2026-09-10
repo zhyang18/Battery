@@ -22,6 +22,11 @@
     <string name="power_format_total">Total: %s</string>
     <string name="power_format_avg">Avg: %s</string>
     <string name="power_format_composite">Mix: %s</string>
+    <string name="power_format_background">Bg: %s</string>
+    <string name="power_format_screen_on_with_energy">On: %1$s (%2$s)</string>
+    <string name="power_format_screen_off_with_energy">Off: %1$s (%2$s)</string>
+    <string name="power_format_avg_with_energy">Avg: %1$s (%2$s)</string>
+    <string name="power_format_background_with_energy">Bg: %1$s (%2$s)</string>
     <string name="power_wh_format">%.1fWh</string>
     <string name="power_param_energy">Remaining Energy</string>
     <string name="power_tooltip_energy">Battery Remaining Energy: %s (Accurately calculated from available capacity and realtime voltage)</string>

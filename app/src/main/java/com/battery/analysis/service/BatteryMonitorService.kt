@@ -145,20 +145,8 @@ class BatteryMonitorService : Service() {
                 val currentStatus = powerManager.getCurrentBatteryStatus()
                 val (_, type) = chargingManager.checkCurrentSystemChargingState()
 
-                // 1. 归档上一个放电周期的耗电账本
-                val lastUnplugTime = powerManager.getLastUnplugTime()
-                val now = System.currentTimeMillis()
-                if (lastUnplugTime in 1 until now && (now - lastUnplugTime) > 30000L) {
-                    val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(now))
-                    val currentMode = powerManager.getSelectedMode()
-                    val fullPackage = powerManager.loadPowerData(currentMode)
-                    val powerRecord = PowerUsageRecord.fromFullPowerPackage(
-                        fullPackage = fullPackage,
-                        recordTime = timeStr,
-                        id = now
-                    )
-                    PowerUsageDbHelper.getInstance(context).insertRecord(powerRecord)
-                }
+                // 1. 归档上一个放电周期的耗电账本（调用底层原子防重归档方法）
+                powerManager.archiveDischargeSession()
 
                 // 2. 开启全新充电会话
                 chargingManager.onPowerConnected(currentStatus.levelPercent, type)

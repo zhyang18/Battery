@@ -125,6 +125,22 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
     }
 
     /**
+     * 格式化瓦时能量为人类可读字符串（如 "0.52Wh"、"1.85Wh"、"0.00Wh"）。
+     *
+     * @param wh 待格式化的瓦时能量数值
+     * @return 格式化后的能量展示文本
+     */
+    private fun formatOverviewEnergy(wh: Float): String {
+        return if (wh <= 0f) {
+            "0.00Wh"
+        } else if (wh < 0.01f) {
+            "<0.01Wh"
+        } else {
+            String.format(Locale.getDefault(), "%.2fWh", wh)
+        }
+    }
+
+    /**
      * 将解析后的完整耗电数据包绑定并渲染至卡片、图表与列表中。
      *
      * @param record 耗电历史快照数据实体
@@ -148,22 +164,50 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         binding.tvDetailVoltage.text = String.format(Locale.getDefault(), "%.2f V", record.voltageVolts)
         binding.tvDetailEnergy.text = String.format(Locale.getDefault(), "%.1f Wh", record.energyWh)
 
-        // 2. 卡片 2：三维指标（低于 0.05W 统一规范展示为 "--" 杜绝显示 0.00W 误导用户）
+        // 2. 卡片 2：三维指标与后台指标（低于 0.05W 统一规范展示为 "--" 杜绝显示 0.00W 误导用户）
+        val onEnergyStr = formatOverviewEnergy(record.screenOnEnergyWh)
+        val totalEnergyStr = formatOverviewEnergy(record.totalEnergyWh)
+        val offEnergyStr = formatOverviewEnergy(record.screenOffEnergyWh)
+        val bgEnergyStr = formatOverviewEnergy(record.backgroundEnergyWh)
+
         val onPwrStr = if (record.screenOnPowerWatts >= 0.05f) String.format(Locale.getDefault(), "%.2fW", record.screenOnPowerWatts) else "--"
         val avgPwrStr = if (record.avgPowerWatts >= 0.05f) String.format(Locale.getDefault(), "%.2fW", record.avgPowerWatts) else "--"
         val offPwrStr = if (record.screenOffPowerWatts >= 0.05f) String.format(Locale.getDefault(), "%.2fW", record.screenOffPowerWatts) else "--"
+        val bgPwrStr = if (record.backgroundPowerWatts >= 0.05f) String.format(Locale.getDefault(), "%.2fW", record.backgroundPowerWatts) else "--"
 
-        binding.tvMetricPowerScreenOn.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), onPwrStr)
-        binding.tvMetricPowerAvg.text = String.format(Locale.getDefault(), getString(R.string.power_format_avg), avgPwrStr)
-        binding.tvMetricPowerScreenOff.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), offPwrStr)
+        binding.tvMetricPowerScreenOn.text = if (onPwrStr != "--" || record.screenOnEnergyWh > 0f) {
+            String.format(Locale.getDefault(), getString(R.string.power_format_screen_on_with_energy), onPwrStr, onEnergyStr)
+        } else {
+            String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), "--")
+        }
+
+        binding.tvMetricPowerAvg.text = if (avgPwrStr != "--" || record.totalEnergyWh > 0f) {
+            String.format(Locale.getDefault(), getString(R.string.power_format_avg_with_energy), avgPwrStr, totalEnergyStr)
+        } else {
+            String.format(Locale.getDefault(), getString(R.string.power_format_avg), "--")
+        }
+
+        binding.tvMetricPowerScreenOff.text = if (offPwrStr != "--" || record.screenOffEnergyWh > 0f) {
+            String.format(Locale.getDefault(), getString(R.string.power_format_screen_off_with_energy), offPwrStr, offEnergyStr)
+        } else {
+            String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), "--")
+        }
+
+        binding.tvMetricPowerBackground.text = if (bgPwrStr != "--" || record.backgroundEnergyWh > 0f) {
+            String.format(Locale.getDefault(), getString(R.string.power_format_background_with_energy), bgPwrStr, bgEnergyStr)
+        } else {
+            String.format(Locale.getDefault(), getString(R.string.power_format_background), "--")
+        }
 
         binding.tvMetricTimeScreenOn.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), record.screenOnDurationText)
         binding.tvMetricTimeTotal.text = String.format(Locale.getDefault(), getString(R.string.power_format_total), record.totalDurationText)
         binding.tvMetricTimeScreenOff.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), record.screenOffDurationText)
+        binding.tvMetricTimeBackground.text = String.format(Locale.getDefault(), getString(R.string.power_format_background), record.backgroundDurationText)
 
         binding.tvMetricRemScreenOn.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), record.remainingScreenOnText)
         binding.tvMetricRemComposite.text = String.format(Locale.getDefault(), getString(R.string.power_format_composite), record.remainingCompositeText)
         binding.tvMetricRemScreenOff.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), record.remainingScreenOffText)
+        binding.tvMetricRemBackground.text = String.format(Locale.getDefault(), getString(R.string.power_format_background), record.remainingBackgroundText)
 
         // 3. 卡片 3 与 4：反序列化全量数据包加载功耗时间轴与应用排行榜
         lifecycleScope.launch(Dispatchers.IO) {

@@ -125,30 +125,48 @@
                         android:id="@+id/tv_power_screen_on"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:singleLine="true"
+                        android:ellipsize="end"
                         android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
                         android:textStyle="bold"
-                        tools:text="亮屏 1.65W" />
+                        tools:text="亮屏 1.65W(0.52Wh)" />
 
                     <TextView
                         android:id="@+id/tv_power_avg"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4.5dp"
+                        android:layout_marginTop="4dp"
+                        android:singleLine="true"
+                        android:ellipsize="end"
                         android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
                         android:textStyle="bold"
-                        tools:text="平均 0.80W" />
+                        tools:text="平均 0.80W(1.85Wh)" />
 
                     <TextView
                         android:id="@+id/tv_power_screen_off"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4.5dp"
+                        android:layout_marginTop="4dp"
+                        android:singleLine="true"
+                        android:ellipsize="end"
                         android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
                         android:textStyle="bold"
-                        tools:text="息屏 0.15W" />
+                        tools:text="息屏 0.15W(1.33Wh)" />
+
+                    <TextView
+                        android:id="@+id/tv_power_background"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:singleLine="true"
+                        android:ellipsize="end"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        tools:text="后台 0.12W(0.95Wh)" />
                 </LinearLayout>
 
                 <!-- 放电时长（第二列：左对齐） -->
@@ -163,8 +181,10 @@
                         android:id="@+id/tv_time_screen_on"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:singleLine="true"
+                        android:ellipsize="end"
                         android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
                         android:textStyle="bold"
                         tools:text="亮屏 5h5m" />
 
@@ -172,9 +192,11 @@
                         android:id="@+id/tv_time_total"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4.5dp"
+                        android:layout_marginTop="4dp"
+                        android:singleLine="true"
+                        android:ellipsize="end"
                         android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
                         android:textStyle="bold"
                         tools:text="总计 13h44m" />
 
@@ -182,11 +204,25 @@
                         android:id="@+id/tv_time_screen_off"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4.5dp"
+                        android:layout_marginTop="4dp"
+                        android:singleLine="true"
+                        android:ellipsize="end"
                         android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
                         android:textStyle="bold"
                         tools:text="息屏 8h39m" />
+
+                    <TextView
+                        android:id="@+id/tv_time_background"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:singleLine="true"
+                        android:ellipsize="end"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        tools:text="后台 8h39m" />
                 </LinearLayout>
 
                 <!-- 理论续航（第三列：左对齐） -->
@@ -201,8 +237,10 @@
                         android:id="@+id/tv_remaining_screen_on"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:singleLine="true"
+                        android:ellipsize="end"
                         android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
                         android:textStyle="bold"
                         tools:text="亮屏 6h30m" />
 
@@ -210,9 +248,11 @@
                         android:id="@+id/tv_remaining_composite"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4.5dp"
+                        android:layout_marginTop="4dp"
+                        android:singleLine="true"
+                        android:ellipsize="end"
                         android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
                         android:textStyle="bold"
                         tools:text="综合 14h46m" />
 
@@ -220,11 +260,25 @@
                         android:id="@+id/tv_remaining_screen_off"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4.5dp"
+                        android:layout_marginTop="4dp"
+                        android:singleLine="true"
+                        android:ellipsize="end"
                         android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="13sp"
+                        android:textSize="12sp"
                         android:textStyle="bold"
                         tools:text="息屏 2d18h" />
+
+                    <TextView
+                        android:id="@+id/tv_remaining_background"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:singleLine="true"
+                        android:ellipsize="end"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        tools:text="后台 3d12h" />
                 </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

@@ -22,6 +22,11 @@
     <string name="power_format_total">总计 %s</string>
     <string name="power_format_avg">平均 %s</string>
     <string name="power_format_composite">综合 %s</string>
+    <string name="power_format_background">后台 %s</string>
+    <string name="power_format_screen_on_with_energy">亮屏 %1$s(%2$s)</string>
+    <string name="power_format_screen_off_with_energy">息屏 %1$s(%2$s)</string>
+    <string name="power_format_avg_with_energy">平均 %1$s(%2$s)</string>
+    <string name="power_format_background_with_energy">后台 %1$s(%2$s)</string>
     <string name="power_wh_format">%.1fWh</string>
     <string name="power_param_energy">当前剩余能量</string>
     <string name="power_tooltip_energy">电池当前剩余能量：%s（结合电池实际容量与实时电压精准计算）</string>

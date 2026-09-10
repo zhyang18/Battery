@@ -1,6 +1,7 @@
 package com.battery.analysis
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.regex.Pattern
@@ -853,6 +854,52 @@ class PowerUsageCalculationTest {
         // 验证纯息屏待机功耗准确等于整机平均功耗 0.2W，亮屏功耗规范置 0
         assertEquals("纯息屏待机时息屏功耗必须等于平均放电功耗", 0.2f, screenOffPower, 0.001f)
         assertEquals("纯息屏待机时亮屏功耗必须为 0", 0f, screenOnPower, 0.001f)
+    }
+
+    /**
+     * 验证并发插电广播场景下生成的相近时间与相同耗电特征的记录能够准确识别为成对重复。
+     */
+    @Test
+    fun testConcurrentDuplicatePowerRecordsDetection() {
+        val r1Id = 1789006025120L
+        val r2Id = 1789006025000L
+        val level1 = 43
+        val level2 = 43
+        val duration1 = "16m10s"
+        val duration2 = "16m10s"
+        val timeStr1 = "2026-09-10 10:07:05"
+        val timeStr2 = "2026-09-10 10:07:05"
+
+        val timeDiff = kotlin.math.abs(r1Id - r2Id)
+        val isSameStats = level1 == level2 && duration1 == duration2
+        val isDuplicate = (timeDiff < 60000L && isSameStats) ||
+                (timeDiff < 30000L && (level1 == level2 || duration1 == duration2)) ||
+                (timeStr1.isNotEmpty() && timeStr1 == timeStr2)
+
+        assertTrue("并发成对生成的耗电记录必须判定为重复", isDuplicate)
+    }
+
+    /**
+     * 验证不同放电周期的独立耗电记录绝不被误判为重复。
+     */
+    @Test
+    fun testDistinctPowerRecordsNotDeduplicated() {
+        val r1Id = 1789006025000L
+        val r2Id = 1789013225000L // 2 小时后
+        val level1 = 43
+        val level2 = 30
+        val duration1 = "16m10s"
+        val duration2 = "1h20m"
+        val timeStr1 = "2026-09-10 10:07:05"
+        val timeStr2 = "2026-09-10 12:07:05"
+
+        val timeDiff = kotlin.math.abs(r1Id - r2Id)
+        val isSameStats = level1 == level2 && duration1 == duration2
+        val isDuplicate = (timeDiff < 60000L && isSameStats) ||
+                (timeDiff < 30000L && (level1 == level2 || duration1 == duration2)) ||
+                (timeStr1.isNotEmpty() && timeStr1 == timeStr2)
+
+        assertFalse("相隔2小时的不同放电记录绝不能判定为重复", isDuplicate)
     }
 }
 

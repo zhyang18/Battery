@@ -964,6 +964,22 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
+     * 格式化瓦时能量为人类可读字符串（如 "0.52Wh"、"1.85Wh"、"0.00Wh"）。
+     *
+     * @param wh 待格式化的瓦时能量数值
+     * @return 格式化后的能量展示文本
+     */
+    private fun formatOverviewEnergy(wh: Float): String {
+        return if (wh <= 0f) {
+            "0.00Wh"
+        } else if (wh < 0.01f) {
+            "<0.01Wh"
+        } else {
+            String.format(Locale.getDefault(), "%.2fWh", wh)
+        }
+    }
+
+    /**
      * 将解析出的完整耗电数据包渲染更新至界面各展示卡片与应用列表中。
      *
      * @param fullPackage 包含电池快照、核心指标、应用列表及走势点的完整数据包
@@ -993,7 +1009,12 @@ class PowerUsageFragment : Fragment() {
             getString(R.string.power_status_unplugged)
         }
 
-        // 2. 刷新核心功耗指标卡片（三大卡片三行精准对应呈现，低于 0.05W 统一规范展示为 "--" 杜绝显示 0.00W 误导用户）
+        // 2. 刷新核心功耗指标卡片（四大行精准对应呈现，低于 0.05W 统一规范展示为 "--" 杜绝显示 0.00W 误导用户）
+        val onEnergyStr = formatOverviewEnergy(overview.screenOnEnergyWh)
+        val totalEnergyStr = formatOverviewEnergy(overview.totalEnergyWh)
+        val offEnergyStr = formatOverviewEnergy(overview.screenOffEnergyWh)
+        val bgEnergyStr = formatOverviewEnergy(overview.backgroundEnergyWh)
+
         val onPowerStr = if (overview.screenOnPowerWatts >= 0.05f) {
             String.format(Locale.getDefault(), "%.2fW", overview.screenOnPowerWatts)
         } else {
@@ -1009,17 +1030,45 @@ class PowerUsageFragment : Fragment() {
         } else {
             "--"
         }
-        binding.tvPowerScreenOn.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), onPowerStr)
-        binding.tvPowerAvg.text = String.format(Locale.getDefault(), getString(R.string.power_format_avg), avgPowerStr)
-        binding.tvPowerScreenOff.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), offPowerStr)
+        val bgPowerStr = if (overview.backgroundPowerWatts >= 0.05f) {
+            String.format(Locale.getDefault(), "%.2fW", overview.backgroundPowerWatts)
+        } else {
+            "--"
+        }
+
+        binding.tvPowerScreenOn.text = if (onPowerStr != "--" || overview.screenOnEnergyWh > 0f) {
+            String.format(Locale.getDefault(), getString(R.string.power_format_screen_on_with_energy), onPowerStr, onEnergyStr)
+        } else {
+            String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), "--")
+        }
+
+        binding.tvPowerAvg.text = if (avgPowerStr != "--" || overview.totalEnergyWh > 0f) {
+            String.format(Locale.getDefault(), getString(R.string.power_format_avg_with_energy), avgPowerStr, totalEnergyStr)
+        } else {
+            String.format(Locale.getDefault(), getString(R.string.power_format_avg), "--")
+        }
+
+        binding.tvPowerScreenOff.text = if (offPowerStr != "--" || overview.screenOffEnergyWh > 0f) {
+            String.format(Locale.getDefault(), getString(R.string.power_format_screen_off_with_energy), offPowerStr, offEnergyStr)
+        } else {
+            String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), "--")
+        }
+
+        binding.tvPowerBackground.text = if (bgPowerStr != "--" || overview.backgroundEnergyWh > 0f) {
+            String.format(Locale.getDefault(), getString(R.string.power_format_background_with_energy), bgPowerStr, bgEnergyStr)
+        } else {
+            String.format(Locale.getDefault(), getString(R.string.power_format_background), "--")
+        }
 
         binding.tvTimeScreenOn.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), overview.screenOnDurationText)
-        binding.tvTimeScreenOff.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), overview.screenOffDurationText)
         binding.tvTimeTotal.text = String.format(Locale.getDefault(), getString(R.string.power_format_total), overview.totalDurationText)
+        binding.tvTimeScreenOff.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), overview.screenOffDurationText)
+        binding.tvTimeBackground.text = String.format(Locale.getDefault(), getString(R.string.power_format_background), overview.backgroundDurationText)
 
         binding.tvRemainingScreenOn.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_on), overview.remainingScreenOnText)
         binding.tvRemainingComposite.text = String.format(Locale.getDefault(), getString(R.string.power_format_composite), overview.remainingCompositeText)
         binding.tvRemainingScreenOff.text = String.format(Locale.getDefault(), getString(R.string.power_format_screen_off), overview.remainingScreenOffText)
+        binding.tvRemainingBackground.text = String.format(Locale.getDefault(), getString(R.string.power_format_background), overview.remainingBackgroundText)
 
         // 3. 刷新应用场景列表
         adapter.submitList(fullPackage.appList)

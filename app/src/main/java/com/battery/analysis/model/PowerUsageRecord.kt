@@ -54,7 +54,14 @@ data class PowerUsageRecord(
     val isShizukuRealData: Boolean,
     val appCount: Int,
     val trendPointsJson: String,
-    val appListJson: String
+    val appListJson: String,
+    val backgroundPowerWatts: Float = 0f,
+    val backgroundDurationText: String = "",
+    val remainingBackgroundText: String = "",
+    val screenOnEnergyWh: Float = 0f,
+    val totalEnergyWh: Float = 0f,
+    val screenOffEnergyWh: Float = 0f,
+    val backgroundEnergyWh: Float = 0f
 ) {
 
     /**
@@ -78,12 +85,19 @@ data class PowerUsageRecord(
             avgPowerWatts = avgPowerWatts,
             screenOnPowerWatts = screenOnPowerWatts,
             screenOffPowerWatts = screenOffPowerWatts,
+            backgroundPowerWatts = backgroundPowerWatts,
             screenOnDurationText = screenOnDurationText,
             screenOffDurationText = screenOffDurationText,
             totalDurationText = totalDurationText,
+            backgroundDurationText = backgroundDurationText,
             remainingScreenOnText = remainingScreenOnText,
             remainingCompositeText = remainingCompositeText,
             remainingScreenOffText = remainingScreenOffText,
+            remainingBackgroundText = remainingBackgroundText,
+            screenOnEnergyWh = screenOnEnergyWh,
+            totalEnergyWh = totalEnergyWh,
+            screenOffEnergyWh = screenOffEnergyWh,
+            backgroundEnergyWh = backgroundEnergyWh,
             usedDurationText = "$screenOnDurationText / $totalDurationText",
             remainingLifeText = remainingCompositeText
         )
@@ -366,7 +380,14 @@ data class PowerUsageRecord(
                 isShizukuRealData = fullPackage.isShizukuRealData,
                 appCount = fullPackage.appList.size,
                 trendPointsJson = trendJsonArray.toString(),
-                appListJson = appJsonArray.toString()
+                appListJson = appJsonArray.toString(),
+                backgroundPowerWatts = overview.backgroundPowerWatts,
+                backgroundDurationText = overview.backgroundDurationText,
+                remainingBackgroundText = overview.remainingBackgroundText,
+                screenOnEnergyWh = overview.screenOnEnergyWh,
+                totalEnergyWh = overview.totalEnergyWh,
+                screenOffEnergyWh = overview.screenOffEnergyWh,
+                backgroundEnergyWh = overview.backgroundEnergyWh
             )
         }
     }

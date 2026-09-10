@@ -42,15 +42,15 @@ import java.util.Locale
 class BatteryMonitorService : Service() {
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var chargingSampleJob: Job? = null
+    private var monitorSamplingJob: Job? = null
     private lateinit var notificationManager: NotificationManager
 
     /**
-     * 内部动态广播接收器，用于在前台服务存活期间毫秒级捕获充放电广播与电池状态变动。
+     * 内部动态广播接收器，用于在前台服务存活期间毫秒级捕获充放电广播、电池状态变动及屏幕亮起事件。
      */
     private val powerReceiver = object : BroadcastReceiver() {
         /**
-         * 接收到系统电池广播时的处理逻辑。
+         * 接收到系统电池与屏幕状态广播时的处理逻辑。
          *
          * @param context 运行上下文
          * @param intent 包含广播动作的 Intent
@@ -64,6 +64,11 @@ class BatteryMonitorService : Service() {
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> {
                     handlePowerDisconnected(appContext)
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    // 屏幕点亮瞬间立即更新通知并触发轮询，消除用户视觉滞后
+                    updateNotification()
+                    startMonitorSamplingLoop()
                 }
                 Intent.ACTION_BATTERY_CHANGED -> {
                     updateNotification()
@@ -97,14 +102,12 @@ class BatteryMonitorService : Service() {
             addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_POWER_DISCONNECTED)
             addAction(Intent.ACTION_BATTERY_CHANGED)
+            addAction(Intent.ACTION_SCREEN_ON)
         }
         registerReceiver(powerReceiver, filter)
 
-        // 若服务启动时已处于充电状态，自动开启后台周期性充电指标采样
-        val chargingManager = ChargingStatsManager.getInstance(this)
-        if (chargingManager.isCharging()) {
-            startChargingSamplingLoop()
-        }
+        // 无论服务启动时处于充电还是放电状态，均自动开启全时态自适应采样轮询
+        startMonitorSamplingLoop()
     }
 
     /**
@@ -138,7 +141,7 @@ class BatteryMonitorService : Service() {
         try {
             unregisterReceiver(powerReceiver)
         } catch (_: Exception) {}
-        chargingSampleJob?.cancel()
+        monitorSamplingJob?.cancel()
         serviceScope.cancel()
     }
 
@@ -161,8 +164,8 @@ class BatteryMonitorService : Service() {
                 // 2. 开启全新充电会话
                 chargingManager.onPowerConnected(currentStatus.levelPercent, type)
 
-                // 3. 开启后台充电连续采样
-                startChargingSamplingLoop()
+                // 3. 开启后台全时态连续采样
+                startMonitorSamplingLoop()
 
                 // 4. 更新常驻通知
                 updateNotification()
@@ -183,15 +186,15 @@ class BatteryMonitorService : Service() {
                 val chargingManager = ChargingStatsManager.getInstance(context)
                 val powerManager = PowerUsageManager.getInstance(context)
 
-                // 1. 停止后台充电采样
-                chargingSampleJob?.cancel()
-
-                // 2. 固化保存充电历史记录
+                // 1. 固化保存充电历史记录
                 chargingManager.onPowerDisconnected()
 
-                // 3. 开启全新放电统计周期（健康度快照由用户主动检测时保存，充放电过程不自动生成）
+                // 2. 开启全新放电统计周期（健康度快照由用户主动检测时保存，充放电过程不自动生成）
                 val currentStatus = powerManager.getCurrentBatteryStatus()
                 powerManager.onPowerDisconnected(currentStatus.levelPercent)
+
+                // 3. 确保持续进行放电采样轮询
+                startMonitorSamplingLoop()
 
                 // 4. 更新常驻通知
                 updateNotification()
@@ -202,24 +205,66 @@ class BatteryMonitorService : Service() {
     }
 
     /**
-     * 开启充电期间后台采样轮询协程。
-     * 根据设备屏幕交互状态自适应调整采样周期（亮屏时 3 秒一次，息屏待机时 15 秒一次），
-     * 兼顾能耗与充电轨迹精度。
+     * 开启后台全时态自适应采样轮询协程。
+     * 支持在充电与放电状态下无缝自适应轮询：
+     * 1. 充电中：每周期采集瞬时充电轨迹数据点，持续更新功率走势；
+     * 2. 放电中：周期性采集温度样本至 [PowerUsageManager]，并实时读取底层放电功耗；
+     * 3. 自适应刷新：亮屏时 3 秒高频刷新以保证通知栏实时性，息屏待机时充电 15 秒、放电 30 秒以兼顾超低功耗。
      */
-    private fun startChargingSamplingLoop() {
-        chargingSampleJob?.cancel()
-        chargingSampleJob = serviceScope.launch(Dispatchers.IO) {
+    private fun startMonitorSamplingLoop() {
+        monitorSamplingJob?.cancel()
+        monitorSamplingJob = serviceScope.launch(Dispatchers.IO) {
             val chargingManager = ChargingStatsManager.getInstance(applicationContext)
+            val powerManager = PowerUsageManager.getInstance(applicationContext)
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
 
-            while (isActive && chargingManager.isCharging()) {
-                chargingManager.sampleCurrentPoint()
+            while (isActive) {
+                val isCharging = chargingManager.isCharging()
+                if (isCharging) {
+                    chargingManager.sampleCurrentPoint()
+                } else {
+                    val status = powerManager.getCurrentBatteryStatus()
+                    if (status.temperature > 0f) {
+                        powerManager.recordDischargeTempSample(
+                            System.currentTimeMillis(),
+                            status.temperature
+                        )
+                    }
+                }
+
                 updateNotification()
 
                 val isInteractive = pm?.isInteractive ?: true
-                val sleepInterval = if (isInteractive) 3000L else 15000L
+                val sleepInterval = if (isInteractive) {
+                    3000L
+                } else {
+                    if (isCharging) 15000L else 30000L
+                }
                 delay(sleepInterval)
             }
+        }
+    }
+
+    /**
+     * 获取设备当前实时的瞬时放电功耗（单位：瓦特 W）。
+     * 优先通过 [NormalApiProvider] 读取底层硬件电流与电压推算瞬时功率，
+     * 若读取失败或数值超出合理区间则返回 null。
+     *
+     * @return 瞬时放电功耗数值（绝对值，单位：W），若不可用则返回 null
+     */
+    private fun getDischargePowerWatts(): Float? {
+        return try {
+            val normalApi = NormalApiProvider()
+            val info = normalApi.getBatteryInfo(this)
+            val power = info.powerWatts
+            if (power != null) {
+                val absPower = Math.abs(power)
+                if (absPower in 0.05f..120.0f) absPower else null
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -239,7 +284,16 @@ class BatteryMonitorService : Service() {
             val powerWatts = chargingPoint?.powerWatts ?: 0f
             getString(R.string.service_notification_charging_title, batteryStatus.levelPercent, powerWatts)
         } else {
-            getString(R.string.service_notification_discharging_title, batteryStatus.levelPercent)
+            val dischargePower = getDischargePowerWatts()
+            if (dischargePower != null && dischargePower >= 0.05f) {
+                getString(
+                    R.string.service_notification_discharging_title_with_power,
+                    batteryStatus.levelPercent,
+                    dischargePower
+                )
+            } else {
+                getString(R.string.service_notification_discharging_title, batteryStatus.levelPercent)
+            }
         }
 
         val content = getString(

@@ -231,12 +231,17 @@ class PowerUsageFragment : Fragment() {
         binding.collapsingToolbar.setStatusBarScrimColor(android.graphics.Color.TRANSPARENT)
         binding.toolbarCollapsed.background = null
 
-        // 1. 顶部 AppBarLayout 偏移联动：渐变淡出完整区域、淡入吸顶 mini 卡片
+        // 1. 顶部 AppBarLayout 偏移联动：标题栏淡出、大指标卡片向上移动滚出屏幕、吸顶 mini 卡片在后半程淡入
         binding.appbarPower.addOnOffsetChangedListener { appBarLayout, verticalOffset ->
             if (currentDisplayTab == 1) {
                 // 充电模式下完全禁用联动折叠动效，固定常驻完整展开标题栏
                 binding.layoutExpandedHeader.alpha = 1f
                 binding.layoutExpandedHeader.visibility = View.VISIBLE
+                binding.layoutTitleBar.alpha = 1f
+                binding.layoutTitleBar.visibility = View.VISIBLE
+                binding.cardPowerMetrics.translationY = 0f
+                binding.cardPowerMetrics.alpha = 1f
+                binding.cardPowerMetrics.visibility = View.GONE
                 binding.cardCollapsedMetrics.visibility = View.GONE
                 binding.cardCollapsedMetrics.alpha = 0f
                 binding.swipeRefreshLayout.isEnabled = false
@@ -247,14 +252,25 @@ class PowerUsageFragment : Fragment() {
             if (totalRange > 0) {
                 val fraction = abs(verticalOffset).toFloat() / totalRange.toFloat()
 
-                // 展开区域（标题栏 + 完整大卡片）：在前半程平滑淡出
-                val expandedAlpha = (1f - fraction * 1.5f).coerceIn(0f, 1f)
-                binding.layoutExpandedHeader.alpha = expandedAlpha
-                binding.layoutExpandedHeader.visibility = if (expandedAlpha > 0f) View.VISIBLE else View.INVISIBLE
+                // 1. 顶部标题栏（耗电统计栏）：在前半程平滑淡出隐藏
+                val titleAlpha = (1f - fraction * 2.2f).coerceIn(0f, 1f)
+                binding.layoutTitleBar.alpha = titleAlpha
+                binding.layoutTitleBar.visibility = if (titleAlpha > 0f) View.VISIBLE else View.INVISIBLE
 
-                // 折叠吸顶 mini 卡片：在后半程平滑淡入（仅在耗电模式大卡片可见的前提下）
-                val isMetricsActive = binding.cardPowerMetrics.visibility == View.VISIBLE || binding.cardCollapsedMetrics.visibility == View.VISIBLE
-                val collapsedAlpha = ((fraction - 0.4f) * 1.67f).coerceIn(0f, 1f)
+                // 2. 大指标卡片：严密贴合下方列表，不使用 translationY 避免产生空白断层；
+                // 全程跟随手势自然向上滚动滚出屏幕，前中程（fraction < 0.75）保持实体不透明（alpha = 1f），仅在折叠尾声吸顶卡片浮现时平滑过渡
+                binding.cardPowerMetrics.translationY = 0f
+                val cardAlpha = if (fraction < 0.75f) 1f else ((1f - fraction) / 0.25f).coerceIn(0f, 1f)
+                binding.cardPowerMetrics.alpha = cardAlpha
+                binding.cardPowerMetrics.visibility = if (cardAlpha > 0f) View.VISIBLE else View.INVISIBLE
+
+                // 父容器保持完全可见且不透明
+                binding.layoutExpandedHeader.alpha = 1f
+                binding.layoutExpandedHeader.visibility = View.VISIBLE
+
+                // 3. 折叠吸顶 mini 卡片：在折叠后半程（fraction >= 0.65）平滑淡入吸顶
+                val isMetricsActive = currentDisplayTab == 0
+                val collapsedAlpha = ((fraction - 0.65f) * 2.85f).coerceIn(0f, 1f)
                 binding.cardCollapsedMetrics.alpha = collapsedAlpha
                 if (collapsedAlpha > 0f && isMetricsActive) {
                     binding.cardCollapsedMetrics.visibility = View.VISIBLE
@@ -264,6 +280,11 @@ class PowerUsageFragment : Fragment() {
             } else {
                 binding.layoutExpandedHeader.alpha = 1f
                 binding.layoutExpandedHeader.visibility = View.VISIBLE
+                binding.layoutTitleBar.alpha = 1f
+                binding.layoutTitleBar.visibility = View.VISIBLE
+                binding.cardPowerMetrics.alpha = 1f
+                binding.cardPowerMetrics.translationY = 0f
+                binding.cardPowerMetrics.visibility = if (currentDisplayTab == 0) View.VISIBLE else View.GONE
                 binding.cardCollapsedMetrics.alpha = 0f
                 binding.cardCollapsedMetrics.visibility = View.INVISIBLE
             }
@@ -772,6 +793,10 @@ class PowerUsageFragment : Fragment() {
             binding.tvPowerTitle.text = getString(R.string.power_stats_title)
             binding.layoutPowerContent.visibility = View.VISIBLE
             binding.cardPowerMetrics.visibility = View.VISIBLE
+            binding.cardPowerMetrics.alpha = 1f
+            binding.cardPowerMetrics.translationY = 0f
+            binding.layoutTitleBar.alpha = 1f
+            binding.layoutTitleBar.visibility = View.VISIBLE
             binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
 
             // 耗电模式下恢复原生联动折叠效果

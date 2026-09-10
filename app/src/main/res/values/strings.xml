@@ -462,6 +462,7 @@
     <string name="service_notification_channel_desc">用于保持后台运行，实时检测插拔电源并精准统计充放电数据</string>
     <string name="service_notification_charging_title">⚡ 充电中 (%1$d%%) · %2$.1fW</string>
     <string name="service_notification_discharging_title">🔋 电池放电中 (%1$d%%)</string>
+    <string name="service_notification_discharging_title_with_power">🔋 电池放电中 (%1$d%%) · %2$.1fW</string>
     <string name="service_notification_content">电压: %1$.2fV | 温度: %2$.1f℃</string>
     <string name="settings_keep_alive_category">后台常驻与保活防杀</string>
     <string name="settings_keep_alive_title">常驻通知栏监控</string>

@@ -24,14 +24,12 @@
             app:statusBarScrim="@android:color/transparent"
             app:layout_scrollFlags="scroll|exitUntilCollapsed">
 
-            <!-- 展开时完整显示的区域（向上滚动时平滑淡出） -->
+            <!-- 展开时完整显示的区域（标题栏淡出，大指标卡片向上移动滚出屏幕） -->
             <LinearLayout
                 android:id="@+id/layout_expanded_header"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                app:layout_collapseMode="parallax"
-                app:layout_collapseParallaxMultiplier="0.6">
+                android:orientation="vertical">
 
                 <!-- 顶部标题栏：支持双模切换与状态指示 -->
                 <LinearLayout

@@ -83,6 +83,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         const val PREF_KEY_LAST_UNPLUG_LEVEL = "pref_last_unplug_level"
         const val PREF_KEY_LAST_UNPLUG_CHARGE_COUNTER = "pref_last_unplug_charge_counter"
         private const val PREF_KEY_UNPLUG_USAGE_SNAPSHOT = "pref_unplug_usage_snapshot"
+        private const val PREF_KEY_REALTIME_SAMPLES_JSON = "pref_discharge_realtime_samples_json"
 
         @Volatile
         private var instance: PowerUsageManager? = null
@@ -113,6 +114,165 @@ class PowerUsageManager private constructor(private val context: Context) {
      * 用于在普通模式或 dumpsys history 缺损时，为各 App 精准匹配前台活跃期间的真实平均与最高温度。
      */
     private val dischargeTempPoints = mutableListOf<Pair<Long, Float>>()
+
+    /**
+     * 放电期间秒级瞬时采样点列表。
+     * 记录放电过程中的每一个瞬时物理采样点：时间戳、电量、瞬时真实电压、瞬时真实温度、瞬时放电功耗、亮息屏状态。
+     */
+    private val dischargeRealtimeSamples = mutableListOf<PowerDischargePoint>()
+
+    /**
+     * 记录放电期间的一个秒级瞬时电池采样数据点。
+     * 包含瞬时实时功率、瞬时真实温度、瞬时真实电压、当前电量及屏幕状态，
+     * 同时自动同步温度采样点并执行队列上限容量保护。
+     *
+     * @param timestamp 采样时间戳（毫秒）
+     * @param batteryLevel 电池电量百分比（0 ~ 100）
+     * @param voltageVolts 瞬时电压（单位：伏特 V）
+     * @param temperature 瞬时温度（单位：摄氏度 ℃）
+     * @param powerWatts 瞬时放电功耗（单位：瓦特 W）
+     * @param isScreenOn 当前采样时刻是否处于亮屏状态
+     */
+    @Synchronized
+    fun recordDischargeRealtimeSample(
+        timestamp: Long,
+        batteryLevel: Int,
+        voltageVolts: Float,
+        temperature: Float,
+        powerWatts: Float,
+        isScreenOn: Boolean
+    ) {
+        val lastPoint = dischargeRealtimeSamples.lastOrNull()
+        // 1 秒内防抖，避免同一秒内密集重复写入
+        if (lastPoint != null && (timestamp - lastPoint.timestamp) < 1000L) {
+            return
+        }
+
+        val startTs = getLastUnplugTime().let { if (it > 0L) it else timestamp }
+        val elapsedHours = (timestamp - startTs).coerceAtLeast(0L) / 3600000f
+
+        val point = PowerDischargePoint(
+            timestamp = timestamp,
+            elapsedHours = elapsedHours,
+            batteryLevel = batteryLevel.coerceIn(1, 100),
+            voltageVolts = (Math.round(voltageVolts * 1000f) / 1000f).coerceIn(2.5f, 5.0f),
+            temperature = (Math.round(temperature * 10f) / 10f).coerceIn(0f, 70f),
+            powerWatts = (Math.round(powerWatts * 100f) / 100f).coerceIn(0f, 60f),
+            activeAppIcons = emptyList(),
+            isScreenOn = isScreenOn,
+            activeAppNames = emptyList()
+        )
+        dischargeRealtimeSamples.add(point)
+        if (dischargeRealtimeSamples.size > 5000) {
+            dischargeRealtimeSamples.removeAt(0)
+        }
+
+        // 同步记录时序温度点
+        recordDischargeTempSample(timestamp, temperature)
+
+        // 每新增 10 个采样点定期持久化，防止后台杀死后轨迹丢失
+        if (dischargeRealtimeSamples.size % 10 == 0) {
+            saveDischargeSamplesToPrefs()
+        }
+    }
+
+    /**
+     * 获取当前放电周期记录的所有秒级瞬时采样点列表。
+     * 若内存中为空，则自动尝试从本地持久化中恢复读取。
+     *
+     * @return 瞬时物理采样点列表 [List<PowerDischargePoint>]
+     */
+    @Synchronized
+    fun getDischargeRealtimeSamples(): List<PowerDischargePoint> {
+        if (dischargeRealtimeSamples.isEmpty()) {
+            loadDischargeSamplesFromPrefs()
+        }
+        return dischargeRealtimeSamples.toList()
+    }
+
+    /**
+     * 重置当前放电周期的秒级瞬时采样点列表，并注入初始起点数据。
+     *
+     * @param timestamp 起始时间戳（毫秒）
+     * @param initialLevel 起始电量百分比
+     * @param initialVoltage 起始电压（伏特 V）
+     * @param initialTemp 起始温度（摄氏度 ℃）
+     * @param initialPower 起始放电功耗（瓦特 W）
+     * @param isScreenOn 起始屏幕状态
+     */
+    @Synchronized
+    fun resetDischargeRealtimeSamples(
+        timestamp: Long,
+        initialLevel: Int,
+        initialVoltage: Float,
+        initialTemp: Float,
+        initialPower: Float = 0f,
+        isScreenOn: Boolean = true
+    ) {
+        dischargeRealtimeSamples.clear()
+        val firstPoint = PowerDischargePoint(
+            timestamp = timestamp,
+            elapsedHours = 0f,
+            batteryLevel = initialLevel.coerceIn(1, 100),
+            voltageVolts = initialVoltage.coerceIn(2.5f, 5.0f),
+            temperature = initialTemp.coerceIn(0f, 70f),
+            powerWatts = initialPower.coerceIn(0f, 60f),
+            activeAppIcons = emptyList(),
+            isScreenOn = isScreenOn,
+            activeAppNames = emptyList()
+        )
+        dischargeRealtimeSamples.add(firstPoint)
+        saveDischargeSamplesToPrefs()
+    }
+
+    /**
+     * 将当前放电周期的秒级瞬时采样点序列持久化保存至 SharedPreferences。
+     */
+    @Synchronized
+    private fun saveDischargeSamplesToPrefs() {
+        try {
+            val jsonArray = org.json.JSONArray()
+            for (p in dischargeRealtimeSamples) {
+                val obj = org.json.JSONObject().apply {
+                    put("ts", p.timestamp)
+                    put("elapsed", p.elapsedHours.toDouble())
+                    put("lvl", p.batteryLevel)
+                    put("volt", p.voltageVolts.toDouble())
+                    put("temp", p.temperature.toDouble())
+                    put("pwr", p.powerWatts.toDouble())
+                    put("screenOn", p.isScreenOn)
+                }
+                jsonArray.put(obj)
+            }
+            prefs.edit().putString(PREF_KEY_REALTIME_SAMPLES_JSON, jsonArray.toString()).apply()
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * 从 SharedPreferences 恢复加载已保存的秒级瞬时放电采样点序列。
+     */
+    @Synchronized
+    private fun loadDischargeSamplesFromPrefs() {
+        val jsonStr = prefs.getString(PREF_KEY_REALTIME_SAMPLES_JSON, null) ?: return
+        try {
+            val jsonArray = org.json.JSONArray(jsonStr)
+            dischargeRealtimeSamples.clear()
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                dischargeRealtimeSamples.add(
+                    PowerDischargePoint(
+                        timestamp = obj.optLong("ts", 0L),
+                        elapsedHours = obj.optDouble("elapsed", 0.0).toFloat(),
+                        batteryLevel = obj.optInt("lvl", 100),
+                        voltageVolts = obj.optDouble("volt", 3.85).toFloat(),
+                        temperature = obj.optDouble("temp", 30.0).toFloat(),
+                        powerWatts = obj.optDouble("pwr", 2.0).toFloat(),
+                        isScreenOn = obj.optBoolean("screenOn", true)
+                    )
+                )
+            }
+        } catch (_: Exception) {}
+    }
 
     /**
      * 记录放电期间的一个电池温度采样点。
@@ -163,8 +323,9 @@ class PowerUsageManager private constructor(private val context: Context) {
      */
     fun onPowerDisconnected(unplugLevel: Int) {
         val now = System.currentTimeMillis()
-        val currentTemp = getCurrentBatteryStatus().temperature
-        resetDischargeTempPoints(now, currentTemp)
+        val status = getCurrentBatteryStatus()
+        resetDischargeTempPoints(now, status.temperature)
+        resetDischargeRealtimeSamples(now, unplugLevel, status.voltageVolts, status.temperature, 0f, true)
 
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val counterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: 0
@@ -1645,6 +1806,81 @@ class PowerUsageManager private constructor(private val context: Context) {
             } catch (_: Exception) {}
         }
 
+        // 优先采用放电期间后台精准采集的秒级瞬时物理数据点（包含瞬时实时功率、温度、电压与电量）
+        val realtimeSamples = getDischargeRealtimeSamples().filter { it.timestamp in (startTs - 15000L)..now }
+        if (realtimeSamples.size >= 2) {
+            val sortedSamples = realtimeSamples.sortedBy { it.timestamp }
+            for (s in sortedSamples) {
+                val pointTs = s.timestamp
+                val elapsedHours = (pointTs - startTs).coerceAtLeast(0L) / 3600000f
+
+                var isScreenOn = s.isScreenOn
+                for (screenInt in screenIntervals) {
+                    if (pointTs in screenInt.startTs..screenInt.endTs) {
+                        isScreenOn = true
+                        break
+                    }
+                }
+
+                var matchedPkg: String? = null
+                for (interval in appIntervals) {
+                    if (pointTs in interval.startTs..interval.endTs) {
+                        matchedPkg = interval.packageName
+                        break
+                    }
+                }
+                if (matchedPkg == null && isScreenOn) {
+                    matchedPkg = primaryPkg
+                }
+
+                val icons = mutableListOf<android.graphics.drawable.Drawable>()
+                val names = mutableListOf<String>()
+                if (matchedPkg != null) {
+                    val info = appInfoMap[matchedPkg]
+                    if (info?.first != null) {
+                        icons.add(info.first!!)
+                        names.add(info.second)
+                    }
+                }
+
+                points.add(
+                    PowerDischargePoint(
+                        timestamp = pointTs,
+                        elapsedHours = elapsedHours,
+                        batteryLevel = s.batteryLevel,
+                        voltageVolts = s.voltageVolts,
+                        temperature = s.temperature,
+                        powerWatts = s.powerWatts,
+                        activeAppIcons = icons,
+                        isScreenOn = isScreenOn,
+                        activeAppNames = names
+                    )
+                )
+            }
+
+            // 若最新采样点距今超过 2 秒，自动闭合注入当前瞬时终点
+            val lastSample = sortedSamples.last()
+            if (now > lastSample.timestamp + 2000L) {
+                val currentStatus = getCurrentBatteryStatus()
+                val latestWatts = if (lastSample.powerWatts > 0f) lastSample.powerWatts else defaultAvgWatts
+                points.add(
+                    PowerDischargePoint(
+                        timestamp = now,
+                        elapsedHours = (now - startTs) / 3600000f,
+                        batteryLevel = currentStatus.levelPercent,
+                        voltageVolts = currentStatus.voltageVolts,
+                        temperature = currentStatus.temperature,
+                        powerWatts = latestWatts,
+                        activeAppIcons = emptyList(),
+                        isScreenOn = true,
+                        activeAppNames = emptyList()
+                    )
+                )
+            }
+
+            return points
+        }
+
         // 2. 计算每个采样步长对应的时间切片范围 [slotStart, slotEnd]
         val stepSpan = duration.toDouble() / steps
         val stepIconsMap = mutableMapOf<Int, MutableList<android.graphics.drawable.Drawable>>()
@@ -1876,8 +2112,9 @@ class PowerUsageManager private constructor(private val context: Context) {
      */
     fun resetPowerStats() {
         val now = System.currentTimeMillis()
-        val curTemp = getCurrentBatteryStatus().temperature
-        resetDischargeTempPoints(now, curTemp)
+        val curStatus = getCurrentBatteryStatus()
+        resetDischargeTempPoints(now, curStatus.temperature)
+        resetDischargeRealtimeSamples(now, curStatus.levelPercent, curStatus.voltageVolts, curStatus.temperature, 0f, true)
 
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val counterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: 0

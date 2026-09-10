@@ -220,25 +220,30 @@ class BatteryMonitorService : Service() {
 
             while (isActive) {
                 val isCharging = chargingManager.isCharging()
+                val isInteractive = pm?.isInteractive ?: true
                 if (isCharging) {
                     chargingManager.sampleCurrentPoint()
                 } else {
                     val status = powerManager.getCurrentBatteryStatus()
-                    if (status.temperature > 0f) {
-                        powerManager.recordDischargeTempSample(
-                            System.currentTimeMillis(),
-                            status.temperature
-                        )
-                    }
+                    val pWatts = getDischargePowerWatts() ?: 0f
+                    powerManager.recordDischargeRealtimeSample(
+                        timestamp = System.currentTimeMillis(),
+                        batteryLevel = status.levelPercent,
+                        voltageVolts = status.voltageVolts,
+                        temperature = status.temperature,
+                        powerWatts = pWatts,
+                        isScreenOn = isInteractive
+                    )
                 }
 
                 updateNotification()
 
-                val isInteractive = pm?.isInteractive ?: true
+                val screenOnInterval = getScreenOnIntervalMs(applicationContext)
+                val screenOffInterval = getScreenOffIntervalMs(applicationContext)
                 val sleepInterval = if (isInteractive) {
-                    3000L
+                    screenOnInterval
                 } else {
-                    if (isCharging) 15000L else 30000L
+                    if (isCharging) 15000L else screenOffInterval
                 }
                 delay(sleepInterval)
             }
@@ -354,6 +359,54 @@ class BatteryMonitorService : Service() {
         private const val PREF_NAME = "battery_service_prefs"
         private const val KEY_SERVICE_ENABLED = "pref_battery_service_enabled"
         private const val KEY_BOOT_AUTO_START = "pref_battery_boot_auto_start"
+        const val KEY_SCREEN_ON_INTERVAL_MS = "pref_screen_on_interval_ms"
+        const val KEY_SCREEN_OFF_INTERVAL_MS = "pref_screen_off_interval_ms"
+        const val DEFAULT_SCREEN_ON_INTERVAL_MS = 3000L
+        const val DEFAULT_SCREEN_OFF_INTERVAL_MS = 30000L
+
+        /**
+         * 获取配置的亮屏状态下常驻监控刷新间隔（毫秒）。
+         *
+         * @param context 应用程序上下文
+         * @return 刷新间隔毫秒数（默认 3000L）
+         */
+        fun getScreenOnIntervalMs(context: Context): Long {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            return prefs.getLong(KEY_SCREEN_ON_INTERVAL_MS, DEFAULT_SCREEN_ON_INTERVAL_MS)
+        }
+
+        /**
+         * 设置并持久化亮屏状态下的常驻监控刷新间隔（毫秒）。
+         *
+         * @param context 应用程序上下文
+         * @param intervalMs 刷新间隔毫秒数
+         */
+        fun setScreenOnIntervalMs(context: Context, intervalMs: Long) {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putLong(KEY_SCREEN_ON_INTERVAL_MS, intervalMs).apply()
+        }
+
+        /**
+         * 获取配置的息屏待机状态下放电监控采样间隔（毫秒）。
+         *
+         * @param context 应用程序上下文
+         * @return 采样间隔毫秒数（默认 30000L）
+         */
+        fun getScreenOffIntervalMs(context: Context): Long {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            return prefs.getLong(KEY_SCREEN_OFF_INTERVAL_MS, DEFAULT_SCREEN_OFF_INTERVAL_MS)
+        }
+
+        /**
+         * 设置并持久化息屏待机状态下的放电监控采样间隔（毫秒）。
+         *
+         * @param context 应用程序上下文
+         * @param intervalMs 采样间隔毫秒数
+         */
+        fun setScreenOffIntervalMs(context: Context, intervalMs: Long) {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putLong(KEY_SCREEN_OFF_INTERVAL_MS, intervalMs).apply()
+        }
 
         /**
          * 启动后台电池实时监控前台服务。

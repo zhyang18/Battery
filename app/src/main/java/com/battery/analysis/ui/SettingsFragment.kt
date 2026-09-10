@@ -122,6 +122,7 @@ class SettingsFragment : Fragment() {
 
         binding.switchKeepAliveService.isChecked = com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())
         binding.switchBootAutoStart.isChecked = com.battery.analysis.service.BatteryMonitorService.isBootAutoStartEnabled(requireContext())
+        updateKeepAliveIntervalDisplay()
         updateBatteryOptimizationDisplay()
     }
 
@@ -734,18 +735,25 @@ class SettingsFragment : Fragment() {
 
     /**
      * 初始化后台常驻与保活防杀设置交互逻辑。
-     * 绑定前台服务监控开关、开机自启动开关、电池优化白名单申请与防杀加锁教程弹窗。
+     * 绑定前台服务监控开关、亮屏与息屏刷新间隔选择气泡、开机自启动开关、电池优化白名单申请与防杀加锁教程弹窗。
      */
     private fun setupKeepAliveSettings() {
-        binding.switchKeepAliveService.isChecked = com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())
+        val isServiceEnabled = com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())
+        binding.switchKeepAliveService.isChecked = isServiceEnabled
+        updateKeepAliveIntervalDisplay()
+
         binding.switchKeepAliveService.setOnCheckedChangeListener { _, isChecked ->
             com.battery.analysis.service.BatteryMonitorService.setServiceEnabled(requireContext(), isChecked)
+            updateKeepAliveIntervalDisplay()
             if (isChecked) {
                 (activity as? MainActivity)?.checkAndStartBatteryMonitorService()
             } else {
                 com.battery.analysis.service.BatteryMonitorService.stop(requireContext())
             }
         }
+
+        setupScreenOnIntervalPicker()
+        setupScreenOffIntervalPicker()
 
         binding.switchBootAutoStart.isChecked = com.battery.analysis.service.BatteryMonitorService.isBootAutoStartEnabled(requireContext())
         binding.switchBootAutoStart.setOnCheckedChangeListener { _, isChecked ->
@@ -759,6 +767,154 @@ class SettingsFragment : Fragment() {
 
         binding.layoutLockRecentsGuide.setOnClickListener {
             showLockRecentsGuideDialog()
+        }
+    }
+
+    /**
+     * 更新亮屏刷新间隔与息屏采样间隔的副标题文本及可用状态。
+     */
+    private fun updateKeepAliveIntervalDisplay() {
+        val isServiceEnabled = com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())
+        val onInterval = com.battery.analysis.service.BatteryMonitorService.getScreenOnIntervalMs(requireContext())
+        val offInterval = com.battery.analysis.service.BatteryMonitorService.getScreenOffIntervalMs(requireContext())
+
+        binding.tvCurrentScreenOnInterval.text = getIntervalDisplay(onInterval)
+        binding.tvCurrentScreenOffInterval.text = when (offInterval) {
+            15000L -> getString(R.string.interval_15s)
+            30000L -> getString(R.string.interval_30s)
+            60000L -> getString(R.string.interval_60s)
+            120000L -> getString(R.string.interval_120s)
+            300000L -> getString(R.string.interval_300s)
+            else -> "${offInterval / 1000}s"
+        }
+
+        binding.layoutScreenOnInterval.alpha = if (isServiceEnabled) 1.0f else 0.45f
+        binding.layoutScreenOffInterval.alpha = if (isServiceEnabled) 1.0f else 0.45f
+        binding.layoutScreenOnInterval.isEnabled = isServiceEnabled
+        binding.layoutScreenOffInterval.isEnabled = isServiceEnabled
+    }
+
+    /**
+     * 初始化亮屏监控刷新间隔选择气泡菜单。
+     */
+    private fun setupScreenOnIntervalPicker() {
+        val intervalValues = listOf(1000L, 2000L, 3000L, 5000L, 10000L)
+        binding.layoutScreenOnInterval.setOnClickListener {
+            if (!com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())) {
+                return@setOnClickListener
+            }
+            val currentVal = com.battery.analysis.service.BatteryMonitorService.getScreenOnIntervalMs(requireContext())
+            val popupView = layoutInflater.inflate(R.layout.popup_interval_picker, null)
+            val density = resources.displayMetrics.density
+            val popupWidth = (140 * density).toInt()
+
+            val popupWindow = android.widget.PopupWindow(
+                popupView,
+                popupWidth,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                true
+            ).apply {
+                isOutsideTouchable = true
+                isFocusable = true
+                animationStyle = R.style.Animation_PopupTopRight
+            }
+
+            val optionViews = listOf(
+                popupView.findViewById<TextView>(R.id.tv_opt_1s),
+                popupView.findViewById<TextView>(R.id.tv_opt_2s),
+                popupView.findViewById<TextView>(R.id.tv_opt_3s),
+                popupView.findViewById<TextView>(R.id.tv_opt_5s),
+                popupView.findViewById<TextView>(R.id.tv_opt_10s)
+            )
+
+            optionViews[0].text = getString(R.string.interval_1s)
+            optionViews[1].text = getString(R.string.interval_2s)
+            optionViews[2].text = getString(R.string.interval_3s)
+            optionViews[3].text = getString(R.string.interval_5s)
+            optionViews[4].text = getString(R.string.interval_10s)
+
+            val normalColor = ContextCompat.getColor(requireContext(), R.color.popup_item_text)
+            val activeColor = Color.parseColor("#2196F3")
+
+            optionViews.forEachIndexed { index, textView ->
+                val intervalVal = intervalValues[index]
+                textView.setTextColor(if (intervalVal == currentVal) activeColor else normalColor)
+                textView.setOnClickListener {
+                    com.battery.analysis.service.BatteryMonitorService.setScreenOnIntervalMs(requireContext(), intervalVal)
+                    updateKeepAliveIntervalDisplay()
+                    (activity as? MainActivity)?.checkAndStartBatteryMonitorService()
+                    popupWindow.dismiss()
+                }
+            }
+
+            popupWindow.showAsDropDown(
+                binding.layoutScreenOnInterval,
+                0,
+                (4 * density).toInt(),
+                android.view.Gravity.END
+            )
+        }
+    }
+
+    /**
+     * 初始化息屏待机采样间隔选择气泡菜单。
+     */
+    private fun setupScreenOffIntervalPicker() {
+        val intervalValues = listOf(15000L, 30000L, 60000L, 120000L, 300000L)
+        binding.layoutScreenOffInterval.setOnClickListener {
+            if (!com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())) {
+                return@setOnClickListener
+            }
+            val currentVal = com.battery.analysis.service.BatteryMonitorService.getScreenOffIntervalMs(requireContext())
+            val popupView = layoutInflater.inflate(R.layout.popup_screen_off_interval_picker, null)
+            val density = resources.displayMetrics.density
+            val popupWidth = (140 * density).toInt()
+
+            val popupWindow = android.widget.PopupWindow(
+                popupView,
+                popupWidth,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                true
+            ).apply {
+                isOutsideTouchable = true
+                isFocusable = true
+                animationStyle = R.style.Animation_PopupTopRight
+            }
+
+            val optionViews = listOf(
+                popupView.findViewById<TextView>(R.id.tv_opt_15s),
+                popupView.findViewById<TextView>(R.id.tv_opt_30s),
+                popupView.findViewById<TextView>(R.id.tv_opt_60s),
+                popupView.findViewById<TextView>(R.id.tv_opt_120s),
+                popupView.findViewById<TextView>(R.id.tv_opt_300s)
+            )
+
+            optionViews[0].text = getString(R.string.interval_15s)
+            optionViews[1].text = getString(R.string.interval_30s)
+            optionViews[2].text = getString(R.string.interval_60s)
+            optionViews[3].text = getString(R.string.interval_120s)
+            optionViews[4].text = getString(R.string.interval_300s)
+
+            val normalColor = ContextCompat.getColor(requireContext(), R.color.popup_item_text)
+            val activeColor = Color.parseColor("#2196F3")
+
+            optionViews.forEachIndexed { index, textView ->
+                val intervalVal = intervalValues[index]
+                textView.setTextColor(if (intervalVal == currentVal) activeColor else normalColor)
+                textView.setOnClickListener {
+                    com.battery.analysis.service.BatteryMonitorService.setScreenOffIntervalMs(requireContext(), intervalVal)
+                    updateKeepAliveIntervalDisplay()
+                    (activity as? MainActivity)?.checkAndStartBatteryMonitorService()
+                    popupWindow.dismiss()
+                }
+            }
+
+            popupWindow.showAsDropDown(
+                binding.layoutScreenOffInterval,
+                0,
+                (4 * density).toInt(),
+                android.view.Gravity.END
+            )
         }
     }
 

@@ -527,6 +527,124 @@
                     app:trackTint="@color/selector_switch_track" />
             </LinearLayout>
 
+            <!-- 条目: 亮屏监控刷新间隔 -->
+            <LinearLayout
+                android:id="@+id/layout_screen_on_interval"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/bg_setting_card_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:clipToOutline="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:src="@drawable/ic_bolt"
+                    app:tint="?android:attr/textColorPrimary" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_screen_on_interval_title"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/settings_screen_on_interval_desc"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="11.5sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tv_current_screen_on_interval"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13.5sp"
+                    tools:text="3 秒" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_arrow_drop_down"
+                    app:tint="?android:attr/textColorSecondary" />
+            </LinearLayout>
+
+            <!-- 条目: 息屏待机采样间隔 -->
+            <LinearLayout
+                android:id="@+id/layout_screen_off_interval"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/bg_setting_card_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:clipToOutline="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:src="@drawable/ic_battery_power"
+                    app:tint="?android:attr/textColorPrimary" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_screen_off_interval_title"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="15sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/settings_screen_off_interval_desc"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="11.5sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tv_current_screen_off_interval"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13.5sp"
+                    tools:text="30 秒" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_arrow_drop_down"
+                    app:tint="?android:attr/textColorSecondary" />
+            </LinearLayout>
+
             <!-- 条目: 开机自动启动监控 -->
             <LinearLayout
                 android:layout_width="match_parent"

@@ -473,9 +473,13 @@ class BatteryTimelineView @JvmOverloads constructor(
         // 2. 绘制垂直时间网格虚线与底部时间刻度文字（以时间点为中心严格居中对齐）
         drawTimeGridAndTicks(canvas, contentLeft, contentWidth, mainChartHeight, screenBarBottom, timeTextY, visibleStart, visibleEnd)
 
-        // 3. 多选/反选模式：根据选中的指标集合依次绘制各曲线（支持自动计算画线锚点与阶梯展示）
+        // 3. 绘制 App 活动分槽平铺徽章（置于底层，使后续所有曲线覆盖在应用小图标之上）
         val metrics = timelineState.selectedMetrics
+        if (metrics.contains(TimelineMetric.APP)) {
+            drawAppEventsLayer(canvas)
+        }
 
+        // 4. 多选/反选模式：以平滑三次贝塞尔曲线绘制各指标曲线（全部覆盖在应用小图标之上）
         if (metrics.contains(TimelineMetric.POWER)) {
             drawPowerCurve(canvas, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, maxScaleW, rawSamples)
         }
@@ -487,11 +491,6 @@ class BatteryTimelineView @JvmOverloads constructor(
         }
         if (metrics.contains(TimelineMetric.VOLTAGE)) {
             drawVoltageCurve(canvas, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, rawSamples)
-        }
-
-        // 4. 绘制 App 活动分槽平铺徽章（从下往上纵向堆叠，Row 0 紧贴绿色状态条上方）
-        if (metrics.contains(TimelineMetric.APP)) {
-            drawAppEventsLayer(canvas)
         }
 
         // 5. 绘制横贯全宽的固定底图时间轴屏幕状态实线条（亮屏绿 / 息屏红）
@@ -597,7 +596,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制功耗波动折线（纯线条无下方阴影，始终自左侧 contentLeft 开始并横跨全宽）。
+     * 绘制功耗波动平滑曲线（采用三次贝塞尔平滑算法，始终自左侧 contentLeft 开始并横跨全宽）。
      *
      * @param canvas 目标绘制画布 [Canvas]
      * @param contentLeft 内容区左边缘 X 坐标
@@ -645,7 +644,8 @@ class BatteryTimelineView @JvmOverloads constructor(
             val y = topPadding + (1f - (pW / maxScaleW).toFloat()) * availableH
 
             if (x > lastX) {
-                curvePath.lineTo(x, y)
+                val cX = (lastX + x) / 2f
+                curvePath.cubicTo(cX, lastY, cX, y, x, y)
                 lastX = x
                 lastY = y
             }
@@ -653,14 +653,15 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         // 确保功耗曲线一直延伸至最右侧终点 contentRight
         if (lastX < contentRight) {
-            curvePath.lineTo(contentRight, lastY)
+            val cX = (lastX + contentRight) / 2f
+            curvePath.cubicTo(cX, lastY, cX, lastY, contentRight, lastY)
         }
 
         canvas.drawPath(curvePath, linePaint)
     }
 
     /**
-     * 绘制电量阶梯曲线、拐点圆点及百分比数值标签（鲜绿色，始终自左侧 contentLeft 起步并贯穿整个时间轴）。
+     * 绘制电量平滑衰减曲线、拐点圆点及百分比数值标签（鲜绿色，始终自左侧 contentLeft 起步并贯穿整个时间轴）。
      *
      * @param canvas 绘图画布 [Canvas]
      * @param contentLeft 内容区左边界 X 坐标
@@ -682,7 +683,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         rawSamples: List<BatterySample>
     ) {
         if (rawSamples.isEmpty()) return
-        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 300)
+        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 800)
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
@@ -697,7 +698,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         val firstNorm = (firstSample.batteryLevel / 100f).coerceIn(0f, 1f) * 0.45f + 0.50f
         val firstY = topPadding + (1f - firstNorm) * availableH
 
-        // 无论处于何种时间跨度，折线始终从最左侧起点 (contentLeft, firstY) 开始
+        // 无论处于何种时间跨度，曲线始终从最左侧起点 (contentLeft, firstY) 开始
         curvePath.moveTo(contentLeft, firstY)
 
         val pointMarkers = mutableListOf<Triple<Float, Float, String>>()
@@ -714,8 +715,8 @@ class BatteryTimelineView @JvmOverloads constructor(
             val y = topPadding + (1f - norm) * availableH
 
             if (x > lastX) {
-                curvePath.lineTo(x, lastY)
-                curvePath.lineTo(x, y)
+                val cX = (lastX + x) / 2f
+                curvePath.cubicTo(cX, lastY, cX, y, x, y)
                 if (s.batteryLevel != lastLevel) {
                     pointMarkers.add(Triple(x, y, "${s.batteryLevel}%"))
                 }
@@ -725,9 +726,10 @@ class BatteryTimelineView @JvmOverloads constructor(
             }
         }
 
-        // 确保折线始终横贯延伸至最右侧终点 (contentRight, lastY)
+        // 确保平滑曲线始终横贯延伸至最右侧终点 (contentRight, lastY)
         if (lastX < contentRight) {
-            curvePath.lineTo(contentRight, lastY)
+            val cX = (lastX + contentRight) / 2f
+            curvePath.cubicTo(cX, lastY, cX, lastY, contentRight, lastY)
         }
 
         canvas.drawPath(curvePath, linePaint)
@@ -737,7 +739,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制温度阶梯折线、拐点圆点及摄氏度数值标签（珊瑚橙色，始终自左侧 contentLeft 起步并贯穿整个时间轴）。
+     * 绘制温度平滑温升/降温曲线、拐点圆点及摄氏度数值标签（珊瑚橙色，始终自左侧 contentLeft 起步并贯穿整个时间轴）。
      *
      * @param canvas 绘图画布 [Canvas]
      * @param contentLeft 内容区左边界 X 坐标
@@ -759,7 +761,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         rawSamples: List<BatterySample>
     ) {
         if (rawSamples.isEmpty()) return
-        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 300)
+        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 800)
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
@@ -774,7 +776,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         val firstNorm = (((firstSample.temperatureC - 15.0) / 30.0).coerceIn(0.0, 1.0) * 0.40 + 0.45).toFloat()
         val firstY = topPadding + (1f - firstNorm) * availableH
 
-        // 折线始终从最左侧起点 (contentLeft, firstY) 开始
+        // 平滑曲线始终从最左侧起点 (contentLeft, firstY) 开始
         curvePath.moveTo(contentLeft, firstY)
 
         val pointMarkers = mutableListOf<Triple<Float, Float, String>>()
@@ -791,8 +793,8 @@ class BatteryTimelineView @JvmOverloads constructor(
             val y = topPadding + (1f - norm) * availableH
 
             if (x > lastX) {
-                curvePath.lineTo(x, lastY)
-                curvePath.lineTo(x, y)
+                val cX = (lastX + x) / 2f
+                curvePath.cubicTo(cX, lastY, cX, y, x, y)
                 val tempInt = (s.temperatureC * 2).toInt()
                 if (tempInt != lastTempInt && pointMarkers.size < 6) {
                     pointMarkers.add(Triple(x, y, String.format(Locale.getDefault(), "%.1f℃", s.temperatureC)))
@@ -803,9 +805,10 @@ class BatteryTimelineView @JvmOverloads constructor(
             }
         }
 
-        // 确保折线始终横贯延伸至最右侧终点 (contentRight, lastY)
+        // 确保平滑曲线始终横贯延伸至最右侧终点 (contentRight, lastY)
         if (lastX < contentRight) {
-            curvePath.lineTo(contentRight, lastY)
+            val cX = (lastX + contentRight) / 2f
+            curvePath.cubicTo(cX, lastY, cX, lastY, contentRight, lastY)
         }
 
         canvas.drawPath(curvePath, linePaint)
@@ -815,7 +818,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制电压阶梯折线、拐点圆点及伏特数值标签（金黄色，始终自左侧 contentLeft 起步并贯穿整个时间轴）。
+     * 绘制电压平滑变化曲线、拐点圆点及伏特数值标签（金黄色，始终自左侧 contentLeft 起步并贯穿整个时间轴）。
      *
      * @param canvas 绘图画布 [Canvas]
      * @param contentLeft 内容区左边界 X 坐标
@@ -837,7 +840,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         rawSamples: List<BatterySample>
     ) {
         if (rawSamples.isEmpty()) return
-        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 300)
+        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 800)
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
@@ -853,7 +856,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         val firstNorm = (((firstVoltV - 3.4f) / 1.0f).coerceIn(0f, 1f) * 0.35f + 0.35f)
         val firstY = topPadding + (1f - firstNorm) * availableH
 
-        // 折线始终从最左侧起点 (contentLeft, firstY) 开始
+        // 平滑曲线始终从最左侧起点 (contentLeft, firstY) 开始
         curvePath.moveTo(contentLeft, firstY)
 
         val pointMarkers = mutableListOf<Triple<Float, Float, String>>()
@@ -871,8 +874,8 @@ class BatteryTimelineView @JvmOverloads constructor(
             val y = topPadding + (1f - norm) * availableH
 
             if (x > lastX) {
-                curvePath.lineTo(x, lastY)
-                curvePath.lineTo(x, y)
+                val cX = (lastX + x) / 2f
+                curvePath.cubicTo(cX, lastY, cX, y, x, y)
                 if (abs(voltV - lastVolt) >= 0.05f && pointMarkers.size < 6) {
                     pointMarkers.add(Triple(x, y, String.format(Locale.getDefault(), "%.3f V", voltV)))
                 }
@@ -882,9 +885,10 @@ class BatteryTimelineView @JvmOverloads constructor(
             }
         }
 
-        // 确保折线始终横贯延伸至最右侧终点 (contentRight, lastY)
+        // 确保平滑曲线始终横贯延伸至最右侧终点 (contentRight, lastY)
         if (lastX < contentRight) {
-            curvePath.lineTo(contentRight, lastY)
+            val cX = (lastX + contentRight) / 2f
+            curvePath.cubicTo(cX, lastY, cX, lastY, contentRight, lastY)
         }
 
         canvas.drawPath(curvePath, linePaint)

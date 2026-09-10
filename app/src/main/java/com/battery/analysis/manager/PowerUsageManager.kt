@@ -122,16 +122,27 @@ class PowerUsageManager private constructor(private val context: Context) {
     private val dischargeRealtimeSamples = mutableListOf<PowerDischargePoint>()
 
     /**
-     * 记录放电期间的一个秒级瞬时电池采样数据点。
-     * 包含瞬时实时功率、瞬时真实温度、瞬时真实电压、当前电量及屏幕状态，
-     * 同时自动同步温度采样点并执行队列上限容量保护。
+     * 异步后台 I/O 线程池，用于执行大采样点序列的持久化存储，杜绝主线程与轮询线程阻塞。
+     */
+    private val diskIoExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    /**
+     * 未持久化采样点脏数据计数器。
+     */
+    @Volatile
+    private var unsavedDischargeSamplesCount = 0
+
+    /**
+     * 记录放电过程中的实时瞬时采样点。
+     * 包含秒级时间戳、瞬时电量、电压、温度、瞬时功耗及屏幕开关状态。
+     * 采用纯内存快速追加与批处理异步刷盘机制，确保极低 CPU 与磁盘 I/O 消耗。
      *
      * @param timestamp 采样时间戳（毫秒）
-     * @param batteryLevel 电池电量百分比（0 ~ 100）
-     * @param voltageVolts 瞬时电压（单位：伏特 V）
-     * @param temperature 瞬时温度（单位：摄氏度 ℃）
-     * @param powerWatts 瞬时放电功耗（单位：瓦特 W）
-     * @param isScreenOn 当前采样时刻是否处于亮屏状态
+     * @param batteryLevel 当前电量百分比 (1..100)
+     * @param voltageVolts 实时电压（伏特 V）
+     * @param temperature 实时温度（摄氏度 ℃）
+     * @param powerWatts 实时瞬时放电功耗（瓦特 W）
+     * @param isScreenOn 屏幕是否处于点亮唤醒状态
      */
     @Synchronized
     fun recordDischargeRealtimeSample(
@@ -170,10 +181,29 @@ class PowerUsageManager private constructor(private val context: Context) {
         // 同步记录时序温度点
         recordDischargeTempSample(timestamp, temperature)
 
-        // 每新增 10 个采样点定期持久化，防止后台杀死后轨迹丢失
-        if (dischargeRealtimeSamples.size % 10 == 0) {
+        // 极致低功耗设计：日常采样纯内存追加，当积累达到 100 个点时才在后台异步持久化一次
+        unsavedDischargeSamplesCount++
+        if (unsavedDischargeSamplesCount >= 100) {
+            unsavedDischargeSamplesCount = 0
+            saveDischargeSamplesToPrefsAsync()
+        }
+    }
+
+    /**
+     * 异步持久化放电采样点至本地存储，避免阻塞调用线程。
+     */
+    fun saveDischargeSamplesToPrefsAsync() {
+        diskIoExecutor.execute {
             saveDischargeSamplesToPrefs()
         }
+    }
+
+    /**
+     * 主动将当前内存中的放电瞬时采样点序列刷入本地持久化存储。
+     * 适合在息屏休眠、电源插拔、清空重置等关键生命周期节点调用。
+     */
+    fun flushDischargeSamplesToDisk() {
+        saveDischargeSamplesToPrefsAsync()
     }
 
     /**
@@ -210,6 +240,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         isScreenOn: Boolean = true
     ) {
         dischargeRealtimeSamples.clear()
+        unsavedDischargeSamplesCount = 0
         val firstPoint = PowerDischargePoint(
             timestamp = timestamp,
             elapsedHours = 0f,
@@ -222,7 +253,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             activeAppNames = emptyList()
         )
         dischargeRealtimeSamples.add(firstPoint)
-        saveDischargeSamplesToPrefs()
+        saveDischargeSamplesToPrefsAsync()
     }
 
     /**
@@ -232,7 +263,9 @@ class PowerUsageManager private constructor(private val context: Context) {
     private fun saveDischargeSamplesToPrefs() {
         try {
             val jsonArray = org.json.JSONArray()
-            for (p in dischargeRealtimeSamples) {
+            // 复制列表副本进行持久化，避免锁持有过长
+            val snapshot = ArrayList(dischargeRealtimeSamples)
+            for (p in snapshot) {
                 val obj = org.json.JSONObject().apply {
                     put("ts", p.timestamp)
                     put("elapsed", p.elapsedHours.toDouble())

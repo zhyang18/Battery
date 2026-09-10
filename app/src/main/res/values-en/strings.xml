@@ -468,8 +468,9 @@
     <string name="settings_keep_alive_desc">Display status in notification bar to prevent app from being killed in background, ensuring 100% accurate unplug &amp; charge detection.</string>
     <string name="settings_screen_on_interval_title">Screen-on Refresh Interval</string>
     <string name="settings_screen_on_interval_desc">Notification and trend sampling frequency when screen is on (Default: 3s)</string>
-    <string name="settings_screen_off_interval_title">Screen-off Standby Interval</string>
-    <string name="settings_screen_off_interval_desc">Background sampling interval during standby when screen is off (Default: 30s)</string>
+    <string name="settings_screen_off_interval_title">Screen-off Standby Strategy</string>
+    <string name="settings_screen_off_interval_desc">Background sampling strategy when screen is off (Smart Eco recommended for zero standby drain)</string>
+    <string name="interval_smart_eco">Smart Eco (Zero-Wake, Recommended)</string>
     <string name="interval_15s">15 seconds</string>
     <string name="interval_30s">30 seconds</string>
     <string name="interval_60s">60 seconds</string>

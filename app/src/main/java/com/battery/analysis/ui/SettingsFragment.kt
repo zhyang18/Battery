@@ -780,6 +780,7 @@ class SettingsFragment : Fragment() {
 
         binding.tvCurrentScreenOnInterval.text = getIntervalDisplay(onInterval)
         binding.tvCurrentScreenOffInterval.text = when (offInterval) {
+            0L -> getString(R.string.interval_smart_eco)
             15000L -> getString(R.string.interval_15s)
             30000L -> getString(R.string.interval_30s)
             60000L -> getString(R.string.interval_60s)
@@ -860,7 +861,7 @@ class SettingsFragment : Fragment() {
      * 初始化息屏待机采样间隔选择气泡菜单。
      */
     private fun setupScreenOffIntervalPicker() {
-        val intervalValues = listOf(15000L, 30000L, 60000L, 120000L, 300000L)
+        val intervalValues = listOf(0L, 15000L, 30000L, 60000L, 120000L, 300000L)
         binding.layoutScreenOffInterval.setOnClickListener {
             if (!com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())) {
                 return@setOnClickListener
@@ -868,7 +869,7 @@ class SettingsFragment : Fragment() {
             val currentVal = com.battery.analysis.service.BatteryMonitorService.getScreenOffIntervalMs(requireContext())
             val popupView = layoutInflater.inflate(R.layout.popup_screen_off_interval_picker, null)
             val density = resources.displayMetrics.density
-            val popupWidth = (140 * density).toInt()
+            val popupWidth = (200 * density).toInt()
 
             val popupWindow = android.widget.PopupWindow(
                 popupView,
@@ -882,6 +883,7 @@ class SettingsFragment : Fragment() {
             }
 
             val optionViews = listOf(
+                popupView.findViewById<TextView>(R.id.tv_opt_smart_eco),
                 popupView.findViewById<TextView>(R.id.tv_opt_15s),
                 popupView.findViewById<TextView>(R.id.tv_opt_30s),
                 popupView.findViewById<TextView>(R.id.tv_opt_60s),
@@ -889,11 +891,12 @@ class SettingsFragment : Fragment() {
                 popupView.findViewById<TextView>(R.id.tv_opt_300s)
             )
 
-            optionViews[0].text = getString(R.string.interval_15s)
-            optionViews[1].text = getString(R.string.interval_30s)
-            optionViews[2].text = getString(R.string.interval_60s)
-            optionViews[3].text = getString(R.string.interval_120s)
-            optionViews[4].text = getString(R.string.interval_300s)
+            optionViews[0].text = getString(R.string.interval_smart_eco)
+            optionViews[1].text = getString(R.string.interval_15s)
+            optionViews[2].text = getString(R.string.interval_30s)
+            optionViews[3].text = getString(R.string.interval_60s)
+            optionViews[4].text = getString(R.string.interval_120s)
+            optionViews[5].text = getString(R.string.interval_300s)
 
             val normalColor = ContextCompat.getColor(requireContext(), R.color.popup_item_text)
             val activeColor = Color.parseColor("#2196F3")

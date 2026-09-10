@@ -9,10 +9,12 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import kotlin.math.abs
 import com.battery.analysis.MainActivity
 import com.battery.analysis.R
 import com.battery.analysis.db.PowerUsageDbHelper
@@ -45,8 +47,18 @@ class BatteryMonitorService : Service() {
     private var monitorSamplingJob: Job? = null
     private lateinit var notificationManager: NotificationManager
 
+    // 内存缓存最近一次系统广播接收到的电池参数，避免高频 IPC 重复查询
+    @Volatile
+    private var cachedLevelPercent: Int = 100
+    @Volatile
+    private var cachedVoltageVolts: Float = 4.0f
+    @Volatile
+    private var cachedTemperature: Float = 25.0f
+    @Volatile
+    private var cachedIsCharging: Boolean = false
+
     /**
-     * 内部动态广播接收器，用于在前台服务存活期间毫秒级捕获充放电广播、电池状态变动及屏幕亮起事件。
+     * 内部动态广播接收器，用于在前台服务存活期间毫秒级捕获充放电广播、电池状态变动及屏幕亮灭事件。
      */
     private val powerReceiver = object : BroadcastReceiver() {
         /**
@@ -66,19 +78,61 @@ class BatteryMonitorService : Service() {
                     handlePowerDisconnected(appContext)
                 }
                 Intent.ACTION_SCREEN_ON -> {
-                    // 屏幕点亮瞬间立即更新通知并触发轮询，消除用户视觉滞后
-                    updateNotification()
+                    // 屏幕点亮瞬间：立即恢复轮询协程并强制刷新一次通知，消除用户视觉滞后
                     startMonitorSamplingLoop()
+                    updateNotification(force = true)
+                }
+                Intent.ACTION_SCREEN_OFF -> {
+                    // 屏幕熄灭瞬间：
+                    // 1. 将内存采样点异步刷盘固化，防止异常退出导致轨迹丢失
+                    PowerUsageManager.getInstance(appContext).flushDischargeSamplesToDisk()
+
+                    // 2. 检查息屏待机策略：若为智能省电模式（<=0L），彻底停止轮询协程，完全释放 CPU 休眠
+                    val screenOffInterval = getScreenOffIntervalMs(appContext)
+                    val chargingManager = ChargingStatsManager.getInstance(appContext)
+                    if (!chargingManager.isCharging() && screenOffInterval <= 0L) {
+                        monitorSamplingJob?.cancel()
+                        monitorSamplingJob = null
+                    }
                 }
                 Intent.ACTION_BATTERY_CHANGED -> {
-                    updateNotification()
+                    // 解析系统电池广播并更新内存缓存
+                    val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, cachedLevelPercent)
+                    val voltRaw = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1)
+                    val tempRaw = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1)
+                    val statusRaw = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+                    if (level > 0) cachedLevelPercent = level
+                    if (voltRaw > 0) cachedVoltageVolts = voltRaw / 1000f
+                    if (tempRaw > 0) cachedTemperature = tempRaw / 10f
+                    cachedIsCharging = (statusRaw == BatteryManager.BATTERY_STATUS_CHARGING || statusRaw == BatteryManager.BATTERY_STATUS_FULL)
+
+                    // 极致省电：仅亮屏时刷新通知，息屏直接跳过
+                    updateNotification(force = false)
+
                     val chargingManager = ChargingStatsManager.getInstance(appContext)
                     if (!chargingManager.isCharging()) {
-                        val rawTemp = intent.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, -1)
-                        if (rawTemp > 0) {
-                            PowerUsageManager.getInstance(appContext).recordDischargeTempSample(
+                        val powerManager = PowerUsageManager.getInstance(appContext)
+                        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+                        val isInteractive = pm?.isInteractive ?: true
+
+                        // 同步记录放电温度点
+                        if (tempRaw > 0) {
+                            powerManager.recordDischargeTempSample(
                                 System.currentTimeMillis(),
-                                rawTemp / 10f
+                                tempRaw / 10f
+                            )
+                        }
+
+                        // 智能省电模式（零唤醒）：息屏期间借由系统硬件状态变化广播的时机被动记录一个瞬时点，不持有 WakeLock，零主动功耗
+                        val screenOffInterval = getScreenOffIntervalMs(appContext)
+                        if (!isInteractive && screenOffInterval <= 0L) {
+                            powerManager.recordDischargeRealtimeSample(
+                                timestamp = System.currentTimeMillis(),
+                                batteryLevel = cachedLevelPercent,
+                                voltageVolts = cachedVoltageVolts,
+                                temperature = cachedTemperature,
+                                powerWatts = 0f,
+                                isScreenOn = false
                             )
                         }
                     }
@@ -103,6 +157,7 @@ class BatteryMonitorService : Service() {
             addAction(Intent.ACTION_POWER_DISCONNECTED)
             addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
         }
         registerReceiver(powerReceiver, filter)
 
@@ -208,8 +263,9 @@ class BatteryMonitorService : Service() {
      * 开启后台全时态自适应采样轮询协程。
      * 支持在充电与放电状态下无缝自适应轮询：
      * 1. 充电中：每周期采集瞬时充电轨迹数据点，持续更新功率走势；
-     * 2. 放电中：周期性采集温度样本至 [PowerUsageManager]，并实时读取底层放电功耗；
-     * 3. 自适应刷新：亮屏时 3 秒高频刷新以保证通知栏实时性，息屏待机时充电 15 秒、放电 30 秒以兼顾超低功耗。
+     * 2. 放电中：周期性采集温度样本至 [PowerUsageManager]，并读取底层放电功耗；
+     * 3. 智能省电：息屏且非充电状态下若配置为智能省电（0L），直接退出轮询协程，完全释放 CPU 休眠；
+     * 4. 亮屏刷新：亮屏时按配置间隔高频刷新以保证通知栏实时性。
      */
     private fun startMonitorSamplingLoop() {
         monitorSamplingJob?.cancel()
@@ -221,29 +277,35 @@ class BatteryMonitorService : Service() {
             while (isActive) {
                 val isCharging = chargingManager.isCharging()
                 val isInteractive = pm?.isInteractive ?: true
+                val screenOffInterval = getScreenOffIntervalMs(applicationContext)
+
+                // 智能省电零唤醒优化：息屏且非充电状态下若配置为 0L，直接结束轮询，释放 CPU Deep Sleep
+                if (!isInteractive && !isCharging && screenOffInterval <= 0L) {
+                    break
+                }
+
                 if (isCharging) {
                     chargingManager.sampleCurrentPoint()
                 } else {
-                    val status = powerManager.getCurrentBatteryStatus()
                     val pWatts = getDischargePowerWatts() ?: 0f
                     powerManager.recordDischargeRealtimeSample(
                         timestamp = System.currentTimeMillis(),
-                        batteryLevel = status.levelPercent,
-                        voltageVolts = status.voltageVolts,
-                        temperature = status.temperature,
+                        batteryLevel = cachedLevelPercent,
+                        voltageVolts = cachedVoltageVolts,
+                        temperature = cachedTemperature,
                         powerWatts = pWatts,
                         isScreenOn = isInteractive
                     )
                 }
 
-                updateNotification()
+                // 息屏期间自动跳过通知刷新，亮屏期间才刷新
+                updateNotification(force = false)
 
                 val screenOnInterval = getScreenOnIntervalMs(applicationContext)
-                val screenOffInterval = getScreenOffIntervalMs(applicationContext)
                 val sleepInterval = if (isInteractive) {
                     screenOnInterval
                 } else {
-                    if (isCharging) 15000L else screenOffInterval
+                    if (isCharging) 15000L else screenOffInterval.coerceAtLeast(15000L)
                 }
                 delay(sleepInterval)
             }
@@ -252,19 +314,22 @@ class BatteryMonitorService : Service() {
 
     /**
      * 获取设备当前实时的瞬时放电功耗（单位：瓦特 W）。
-     * 优先通过 [NormalApiProvider] 读取底层硬件电流与电压推算瞬时功率，
-     * 若读取失败或数值超出合理区间则返回 null。
+     * 直接读取底层硬件库仑计电流寄存器并结合缓存电压推算，
+     * 杜绝临时注册广播引发的 IPC 开销，数值超出合理区间则返回 null。
      *
      * @return 瞬时放电功耗数值（绝对值，单位：W），若不可用则返回 null
      */
     private fun getDischargePowerWatts(): Float? {
         return try {
-            val normalApi = NormalApiProvider()
-            val info = normalApi.getBatteryInfo(this)
-            val power = info.powerWatts
-            if (power != null) {
-                val absPower = Math.abs(power)
-                if (absPower in 0.05f..120.0f) absPower else null
+            val batteryManager = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return null
+            val rawCurrent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+            if (rawCurrent == 0 || rawCurrent == Int.MIN_VALUE) return null
+            val absCur = abs(rawCurrent)
+            val curMa: Float = if (absCur < 100000) absCur.toFloat() else (absCur / 1000f)
+            val voltage: Float = cachedVoltageVolts
+            if (voltage > 0f && curMa > 0f) {
+                val power: Float = (voltage * curMa) / 1000f
+                if (power in 0.05f..120.0f) power else null
             } else {
                 null
             }
@@ -279,32 +344,30 @@ class BatteryMonitorService : Service() {
      * @return 配置完毕的系统通知 [Notification]
      */
     private fun buildNotification(): Notification {
-        val powerManager = PowerUsageManager.getInstance(this)
         val chargingManager = ChargingStatsManager.getInstance(this)
-        val batteryStatus = powerManager.getCurrentBatteryStatus()
         val isCharging = chargingManager.isCharging()
 
         val title = if (isCharging) {
             val chargingPoint = chargingManager.getSamplePoints().lastOrNull()
             val powerWatts = chargingPoint?.powerWatts ?: 0f
-            getString(R.string.service_notification_charging_title, batteryStatus.levelPercent, powerWatts)
+            getString(R.string.service_notification_charging_title, cachedLevelPercent, powerWatts)
         } else {
             val dischargePower = getDischargePowerWatts()
             if (dischargePower != null && dischargePower >= 0.05f) {
                 getString(
                     R.string.service_notification_discharging_title_with_power,
-                    batteryStatus.levelPercent,
+                    cachedLevelPercent,
                     dischargePower
                 )
             } else {
-                getString(R.string.service_notification_discharging_title, batteryStatus.levelPercent)
+                getString(R.string.service_notification_discharging_title, cachedLevelPercent)
             }
         }
 
         val content = getString(
             R.string.service_notification_content,
-            batteryStatus.voltageVolts,
-            batteryStatus.temperature
+            cachedVoltageVolts,
+            cachedTemperature
         )
 
         val pendingIntent = PendingIntent.getActivity(
@@ -329,9 +392,17 @@ class BatteryMonitorService : Service() {
 
     /**
      * 刷新并推送最新的电池状态通知至系统通知栏。
+     * 在息屏期间且非强制刷新时自动跳过，消除 SystemUI 绘制开销与锁屏唤醒。
+     *
+     * @param force 是否强制触发系统通知栏刷新（如点亮屏幕瞬间）
      */
-    private fun updateNotification() {
+    private fun updateNotification(force: Boolean = false) {
         try {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            val isInteractive = pm?.isInteractive ?: true
+            if (!isInteractive && !force) {
+                return
+            }
             notificationManager.notify(NOTIFICATION_ID, buildNotification())
         } catch (_: Exception) {}
     }
@@ -362,7 +433,7 @@ class BatteryMonitorService : Service() {
         const val KEY_SCREEN_ON_INTERVAL_MS = "pref_screen_on_interval_ms"
         const val KEY_SCREEN_OFF_INTERVAL_MS = "pref_screen_off_interval_ms"
         const val DEFAULT_SCREEN_ON_INTERVAL_MS = 3000L
-        const val DEFAULT_SCREEN_OFF_INTERVAL_MS = 30000L
+        const val DEFAULT_SCREEN_OFF_INTERVAL_MS = 0L
 
         /**
          * 获取配置的亮屏状态下常驻监控刷新间隔（毫秒）。

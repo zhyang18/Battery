@@ -470,7 +470,8 @@
     <string name="settings_screen_on_interval_title">亮屏监控刷新间隔</string>
     <string name="settings_screen_on_interval_desc">屏幕点亮时常驻通知与走势采样的刷新频率 (默认 3 秒)</string>
     <string name="settings_screen_off_interval_title">息屏待机采样间隔</string>
-    <string name="settings_screen_off_interval_desc">设备锁屏休眠时放电状态的后台采样间隔 (默认 30 秒)</string>
+    <string name="settings_screen_off_interval_desc">设备锁屏休眠时放电状态的后台采样策略 (推荐智能省电，待机零唤醒)</string>
+    <string name="interval_smart_eco">智能省电 (零唤醒，推荐)</string>
     <string name="interval_15s">15 秒</string>
     <string name="interval_30s">30 秒</string>
     <string name="interval_60s">60 秒</string>

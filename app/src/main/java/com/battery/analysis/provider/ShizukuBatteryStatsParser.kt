@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import com.battery.analysis.model.AppPowerUsageItem
+import com.battery.analysis.util.NetworkStatsHelper
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -21,6 +22,45 @@ import kotlin.math.abs
  * @property context 应用程序上下文
  */
 class ShizukuBatteryStatsParser(private val context: Context) {
+
+    private val networkStatsHelper = NetworkStatsHelper(context)
+
+    /**
+     * 单个应用 UID 的底层权威硬件资源开销统计实体数据类。
+     *
+     * @property uid 应用程序系统 UID
+     * @property cpuUserMs 用户态 CPU 计算时长（毫秒）
+     * @property cpuSystemMs 内核系统态 CPU 计算时长（毫秒）
+     * @property cpuForegroundMs 前台活跃期间 CPU 计算时长（毫秒）
+     * @property cpuBackgroundMs 后台服务/计算期间 CPU 计算时长（毫秒）
+     * @property wakelockMs 持有唤醒锁时长（毫秒）
+     * @property gpsMs GPS 定位使用时长（毫秒）
+     * @property networkBytes 网络传输总字节数（单位：字节 Byte）
+     * @property fgsMs 前台服务后台运行时长（毫秒）
+     */
+    data class UidHardwareStats(
+        val uid: Int,
+        var cpuUserMs: Long = 0L,
+        var cpuSystemMs: Long = 0L,
+        var cpuForegroundMs: Long = 0L,
+        var cpuBackgroundMs: Long = 0L,
+        var wakelockMs: Long = 0L,
+        var gpsMs: Long = 0L,
+        var networkBytes: Long = 0L,
+        var fgsMs: Long = 0L
+    ) {
+        /**
+         * 获取该 UID 的 CPU 总体真实运算耗时（毫秒）。
+         * 取用户态与内核态之和与前后台 CPU 之和的较大者。
+         *
+         * @return CPU 综合总耗时（毫秒）
+         */
+        fun getTotalCpuMs(): Long {
+            val sumUsrSys = cpuUserMs + cpuSystemMs
+            val sumFgBg = cpuForegroundMs + cpuBackgroundMs
+            return maxOf(sumUsrSys, sumFgBg)
+        }
+    }
 
     /**
      * 解析 dumpsys batterystats 返回的整体放电概要信息。
@@ -61,6 +101,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      */
     /**
      * 执行 dumpsys batterystats 并解析各应用真实功耗与放电概要。
+     * 自动通过 dumpsys batterystats --checkin 与文本段落双通道提取各 UID 真实硬件统计（CPU、网络、唤醒锁与 GPS）。
      *
      * @param batteryVoltageVolts 当前测得的电池电压（单位：伏特 V，用于换算 W）
      * @param batteryTempCelsius 当前测得的电池温度（单位：摄氏度 ℃）
@@ -75,7 +116,11 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         // 1. 通过 Shizuku 提权直接加载全系统所有应用的 UID 到包名映射表（100% 穿透包可见性限制）
         val uidPkgMap = loadUidPackageMapViaShizuku()
 
-        // 2. 优先获取自上次断开充电以来的增量账本
+        // 2. 优先通过 dumpsys batterystats --checkin 提取结构化硬件指标
+        val checkinOutput = executeShizukuCommand("dumpsys batterystats --checkin")
+        val checkinHwMap = parseHardwareStatsFromCheckin(checkinOutput)
+
+        // 3. 优先获取自上次断开充电以来的增量账本
         var rawOutput = executeShizukuCommand("dumpsys batterystats --charged")
         if (rawOutput.isBlank() || !rawOutput.contains("Estimated power use")) {
             rawOutput = executeShizukuCommand("dumpsys batterystats")
@@ -85,7 +130,25 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             return BatteryStatsResult(4500f, 0f, 0L, 0L, 0L, 0f, emptyList())
         }
 
-        return parseStatsText(rawOutput, batteryVoltageVolts, batteryTempCelsius, uidPkgMap, unplugTime)
+        // 4. 若 checkin 解析为空或缺少部分 UID，结合文本段落进行互补
+        val plainHwMap = parseHardwareStatsFromPlainText(rawOutput)
+        val combinedHwMap = checkinHwMap.toMutableMap()
+        for ((uid, pStats) in plainHwMap) {
+            val exist = combinedHwMap[uid]
+            if (exist == null) {
+                combinedHwMap[uid] = pStats
+            } else {
+                if (exist.cpuUserMs == 0L && exist.cpuSystemMs == 0L) {
+                    exist.cpuUserMs = pStats.cpuUserMs
+                    exist.cpuSystemMs = pStats.cpuSystemMs
+                }
+                if (exist.wakelockMs == 0L) exist.wakelockMs = pStats.wakelockMs
+                if (exist.gpsMs == 0L) exist.gpsMs = pStats.gpsMs
+                if (exist.networkBytes == 0L) exist.networkBytes = pStats.networkBytes
+            }
+        }
+
+        return parseStatsText(rawOutput, batteryVoltageVolts, batteryTempCelsius, uidPkgMap, unplugTime, combinedHwMap)
     }
 
     /**
@@ -96,16 +159,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * @param tempCelsius 电池温度
      * @param uidPkgMap 事先通过提权获取的 UID 到包名映射字典
      * @param unplugTime 最近一次断开充电或手动重置的时间戳（毫秒），默认为 0L
-     * @return 解析完成的 [BatteryStatsResult]
-     */
-    /**
-     * 解析 dumpsys 原始输出字符串。
-     *
-     * @param rawText dumpsys batterystats 原始文本
-     * @param voltageVolts 电池电压
-     * @param tempCelsius 电池温度
-     * @param uidPkgMap 事先通过提权获取的 UID 到包名映射字典
-     * @param unplugTime 最近一次断开充电或手动重置的时间戳（毫秒），默认为 0L
+     * @param hwStatsMap 事先通过 Checkin 或文本扫描提取的各 UID 权威硬件开销字典
      * @return 解析完成的 [BatteryStatsResult]
      */
     fun parseStatsText(
@@ -113,7 +167,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         voltageVolts: Float,
         tempCelsius: Float,
         uidPkgMap: Map<Int, String> = emptyMap(),
-        unplugTime: Long = 0L
+        unplugTime: Long = 0L,
+        hwStatsMap: Map<Int, UidHardwareStats> = emptyMap()
     ): BatteryStatsResult {
         val pm = context.packageManager
         var capacityMah = 4500f
@@ -370,13 +425,23 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             )
                             val totalDirectEnergyWh = (drainMah * voltageVolts) / 1000f
 
+                            val hw = hwStatsMap[uid]
+                            val realCpuMs = if (hw != null && hw.getTotalCpuMs() > 0L) hw.getTotalCpuMs() else cpuMs
+                            val baseBg = if (hw != null) {
+                                val bgCpu = (hw.getTotalCpuMs() - foregroundMs).coerceAtLeast(0L)
+                                val directBg = hw.cpuBackgroundMs
+                                maxOf(bgCpu, directBg) + hw.wakelockMs + hw.fgsMs
+                            } else {
+                                backgroundMs
+                            }
+
                             // 前后台能量解耦：基于真实物理功耗合理性模型与 CPU 算力分配，彻底消除后台能耗全部算给前台的缺陷
                             val isGame = com.battery.analysis.manager.PowerUsageManager.getInstance(context).isGameApp(pkgName)
                             val (fgEnergyWh, bgEnergyWh, safeBgMs) = decoupleAppEnergyAndTimes(
                                 totalEnergy = totalDirectEnergyWh,
                                 foregroundMs = foregroundMs,
-                                backgroundMs = backgroundMs,
-                                cpuMs = cpuMs,
+                                backgroundMs = maxOf(backgroundMs, baseBg),
+                                cpuMs = realCpuMs,
                                 dischargeMs = dischargeDurationMs,
                                 isGame = isGame
                             )
@@ -396,6 +461,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             val appTemp = tempCelsius
                             val maxTemp = tempCelsius
 
+                            val realNetBytes = hw?.networkBytes ?: 0L
+                            val realWakeMs = hw?.wakelockMs ?: 0L
+                            val realGpsMs = hw?.gpsMs ?: 0L
+
                             try {
                                 val appInfo = pm.getApplicationInfo(pkgName, 0)
                                 val appName = pm.getApplicationLabel(appInfo).toString()
@@ -413,7 +482,11 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                                     directEnergyWh = totalDirectEnergyWh,
                                     backgroundTimeMs = effectiveBackgroundMs,
                                     foregroundEnergyWh = fgEnergyWh,
-                                    backgroundEnergyWh = bgEnergyWh
+                                    backgroundEnergyWh = bgEnergyWh,
+                                    cpuTimeMs = realCpuMs,
+                                    networkBytes = realNetBytes,
+                                    wakelockTimeMs = realWakeMs,
+                                    gpsTimeMs = realGpsMs
                                 )
                             } catch (_: Exception) {
                                 // 兜底处理：未能获取到特定 ApplicationInfo 时才使用简要包名
@@ -430,7 +503,11 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                                     directEnergyWh = totalDirectEnergyWh,
                                     backgroundTimeMs = effectiveBackgroundMs,
                                     foregroundEnergyWh = fgEnergyWh,
-                                    backgroundEnergyWh = bgEnergyWh
+                                    backgroundEnergyWh = bgEnergyWh,
+                                    cpuTimeMs = realCpuMs,
+                                    networkBytes = realNetBytes,
+                                    wakelockTimeMs = realWakeMs,
+                                    gpsTimeMs = realGpsMs
                                 )
                             }
                         }
@@ -462,7 +539,16 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         }
 
         // 5. 智能融合：仅针对 dumpsys 遗漏但系统确实有前台记录的应用进行补全，不覆盖 dumpsys 原始前台时间与功率
-        val userAppList = mergeWithUsageStatsUserApps(parsedAppMap, pkgDrainMahMap, dischargeDurationMs, voltageVolts, cycleAvgTemp, cycleMaxTemp, unplugTime)
+        val userAppList = mergeWithUsageStatsUserApps(
+            parsedAppMap,
+            pkgDrainMahMap,
+            dischargeDurationMs,
+            voltageVolts,
+            cycleAvgTemp,
+            cycleMaxTemp,
+            unplugTime,
+            hwStatsMap
+        )
 
         // 6. 若仍未匹配到亮屏时长，通过所有前台应用的累计活跃时长进行真实计算
         if (screenOnDurationMs <= 0L) {
@@ -719,9 +805,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     }
 
     /**
-     * 结合系统应用使用情况管理器，对 dumpsys 数据进行前台时间与能耗辅助补全。
+     * 结合系统应用使用情况管理器与底层硬件指标，对 dumpsys 数据进行前台时间与硬件开销辅助补全。
      * 当 dumpsys 详情中未携带具体前台时间（top/fg 字段缺省）时，通过 UsageStats 增量精准补全前台时长并重新解耦前后台能量与亮屏功耗；
-     * 并对 dumpsys 遗漏但系统确实有前台记录的用户应用进行补充。
+     * 并结合 [hwStatsMap] 与 [NetworkStatsHelper] 补足应用真实 CPU、网络流量、唤醒锁与 GPS 定位消耗。
      *
      * @param existingMap 已通过 dumpsys batterystats 解析得到的应用映射字典
      * @param pkgDrainMahMap 各应用由 dumpsys 解析得到的真实放电量（mAh）字典
@@ -730,6 +816,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * @param cycleAvgTemp 放电周期内测得的电池平均温度（℃）
      * @param cycleMaxTemp 放电周期内测得的电池最高温度（℃）
      * @param unplugTime 最近一次断开充电或手动重置的时间戳（毫秒），默认为 0L
+     * @param hwStatsMap 各应用 UID 硬件指标映射表
      * @return 融合校准后的应用耗电列表 [MutableList<AppPowerUsageItem>]
      */
     private fun mergeWithUsageStatsUserApps(
@@ -739,7 +826,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         voltage: Float,
         cycleAvgTemp: Float,
         cycleMaxTemp: Float,
-        unplugTime: Long = 0L
+        unplugTime: Long = 0L,
+        hwStatsMap: Map<Int, UidHardwareStats> = emptyMap()
     ): MutableList<AppPowerUsageItem> {
         val pm = context.packageManager
         val endTime = System.currentTimeMillis()
@@ -753,10 +841,13 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             emptyMap()
         }
 
-        // 1. 对 dumpsys 原本提取的应用进行前台时长与真实亮屏功耗的精准补全
+        // 1. 对 dumpsys 原本提取的应用进行前台时长、后台活跃时长与硬件开销的精准补全
         val existingKeys = existingMap.keys.toList()
         for (pkg in existingKeys) {
             val old = existingMap[pkg] ?: continue
+            val uid = try { pm.getApplicationInfo(pkg, 0).uid } catch (_: Exception) { -1 }
+            val hw = hwStatsMap[uid]
+
             var effectiveFg = old.foregroundTimeMs
             var effectiveBg = old.backgroundTimeMs
 
@@ -766,9 +857,16 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 if (realFg > 0L) {
                     effectiveFg = realFg.coerceAtMost(dischargeMs)
                 } else if (pkg == context.packageName) {
-                    // 本应用持续在前台运行，若 UsageEvents 延迟未返回，以当前放电周期时长作为有效前台时长
                     effectiveFg = dischargeMs.coerceAtLeast(1000L)
                 }
+            }
+
+            val realCpuMs = if (hw != null && hw.getTotalCpuMs() > 0L) hw.getTotalCpuMs() else old.cpuTimeMs
+            val baseBg = if (hw != null) {
+                val bgCpu = (hw.getTotalCpuMs() - effectiveFg).coerceAtLeast(0L)
+                maxOf(bgCpu, hw.cpuBackgroundMs) + hw.wakelockMs + hw.fgsMs
+            } else {
+                effectiveBg
             }
 
             // 依据真实补全后的前后台时长，重新科学解耦前台消耗能量、后台消耗能量以及亮屏平均功耗
@@ -777,8 +875,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             val (fgEnergyWh, bgEnergyWh, safeBgMs) = decoupleAppEnergyAndTimes(
                 totalEnergy = totalEnergy,
                 foregroundMs = effectiveFg,
-                backgroundMs = effectiveBg,
-                cpuMs = 0L,
+                backgroundMs = maxOf(effectiveBg, baseBg),
+                cpuMs = realCpuMs,
                 dischargeMs = dischargeMs,
                 isGame = isGame
             )
@@ -794,17 +892,25 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 0f
             }
 
+            var netBytes = if (hw != null && hw.networkBytes > 0L) hw.networkBytes else old.networkBytes
+            if (netBytes <= 0L && uid > 0) {
+                netBytes = networkStatsHelper.getUidNetworkBytes(uid, startTime, endTime)
+            }
+
             existingMap[pkg] = old.copy(
                 foregroundTimeMs = effectiveFg,
                 backgroundTimeMs = effectiveFinalBg,
                 foregroundEnergyWh = fgEnergyWh,
                 backgroundEnergyWh = bgEnergyWh,
-                avgPowerWatts = avgWatts
+                avgPowerWatts = avgWatts,
+                cpuTimeMs = realCpuMs,
+                networkBytes = netBytes,
+                wakelockTimeMs = hw?.wakelockMs ?: old.wakelockTimeMs,
+                gpsTimeMs = hw?.gpsMs ?: old.gpsTimeMs
             )
         }
 
         // 2. 补充 dumpsys 遗漏但系统事件中确实在前台运行的用户应用
-        // 计算已知应用的前台平均功耗作为参考基准，杜绝使用写死常数
         val knownFgHours = existingMap.values.sumOf { it.foregroundTimeMs } / 3600000.0
         val knownFgEnergyWh = existingMap.values.sumOf { it.foregroundEnergyWh.toDouble() }
         val sysAvgWatts = if (dischargeMs > 0L) {
@@ -829,6 +935,21 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                         val appInfo = pm.getApplicationInfo(pkgName, 0)
                         val appName = pm.getApplicationLabel(appInfo).toString()
                         val icon = pm.getApplicationIcon(appInfo)
+                        val uid = appInfo.uid
+                        val hw = hwStatsMap[uid]
+
+                        var netBytes = hw?.networkBytes ?: 0L
+                        if (netBytes <= 0L && uid > 0) {
+                            netBytes = networkStatsHelper.getUidNetworkBytes(uid, startTime, endTime)
+                        }
+                        val realCpu = hw?.getTotalCpuMs() ?: 0L
+                        val realWake = hw?.wakelockMs ?: 0L
+                        val realGps = hw?.gpsMs ?: 0L
+                        val bgTime = if (hw != null) {
+                            ((realCpu - safeFgTime).coerceAtLeast(0L) + realWake + hw.fgsMs).coerceAtMost(dischargeMs)
+                        } else {
+                            0L
+                        }
 
                         val fgEnergy = (baselineWatts * (safeFgTime / 3600000f)).coerceAtLeast(0f)
 
@@ -842,9 +963,13 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             maxTemperature = cycleMaxTemp,
                             lastUsedTimeMs = endTime,
                             directEnergyWh = fgEnergy,
-                            backgroundTimeMs = 0L,
+                            backgroundTimeMs = bgTime,
                             foregroundEnergyWh = fgEnergy,
-                            backgroundEnergyWh = 0f
+                            backgroundEnergyWh = 0f,
+                            cpuTimeMs = realCpu,
+                            networkBytes = netBytes,
+                            wakelockTimeMs = realWake,
+                            gpsTimeMs = realGps
                         )
                     } catch (_: PackageManager.NameNotFoundException) {
                     }
@@ -885,6 +1010,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 backgroundMs
             } else if (cpuMs > 0L) {
                 cpuMs.coerceAtMost(dischargeMs.coerceAtLeast(1000L))
+            } else if (totalEnergy > 0.0005f) {
+                val inferredMs = ((totalEnergy / 1.5f) * 3600000.0).toLong()
+                inferredMs.coerceIn(1000L, dischargeMs.coerceAtLeast(1000L))
             } else {
                 0L
             }
@@ -893,7 +1021,16 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
         val fgHours = foregroundMs / 3600000.0
         if (fgHours <= 0.0) {
-            val effectiveBg = if (backgroundMs > 0L) backgroundMs else if (cpuMs > 0L) cpuMs else 0L
+            val effectiveBg = if (backgroundMs > 0L) {
+                backgroundMs
+            } else if (cpuMs > 0L) {
+                cpuMs
+            } else if (totalEnergy > 0.0005f) {
+                val inferredMs = ((totalEnergy / 1.5f) * 3600000.0).toLong()
+                inferredMs.coerceIn(1000L, dischargeMs.coerceAtLeast(1000L))
+            } else {
+                0L
+            }
             return Triple(0f, totalEnergy, effectiveBg)
         }
 
@@ -944,7 +1081,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         }
 
         // 后台活跃时长仅保留真实的后台记录时间或后台 CPU 算力时间，绝不虚拟成整机放电总时长
-        val effectiveBgMs = if (backgroundMs > 0L) {
+        val rawEffectiveBgMs = if (backgroundMs > 0L) {
             backgroundMs
         } else if (cpuMs > foregroundMs) {
             (cpuMs - foregroundMs).coerceAtLeast(0L)
@@ -952,7 +1089,17 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             0L
         }
 
-        return Triple(fgEnergyWh, bgEnergyWh, effectiveBgMs)
+        // 消除“后台分配了能量，但后台时间却显示 0s”的缺陷
+        val finalEffectiveBgMs = if (rawEffectiveBgMs > 0L) {
+            rawEffectiveBgMs
+        } else if (bgEnergyWh > 0.0005f) {
+            val inferredMs = ((bgEnergyWh / 1.5f) * 3600000.0).toLong()
+            inferredMs.coerceIn(1000L, dischargeMs.coerceAtLeast(1000L))
+        } else {
+            0L
+        }
+
+        return Triple(fgEnergyWh, bgEnergyWh, finalEffectiveBgMs)
     }
 
     /**
@@ -1071,6 +1218,183 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         }
 
         return totalMs
+    }
+
+    /**
+     * 解析 dumpsys batterystats --checkin 原始输出，提取所有 UID 的硬件消耗细节（CPU、网络、唤醒锁、GPS、前台服务）。
+     *
+     * @param checkinText dumpsys batterystats --checkin 命令的原始文本输出
+     * @return 按 UID 索引的硬件资源消耗映射表 [Map<Int, UidHardwareStats>]
+     */
+    fun parseHardwareStatsFromCheckin(checkinText: String): Map<Int, UidHardwareStats> {
+        if (checkinText.isBlank()) return emptyMap()
+        val resultMap = mutableMapOf<Int, UidHardwareStats>()
+
+        checkinText.lineSequence().forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.isEmpty()) return@forEach
+
+            val parts = trimmed.split(",")
+            if (parts.size < 4) return@forEach
+
+            val uid = parts[1].toIntOrNull() ?: return@forEach
+            if (uid < 0) return@forEach
+
+            val aggType = parts[2]
+            // 只关切自上次拔电/充饱电以来的增量聚合段 ("l" 代表 since last charged, "u" 代表 unplugged)
+            if (aggType != "l" && aggType != "u") return@forEach
+
+            val tag = parts[3]
+            val stats = resultMap.getOrPut(uid) { UidHardwareStats(uid) }
+
+            when (tag) {
+                "cpu" -> {
+                    // 格式: vers,uid,l,cpu,userTime,systemTime,...
+                    val user = parts.getOrNull(4)?.toLongOrNull() ?: 0L
+                    val sys = parts.getOrNull(5)?.toLongOrNull() ?: 0L
+                    stats.cpuUserMs += user
+                    stats.cpuSystemMs += sys
+                }
+                "nt" -> {
+                    // 格式: vers,uid,l,nt,mobileRx,mobileTx,wifiRx,wifiTx,...
+                    val mRx = parts.getOrNull(4)?.toLongOrNull() ?: 0L
+                    val mTx = parts.getOrNull(5)?.toLongOrNull() ?: 0L
+                    val wRx = parts.getOrNull(6)?.toLongOrNull() ?: 0L
+                    val wTx = parts.getOrNull(7)?.toLongOrNull() ?: 0L
+                    stats.networkBytes += (mRx + mTx + wRx + wTx).coerceAtLeast(0L)
+                }
+                "wl" -> {
+                    // 格式: vers,uid,l,wl,tag,fullTime,fullCount,partialTime,partialCount,...
+                    var idx = 4
+                    while (idx + 3 < parts.size) {
+                        val partialTime = parts.getOrNull(idx + 3)?.toLongOrNull() ?: 0L
+                        if (partialTime > 0L) {
+                            stats.wakelockMs += partialTime
+                        }
+                        idx += 6
+                    }
+                }
+                "g" -> {
+                    // 格式: vers,uid,l,g,gpsTimeMs,gpsCount
+                    val gpsTime = parts.getOrNull(4)?.toLongOrNull() ?: 0L
+                    stats.gpsMs += gpsTime
+                }
+                "fgs" -> {
+                    // 格式: vers,uid,l,fgs,fgsTimeMs,fgsCount
+                    val fgsTime = parts.getOrNull(4)?.toLongOrNull() ?: 0L
+                    stats.fgsMs += fgsTime
+                }
+                "pr" -> {
+                    // 格式: vers,uid,l,pr,procName,userTime,systemTime,starts,numCrashes,numAnrs,fgTime
+                    val user = parts.getOrNull(5)?.toLongOrNull() ?: 0L
+                    val sys = parts.getOrNull(6)?.toLongOrNull() ?: 0L
+                    val fg = parts.getOrNull(10)?.toLongOrNull() ?: 0L
+                    if (stats.cpuUserMs == 0L && stats.cpuSystemMs == 0L) {
+                        stats.cpuUserMs += user
+                        stats.cpuSystemMs += sys
+                    }
+                    if (fg > 0L) {
+                        stats.cpuForegroundMs += fg
+                    }
+                }
+            }
+        }
+        return resultMap
+    }
+
+    /**
+     * 从常规文本格式的 dumpsys batterystats 输出中扫描提取各 UID 的硬件指标（作为 Checkin 缺失时的兜底补充）。
+     *
+     * @param rawText 常规 dumpsys batterystats 文本内容
+     * @return 按 UID 索引的硬件资源消耗映射表 [Map<Int, UidHardwareStats>]
+     */
+    fun parseHardwareStatsFromPlainText(rawText: String): Map<Int, UidHardwareStats> {
+        if (rawText.isBlank()) return emptyMap()
+        val resultMap = mutableMapOf<Int, UidHardwareStats>()
+        var currentUid = -1
+
+        val uidHeaderRegex = Pattern.compile("^\\s{2,4}(?:Uid\\s+)?([\\w]+):\\s*$", Pattern.CASE_INSENSITIVE)
+        val cpuLineRegex = Pattern.compile("CPU:\\s*(?:([\\d\\w\\s]+?)\\s*usr)?(?:\\s*\\+\\s*([\\d\\w\\s]+?)\\s*krn)?(?:\\s*;\\s*([\\d\\w\\s]+?)\\s*fg)?(?:\\s*;\\s*([\\d\\w\\s]+?)\\s*bg)?", Pattern.CASE_INSENSITIVE)
+        val wakeLineRegex = Pattern.compile("(?:TOTAL wake|Wake lock [^:]+):\\s*([\\d\\w\\s]+?)\\s*partial", Pattern.CASE_INSENSITIVE)
+        val gpsLineRegex = Pattern.compile("(?:GPS|Sensor GPS):\\s*([\\d\\w\\s]+?)(?:\\s+realtime|\\s*\\(|$)", Pattern.CASE_INSENSITIVE)
+        val netLineRegex = Pattern.compile("(?:Mobile|Wi-Fi|WiFi) network:\\s*([\\d\\w\\s.]+?)\\s*received,\\s*([\\d\\w\\s.]+?)\\s*sent", Pattern.CASE_INSENSITIVE)
+
+        rawText.lineSequence().forEach { line ->
+            val uMatch = uidHeaderRegex.matcher(line)
+            if (uMatch.find()) {
+                val rawStr = uMatch.group(1) ?: ""
+                currentUid = convertUidStringToNumeric(rawStr)
+                return@forEach
+            }
+
+            if (currentUid <= 0) return@forEach
+            val trimmed = line.trim()
+
+            if (line.isNotEmpty() && !line.startsWith(" ") && !line.startsWith("\t")) {
+                currentUid = -1
+                return@forEach
+            }
+
+            val stats = resultMap.getOrPut(currentUid) { UidHardwareStats(currentUid) }
+
+            val cpuMatch = cpuLineRegex.matcher(trimmed)
+            if (cpuMatch.find()) {
+                val usr = cpuMatch.group(1)?.let { parseDurationStringToMs(it) } ?: 0L
+                val krn = cpuMatch.group(2)?.let { parseDurationStringToMs(it) } ?: 0L
+                val fg = cpuMatch.group(3)?.let { parseDurationStringToMs(it) } ?: 0L
+                val bg = cpuMatch.group(4)?.let { parseDurationStringToMs(it) } ?: 0L
+                if (usr > 0L || krn > 0L) {
+                    stats.cpuUserMs = maxOf(stats.cpuUserMs, usr)
+                    stats.cpuSystemMs = maxOf(stats.cpuSystemMs, krn)
+                }
+                if (fg > 0L) stats.cpuForegroundMs = maxOf(stats.cpuForegroundMs, fg)
+                if (bg > 0L) stats.cpuBackgroundMs = maxOf(stats.cpuBackgroundMs, bg)
+            }
+
+            val wakeMatch = wakeLineRegex.matcher(trimmed)
+            if (wakeMatch.find()) {
+                val wakeMs = wakeMatch.group(1)?.let { parseDurationStringToMs(it) } ?: 0L
+                if (wakeMs > 0L) {
+                    stats.wakelockMs = maxOf(stats.wakelockMs, wakeMs)
+                }
+            }
+
+            val gpsMatch = gpsLineRegex.matcher(trimmed)
+            if (gpsMatch.find()) {
+                val gpsMs = gpsMatch.group(1)?.let { parseDurationStringToMs(it) } ?: 0L
+                if (gpsMs > 0L) {
+                    stats.gpsMs = maxOf(stats.gpsMs, gpsMs)
+                }
+            }
+
+            val netMatch = netLineRegex.matcher(trimmed)
+            if (netMatch.find()) {
+                val rxBytes = parseNetworkBytes(netMatch.group(1) ?: "")
+                val txBytes = parseNetworkBytes(netMatch.group(2) ?: "")
+                stats.networkBytes += (rxBytes + txBytes)
+            }
+        }
+        return resultMap
+    }
+
+    /**
+     * 解析网络流量文本为字节数（如 "12.50KB"、"1.20MB"、"345B"）。
+     *
+     * @param text 流量文本
+     * @return 转换后的字节总数
+     */
+    private fun parseNetworkBytes(text: String): Long {
+        val clean = text.trim()
+        val numMatch = Pattern.compile("([\\d.]+)\\s*([a-zA-Z]+)?").matcher(clean)
+        if (!numMatch.find()) return 0L
+        val value = numMatch.group(1)?.toDoubleOrNull() ?: return 0L
+        val unit = numMatch.group(2)?.uppercase() ?: "B"
+        return when {
+            unit.startsWith("G") -> (value * 1024 * 1024 * 1024).toLong()
+            unit.startsWith("M") -> (value * 1024 * 1024).toLong()
+            unit.startsWith("K") -> (value * 1024).toLong()
+            else -> value.toLong()
+        }
     }
 
     /**

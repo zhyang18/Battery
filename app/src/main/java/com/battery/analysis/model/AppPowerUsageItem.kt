@@ -19,6 +19,10 @@ import android.graphics.drawable.Drawable
  * @property backgroundTimeMs 后台运行活跃时长（单位：毫秒，默认 0L）
  * @property foregroundEnergyWh 前台活跃状态下消耗的能量（单位：瓦时 Wh，默认 0f）
  * @property backgroundEnergyWh 后台活跃/休眠状态下消耗的能量（单位：瓦时 Wh，默认 0f）
+ * @property cpuTimeMs CPU 运行时长（单位：毫秒，默认 0L）
+ * @property networkBytes 网络数据传输总量（单位：字节 Byte，默认 0L）
+ * @property wakelockTimeMs 持有唤醒锁时长（单位：毫秒，默认 0L）
+ * @property gpsTimeMs GPS 定位使用时长（单位：毫秒，默认 0L）
  */
 data class AppPowerUsageItem(
     val packageName: String,
@@ -32,7 +36,11 @@ data class AppPowerUsageItem(
     val directEnergyWh: Float? = null,
     val backgroundTimeMs: Long = 0L,
     val foregroundEnergyWh: Float = 0f,
-    val backgroundEnergyWh: Float = 0f
+    val backgroundEnergyWh: Float = 0f,
+    val cpuTimeMs: Long = 0L,
+    val networkBytes: Long = 0L,
+    val wakelockTimeMs: Long = 0L,
+    val gpsTimeMs: Long = 0L
 ) {
     /**
      * 计算该应用消耗的总电量（单位：瓦时 Wh）。

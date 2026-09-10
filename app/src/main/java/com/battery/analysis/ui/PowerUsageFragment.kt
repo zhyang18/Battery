@@ -245,7 +245,11 @@ class PowerUsageFragment : Fragment() {
         val isCharging = chargingManager.isCharging()
         applyKeepScreenOn(isCharging)
 
-        val tip = if (newKeepOn) "已开启充电保持屏幕常亮" else "已关闭充电保持屏幕常亮"
+        val tip = if (newKeepOn) {
+            getString(R.string.toast_keep_screen_on_enabled)
+        } else {
+            getString(R.string.toast_keep_screen_on_disabled)
+        }
         Toast.makeText(requireContext(), tip, Toast.LENGTH_SHORT).show()
     }
 

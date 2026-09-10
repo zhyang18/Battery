@@ -39,7 +39,7 @@
     <string name="power_value_format_with_energy">%1$s (%2$s)</string>
     <string name="power_wh_format">%.1fWh</string>
     <string name="power_param_energy">Remaining Energy</string>
-    <string name="power_tooltip_energy">Battery Remaining Energy: %s (Accurately calculated from available capacity and realtime voltage)</string>
+    <string name="power_tooltip_energy">Remaining Energy: %s</string>
     <string name="power_temp_format">%.1f℃</string>
     <string name="power_volt_format">%.3fV</string>
     <string name="power_status_unplugged">Not charging</string>
@@ -55,8 +55,10 @@
     <string name="power_sort_name">Sort by Name</string>
     <string name="power_mode_shizuku">⚡ Shizuku Mode (High Precision)</string>
     <string name="power_mode_normal">Standard Mode (UsageStats)</string>
-    <string name="power_mode_tip_shizuku">Shizuku high precision mode active, reading dumpsys batterystats authority log</string>
-    <string name="power_mode_tip_normal">Standard mode active, estimated from foreground usage stats and power profile</string>
+    <string name="power_mode_tip_shizuku">Shizuku high-precision mode enabled</string>
+    <string name="power_mode_tip_normal">Standard mode enabled</string>
+    <string name="toast_keep_screen_on_enabled">Keep screen on enabled</string>
+    <string name="toast_keep_screen_on_disabled">Keep screen on disabled</string>
     <string name="power_shizuku_not_running_title">Shizuku Service Not Running</string>
     <string name="power_shizuku_not_running_desc">Please launch the Shizuku app and ensure the service is running to enable deep battery stats.</string>
     <string name="power_shizuku_unauthorized_title">Shizuku Permission Required</string>
@@ -64,7 +66,7 @@
     <string name="power_shizuku_btn_auth">Authorize Now</string>
     <string name="power_shizuku_btn_open">Open Shizuku</string>
     <string name="power_drain_format">%1$.1fmAh (%2$.1f%%)</string>
-    <string name="power_toast_cleared">Power sampling records have been reset</string>
+    <string name="power_toast_cleared">Power stats reset</string>
     <string name="power_guide_process_title">Discharge Process Guide</string>
     <string name="power_guide_process_content">The discharge process chart shows the battery level curve over time since boot or last discharge, marking active apps during high-drain periods.</string>
     <string name="power_guide_scene_title">Usage Scenarios Guide</string>
@@ -289,9 +291,9 @@
     <string name="sampling_mode_power_save_short">🍃 Power Saver (Default)</string>
     <string name="sampling_mode_balanced_short">⚡ Balanced</string>
     <string name="sampling_mode_high_precision_short">🔥 Geek (1s)</string>
-    <string name="sampling_mode_tip_power_save">Ultra Power Saver enabled: Event-driven + Shizuku native log parsing, 0 extra background power drain</string>
-    <string name="sampling_mode_tip_balanced">Balanced Smart mode enabled: 1.5s sampling in foreground, 5s adaptive sampling when screen on</string>
-    <string name="sampling_mode_tip_high_precision">Geek High Precision mode enabled: 1s continuous high-rate sampling when screen on</string>
+    <string name="sampling_mode_tip_power_save">Power saver mode enabled</string>
+    <string name="sampling_mode_tip_balanced">Balanced mode enabled</string>
+    <string name="sampling_mode_tip_high_precision">High-precision mode enabled</string>
     <string name="interval_1s">1 second</string>
     <string name="interval_2s">2 seconds</string>
     <string name="interval_3s">3 seconds</string>
@@ -353,31 +355,31 @@
     <string name="toast_shizuku_success">Shizuku authorization succeeded!</string>
     <string name="toast_shizuku_denied">Shizuku authorization denied</string>
     <string name="toast_press_again_exit">Press back again to exit</string>
-    <string name="toast_copy_success">Snapshot copied to clipboard</string>
-    <string name="toast_delete_success">Snapshot deleted successfully</string>
-    <string name="toast_clear_success">All history records cleared</string>
-    <string name="toast_save_snapshots_format">Saved snapshots for [%s]</string>
-    <string name="toast_no_data_to_save">No battery data available to save. Please refresh first.</string>
-    <string name="toast_backup_success">Backup succeeded! Exported %d records</string>
-    <string name="toast_backup_failed">Backup export failed: %s</string>
-    <string name="toast_restore_success">Successfully %1$s restored %2$d records!</string>
-    <string name="toast_restore_failed">Data restoration failed: %s</string>
-    <string name="toast_system_api_updated">System API data updated</string>
+    <string name="toast_copy_success">Copied to clipboard</string>
+    <string name="toast_delete_success">Snapshot deleted</string>
+    <string name="toast_clear_success">History records cleared</string>
+    <string name="toast_save_snapshots_format">Saved [%s] snapshot</string>
+    <string name="toast_no_data_to_save">No data to save</string>
+    <string name="toast_backup_success">Exported %d records</string>
+    <string name="toast_backup_failed">Backup failed: %s</string>
+    <string name="toast_restore_success">%1$s restored (%2$d records)</string>
+    <string name="toast_restore_failed">Restore failed: %s</string>
+    <string name="toast_system_api_updated">System API updated</string>
     <string name="toast_shizuku_data_updated">Shizuku data updated</string>
-    <string name="toast_bugreport_reimport_tip">Please tap card to re-import bugreport</string>
-    <string name="toast_request_auth_failed">Failed to request authorization: %s</string>
-    <string name="toast_already_authorized">Already authorized, no need to request again</string>
-    <string name="toast_shizuku_not_connected">Shizuku not connected, attempting to launch Shizuku App...</string>
-    <string name="toast_shizuku_not_found">Shizuku App not found. Please install and launch it first.</string>
+    <string name="toast_bugreport_reimport_tip">Tap card to re-import bugreport</string>
+    <string name="toast_request_auth_failed">Auth failed: %s</string>
+    <string name="toast_already_authorized">Already authorized</string>
+    <string name="toast_shizuku_not_connected">Shizuku disconnected, opening...</string>
+    <string name="toast_shizuku_not_found">Shizuku not installed</string>
 
     <!-- History Snapshot Loading & Power Unplug Auto-Record -->
     <string name="btn_load_snapshot">Load &amp; View</string>
-    <string name="toast_load_snapshot_success">History snapshot loaded</string>
+    <string name="toast_load_snapshot_success">Snapshot loaded</string>
     <string name="history_snapshot_banner_format">📌 Viewing snapshot: %s</string>
     <string name="btn_restore_realtime">Restore Live</string>
-    <string name="toast_restored_realtime">Restored to live battery monitoring</string>
+    <string name="toast_restored_realtime">Switched to live data</string>
     <string name="note_auto_unplug">Recorded on power unplug</string>
-    <string name="toast_unplug_recorded">Battery snapshot recorded on unplug</string>
+    <string name="toast_unplug_recorded">Snapshot recorded on unplug</string>
 
     <!-- Power Usage History -->
     <string name="power_history_title">Power Usage History</string>
@@ -413,10 +415,11 @@
     <string name="charging_status_standard">Standard Charging</string>
     <string name="charging_status_full">Fully Charged</string>
     <string name="charging_status_discharging">Discharging (Unplugged)</string>
-    <string name="toast_auto_switch_charging">⚡ Charger connected, switched to charging stats</string>
-    <string name="toast_auto_switch_discharging">🔋 Charger unplugged, switched to power stats</string>
+    <string name="toast_auto_switch_charging">⚡ Switched to charging</string>
+    <string name="toast_auto_switch_discharging">🔋 Switched to discharging</string>
     <string name="charging_reset_confirm_title">Reset Charging Stats</string>
     <string name="charging_reset_confirm_msg">Are you sure you want to reset current charging trends and samples?</string>
+    <string name="charging_reset_success">Charging stats reset</string>
     <string name="charging_guide_title">Charging Statistics Guide</string>
     <string name="charging_guide_desc">Automatically shown when connected to power. Visualizes green power curve, blue level curve and red temperature curve with square legends and realtime updates.</string>
 
@@ -471,6 +474,6 @@
     <string name="dialog_lock_recents_title">Background Keep-Alive Guide</string>
     <string name="dialog_lock_recents_content">To ensure external power plug and unplug events are reliably detected even if recents are cleared:\n\n1. Lock App in Recents: Open recent tasks, pull down or long press this card and tap the lock icon;\n\n2. Allow Auto-start: Enable autostart permission in system app settings;\n\n3. Unrestricted Battery: Set battery management to No Restrictions;\n\n4. Enable Persistent Notification: Turn on the switch above to run foreground service.</string>
     <string name="toast_battery_optimization_granted">Battery optimization ignored</string>
-    <string name="toast_battery_optimization_request">Please tap Allow in the upcoming prompt to whitelist the app.</string>
+    <string name="toast_battery_optimization_request">Please tap Allow in the popup</string>
 </resources>
 

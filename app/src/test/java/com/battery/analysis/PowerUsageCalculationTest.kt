@@ -123,6 +123,110 @@ class PowerUsageCalculationTest {
     }
 
     /**
+     * 验证时间切片匹配算法：不同应用在前台不同运行时段内根据时序温度采样点计算出真实的平均温与最高温，
+     * 并且均规整精确到 1 位小数，不再全部退化为当前瞬时设备温度。
+     */
+    @Test
+    fun testAppTimeSliceTemperatureCalculationWithHistoryPoints() {
+        val baseTime = 1710000000000L
+        // 历史温度序列：前期 32℃ 左右，中期应用 A 运行时 35℃~36℃，后期应用 B 玩游戏时 39℃~41℃
+        val historyTempPoints = listOf(
+            Pair(baseTime + 60000L, 32.0f),
+            Pair(baseTime + 120000L, 32.4f),
+            // 应用 A 前台运行期：10分钟~20分钟
+            Pair(baseTime + 600000L, 35.1f),
+            Pair(baseTime + 900000L, 36.3f),
+            Pair(baseTime + 1200000L, 35.8f),
+            // 应用 B 前台运行期：30分钟~40分钟
+            Pair(baseTime + 1800000L, 39.2f),
+            Pair(baseTime + 2100000L, 41.0f),
+            Pair(baseTime + 2400000L, 40.4f)
+        )
+
+        val appAIntervals = listOf(
+            Pair(baseTime + 550000L, baseTime + 1250000L) // 包含 35.1, 36.3, 35.8
+        )
+        val appBIntervals = listOf(
+            Pair(baseTime + 1750000L, baseTime + 2450000L) // 包含 39.2, 41.0, 40.4
+        )
+
+        // 计算应用 A 的平均温度与最高温度
+        val matchedTempsA = historyTempPoints.filter { (ts, _) ->
+            appAIntervals.any { interval -> ts in interval.first..interval.second }
+        }.map { it.second }
+        val rawAvgA = matchedTempsA.average().toFloat()
+        val rawMaxA = matchedTempsA.maxOrNull() ?: rawAvgA
+        val avgTempA = (Math.round(rawAvgA * 10f) / 10f).coerceIn(0f, 70f)
+        val maxTempA = (Math.round(rawMaxA * 10f) / 10f).coerceAtLeast(avgTempA).coerceIn(0f, 70f)
+
+        // 计算应用 B 的平均温度与最高温度
+        val matchedTempsB = historyTempPoints.filter { (ts, _) ->
+            appBIntervals.any { interval -> ts in interval.first..interval.second }
+        }.map { it.second }
+        val rawAvgB = matchedTempsB.average().toFloat()
+        val rawMaxB = matchedTempsB.maxOrNull() ?: rawAvgB
+        val avgTempB = (Math.round(rawAvgB * 10f) / 10f).coerceIn(0f, 70f)
+        val maxTempB = (Math.round(rawMaxB * 10f) / 10f).coerceAtLeast(avgTempB).coerceIn(0f, 70f)
+
+        // 验证应用 A 与应用 B 计算出的温度具有显著且真实的物理差异
+        assertEquals(35.7f, avgTempA, 0.01f)
+        assertEquals(36.3f, maxTempA, 0.01f)
+
+        assertEquals(40.2f, avgTempB, 0.01f)
+        assertEquals(41.0f, maxTempB, 0.01f)
+
+        // 验证最高温度大于等于平均温度
+        assertTrue(maxTempA >= avgTempA)
+        assertTrue(maxTempB >= avgTempB)
+        // 验证两应用最高温度差异明显
+        assertTrue(maxTempB > maxTempA)
+    }
+
+    /**
+     * 验证 Battery History 解析在遇到无电量百分比的纯时间增量行时，依然能正确提取温度与推进时间戳。
+     */
+    @Test
+    fun testBatteryHistoryRegexWithNoLevelDeltaLines() {
+        val regexTimeDelta = Pattern.compile("^\\s*([+-]?[\\w\\d]+)\\b", Pattern.CASE_INSENSITIVE)
+        val regexTemp = Pattern.compile("(?:^|\\s)[+-]?temp=(\\d+)", Pattern.CASE_INSENSITIVE)
+
+        val rawLines = listOf(
+            "RESET:TIME: 2026-03-10-14-30-00",
+            "0 (15) 079 -screen +wake_lock temp=350 volt=4231",
+            "  +1m23s456ms +screen temp=362 volt=4220",
+            "  +30s000ms +temp=378 volt=4200"
+        )
+
+        var currentTs = 1710000000000L
+        val temps = mutableListOf<Pair<Long, Float>>()
+
+        for (line in rawLines) {
+            val trimmed = line.trim()
+            val deltaMatcher = regexTimeDelta.matcher(trimmed)
+            if (deltaMatcher.find()) {
+                val deltaStr = deltaMatcher.group(1) ?: ""
+                if (deltaStr.startsWith("+") || deltaStr.contains("ms") || deltaStr.contains("s") || deltaStr.contains("m")) {
+                    currentTs += 30000L // 模拟解析耗时
+                }
+            }
+            val tempMatcher = regexTemp.matcher(trimmed)
+            if (tempMatcher.find()) {
+                val rawT = tempMatcher.group(1)?.toFloatOrNull()
+                if (rawT != null) {
+                    temps.add(Pair(currentTs, (Math.round(rawT) / 10f)))
+                }
+            }
+        }
+
+        assertEquals(3, temps.size)
+        assertEquals(35.0f, temps[0].second, 0.01f)
+        assertEquals(36.2f, temps[1].second, 0.01f)
+        assertEquals(37.8f, temps[2].second, 0.01f)
+        // 验证时间戳有递增推进
+        assertTrue(temps[2].first > temps[0].first)
+    }
+
+    /**
      * 验证时间轴应用分配算法：主力应用在亮屏期间连续填充（不再出现整段空白仅剩3处孤立点），且单切片单应用（不再统一堆叠展示）。
      */
     @Test

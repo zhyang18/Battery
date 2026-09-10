@@ -109,12 +109,63 @@ class PowerUsageManager private constructor(private val context: Context) {
     private var lastArchivedUnplugTime: Long = prefs.getLong("pref_last_archived_unplug_time", 0L)
 
     /**
+     * 放电期间实时时序温度采样点列表（时间戳 -> 摄氏度）。
+     * 用于在普通模式或 dumpsys history 缺损时，为各 App 精准匹配前台活跃期间的真实平均与最高温度。
+     */
+    private val dischargeTempPoints = mutableListOf<Pair<Long, Float>>()
+
+    /**
+     * 记录放电期间的一个电池温度采样点。
+     * 内置 10 秒时间或 0.2℃ 温差防抖过滤，防止无意义重复采样。
+     *
+     * @param timestamp 采样时间戳（毫秒）
+     * @param tempCelsius 采集到的温度数值（摄氏度）
+     */
+    @Synchronized
+    fun recordDischargeTempSample(timestamp: Long, tempCelsius: Float) {
+        val formatted = (Math.round(tempCelsius * 10f) / 10f).coerceIn(0f, 70f)
+        val lastPoint = dischargeTempPoints.lastOrNull()
+        if (lastPoint == null || (timestamp - lastPoint.first) >= 10000L || Math.abs(formatted - lastPoint.second) >= 0.2f) {
+            dischargeTempPoints.add(Pair(timestamp, formatted))
+            if (dischargeTempPoints.size > 3000) {
+                dischargeTempPoints.removeAt(0)
+            }
+        }
+    }
+
+    /**
+     * 获取当前放电周期记录的所有时序温度采样点。
+     *
+     * @return 时序温度采样点列表 [List<Pair<Long, Float>>]
+     */
+    @Synchronized
+    fun getDischargeTempPoints(): List<Pair<Long, Float>> {
+        return dischargeTempPoints.toList()
+    }
+
+    /**
+     * 清空当前放电周期的时序温度采样点并设置初始起点。
+     *
+     * @param timestamp 起始时间戳（毫秒）
+     * @param initialTemp 初始温度（摄氏度）
+     */
+    @Synchronized
+    fun resetDischargeTempPoints(timestamp: Long, initialTemp: Float) {
+        dischargeTempPoints.clear()
+        val formatted = (Math.round(initialTemp * 10f) / 10f).coerceIn(0f, 70f)
+        dischargeTempPoints.add(Pair(timestamp, formatted))
+    }
+
+    /**
      * 当外部电源断开（拔掉充电器）或用户手动重置时触发，重置当前放电统计周期基准。
      *
      * @param unplugLevel 断开电源时刻的电池电量百分比
      */
     fun onPowerDisconnected(unplugLevel: Int) {
         val now = System.currentTimeMillis()
+        val currentTemp = getCurrentBatteryStatus().temperature
+        resetDischargeTempPoints(now, currentTemp)
+
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val counterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: 0
         val editor = prefs.edit()
@@ -205,7 +256,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                         val stats = shizukuParser.parseChargedBatteryStats(
                             batterySnapshot.voltageVolts,
                             batterySnapshot.temperature,
-                            lastUnplugTime
+                            lastUnplugTime,
+                            getDischargeTempPoints()
                         )
                         if (stats.detectedUnplugLevel != null && stats.detectedUnplugLevel >= currentLevel) {
                             val detectedTime = if (stats.detectedUnplugTs != null && stats.detectedUnplugTs > 0L) {
@@ -571,9 +623,10 @@ class PowerUsageManager private constructor(private val context: Context) {
         // 1. Shizuku 模式且已获得授权
         if (mode == MODE_SHIZUKU && isShizukuAuthorized()) {
             val stats = shizukuParser.parseChargedBatteryStats(
-                batterySnapshot.voltageVolts,
-                batterySnapshot.temperature,
-                unplugTime
+                batteryVoltageVolts = batterySnapshot.voltageVolts,
+                batteryTempCelsius = batterySnapshot.temperature,
+                unplugTime = unplugTime,
+                localHistoryTempPoints = getDischargeTempPoints()
             )
 
             if (stats.appList.isNotEmpty() || stats.dischargeDurationMs > 0L) {
@@ -1020,15 +1073,28 @@ class PowerUsageManager private constructor(private val context: Context) {
         // 重新基于已核验的前后台能量生成精准的普通模式概览卡片指标（确保包含后台平均功耗与能量）
         val finalOverview = calculateOverviewStats(batterySnapshot.levelPercent, validatedAppList)
 
+        val startTs = now - elapsedMs
+        val (appIntervals, _) = queryUsageIntervals(startTs, now)
+        val localTempPoints = getDischargeTempPoints()
+
+        // 采用前台活跃时间切片与本地放电时序温度采样点，精准计算各 App 运行时真实平均温度与最高温度（带 1 位小数）
+        val finalAppList = calculateAppPowerAndTempWithTimeSlices(
+            appItems = validatedAppList,
+            appIntervals = appIntervals,
+            historyTempPoints = localTempPoints,
+            defaultTempCelsius = batterySnapshot.temperature
+        )
+
         val startLevel = if (unplugTime > 0L && unplugLevel >= batterySnapshot.levelPercent) unplugLevel else batterySnapshot.levelPercent
         val points = getDischargeTrendPoints(
             startLevel = startLevel,
             currentLevel = batterySnapshot.levelPercent,
-            appItems = validatedAppList,
+            appItems = finalAppList,
             durationMs = elapsedMs,
             screenOnDurationMs = normalScreenOnMs,
             screenOnPowerWatts = finalOverview.screenOnPowerWatts,
             screenOffPowerWatts = finalOverview.screenOffPowerWatts,
+            historyTempPoints = localTempPoints,
             currentVoltageVolts = batterySnapshot.voltageVolts,
             defaultTempCelsius = batterySnapshot.temperature
         )
@@ -1036,7 +1102,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         return FullPowerDataPackage(
             batterySnapshot = batterySnapshot,
             overviewStats = finalOverview,
-            appList = validatedAppList,
+            appList = finalAppList,
             trendPoints = points,
             isShizukuRealData = false,
             startLevelPercent = startLevel
@@ -1810,6 +1876,9 @@ class PowerUsageManager private constructor(private val context: Context) {
      */
     fun resetPowerStats() {
         val now = System.currentTimeMillis()
+        val curTemp = getCurrentBatteryStatus().temperature
+        resetDischargeTempPoints(now, curTemp)
+
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val counterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: 0
         val editor = prefs.edit()

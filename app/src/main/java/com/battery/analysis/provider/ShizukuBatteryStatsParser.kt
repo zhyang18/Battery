@@ -101,17 +101,20 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      */
     /**
      * 执行 dumpsys batterystats 并解析各应用真实功耗与放电概要。
-     * 自动通过 dumpsys batterystats --checkin 与文本段落双通道提取各 UID 真实硬件统计（CPU、网络、唤醒锁与 GPS）。
+     * 自动通过 dumpsys batterystats --checkin 与文本段落双通道提取各 UID 真实硬件统计（CPU、网络、唤醒锁与 GPS），
+     * 并支持在底层历史缺损时由外部传入本地采样点兜底。
      *
      * @param batteryVoltageVolts 当前测得的电池电压（单位：伏特 V，用于换算 W）
      * @param batteryTempCelsius 当前测得的电池温度（单位：摄氏度 ℃）
      * @param unplugTime 最近一次断开充电或手动重置的时间戳（毫秒），默认为 0L
+     * @param localHistoryTempPoints 本地放电时序温度采样点列表（用于 dumpsys 历史缺损时兜底）
      * @return 包含概要及各应用耗电列表的解析结果 [BatteryStatsResult]
      */
     fun parseChargedBatteryStats(
         batteryVoltageVolts: Float,
         batteryTempCelsius: Float,
-        unplugTime: Long = 0L
+        unplugTime: Long = 0L,
+        localHistoryTempPoints: List<Pair<Long, Float>> = emptyList()
     ): BatteryStatsResult {
         // 1. 通过 Shizuku 提权直接加载全系统所有应用的 UID 到包名映射表（100% 穿透包可见性限制）
         val uidPkgMap = loadUidPackageMapViaShizuku()
@@ -124,6 +127,19 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         var rawOutput = executeShizukuCommand("dumpsys batterystats --charged")
         if (rawOutput.isBlank() || !rawOutput.contains("Estimated power use")) {
             rawOutput = executeShizukuCommand("dumpsys batterystats")
+        }
+
+        // 若当前输出中未包含 Battery History 段落，主动补充拉取时序历史
+        if (!rawOutput.contains("Battery History", ignoreCase = true)) {
+            val historyOutput = executeShizukuCommand("dumpsys batterystats --history")
+            if (historyOutput.isNotBlank() && historyOutput.contains("Battery History", ignoreCase = true)) {
+                rawOutput = historyOutput + "\n" + rawOutput
+            } else {
+                val fullOutput = executeShizukuCommand("dumpsys batterystats")
+                if (fullOutput.isNotBlank() && fullOutput.contains("Battery History", ignoreCase = true)) {
+                    rawOutput = fullOutput + "\n" + rawOutput
+                }
+            }
         }
 
         if (rawOutput.isBlank()) {
@@ -148,7 +164,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             }
         }
 
-        return parseStatsText(rawOutput, batteryVoltageVolts, batteryTempCelsius, uidPkgMap, unplugTime, combinedHwMap)
+        return parseStatsText(rawOutput, batteryVoltageVolts, batteryTempCelsius, uidPkgMap, unplugTime, combinedHwMap, localHistoryTempPoints)
     }
 
     /**
@@ -160,6 +176,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * @param uidPkgMap 事先通过提权获取的 UID 到包名映射字典
      * @param unplugTime 最近一次断开充电或手动重置的时间戳（毫秒），默认为 0L
      * @param hwStatsMap 事先通过 Checkin 或文本扫描提取的各 UID 权威硬件开销字典
+     * @param localHistoryTempPoints 本地放电时序温度采样点列表（用于 dumpsys 历史缺损时兜底）
      * @return 解析完成的 [BatteryStatsResult]
      */
     fun parseStatsText(
@@ -168,7 +185,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         tempCelsius: Float,
         uidPkgMap: Map<Int, String> = emptyMap(),
         unplugTime: Long = 0L,
-        hwStatsMap: Map<Int, UidHardwareStats> = emptyMap()
+        hwStatsMap: Map<Int, UidHardwareStats> = emptyMap(),
+        localHistoryTempPoints: List<Pair<Long, Float>> = emptyList()
     ): BatteryStatsResult {
         val pm = context.packageManager
         var capacityMah = 4500f
@@ -340,14 +358,18 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                     }
                 }
                 if (inBatteryHistorySection) {
+                    // 1. 提取行首可能携带的时间增量步长（如 +1m23s456ms、+3s100ms 等）
+                    var deltaMs = 0L
                     val hMatcher = REGEX_BATTERY_HISTORY_LINE.matcher(trimmed)
                     if (hMatcher.find()) {
                         val deltaStr = hMatcher.group(1) ?: ""
+                        if (deltaStr.isNotEmpty() && deltaStr != "0") {
+                            deltaMs = parseDurationStringToMs(deltaStr)
+                        }
                         val level = hMatcher.group(2)?.toIntOrNull()
                         if (level != null && level in 1..100) {
-                            if (deltaStr.isNotEmpty()) {
-                                currentHistoryTs += parseDurationStringToMs(deltaStr)
-                            }
+                            currentHistoryTs += deltaMs
+                            deltaMs = 0L
                             val isUnplug = trimmed.contains("-plugged", ignoreCase = true)
                             val isPlug = trimmed.contains("+plugged", ignoreCase = true)
                             if (isUnplug) {
@@ -358,12 +380,43 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             }
                             historyPoints.add(Pair(currentHistoryTs, level))
                         }
+                    } else {
+                        val deltaMatcher = REGEX_HISTORY_TIME_DELTA.matcher(trimmed)
+                        if (deltaMatcher.find()) {
+                            val deltaStr = deltaMatcher.group(1) ?: ""
+                            if (deltaStr.isNotEmpty() && deltaStr != "0" && (deltaStr.startsWith("+") || deltaStr.startsWith("-") || deltaStr.contains("ms") || deltaStr.contains("s") || deltaStr.contains("m") || deltaStr.contains("h"))) {
+                                deltaMs = parseDurationStringToMs(deltaStr)
+                            }
+                        }
+                        val levelMatcher = REGEX_HISTORY_LEVEL.matcher(trimmed)
+                        if (levelMatcher.find()) {
+                            val level = levelMatcher.group(1)?.toIntOrNull()
+                            if (level != null && level in 1..100) {
+                                currentHistoryTs += deltaMs
+                                deltaMs = 0L
+                                val isUnplug = trimmed.contains("-plugged", ignoreCase = true)
+                                val isPlug = trimmed.contains("+plugged", ignoreCase = true)
+                                if (isUnplug) {
+                                    detectedUnplugTs = currentHistoryTs
+                                    detectedUnplugLevel = level
+                                } else if (isPlug) {
+                                    lastPluggedTs = currentHistoryTs
+                                }
+                                historyPoints.add(Pair(currentHistoryTs, level))
+                            }
+                        }
                     }
+
+                    if (deltaMs > 0L) {
+                        currentHistoryTs += deltaMs
+                    }
+
+                    // 2. 提取该时序点的电池温度（系统记录单位为 0.1℃，转换为摄氏度）
                     val tempMatcher = REGEX_HISTORY_TEMP.matcher(trimmed)
                     if (tempMatcher.find()) {
                         val rawT = tempMatcher.group(1)?.toFloatOrNull()
                         if (rawT != null && rawT in 0f..800f) {
-                            val tVal = rawT / 10f
+                            val tVal = (Math.round(rawT) / 10f).coerceIn(0f, 70f)
                             historyTempList.add(tVal)
                             historyTempPoints.add(Pair(currentHistoryTs, tVal))
                         }
@@ -516,14 +569,26 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             }
         }
 
-        // 计算放电周期内的真实电池温度统计指标（平均温度与最高温度）
-        val cycleAvgTemp = if (historyTempList.isNotEmpty()) {
-            ((Math.round(historyTempList.average() * 10.0) / 10.0).toFloat()).coerceIn(0f, 70f)
+        // 4.1 融合时序温度点：优先使用 dumpsys 提取的时序温度，若为空则由本地放电时序采样点兜底
+        val effectiveTempPoints = if (historyTempPoints.isNotEmpty()) {
+            historyTempPoints
         } else {
-            tempCelsius
+            localHistoryTempPoints
         }
-        val cycleMaxTemp = if (historyTempList.isNotEmpty()) {
-            val maxRecorded = historyTempList.maxOrNull() ?: tempCelsius
+        val effectiveTempList = if (historyTempList.isNotEmpty()) {
+            historyTempList
+        } else {
+            effectiveTempPoints.map { it.second }
+        }
+
+        // 计算放电周期内的真实电池温度统计指标（平均温度与最高温度）
+        val cycleAvgTemp = if (effectiveTempList.isNotEmpty()) {
+            ((Math.round(effectiveTempList.average() * 10.0) / 10.0).toFloat()).coerceIn(0f, 70f)
+        } else {
+            (Math.round(tempCelsius * 10f) / 10f).coerceIn(0f, 70f)
+        }
+        val cycleMaxTemp = if (effectiveTempList.isNotEmpty()) {
+            val maxRecorded = effectiveTempList.maxOrNull() ?: tempCelsius
             (Math.round(maxRecorded * 10f) / 10f).coerceAtLeast(cycleAvgTemp).coerceIn(0f, 70f)
         } else {
             cycleAvgTemp
@@ -654,7 +719,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             appList = validatedList,
             screenDrainMah = screenDrainMah,
             historyLevelPoints = filteredHistoryPoints,
-            historyTempPoints = historyTempPoints,
+            historyTempPoints = effectiveTempPoints,
             detectedUnplugTs = finalUnplugTs,
             detectedUnplugLevel = finalUnplugLevel
         )
@@ -1461,6 +1526,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         private val REGEX_ANDROID_UID = Pattern.compile("^u(\\d+)_?a(\\d+)$", Pattern.CASE_INSENSITIVE)
         private val REGEX_RESET_TIME = Pattern.compile("RESET:TIME:\\s*(\\d{4})-(\\d{2})-(\\d{2})-(\\d{2})-(\\d{2})-(\\d{2})", Pattern.CASE_INSENSITIVE)
         private val REGEX_BATTERY_HISTORY_LINE = Pattern.compile("^(?:([+-]?[\\w\\d]+)\\s+)?\\(\\d+\\)\\s*(\\d{1,3})\\b", Pattern.CASE_INSENSITIVE)
+        private val REGEX_HISTORY_TIME_DELTA = Pattern.compile("^\\s*([+-]?[\\w\\d]+)\\b", Pattern.CASE_INSENSITIVE)
+        private val REGEX_HISTORY_LEVEL = Pattern.compile("\\(\\d+\\)\\s*(\\d{1,3})\\b", Pattern.CASE_INSENSITIVE)
         private val REGEX_HISTORY_TEMP = Pattern.compile("(?:^|\\s)[+-]?temp=(\\d+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_DISCHARGE_STEP = Pattern.compile("#\\d+:\\s*\\+([\\w\\d]+)\\s+to\\s+(\\d{1,3})", Pattern.CASE_INSENSITIVE)
 

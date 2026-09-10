@@ -67,6 +67,16 @@ class BatteryMonitorService : Service() {
                 }
                 Intent.ACTION_BATTERY_CHANGED -> {
                     updateNotification()
+                    val chargingManager = ChargingStatsManager.getInstance(appContext)
+                    if (!chargingManager.isCharging()) {
+                        val rawTemp = intent.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, -1)
+                        if (rawTemp > 0) {
+                            PowerUsageManager.getInstance(appContext).recordDischargeTempSample(
+                                System.currentTimeMillis(),
+                                rawTemp / 10f
+                            )
+                        }
+                    }
                 }
             }
         }

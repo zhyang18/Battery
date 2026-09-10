@@ -39,7 +39,7 @@
     <string name="power_value_format_with_energy">%1$s (%2$s)</string>
     <string name="power_wh_format">%.1fWh</string>
     <string name="power_param_energy">当前剩余能量</string>
-    <string name="power_tooltip_energy">电池当前剩余能量：%s（结合电池实际容量与实时电压精准计算）</string>
+    <string name="power_tooltip_energy">当前剩余能量：%s</string>
     <string name="power_temp_format">%.1f℃</string>
     <string name="power_volt_format">%.3fV</string>
     <string name="power_status_unplugged">未充电</string>
@@ -55,8 +55,10 @@
     <string name="power_sort_name">按名称排序</string>
     <string name="power_mode_shizuku">Shizuku 模式 (高精度推荐)</string>
     <string name="power_mode_normal">标准模式 (UsageStats)</string>
-    <string name="power_mode_tip_shizuku">已启用 Shizuku 高精度模式，直接读取系统底层 dumpsys batterystats 权威功耗账本</string>
-    <string name="power_mode_tip_normal">当前为标准模式，基于系统前台使用时长与硬件基准模型估算</string>
+    <string name="power_mode_tip_shizuku">已启用 Shizuku 高精度模式</string>
+    <string name="power_mode_tip_normal">已切换为普通标准模式</string>
+    <string name="toast_keep_screen_on_enabled">已开启屏幕常亮</string>
+    <string name="toast_keep_screen_on_disabled">已关闭屏幕常亮</string>
     <string name="power_shizuku_not_running_title">Shizuku 服务未运行</string>
     <string name="power_shizuku_not_running_desc">请先启动 Shizuku App 并确保服务已运行，以开启系统底层权威耗电统计。</string>
     <string name="power_shizuku_unauthorized_title">需要 Shizuku 提权授权</string>
@@ -64,7 +66,7 @@
     <string name="power_shizuku_btn_auth">立即授权</string>
     <string name="power_shizuku_btn_open">打开 Shizuku</string>
     <string name="power_drain_format">%1$.1fmAh (%2$.1f%%)</string>
-    <string name="power_toast_cleared">已重置当前周期的耗电采样记录</string>
+    <string name="power_toast_cleared">耗电统计已重置</string>
     <string name="power_guide_process_title">使用过程说明</string>
     <string name="power_guide_process_content">“使用过程”折线图展示自本次开机或放电以来电池电量百分比随时间的变化曲线，并在高耗电阶段下方打点展示当时活跃的应用，直观呈现电池消耗历程。</string>
     <string name="power_guide_scene_title">使用场景说明</string>
@@ -290,9 +292,9 @@
     <string name="sampling_mode_power_save_short">🍃 极限省电 (默认)</string>
     <string name="sampling_mode_balanced_short">⚡ 标准智能</string>
     <string name="sampling_mode_high_precision_short">🔥 极客高精 (1秒)</string>
-    <string name="sampling_mode_tip_power_save">已启用极限省电模式：事件触发 + Shizuku 系统原生记录解析，零额外后台耗电</string>
-    <string name="sampling_mode_tip_balanced">已启用标准智能模式：前台 1.5 秒平滑采样，后台亮屏 5 秒自适应采样</string>
-    <string name="sampling_mode_tip_high_precision">已启用极客高精模式：亮屏 1 秒高频持续采样，细腻捕捉瞬时功耗尖峰</string>
+    <string name="sampling_mode_tip_power_save">已启用极限省电模式</string>
+    <string name="sampling_mode_tip_balanced">已启用标准智能模式</string>
+    <string name="sampling_mode_tip_high_precision">已启用极客高精模式</string>
     <string name="interval_1s">1 秒</string>
     <string name="interval_2s">2 秒</string>
     <string name="interval_3s">3 秒</string>
@@ -354,31 +356,31 @@
     <string name="toast_shizuku_success">Shizuku 授权成功！</string>
     <string name="toast_shizuku_denied">Shizuku 授权被拒绝</string>
     <string name="toast_press_again_exit">再按一次退出应用</string>
-    <string name="toast_copy_success">已复制该条历史记录至剪贴板</string>
-    <string name="toast_delete_success">已成功删除该条快照</string>
-    <string name="toast_clear_success">已清空全部历史记录</string>
-    <string name="toast_save_snapshots_format">已同时保存【%s】历史快照</string>
-    <string name="toast_no_data_to_save">当前暂无可用的电池检测数据，请先在检测页刷新</string>
-    <string name="toast_backup_success">备份成功！共导出 %d 条历史记录</string>
-    <string name="toast_backup_failed">备份导出失败: %s</string>
-    <string name="toast_restore_success">已成功%1$s恢复 %2$d 条历史记录！</string>
-    <string name="toast_restore_failed">数据恢复失败: %s</string>
+    <string name="toast_copy_success">已复制到剪贴板</string>
+    <string name="toast_delete_success">已删除该条快照</string>
+    <string name="toast_clear_success">已清空历史记录</string>
+    <string name="toast_save_snapshots_format">已保存【%s】快照</string>
+    <string name="toast_no_data_to_save">暂无可保存数据</string>
+    <string name="toast_backup_success">已导出 %d 条记录</string>
+    <string name="toast_backup_failed">备份失败: %s</string>
+    <string name="toast_restore_success">已%1$s恢复 %2$d 条记录</string>
+    <string name="toast_restore_failed">恢复失败: %s</string>
     <string name="toast_system_api_updated">系统 API 数据已更新</string>
     <string name="toast_shizuku_data_updated">Shizuku 数据已更新</string>
-    <string name="toast_bugreport_reimport_tip">错误报告请点击卡片重新导入</string>
-    <string name="toast_request_auth_failed">请求授权失败: %s</string>
-    <string name="toast_already_authorized">已经授权，无需再次请求</string>
-    <string name="toast_shizuku_not_connected">Shizuku 尚未连接，尝试打开 Shizuku App...</string>
-    <string name="toast_shizuku_not_found">未找到 Shizuku App，请先安装并启动</string>
+    <string name="toast_bugreport_reimport_tip">点击卡片重新导入报告</string>
+    <string name="toast_request_auth_failed">授权失败: %s</string>
+    <string name="toast_already_authorized">已获授权，无需重复申请</string>
+    <string name="toast_shizuku_not_connected">Shizuku 未连接，正在打开</string>
+    <string name="toast_shizuku_not_found">未安装 Shizuku</string>
 
     <!-- 历史记录加载与断电自动记录 -->
     <string name="btn_load_snapshot">加载查看</string>
-    <string name="toast_load_snapshot_success">已加载该条历史快照数据</string>
+    <string name="toast_load_snapshot_success">已加载历史快照</string>
     <string name="history_snapshot_banner_format">📌 正在查看历史快照：%s</string>
     <string name="btn_restore_realtime">恢复实时</string>
-    <string name="toast_restored_realtime">已切回实时电池监测</string>
+    <string name="toast_restored_realtime">已切回实时监测</string>
     <string name="note_auto_unplug">拔掉电源自动记录</string>
-    <string name="toast_unplug_recorded">已自动记录断电快照</string>
+    <string name="toast_unplug_recorded">已记录断电快照</string>
 
     <!-- 耗电历史记录 -->
     <string name="power_history_title">耗电记录历史</string>
@@ -414,11 +416,11 @@
     <string name="charging_status_standard">标准充电中</string>
     <string name="charging_status_full">已充满电</string>
     <string name="charging_status_discharging">未连接充电器</string>
-    <string name="toast_auto_switch_charging">⚡ 已检测到连接电源，已自动显示充电统计</string>
-    <string name="toast_auto_switch_discharging">🔋 已检测到断开电源，已自动显示耗电统计</string>
+    <string name="toast_auto_switch_charging">⚡ 已连接电源，切换至充电</string>
+    <string name="toast_auto_switch_discharging">🔋 已断开电源，切换至耗电</string>
     <string name="charging_reset_confirm_title">重置充电统计</string>
     <string name="charging_reset_confirm_msg">确定要清空当前充电走势图表与统计采样数据吗？</string>
-    <string name="charging_reset_success">充电走势与统计数据已清空重置</string>
+    <string name="charging_reset_success">充电统计已重置</string>
     <string name="charging_guide_title">充电统计全景指南</string>
     <string name="charging_guide_desc">本界面支持在设备连接充电器时自动智能呈现。三合一折线图表动态绘制绿色功率曲线、蓝色电量曲线与红色温度曲线；图表正下方提供带色块标识的实时读数看板；数据每秒实时采样更新，拔电时自动存档。</string>
 
@@ -473,6 +475,6 @@
     <string name="dialog_lock_recents_title">后台防杀与锁定指南</string>
     <string name="dialog_lock_recents_content">由于部分手机系统（如澎湃/MIUI、ColorOS、OriginOS、鸿蒙等）在清理多任务卡片时会执行强制停止，导致系统广播全部被屏蔽，建议开启以下设置以保证插拔电源能被 100% 检测到：\n\n1. 【多任务锁定】：呼出最近任务列表，下拉或长按本应用卡片，点击“锁定”小锁图标；\n\n2. 【自启动权限】：在手机设置 -> 应用管理 -> 本应用 -> 自启动中，开启“允许自启动”；\n\n3. 【后台无限制】：在应用耗电管理中，选择“无限制”或“允许完全后台行为”；\n\n4. 【常驻通知栏】：开启本页上方的“常驻通知栏监控”，利用前台服务机制抵御系统杀进程。</string>
     <string name="toast_battery_optimization_granted">已加入电池优化白名单</string>
-    <string name="toast_battery_optimization_request">请在接下来的系统弹窗中选择“允许”加入白名单</string>
+    <string name="toast_battery_optimization_request">请在弹窗中选择“允许”加白</string>
 </resources>
 

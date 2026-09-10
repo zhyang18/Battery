@@ -3,29 +3,31 @@ package com.battery.analysis.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import android.os.Bundle
-import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.fragment.app.Fragment
-import androidx.fragment.app.activityViewModels
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.battery.analysis.R
-import com.battery.analysis.databinding.FragmentHistoryBinding
+import com.battery.analysis.databinding.ActivityHistoryBinding
 import com.battery.analysis.model.DecayStatistics
 import com.battery.analysis.model.HistoryRecord
 import com.battery.analysis.model.PeriodicDecayItem
@@ -34,60 +36,55 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
- * 历史记录顶级页面 Fragment。
- * 负责展示电池健康度与充满容量历史快照列表，提供四大等宽分类筛选（全部、系统api、Shizuku、错误报告），
- * 集成平滑贝塞尔健康度趋势折线图、日/月/年衰减速率卡片及全量多维衰减明细弹窗，
- * 并支持左右滑动删除、一键清空与多语言动态适配。
+ * 历史记录独立详情页面 Activity。
+ * 承载电池健康度与充满容量历史快照列表，提供四大等宽分类筛选（全部、系统api、Shizuku、错误报告），
+ * 当分类标签为“全部”时隐藏衰减趋势图卡片，在特定数据源分类下展示平滑贝塞尔健康度趋势图与日/月/年衰减速率，
+ * 支持左右滑动删除、一键清空、保存当前快照、衰减明细弹窗以及载入快照至主界面查看。
  */
-class HistoryFragment : Fragment() {
+class HistoryActivity : AppCompatActivity() {
 
-    private var _binding: FragmentHistoryBinding? = null
-    private val binding get() = _binding!!
-
-    private val viewModel: BatteryViewModel by activityViewModels()
+    private lateinit var binding: ActivityHistoryBinding
+    private val viewModel: BatteryViewModel by viewModels()
     private lateinit var adapter: HistoryAdapter
 
     private var shouldScrollToTopOnUpdate = false
 
     /**
-     * 创建 Fragment 的视图层级。
+     * 活动初始化生命周期回调，配置沉浸式状态栏、视图绑定、列表组件及事件监听。
      *
-     * @param inflater 布局填充器
-     * @param container 父容器视图
-     * @param savedInstanceState 状态保存 Bundle
-     * @return 初始化的根视图 [View]
+     * @param savedInstanceState 状态恢复 Bundle
      */
-    override fun onCreateView(
-        inflater: LayoutInflater,
-        container: ViewGroup?,
-        savedInstanceState: Bundle?
-    ): View {
-        _binding = FragmentHistoryBinding.inflate(inflater, container, false)
-        return binding.root
-    }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        updateSystemBarAppearance()
 
-    /**
-     * 视图创建完毕后的生命周期回调，配置 RecyclerView、分类按钮与数据观察。
-     *
-     * @param view 创建完成的根视图
-     * @param savedInstanceState 状态保存 Bundle
-     */
-    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        super.onViewCreated(view, savedInstanceState)
+        binding = ActivityHistoryBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
         setupRecyclerView()
         setupCategoryTabs()
         setupListeners()
         observeData()
+
+        viewModel.loadHistoryRecords(this)
     }
 
     /**
-     * 界面变为可见时的生命周期回调，自动触发一次本地数据库历史记录的最新重载。
+     * 界面恢复可见时的生命周期回调，自动触发最新历史数据库重载。
      */
     override fun onResume() {
         super.onResume()
-        val ctx = context ?: return
-        viewModel.loadHistoryRecords(ctx)
+        viewModel.loadHistoryRecords(this)
+    }
+
+    /**
+     * 根据系统当前日夜间模式适配状态栏与导航栏图标色彩。
+     */
+    private fun updateSystemBarAppearance() {
+        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+        val isNight = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
+        insetsController.isAppearanceLightStatusBars = !isNight
+        insetsController.isAppearanceLightNavigationBars = !isNight
     }
 
     /**
@@ -103,27 +100,26 @@ class HistoryFragment : Fragment() {
             }
         )
 
-        binding.rvHistory.layoutManager = LinearLayoutManager(requireContext())
+        binding.rvHistory.layoutManager = LinearLayoutManager(this)
         binding.rvHistory.adapter = adapter
-        binding.rvHistory.itemAnimator = androidx.recyclerview.widget.DefaultItemAnimator()
+        binding.rvHistory.itemAnimator = DefaultItemAnimator()
 
-        // 配置左滑手势直接删除
         val swipeCallback = object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT) {
             private val bgPaint = Paint().apply {
                 color = Color.parseColor("#EF4444")
                 isAntiAlias = true
             }
-            private val deleteIcon: Drawable? = ContextCompat.getDrawable(requireContext(), R.drawable.ic_delete)?.apply {
-                setTint(ContextCompat.getColor(requireContext(), R.color.white))
+            private val deleteIcon: Drawable? = ContextCompat.getDrawable(this@HistoryActivity, R.drawable.ic_delete)?.apply {
+                setTint(ContextCompat.getColor(this@HistoryActivity, R.color.white))
             }
 
             /**
-             * 拖拽排序移动回调（本页面禁用上下拖拽）。
+             * 列表项拖拽排序回调（当前禁用）。
              *
-             * @param recyclerView 目标 RecyclerView
-             * @param viewHolder 被拖拽的 ViewHolder
+             * @param recyclerView 宿主 RecyclerView
+             * @param viewHolder 被拖拽项 ViewHolder
              * @param target 目标位置 ViewHolder
-             * @return 是否消费移动
+             * @return 固定返回 false
              */
             override fun onMove(
                 recyclerView: RecyclerView,
@@ -132,7 +128,7 @@ class HistoryFragment : Fragment() {
             ): Boolean = false
 
             /**
-             * 侧滑动作触发回调，弹出删除确认弹窗并在取消时复位条目。
+             * 列表项滑动触发回调，弹出删除确认弹窗并在取消时复位条目。
              *
              * @param viewHolder 滑动的 ViewHolder
              * @param direction 滑动方向
@@ -149,15 +145,15 @@ class HistoryFragment : Fragment() {
             }
 
             /**
-             * 自定义绘制滑动背景及居中垃圾桶图标。
+             * 滑动过程中的背景与垃圾桶图标自定义绘制。
              *
-             * @param c 画布
-             * @param recyclerView 目标 RecyclerView
-             * @param viewHolder 当前正在滑动的 ViewHolder
-             * @param dX X轴位移距离
-             * @param dY Y轴位移距离
-             * @param actionState 动作状态
-             * @param isCurrentlyActive 是否处于手势活跃中
+             * @param c 绘图画布
+             * @param recyclerView 宿主 RecyclerView
+             * @param viewHolder 正在绘制的 ViewHolder
+             * @param dX 水平位移距离
+             * @param dY 垂直位移距离
+             * @param actionState 交互状态
+             * @param isCurrentlyActive 是否处于活跃触摸状态
              */
             override fun onChildDraw(
                 c: Canvas,
@@ -169,17 +165,19 @@ class HistoryFragment : Fragment() {
                 isCurrentlyActive: Boolean
             ) {
                 val itemView = viewHolder.itemView
-                if (dX < 0) { // 向左滑动
-                    val cornerRadius = 12 * resources.displayMetrics.density
+                val itemMarginHorizontal = 16 * resources.displayMetrics.density
+                val itemMarginVertical = 6 * resources.displayMetrics.density
+                val cornerRadius = 16 * resources.displayMetrics.density
+
+                if (dX < 0) {
                     val rectF = RectF(
-                        itemView.right + dX,
-                        itemView.top.toFloat(),
-                        itemView.right.toFloat(),
-                        itemView.bottom.toFloat()
+                        itemView.right + dX - 20,
+                        itemView.top + itemMarginVertical,
+                        itemView.right - itemMarginHorizontal,
+                        itemView.bottom - itemMarginVertical
                     )
                     c.drawRoundRect(rectF, cornerRadius, cornerRadius, bgPaint)
 
-                    // 绘制白色垃圾桶图标
                     deleteIcon?.let { icon ->
                         val iconMargin = (itemView.height - icon.intrinsicHeight) / 2
                         val iconTop = itemView.top + iconMargin
@@ -201,7 +199,7 @@ class HistoryFragment : Fragment() {
     }
 
     /**
-     * 初始化等宽均分的四大分类筛选标签（全部、系统api、Shizuku、错误报告）。
+     * 初始化四大等宽分类筛选标签（全部、系统api、Shizuku、错误报告）。
      */
     private fun setupCategoryTabs() {
         binding.btnFilterAll.setOnClickListener {
@@ -235,7 +233,7 @@ class HistoryFragment : Fragment() {
             val isSelected = (cat == selectedCategory)
             if (isSelected) {
                 textView.setBackgroundResource(R.drawable.bg_filter_chip_selected)
-                textView.setTextColor(ContextCompat.getColor(requireContext(), R.color.nav_item_selected))
+                textView.setTextColor(ContextCompat.getColor(this, R.color.nav_item_selected))
                 textView.setTypeface(null, android.graphics.Typeface.BOLD)
             } else {
                 textView.setBackgroundResource(R.drawable.bg_filter_chip_normal)
@@ -246,10 +244,15 @@ class HistoryFragment : Fragment() {
     }
 
     /**
-     * 初始化顶部保存、清空按钮及下拉刷新手势监听器。
+     * 初始化顶部返回键、保存快照、清空按钮及下拉刷新手势监听器。
      */
     private fun setupListeners() {
-        // 1. 顶部“保存快照”按钮：一键同时保存三种数据
+        // 0. 返回按钮点击退出页面
+        binding.btnBack.setOnClickListener {
+            finish()
+        }
+
+        // 1. 顶部“保存快照”按钮
         binding.btnSaveSnapshot.setOnClickListener {
             handleSaveAllSnapshots()
         }
@@ -263,7 +266,7 @@ class HistoryFragment : Fragment() {
         binding.btnClearHistory.setOnClickListener {
             val count = viewModel.historyRecords.value.size
             if (count == 0) {
-                Toast.makeText(requireContext(), getString(R.string.empty_history_title), Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.empty_history_title), Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
             showClearAllConfirmDialog()
@@ -272,12 +275,7 @@ class HistoryFragment : Fragment() {
         // 4. 下拉刷新重载历史数据库
         binding.swipeRefreshHistory.setColorSchemeColors(Color.parseColor("#2196F3"))
         binding.swipeRefreshHistory.setOnRefreshListener {
-            val ctx = context
-            if (ctx == null) {
-                binding.swipeRefreshHistory.isRefreshing = false
-                return@setOnRefreshListener
-            }
-            viewModel.loadHistoryRecords(ctx)
+            viewModel.loadHistoryRecords(this)
             binding.swipeRefreshHistory.isRefreshing = false
         }
 
@@ -300,9 +298,9 @@ class HistoryFragment : Fragment() {
      * 观察 ViewModel 中的历史数据流、选中分类流以及衰减与循环统计流，刷新界面状态。
      */
     private fun observeData() {
-        // 1. 观察当前选中的分类，更新标签外观并控制趋势图卡片显隐
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+        // 1. 观察当前选中的分类，更新标签外观并控制趋势图显隐
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.selectedCategory.collect { category ->
                     updateCategoryTabsState(category)
                     updateTrendChartCardVisibility(category, viewModel.healthTrendPoints.value)
@@ -311,8 +309,8 @@ class HistoryFragment : Fragment() {
         }
 
         // 2. 观察筛选过滤后的历史记录列表并同步更新顶部角标
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.filteredHistoryRecords.collect { list ->
                     binding.tvHistoryCount.text = getString(R.string.history_count_format, list.size)
                     adapter.submitList(list) {
@@ -350,8 +348,8 @@ class HistoryFragment : Fragment() {
         }
 
         // 3. 观察当前分类下用于绘制趋势图的数据点集，若分类为“全部”则始终不显示图表卡片
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.healthTrendPoints.collect { points ->
                     binding.chartHealthTrend.setData(points)
 
@@ -379,9 +377,9 @@ class HistoryFragment : Fragment() {
             }
         }
 
-        // 5. 观察电池健康度衰减统计数据流，更新每日、每月、每年衰减小卡片
-        viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+        // 4. 观察电池健康度衰减统计数据流，更新每日、每月、每年衰减小卡片
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.decayStatistics.collect { stats ->
                     updateDecayStatCards(stats)
                 }
@@ -411,7 +409,6 @@ class HistoryFragment : Fragment() {
      */
     private fun updateDecayStatCards(stats: DecayStatistics) {
         if (stats.hasSufficientData) {
-            // 每日平均
             stats.dailyDecayRate?.let { rate ->
                 binding.tvStatDailyDecay.text = formatDecayValue(rate, 3)
                 binding.tvStatDailyDecay.setTextColor(getDecayTextColor(rate))
@@ -420,7 +417,6 @@ class HistoryFragment : Fragment() {
                 binding.tvStatDailyDecay.setTextColor(Color.parseColor("#9CA3AF"))
             }
 
-            // 每月平均
             stats.monthlyDecayRate?.let { rate ->
                 binding.tvStatMonthlyDecay.text = formatDecayValue(rate, 2)
                 binding.tvStatMonthlyDecay.setTextColor(getDecayTextColor(rate))
@@ -429,7 +425,6 @@ class HistoryFragment : Fragment() {
                 binding.tvStatMonthlyDecay.setTextColor(Color.parseColor("#9CA3AF"))
             }
 
-            // 每年预估
             stats.yearlyDecayRate?.let { rate ->
                 binding.tvStatYearlyDecay.text = formatDecayValue(rate, 2)
                 binding.tvStatYearlyDecay.setTextColor(getDecayTextColor(rate))
@@ -465,14 +460,13 @@ class HistoryFragment : Fragment() {
     }
 
     /**
-     * 格式化充放电循环次数消耗速率带符号（支持多语言）。
+     * 格式化充放电循环次数消耗速率带符号。
      *
      * @param rate 循环消耗速率数值（正数代表循环消耗增长）
      * @param decimals 小数点保留位数
      * @return 格式化后的带符号文本（如 "+0.50 次"、"+15.2 次" 或 "0 次"）
      */
     private fun formatCycleRate(rate: Float, decimals: Int): String {
-        val ctx = context
         val numStr = if (rate > 0.0001f) {
             String.format(Locale.getDefault(), "+%.${decimals}f", rate)
         } else if (rate < -0.0001f) {
@@ -480,11 +474,7 @@ class HistoryFragment : Fragment() {
         } else {
             String.format(Locale.getDefault(), "%.${decimals}f", 0f)
         }
-        return if (ctx != null) {
-            ctx.getString(R.string.period_cycle_single_format, numStr).replace("•", "").trim()
-        } else {
-            "$numStr 次"
-        }
+        return getString(R.string.period_cycle_single_format, numStr).replace("•", "").trim()
     }
 
     /**
@@ -495,9 +485,9 @@ class HistoryFragment : Fragment() {
      */
     private fun getDecayTextColor(rate: Float): Int {
         return when {
-            rate > 0.0001f -> Color.parseColor("#EF4444") // 下降衰减标红
-            rate < -0.0001f -> Color.parseColor("#10B981") // 上升波动标绿
-            else -> Color.parseColor("#10B981") // 持平标绿
+            rate > 0.0001f -> Color.parseColor("#EF4444")
+            rate < -0.0001f -> Color.parseColor("#10B981")
+            else -> Color.parseColor("#10B981")
         }
     }
 
@@ -610,7 +600,6 @@ class HistoryFragment : Fragment() {
             tvStatDetails.text = getString(R.string.decay_stat_insufficient_hint, stats.totalPoints)
         }
 
-        // 4. 动态渲染周期明细方法
         fun renderPeriodicItems(items: List<PeriodicDecayItem>) {
             container.removeAllViews()
             if (items.isEmpty()) {
@@ -625,7 +614,7 @@ class HistoryFragment : Fragment() {
                     val tvRangeText = rowView.findViewById<TextView>(R.id.tv_periodic_range_text)
                     val divider = rowView.findViewById<View>(R.id.divider_periodic_row)
 
-                    tvTitle.text = item.getFormattedPeriodLabel(requireContext())
+                    tvTitle.text = item.getFormattedPeriodLabel(this@HistoryActivity)
 
                     val cycleStr = if (item.cycleChange != null) {
                         val sign = if (item.cycleChange >= 0) "+${item.cycleChange}" else "${item.cycleChange}"
@@ -637,10 +626,8 @@ class HistoryFragment : Fragment() {
                     } else ""
 
                     tvSubInfo.text = "${getString(R.string.period_sample_count_format, item.sampleCount)}$cycleStr"
-
-                    tvDecayBadge.text = item.formatDecay(requireContext())
+                    tvDecayBadge.text = item.formatDecay(this@HistoryActivity)
                     tvDecayBadge.setTextColor(getDecayTextColor(item.decay))
-
                     tvRangeText.text = String.format(Locale.getDefault(), "%.2f%% → %.2f%%", item.startHealth, item.endHealth)
 
                     if (index == items.size - 1) {
@@ -652,7 +639,6 @@ class HistoryFragment : Fragment() {
             }
         }
 
-        // 5. Tab 切换状态处理（按日、按月、按年顺序排列）
         fun updateTabUI(tab: String) {
             val tabs = listOf(
                 Triple(btnTabDay, "DAY", stats.dailyItems),
@@ -663,7 +649,7 @@ class HistoryFragment : Fragment() {
             for ((button, t, items) in tabs) {
                 if (t == tab) {
                     button.setBackgroundResource(R.drawable.bg_filter_chip_selected)
-                    button.setTextColor(ContextCompat.getColor(requireContext(), R.color.nav_item_selected))
+                    button.setTextColor(ContextCompat.getColor(this, R.color.nav_item_selected))
                     button.setTypeface(null, android.graphics.Typeface.BOLD)
                     renderPeriodicItems(items)
                 } else {
@@ -680,7 +666,7 @@ class HistoryFragment : Fragment() {
 
         updateTabUI(initialTab)
 
-        val dialog = AlertDialog.Builder(requireContext())
+        val dialog = AlertDialog.Builder(this)
             .setView(dialogView)
             .create()
 
@@ -698,7 +684,6 @@ class HistoryFragment : Fragment() {
             window.setLayout(width, height)
             window.setGravity(android.view.Gravity.CENTER)
 
-            // 使用符合 FrameLayout 父容器要求的 FrameLayout.LayoutParams (支持 MarginLayoutParams)，彻底杜绝 ClassCastException 并锁定高度
             dialogView.layoutParams = android.widget.FrameLayout.LayoutParams(
                 android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
                 android.widget.FrameLayout.LayoutParams.MATCH_PARENT
@@ -711,9 +696,8 @@ class HistoryFragment : Fragment() {
      * 一键同时保存系统api、Shizuku、错误报告三种分类的历史快照，并在成功后自动滚动列表至顶部。
      */
     private fun handleSaveAllSnapshots() {
-        val ctx = context ?: return
         shouldScrollToTopOnUpdate = true
-        viewModel.saveAllSnapshots(ctx) { savedCategories ->
+        viewModel.saveAllSnapshots(this) { savedCategories ->
             if (savedCategories.isNotEmpty()) {
                 val localizedList = savedCategories.map { cat ->
                     when (cat) {
@@ -724,24 +708,24 @@ class HistoryFragment : Fragment() {
                     }
                 }
                 val catStr = localizedList.joinToString("、")
-                Toast.makeText(ctx, getString(R.string.toast_save_snapshots_format, catStr), Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.toast_save_snapshots_format, catStr), Toast.LENGTH_SHORT).show()
                 binding.rvHistory.post {
                     binding.rvHistory.scrollToPosition(0)
                 }
             } else {
                 shouldScrollToTopOnUpdate = false
-                Toast.makeText(ctx, getString(R.string.toast_no_data_to_save), Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.toast_no_data_to_save), Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     /**
-     * 弹出单条历史记录的完整 14 项指标大圆角自定义详情对话框（键值左右分开排列）。
+     * 弹出单条历史记录的完整指标详情对话框，并支持一键载入至健康度主界面查看。
      *
      * @param record 待查看的历史记录对象
      */
     private fun showRecordDetailsDialog(record: HistoryRecord) {
-        val detailsText = record.formatFullDetails(requireContext())
+        val detailsText = record.formatFullDetails(this)
         val dialogView = layoutInflater.inflate(R.layout.dialog_history_detail, null)
 
         val tvTitle = dialogView.findViewById<TextView>(R.id.tv_dialog_detail_title)
@@ -758,7 +742,7 @@ class HistoryFragment : Fragment() {
         tvTitle.text = getString(R.string.history_detail_title_format, localizedCat)
         container.removeAllViews()
 
-        val pairs = record.getDetailPairs(requireContext())
+        val pairs = record.getDetailPairs(this)
         pairs.forEachIndexed { index, triple ->
             val rowView = layoutInflater.inflate(R.layout.item_dialog_detail_row, container, false)
             val tvLabel = rowView.findViewById<TextView>(R.id.tv_row_label)
@@ -771,7 +755,6 @@ class HistoryFragment : Fragment() {
                 tvValue.setTextColor(Color.parseColor(colorHex))
             }
 
-            // 最后一行隐藏分割线
             if (index == pairs.size - 1) {
                 divider.visibility = View.GONE
             }
@@ -779,7 +762,7 @@ class HistoryFragment : Fragment() {
             container.addView(rowView)
         }
 
-        val dialog = AlertDialog.Builder(requireContext())
+        val dialog = AlertDialog.Builder(this)
             .setView(dialogView)
             .create()
 
@@ -788,18 +771,20 @@ class HistoryFragment : Fragment() {
         }
 
         btnCopy.setOnClickListener {
-            val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             val clip = ClipData.newPlainText("Battery History Record", detailsText)
             clipboard.setPrimaryClip(clip)
-            Toast.makeText(requireContext(), getString(R.string.toast_copy_success), Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.toast_copy_success), Toast.LENGTH_SHORT).show()
         }
 
         val btnLoad = dialogView.findViewById<TextView>(R.id.btn_dialog_detail_load)
         btnLoad.setOnClickListener {
             dialog.dismiss()
-            viewModel.loadRecordToDetection(record)
-            (activity as? com.battery.analysis.MainActivity)?.navigateToNav(R.id.nav_detection)
-            Toast.makeText(requireContext(), getString(R.string.toast_load_snapshot_success), Toast.LENGTH_SHORT).show()
+            val resultIntent = Intent().apply {
+                putExtra(EXTRA_LOAD_RECORD, record)
+            }
+            setResult(RESULT_LOAD_TO_MAIN, resultIntent)
+            finish()
         }
 
         dialog.show()
@@ -813,12 +798,11 @@ class HistoryFragment : Fragment() {
     }
 
     /**
-     * 弹出删除单条记录的现代化精致二次确认对话框。
+     * 弹出删除单条记录的确认对话框。
      *
      * @param record 待删除的历史记录对象
      */
     private fun showDeleteConfirmDialog(record: HistoryRecord) {
-        val ctx = context ?: return
         val dialogView = layoutInflater.inflate(R.layout.dialog_custom_delete_confirm, null)
 
         val tvTitle = dialogView.findViewById<TextView>(R.id.tv_dialog_delete_title)
@@ -853,7 +837,7 @@ class HistoryFragment : Fragment() {
         val cycleStr = record.cycleCount?.let { "   🔄 $it" } ?: ""
         tvPreviewSummary.text = "$levelStr$healthStr$cycleStr"
 
-        val dialog = AlertDialog.Builder(requireContext())
+        val dialog = AlertDialog.Builder(this)
             .setView(dialogView)
             .create()
 
@@ -862,8 +846,8 @@ class HistoryFragment : Fragment() {
         }
 
         btnConfirm.setOnClickListener {
-            viewModel.deleteHistoryRecord(ctx, record.id)
-            Toast.makeText(ctx, getString(R.string.toast_delete_success), Toast.LENGTH_SHORT).show()
+            viewModel.deleteHistoryRecord(this, record.id)
+            Toast.makeText(this, getString(R.string.toast_delete_success), Toast.LENGTH_SHORT).show()
             dialog.dismiss()
         }
 
@@ -878,10 +862,9 @@ class HistoryFragment : Fragment() {
     }
 
     /**
-     * 弹出清空全部历史记录的高颜值危险操作警告对话框。
+     * 弹出清空全部历史记录的警告对话框。
      */
     private fun showClearAllConfirmDialog() {
-        val ctx = context ?: return
         val totalCount = viewModel.historyRecords.value.size
         val dialogView = layoutInflater.inflate(R.layout.dialog_custom_delete_confirm, null)
 
@@ -896,7 +879,7 @@ class HistoryFragment : Fragment() {
         layoutPreview.visibility = View.GONE
         btnConfirm.text = getString(R.string.clear_all)
 
-        val dialog = AlertDialog.Builder(requireContext())
+        val dialog = AlertDialog.Builder(this)
             .setView(dialogView)
             .create()
 
@@ -905,8 +888,8 @@ class HistoryFragment : Fragment() {
         }
 
         btnConfirm.setOnClickListener {
-            viewModel.clearAllHistory(ctx)
-            Toast.makeText(ctx, getString(R.string.toast_clear_success), Toast.LENGTH_SHORT).show()
+            viewModel.clearAllHistory(this)
+            Toast.makeText(this, getString(R.string.toast_clear_success), Toast.LENGTH_SHORT).show()
             dialog.dismiss()
         }
 
@@ -920,22 +903,15 @@ class HistoryFragment : Fragment() {
         }
     }
 
-    /**
-     * 视图销毁时的清理工作。
-     */
-    override fun onDestroyView() {
-        super.onDestroyView()
-        _binding = null
-    }
-
     companion object {
         /**
-         * 静态工厂方法，用于创建 [HistoryFragment] 实例。
-         *
-         * @return 新建的 [HistoryFragment]
+         * 载入历史快照返回主页面的 Extra 键名。
          */
-        fun newInstance(): HistoryFragment {
-            return HistoryFragment()
-        }
+        const val EXTRA_LOAD_RECORD = "extra_load_record"
+
+        /**
+         * 载入历史快照至主界面的 ResultCode。
+         */
+        const val RESULT_LOAD_TO_MAIN = 2001
     }
 }

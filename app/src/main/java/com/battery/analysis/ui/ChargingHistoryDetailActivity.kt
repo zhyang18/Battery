@@ -130,7 +130,7 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
         )
 
         if (record.screenOffDurationMs > 0L) {
-            binding.cardScreenOffSpecial.visibility = View.VISIBLE
+            binding.layoutScreenOffSpecial.visibility = View.VISIBLE
             val screenOffSign = if (record.screenOffLevelGain >= 0) "+${record.screenOffLevelGain}%" else "${record.screenOffLevelGain}%"
             binding.tvScreenOffLevelGain.text = screenOffSign
             binding.tvScreenOffEnergy.text = String.format(
@@ -139,7 +139,7 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
                 record.screenOffEnergyWh
             )
         } else {
-            binding.cardScreenOffSpecial.visibility = View.GONE
+            binding.layoutScreenOffSpecial.visibility = View.GONE
         }
 
         // 绑定三合一走势折线图数据（电量、功率、温度），支持手势标尺交互

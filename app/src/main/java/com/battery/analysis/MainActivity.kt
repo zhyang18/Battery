@@ -23,7 +23,7 @@ import rikka.shizuku.Shizuku
 
 /**
  * 电池检测应用主界面 Activity。
- * 承载底部三大顶级页签（检测、记录、设置）导航容器，负责数据轮询调度、主题管理与 Shizuku 监听。
+ * 承载底部三大顶级页签（耗电、健康度、设置）导航容器，负责数据轮询调度、主题管理与 Shizuku 监听。
  */
 class MainActivity : AppCompatActivity() {
 
@@ -212,7 +212,7 @@ class MainActivity : AppCompatActivity() {
 
         // 禁用顶级 ViewPager2 手势横滑，避免干扰内部子 Tab 横滑切换
         binding.mainViewPager.isUserInputEnabled = false
-        binding.mainViewPager.offscreenPageLimit = 3
+        binding.mainViewPager.offscreenPageLimit = 2
 
         binding.bottomNavigation.setOnItemSelectedListener { item ->
             when (item.itemId) {
@@ -224,12 +224,8 @@ class MainActivity : AppCompatActivity() {
                     binding.mainViewPager.setCurrentItem(1, false)
                     true
                 }
-                R.id.nav_history -> {
-                    binding.mainViewPager.setCurrentItem(2, false)
-                    true
-                }
                 R.id.nav_settings -> {
-                    binding.mainViewPager.setCurrentItem(3, false)
+                    binding.mainViewPager.setCurrentItem(2, false)
                     true
                 }
                 else -> false

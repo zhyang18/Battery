@@ -1,12 +1,13 @@
 <resources>
     <!-- 基础应用 -->
-    <string name="app_name">电池检测</string>
-    <string name="app_full_title">电池检测 (Battery App)</string>
+    <string name="app_name">电池统计</string>
+    <string name="app_full_title">电池统计</string>
 
     <!-- 底部导航 -->
     <string name="nav_power">耗电</string>
     <string name="nav_charging">充电</string>
-    <string name="nav_detection">检测</string>
+    <string name="nav_detection">健康度</string>
+    <string name="nav_detection_detail">电池健康度</string>
     <string name="nav_history">记录</string>
     <string name="nav_settings">设置</string>
 

@@ -1,12 +1,13 @@
 <resources>
     <!-- Base App -->
-    <string name="app_name">Battery Analysis</string>
-    <string name="app_full_title">Battery Analysis (Battery App)</string>
+    <string name="app_name">Battery Statistics</string>
+    <string name="app_full_title">Battery Statistics</string>
 
     <!-- Bottom Navigation -->
     <string name="nav_power">Power</string>
     <string name="nav_charging">Charging</string>
-    <string name="nav_detection">Detection</string>
+    <string name="nav_detection">Health</string>
+    <string name="nav_detection_detail">Battery Health</string>
     <string name="nav_history">History</string>
     <string name="nav_settings">Settings</string>
 

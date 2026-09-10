@@ -2,6 +2,7 @@ package com.battery.analysis.model
 
 import android.content.Context
 import com.battery.analysis.R
+import java.io.Serializable
 import java.util.Locale
 
 /**
@@ -104,7 +105,7 @@ data class HistoryRecord(
      * 电池技术类型（如 Li-ion）。
      */
     val technology: String? = null
-) {
+) : Serializable {
     /**
      * 将该历史记录的所有参数格式化为便于查看与复制的详细文本（支持自适应中英文）。
      *

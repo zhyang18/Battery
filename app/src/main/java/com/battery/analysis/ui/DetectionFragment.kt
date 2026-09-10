@@ -18,10 +18,14 @@ import com.battery.analysis.viewmodel.BatteryViewModel
 import com.google.android.material.tabs.TabLayoutMediator
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.content.Intent
+import androidx.activity.result.contract.ActivityResultContracts
+import com.battery.analysis.model.HistoryRecord
 
 /**
- * 电池检测顶级页面 Fragment。
- * 承载上方三大子页签（系统api、Shizuku、错误报告）与 ViewPager2 左右滑动手势容器，并支持下拉解耦独立刷新数据。
+ * 电池健康度顶级页面 Fragment。
+ * 承载上方三大子页签（系统api、Shizuku、错误报告）与 ViewPager2 左右滑动手势容器，
+ * 并在右上角提供“历史记录”入口跳转至独立的历史记录详情页面，支持从快照返回并加载渲染。
  */
 class DetectionFragment : Fragment() {
 
@@ -29,6 +33,24 @@ class DetectionFragment : Fragment() {
     private val binding get() = _binding!!
 
     private val viewModel: BatteryViewModel by activityViewModels()
+
+    /**
+     * 启动历史记录详情 Activity 并监听快照载入返回结果的 Launcher。
+     */
+    private val historyLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == HistoryActivity.RESULT_LOAD_TO_MAIN) {
+            val record = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                result.data?.getSerializableExtra(HistoryActivity.EXTRA_LOAD_RECORD, HistoryRecord::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                result.data?.getSerializableExtra(HistoryActivity.EXTRA_LOAD_RECORD) as? HistoryRecord
+            }
+            if (record != null) {
+                viewModel.loadRecordToDetection(record)
+                Toast.makeText(requireContext(), getString(R.string.toast_load_snapshot_success), Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     /**
      * 创建 Fragment 的视图层级。
@@ -55,6 +77,12 @@ class DetectionFragment : Fragment() {
      */
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        // 0. 右上角“历史记录”入口点击事件：打开独立历史记录页面
+        binding.btnDetectionHistory.setOnClickListener {
+            val intent = Intent(requireContext(), HistoryActivity::class.java)
+            historyLauncher.launch(intent)
+        }
 
         // 1. 初始化子 ViewPager2 与 TabLayout
         val pagerAdapter = DetectionPagerAdapter(this)

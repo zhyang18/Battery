@@ -674,14 +674,11 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 当监听到断开外部电源（拔掉充电器）时触发，固化充电数据并智能展示耗电统计界面。
+     * 当监听到断开外部电源（拔掉充电器）时触发，更新界面展示模式切回耗电统计。
+     * 底层数据固化与归档已由后台监控服务与广播接收器原子保障，界面仅专注视图渲染切换。
      */
     private fun onDevicePowerDisconnected() {
         if (_binding == null) return
-        val currentLevel = powerManager.getCurrentBatteryStatus().levelPercent
-        powerManager.onPowerDisconnected(currentLevel)
-        chargingManager.onPowerDisconnected()
-
         applySmartChargingMode(isCharging = false, showToast = true)
     }
 

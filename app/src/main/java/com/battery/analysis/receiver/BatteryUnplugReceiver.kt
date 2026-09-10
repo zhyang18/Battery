@@ -3,26 +3,17 @@ package com.battery.analysis.receiver
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
-import android.widget.Toast
-import com.battery.analysis.R
-import com.battery.analysis.db.ChargingHistoryDbHelper
-import com.battery.analysis.db.HistoryDbHelper
 import com.battery.analysis.db.PowerUsageDbHelper
 import com.battery.analysis.manager.ChargingStatsManager
 import com.battery.analysis.manager.PowerUsageManager
-import com.battery.analysis.model.HistoryRecord
 import com.battery.analysis.model.PowerUsageRecord
-import com.battery.analysis.provider.NormalApiProvider
-import com.battery.analysis.provider.ShizukuProvider
 import com.battery.analysis.service.BatteryMonitorService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import rikka.shizuku.Shizuku
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -150,17 +141,16 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
     }
 
     /**
-     * 异步采集当前系统的电池数据，构建历史记录并存入 SQLite 数据库。
+     * 执行断开电源后的充放电结算处理：固化上一个充电周期的历史账本，采集断电前耗电统计快照，并重置开启全新放电统计周期。
+     * 健康度快照仅在用户主动于电池健康页检测时保存，充放电过程不自动生成健康度记录。
      *
      * @param context 应用程序上下文
      * @param timestamp 触发断电时的时间戳毫秒值
      */
     private fun recordBatterySnapshotOnUnplug(context: Context, timestamp: Long) {
         val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
-        val noteText = context.getString(R.string.note_auto_unplug)
-        val recordsToInsert = mutableListOf<HistoryRecord>()
 
-        // 0. 关键闭环：当断开充电器时，固化并保存本次充电历史记录入库
+        // 1. 关键闭环：当断开充电器时，固化并保存本次充电历史记录入库
         try {
             val chargingManager = ChargingStatsManager.getInstance(context)
             chargingManager.onPowerDisconnected()
@@ -168,43 +158,7 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
             e.printStackTrace()
         }
 
-        // 1. 采集系统原生 API 电池快照数据
-        val normalProvider = NormalApiProvider()
-        val normalInfo = normalProvider.getBatteryInfo(context)
-        val normalRecord = HistoryRecord.fromBatteryInfo(
-            info = normalInfo,
-            category = "系统api",
-            id = timestamp,
-            note = noteText
-        ).copy(captureTime = timeStr)
-        recordsToInsert.add(normalRecord)
-
-        // 2. 若 Shizuku 处于运行且已授权状态，同步采集底层驱动高精度快照
-        val isShizukuAvailable = try {
-            Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        } catch (_: Exception) {
-            false
-        }
-
-        if (isShizukuAvailable) {
-            try {
-                val shizukuProvider = ShizukuProvider()
-                val shizukuInfo = shizukuProvider.getBatteryInfo(context)
-                if (shizukuInfo.designCapacity != null || shizukuInfo.level != null || shizukuInfo.cycleCount != null) {
-                    val shizukuRecord = HistoryRecord.fromBatteryInfo(
-                        info = shizukuInfo,
-                        category = "Shizuku",
-                        id = timestamp + 1,
-                        note = noteText
-                    ).copy(captureTime = timeStr)
-                    recordsToInsert.add(shizukuRecord)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
-        // 3. 采集断开前耗电统计完整账本快照并存入 PowerUsageDbHelper 数据库，随后重置开启新放电周期
+        // 2. 采集断开前耗电统计完整账本快照并存入 PowerUsageDbHelper 数据库，随后重置开启新放电周期
         try {
             val powerManager = PowerUsageManager.getInstance(context)
             val currentMode = powerManager.getSelectedMode()
@@ -226,20 +180,6 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
             }
         } catch (e: Exception) {
             e.printStackTrace()
-        }
-
-        // 4. 事务批量插入常规电池检测历史数据库
-        if (recordsToInsert.isNotEmpty()) {
-            val dbHelper = HistoryDbHelper.getInstance(context)
-            dbHelper.insertRecords(recordsToInsert)
-
-            // 5. 通知前台界面刷新数据流并提示 Toast
-            mainHandler.post {
-                onRecordInsertedListener?.invoke()
-                try {
-                    Toast.makeText(context, context.getString(R.string.toast_unplug_recorded), Toast.LENGTH_SHORT).show()
-                } catch (_: Exception) {}
-            }
         }
     }
 

@@ -141,6 +141,10 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
         } else {
             binding.cardScreenOffSpecial.visibility = View.GONE
         }
+
+        // 绑定三合一走势折线图数据（电量、功率、温度），支持手势标尺交互
+        val samplePoints = record.getSamplePoints()
+        binding.chargingChartView.setData(samplePoints)
     }
 
     /**

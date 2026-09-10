@@ -39,6 +39,14 @@ class ChargingStatsManager private constructor(private val context: Context) {
     @Volatile
     private var isCurrentlyCharging: Boolean = false
 
+    // 标记当前充电会话是否已完成数据库归档持久化，防止多源并发广播导致重复入库
+    @Volatile
+    private var hasPersistedCurrentSession: Boolean = false
+
+    // 上一次持久化归档的会话起始时间戳，辅助进行双重幂等防重拦截
+    @Volatile
+    private var lastPersistedStartTimestamp: Long = 0L
+
     // 上一次采样时刻与电量，用于精准核算息屏增量
     @Volatile
     private var lastSampleTimestamp: Long = 0L
@@ -108,9 +116,13 @@ class ChargingStatsManager private constructor(private val context: Context) {
                 0f
             }
 
-            if (duration >= 10000L || finalChargedEnergyWh > 0.005f || levelGain > 0) {
+            val alreadyPersisted = hasPersistedCurrentSession || (currentSummary.startTimestamp > 0L && currentSummary.startTimestamp == lastPersistedStartTimestamp)
+            if (!alreadyPersisted && (duration >= 10000L || finalChargedEnergyWh > 0.005f || levelGain > 0)) {
                 try {
                     val recordTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(now))
+                    val snapshotPoints = synchronized(samplePoints) { samplePoints.toList() }
+                    val pointsJson = ChargingHistoryRecord.pointsToJson(snapshotPoints)
+
                     val record = ChargingHistoryRecord(
                         id = now,
                         recordTime = recordTime,
@@ -127,9 +139,12 @@ class ChargingStatsManager private constructor(private val context: Context) {
                         chargeType = currentSummary.chargeType,
                         screenOffDurationMs = currentSummary.screenOffDurationMs,
                         screenOffLevelGain = currentSummary.screenOffLevelGain,
-                        screenOffEnergyWh = currentSummary.screenOffEnergyWh
+                        screenOffEnergyWh = currentSummary.screenOffEnergyWh,
+                        samplePointsJson = pointsJson
                     )
                     ChargingHistoryDbHelper.getInstance(context).insertRecord(record)
+                    hasPersistedCurrentSession = true
+                    lastPersistedStartTimestamp = currentSummary.startTimestamp
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
@@ -246,6 +261,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
     fun onPowerConnected(initialLevel: Int, chargeType: String) {
         val now = System.currentTimeMillis()
         isCurrentlyCharging = true
+        hasPersistedCurrentSession = false
         lastSampleTimestamp = now
         lastSampleLevel = initialLevel
 
@@ -457,8 +473,22 @@ class ChargingStatsManager private constructor(private val context: Context) {
 
     /**
      * 当断开充电器（拔出电源）时触发，固化本次充电周期的完整数据，并自动归档至充电历史数据库中。
+     * 内部具备线程级互斥加锁（@Synchronized）与会话持久化状态守卫，杜绝 Service 与 Receiver
+     * 并发广播导致的重复归档，确保每次拔电仅生成唯一一份充电历史记录。
      */
+    @Synchronized
     fun onPowerDisconnected() {
+        // 1. 若当前会话已被归档持久化过，或者与上一次已归档的会话起始时间相同，直接拦截退出
+        if (hasPersistedCurrentSession || (currentSummary.startTimestamp > 0L && currentSummary.startTimestamp == lastPersistedStartTimestamp)) {
+            isCurrentlyCharging = false
+            return
+        }
+
+        // 2. 若当前并未处于充电中状态，直接退出
+        if (!isCurrentlyCharging && !currentSummary.isCharging) {
+            return
+        }
+
         isCurrentlyCharging = false
         val now = System.currentTimeMillis()
         currentSummary = currentSummary.copy(
@@ -467,11 +497,14 @@ class ChargingStatsManager private constructor(private val context: Context) {
         )
         saveChargingSessionToPrefs()
 
-        // 充电持续时长超过 10 秒或充入能量大于 0.005Wh 或有电量增量时，自动持久化至充电历史数据库
+        // 3. 充电持续时长超过 10 秒或充入能量大于 0.005Wh 或有电量增量时，自动持久化至充电历史数据库
         val duration = currentSummary.getDurationMs()
         if (duration >= 10000L || currentSummary.chargedEnergyWh > 0.005f || currentSummary.getLevelGain() > 0) {
             try {
                 val recordTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(now))
+                val snapshotPoints = synchronized(samplePoints) { samplePoints.toList() }
+                val pointsJson = ChargingHistoryRecord.pointsToJson(snapshotPoints)
+
                 val record = ChargingHistoryRecord(
                     id = now,
                     recordTime = recordTime,
@@ -488,9 +521,12 @@ class ChargingStatsManager private constructor(private val context: Context) {
                     chargeType = currentSummary.chargeType,
                     screenOffDurationMs = currentSummary.screenOffDurationMs,
                     screenOffLevelGain = currentSummary.screenOffLevelGain,
-                    screenOffEnergyWh = currentSummary.screenOffEnergyWh
+                    screenOffEnergyWh = currentSummary.screenOffEnergyWh,
+                    samplePointsJson = pointsJson
                 )
                 ChargingHistoryDbHelper.getInstance(context).insertRecord(record)
+                hasPersistedCurrentSession = true
+                lastPersistedStartTimestamp = currentSummary.startTimestamp
             } catch (e: Exception) {
                 e.printStackTrace()
             }

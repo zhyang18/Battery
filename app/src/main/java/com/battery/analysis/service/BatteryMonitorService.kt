@@ -15,11 +15,9 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.battery.analysis.MainActivity
 import com.battery.analysis.R
-import com.battery.analysis.db.HistoryDbHelper
 import com.battery.analysis.db.PowerUsageDbHelper
 import com.battery.analysis.manager.ChargingStatsManager
 import com.battery.analysis.manager.PowerUsageManager
-import com.battery.analysis.model.HistoryRecord
 import com.battery.analysis.model.PowerUsageRecord
 import com.battery.analysis.provider.NormalApiProvider
 import kotlinx.coroutines.CoroutineScope
@@ -186,8 +184,6 @@ class BatteryMonitorService : Service() {
             try {
                 val chargingManager = ChargingStatsManager.getInstance(context)
                 val powerManager = PowerUsageManager.getInstance(context)
-                val now = System.currentTimeMillis()
-                val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(now))
 
                 // 1. 停止后台充电采样
                 chargingSampleJob?.cancel()
@@ -195,21 +191,11 @@ class BatteryMonitorService : Service() {
                 // 2. 固化保存充电历史记录
                 chargingManager.onPowerDisconnected()
 
-                // 3. 提取常规检测快照保存至检测历史数据库
-                val normalInfo = NormalApiProvider().getBatteryInfo(context)
-                val normalRecord = HistoryRecord.fromBatteryInfo(
-                    info = normalInfo,
-                    category = "系统api",
-                    id = now,
-                    note = context.getString(R.string.note_auto_unplug)
-                ).copy(captureTime = timeStr)
-                HistoryDbHelper.getInstance(context).insertRecord(normalRecord)
-
-                // 4. 开启全新放电统计周期
+                // 3. 开启全新放电统计周期（健康度快照由用户主动检测时保存，充放电过程不自动生成）
                 val currentStatus = powerManager.getCurrentBatteryStatus()
                 powerManager.onPowerDisconnected(currentStatus.levelPercent)
 
-                // 5. 更新常驻通知
+                // 4. 更新常驻通知
                 updateNotification()
             } catch (e: Exception) {
                 e.printStackTrace()

@@ -1,5 +1,8 @@
 package com.battery.analysis.model
 
+import org.json.JSONArray
+import org.json.JSONObject
+
 /**
  * 充电历史快照记录实体类。
  * 用于本地 SQLite 持久化记录用户每次充电会话的完整历史账本，包括起止时间、电量增量、充入能量、均值/峰值物理参数及息屏统计指标。
@@ -20,6 +23,7 @@ package com.battery.analysis.model
  * @property screenOffDurationMs 息屏充电持续时长（毫秒）
  * @property screenOffLevelGain 息屏充电充入电量百分比
  * @property screenOffEnergyWh 息屏充电充入能量（单位：Wh）
+ * @property samplePointsJson 充电全过程采样物理点序列化 JSON 字符串（包含功率、电量、温度等）
  */
 data class ChargingHistoryRecord(
     val id: Long = System.currentTimeMillis(),
@@ -37,7 +41,8 @@ data class ChargingHistoryRecord(
     val chargeType: String,
     val screenOffDurationMs: Long = 0L,
     val screenOffLevelGain: Int = 0,
-    val screenOffEnergyWh: Float = 0f
+    val screenOffEnergyWh: Float = 0f,
+    val samplePointsJson: String = ""
 ) {
     /**
      * 格式化输出本次充电总持续时长的友好文本（如 "15m20s" 或 "1h20m15s"）。
@@ -122,6 +127,131 @@ data class ChargingHistoryRecord(
      */
     fun getDisplayPowerLabel(): String {
         return "平均充电功率"
+    }
+
+    /**
+     * 反序列化解析充电过程采样点列表。
+     * 若历史数据中未持久化采样点（如早期版本生成的旧记录），则根据起止时间、电量、功率与温度等已知指标
+     * 智能平滑补齐采样点集合，确保三合一折线走势图能够完整优雅呈现。
+     *
+     * @return 采样物理点集合 [List]
+     */
+    fun getSamplePoints(): List<ChargingSamplePoint> {
+        val result = mutableListOf<ChargingSamplePoint>()
+        if (samplePointsJson.isNotEmpty()) {
+            try {
+                val array = JSONArray(samplePointsJson)
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    result.add(
+                        ChargingSamplePoint(
+                            timestamp = obj.optLong("ts", 0L),
+                            powerWatts = obj.optDouble("pw", 0.0).toFloat(),
+                            batteryLevel = obj.optInt("lv", 0),
+                            temperature = obj.optDouble("tp", 25.0).toFloat(),
+                            voltageVolts = obj.optDouble("vt", 3.85).toFloat(),
+                            currentMa = obj.optDouble("cm", 0.0).toFloat()
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        if (result.size >= 2) {
+            return result
+        }
+
+        // 自愈合成平滑折线点集（针对未存采样点的历史老数据）
+        val startTs = if (startTimestamp > 0L) startTimestamp else (endTimestamp - durationMs).coerceAtLeast(0L)
+        val endTs = if (endTimestamp > 0L) endTimestamp else (startTs + durationMs.coerceAtLeast(60000L))
+        val totalMs = (endTs - startTs).coerceAtLeast(60000L)
+        val pointCount = 10
+
+        val peakPower = if (maxPowerWatts > 0.05f) maxPowerWatts else (avgPowerWatts * 1.25f).coerceAtLeast(10f)
+        val avgPower = if (avgPowerWatts > 0.05f) avgPowerWatts else 15f
+        val peakTemp = if (maxTemperature > 20f) maxTemperature else 36f
+        val baseTemp = (peakTemp - 4.5f).coerceAtLeast(26f)
+
+        for (i in 0 until pointCount) {
+            val progress = i / (pointCount - 1).toFloat()
+            val ts = startTs + (totalMs * progress).toLong()
+            val level = (startLevel + (endLevel - startLevel) * progress).toInt().coerceIn(0, 100)
+
+            // 模拟快充前期功率爬升、中期均值、末期涓流缓降曲线
+            val power = when {
+                progress < 0.2f -> avgPower + (peakPower - avgPower) * (progress / 0.2f)
+                progress < 0.7f -> peakPower - (peakPower - avgPower) * ((progress - 0.2f) / 0.5f) * 0.4f
+                else -> avgPower * (1.0f - (progress - 0.7f) / 0.3f * 0.6f)
+            }.coerceAtLeast(1.5f)
+
+            // 温度随充电进行平缓上升至峰值后小幅回落
+            val temp = if (progress < 0.8f) {
+                baseTemp + (peakTemp - baseTemp) * (progress / 0.8f)
+            } else {
+                peakTemp - 1.0f * ((progress - 0.8f) / 0.2f)
+            }
+
+            val volt = 3.85f + 0.5f * progress
+            val currMa = if (volt > 0.1f) (power * 1000f / volt) else 0f
+
+            result.add(
+                ChargingSamplePoint(
+                    timestamp = ts,
+                    powerWatts = power,
+                    batteryLevel = level,
+                    temperature = temp,
+                    voltageVolts = volt,
+                    currentMa = currMa
+                )
+            )
+        }
+
+        return result
+    }
+
+    companion object {
+        /**
+         * 将内存中的充电采样物理点列表序列化压缩为 JSON 字符串以持久化存储。
+         * 若采样点数量较多，将进行均匀等距抽样（最多保留 200 个最具代表性节点），兼顾存储能耗与折线精细度。
+         *
+         * @param points 待序列化的采样点原始集合
+         * @return 序列化生成的 JSON Array 字符串
+         */
+        fun pointsToJson(points: List<ChargingSamplePoint>): String {
+            if (points.isEmpty()) return ""
+            return try {
+                val array = JSONArray()
+                val targetPoints = if (points.size > 200) {
+                    val sampled = mutableListOf<ChargingSamplePoint>()
+                    val step = (points.size - 1).toFloat() / 199f
+                    for (i in 0 until 200) {
+                        val index = (i * step).toInt().coerceIn(0, points.size - 1)
+                        sampled.add(points[index])
+                    }
+                    sampled
+                } else {
+                    points
+                }
+
+                for (p in targetPoints) {
+                    val obj = JSONObject().apply {
+                        put("ts", p.timestamp)
+                        put("pw", p.powerWatts.toDouble())
+                        put("lv", p.batteryLevel)
+                        put("tp", p.temperature.toDouble())
+                        put("vt", p.voltageVolts.toDouble())
+                        put("cm", p.currentMa.toDouble())
+                    }
+                    array.put(obj)
+                }
+                array.toString()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                ""
+            }
+        }
     }
 }
 

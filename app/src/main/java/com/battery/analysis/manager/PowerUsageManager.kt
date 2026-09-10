@@ -869,13 +869,29 @@ class PowerUsageManager private constructor(private val context: Context) {
                     }
                 }
 
-                // 4. 后台所有应用能耗与后台平均功耗统计
+                // 4. 后台所有应用能耗、后台真实活跃时长、平均功耗与剩余续航统计
                 val allBgEnergyWh = enrichedAppList.sumOf { it.backgroundEnergyWh.toDouble() }.toFloat()
-                val effectiveBgMs = if (screenOffMs > 30000L) screenOffMs else (durationMs - screenOnMs).coerceAtLeast(0L)
+                val appMaxBgMs = enrichedAppList.maxOfOrNull { it.backgroundTimeMs } ?: 0L
+                val rawBgMs = if (screenOffMs > 30000L) maxOf(screenOffMs, appMaxBgMs) else maxOf((durationMs - screenOnMs).coerceAtLeast(0L), appMaxBgMs)
+                val effectiveBgMs = if (rawBgMs >= 1000L) {
+                    rawBgMs
+                } else if (allBgEnergyWh > 0.0005f) {
+                    ((allBgEnergyWh / 0.5f) * 3600000.0).toLong().coerceIn(1000L, durationMs.coerceAtLeast(1000L))
+                } else {
+                    0L
+                }
                 val effectiveBgHours = effectiveBgMs / 3600000f
                 val calcBgWatts = if (effectiveBgHours > 0f && allBgEnergyWh > 0f) (allBgEnergyWh / effectiveBgHours) else 0f
-                val bgWatts = if (screenOffWatts > 0.05f) minOf(calcBgWatts, screenOffWatts) else calcBgWatts.coerceAtMost(ShizukuBatteryStatsParser.MAX_STANDBY_POWER_WATTS)
-                val remBackgroundStr = if (bgWatts >= 0.05f) formatHoursToText(energy / bgWatts) else "--"
+                val bgWatts = if (screenOffWatts > 0.05f) {
+                    minOf(calcBgWatts, screenOffWatts)
+                } else if (calcBgWatts >= 0.05f) {
+                    calcBgWatts.coerceAtMost(ShizukuBatteryStatsParser.MAX_STANDBY_POWER_WATTS)
+                } else if (allBgEnergyWh > 0.001f) {
+                    0.08f
+                } else {
+                    0f
+                }
+                val remBackgroundStr = if (bgWatts >= 0.05f && energy > 0f) formatHoursToText(energy / bgWatts) else "--"
                 val bgDurationStr = formatDuration(effectiveBgMs)
 
                 val offEnergyWh = if (screenOffHours > 0f && screenOffWatts > 0f) (screenOffWatts * screenOffHours) else 0f
@@ -1948,12 +1964,31 @@ class PowerUsageManager private constructor(private val context: Context) {
         val offEnergyWh = if (screenOffHours > 0f && screenOffPower > 0f) screenOffPower * screenOffHours else 0f
         val onEnergyWh = if (screenOnHours > 0f) (realTotalEnergyWh - offEnergyWh).coerceAtLeast(0f) else 0f
         val allBgEnergyWh = appList.sumOf { it.backgroundEnergyWh.toDouble() }.toFloat()
-        val bgDurationMs = if (screenOffMs > 30000L) screenOffMs else (totalMs - screenOnMs).coerceAtLeast(0L)
+        val appMaxBgMs = appList.maxOfOrNull { it.backgroundTimeMs } ?: 0L
+        val rawBgMs = if (screenOffMs > 30000L) maxOf(screenOffMs, appMaxBgMs) else maxOf((totalMs - screenOnMs).coerceAtLeast(0L), appMaxBgMs)
+        val bgDurationMs = if (rawBgMs >= 1000L) {
+            rawBgMs
+        } else if (allBgEnergyWh > 0.0005f) {
+            ((allBgEnergyWh / 0.5f) * 3600000.0).toLong().coerceIn(1000L, totalMs.coerceAtLeast(1000L))
+        } else {
+            0L
+        }
         val bgHours = bgDurationMs / 3600000f
         val calcBgWatts = if (bgHours > 0f && allBgEnergyWh > 0f) (allBgEnergyWh / bgHours) else 0f
-        val bgWatts = if (screenOffPower > 0.05f) minOf(calcBgWatts, screenOffPower) else calcBgWatts.coerceAtMost(ShizukuBatteryStatsParser.MAX_STANDBY_POWER_WATTS)
-        val remBgStr = if (bgWatts >= 0.05f && remainingTotalHours > 0f) {
+        val bgWatts = if (screenOffPower > 0.05f) {
+            minOf(calcBgWatts, screenOffPower)
+        } else if (calcBgWatts >= 0.05f) {
+            calcBgWatts.coerceAtMost(ShizukuBatteryStatsParser.MAX_STANDBY_POWER_WATTS)
+        } else if (allBgEnergyWh > 0.001f) {
+            0.08f
+        } else {
+            0f
+        }
+        val remBgStr = if (bgWatts >= 0.05f && remainingTotalHours > 0f && avgPower > 0f) {
             formatHoursToText(remainingTotalHours * (avgPower / bgWatts))
+        } else if (bgWatts >= 0.05f && realTotalEnergyWh > 0f) {
+            val currentBatteryEnergy = (currentLevel / 100f) * (NormalApiProvider.getDesignCapacity(context) ?: 5000f) * 3.85f / 1000f
+            formatHoursToText(currentBatteryEnergy / bgWatts)
         } else {
             "--"
         }

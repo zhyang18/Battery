@@ -83,14 +83,14 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
             val pwrStr = item.getFormattedCombinedAvgWatts()
             tvAvgInfo.text = String.format(
                 Locale.getDefault(),
-                "AVG: %s, %.1f℃",
-                pwrStr,
-                item.avgTemperature
+                "AVG: %s",
+                pwrStr
             )
             tvAppEnergy.text = item.getFormattedCombinedEnergyWh()
             tvMaxTemp.text = String.format(
                 Locale.getDefault(),
-                "MAX: %.1f℃",
+                "%.1f℃ | MAX: %.1f℃",
+                item.avgTemperature,
                 item.maxTemperature
             )
             tvDuration.text = item.getFormattedCombinedDuration()

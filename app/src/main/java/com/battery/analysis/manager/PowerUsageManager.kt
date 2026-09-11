@@ -478,8 +478,35 @@ class PowerUsageManager private constructor(private val context: Context) {
                     reconciled = true
                 }
             } else if (lastUnplugTime <= 0L || (now - lastUnplugTime) > 48 * 3600000L) {
-                // 长期未更新拔电时间，自动修正基准
-                if (!isShizukuAuthorized()) {
+                // 首次进入无记录或长期未更新拔电时间，自动修正基准
+                var syncedViaShizuku = false
+                if (isShizukuAuthorized()) {
+                    try {
+                        val stats = shizukuParser.parseChargedBatteryStats(
+                            batterySnapshot.voltageVolts,
+                            batterySnapshot.temperature,
+                            0L,
+                            getDischargeTempPoints()
+                        )
+                        if (stats.detectedUnplugLevel != null && stats.detectedUnplugLevel >= currentLevel) {
+                            val detectedTime = if (stats.detectedUnplugTs != null && stats.detectedUnplugTs > 0L) {
+                                stats.detectedUnplugTs
+                            } else {
+                                now - stats.dischargeDurationMs
+                            }
+                            prefs.edit()
+                                .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, stats.detectedUnplugLevel)
+                                .putLong(PREF_KEY_LAST_UNPLUG_TIME, detectedTime)
+                                .apply()
+                            saveUnplugUsageSnapshot()
+                            syncedViaShizuku = true
+                            reconciled = true
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+                if (!syncedViaShizuku) {
                     onPowerDisconnected(currentLevel)
                     reconciled = true
                 }
@@ -591,11 +618,13 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 获取最近一次拔掉电源时的初始电量百分比。
+     * 若首次启动尚未产生拔电记录，以当前设备实际电量作为初始基准，避免误判为 100% 导致虚高功耗。
      *
-     * @return 拔电时的初始电量百分比（默认 100）
+     * @return 拔电时的初始电量百分比
      */
     fun getLastUnplugLevel(): Int {
-        return prefs.getInt(PREF_KEY_LAST_UNPLUG_LEVEL, 100)
+        val saved = prefs.getInt(PREF_KEY_LAST_UNPLUG_LEVEL, -1)
+        return if (saved in 1..100) saved else getCurrentBatteryStatus().levelPercent
     }
 
     /**
@@ -875,8 +904,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val screenOnHours = screenOnMs / 3600000f
                 val screenOffHours = screenOffMs / 3600000f
 
-                // 起始电量：优先取探测到的真实拔电电量，其次取有效拔电记录，次取历史点最高电量，最后以当前电量保底
-                val historyMaxLevel = stats.historyLevelPoints.maxOfOrNull { it.second } ?: batterySnapshot.levelPercent
+                // 起始电量：优先取探测到的真实拔电电量，其次取有效拔电记录，仅在本次放电时间区间内回溯历史电量，最后以当前电量保底
+                val intervalHistoryMax = stats.historyLevelPoints
+                    .filter { it.first >= startTs }
+                    .maxOfOrNull { it.second }
                 val startLevel = when {
                     stats.detectedUnplugLevel != null && stats.detectedUnplugLevel >= batterySnapshot.levelPercent -> {
                         stats.detectedUnplugLevel
@@ -884,8 +915,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                     effectiveUnplugTime > 0L && effectiveUnplugLevel >= batterySnapshot.levelPercent -> {
                         effectiveUnplugLevel
                     }
-                    historyMaxLevel >= batterySnapshot.levelPercent -> {
-                        historyMaxLevel
+                    intervalHistoryMax != null && intervalHistoryMax >= batterySnapshot.levelPercent -> {
+                        intervalHistoryMax
                     }
                     else -> {
                         batterySnapshot.levelPercent
@@ -2198,7 +2229,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         val effectiveCapacity = getEffectiveDeviceCapacityMah()
         val unplugLevel = getLastUnplugLevel().coerceIn(1, 100)
-        val startLevel = if (unplugLevel >= currentLevel) unplugLevel else 100
+        val startLevel = if (unplugLevel >= currentLevel) unplugLevel else currentLevel
         val dropPercent = (startLevel - currentLevel).coerceAtLeast(0)
         val dischargeHours = totalMs / 3600000f
         val screenOnHours = screenOnMs / 3600000f

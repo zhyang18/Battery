@@ -153,7 +153,8 @@ class MainActivity : AppCompatActivity() {
      * 检查并按需启动后台电池实时监控前台服务，兼容 Android 13+ 运行时通知权限校验。
      */
     fun checkAndStartBatteryMonitorService() {
-        if (!com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(this)) {
+        if (!com.battery.analysis.service.BatteryMonitorService.shouldServiceRun(this)) {
+            com.battery.analysis.service.BatteryMonitorService.stop(this)
             return
         }
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 息屏状态指示图标（月牙弯月，用于指示设备处于息屏待机或休眠状态） -->
+    <path
+        android:fillColor="#888888"
+        android:pathData="M12.3,2a10,10 0 0,0 -1.9,0.18 8,8 0 1,1 9.42,9.42A10,10 0 0,0 12.3,2z" />
+</vector>

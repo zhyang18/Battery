@@ -484,6 +484,7 @@
                 android:background="@null"
                 android:minHeight="0dp"
                 android:padding="0dp"
+                android:visibility="gone"
                 app:elevation="0dp"
                 app:contentInsetStart="0dp"
                 app:contentInsetEnd="0dp"
@@ -500,7 +501,7 @@
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="4dp"
                     android:alpha="0"
-                    android:visibility="invisible"
+                    android:visibility="gone"
                     app:cardBackgroundColor="#14888888"
                     app:cardCornerRadius="14dp"
                     app:cardElevation="0dp"
@@ -675,7 +676,7 @@
             android:fillViewport="true"
             android:paddingStart="14dp"
             android:paddingEnd="14dp"
-            android:paddingBottom="72dp">
+            android:paddingBottom="16dp">
 
             <LinearLayout
                 android:layout_width="match_parent"

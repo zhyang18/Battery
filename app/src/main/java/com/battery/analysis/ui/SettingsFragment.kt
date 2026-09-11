@@ -1,5 +1,7 @@
 package com.battery.analysis.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -27,6 +29,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.battery.analysis.MainActivity
 import com.battery.analysis.R
+import com.battery.analysis.daemon.DaemonManager
 import com.battery.analysis.databinding.FragmentSettingsBinding
 import com.battery.analysis.manager.LanguageManager
 import com.battery.analysis.model.BackupData
@@ -124,6 +127,7 @@ class SettingsFragment : Fragment() {
         binding.switchBootAutoStart.isChecked = com.battery.analysis.service.BatteryMonitorService.isBootAutoStartEnabled(requireContext())
         updateKeepAliveIntervalDisplay()
         updateBatteryOptimizationDisplay()
+        updateDaemonStatusDisplay()
     }
 
     /**
@@ -735,21 +739,18 @@ class SettingsFragment : Fragment() {
 
     /**
      * 初始化后台常驻与保活防杀设置交互逻辑。
-     * 绑定前台服务监控开关、亮屏与息屏刷新间隔选择气泡、开机自启动开关、电池优化白名单申请与防杀加锁教程弹窗。
+     * 绑定前台服务通知栏显示开关、亮屏与息屏刷新间隔选择气泡、开机自启动开关、电池优化白名单申请与防杀加锁教程弹窗。
      */
     private fun setupKeepAliveSettings() {
-        val isServiceEnabled = com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())
-        binding.switchKeepAliveService.isChecked = isServiceEnabled
+        setupPrivilegedDaemonSettings()
+
+        val isDisplayEnabled = com.battery.analysis.service.BatteryMonitorService.isNotificationDisplayEnabled(requireContext())
+        binding.switchKeepAliveService.isChecked = isDisplayEnabled
         updateKeepAliveIntervalDisplay()
 
         binding.switchKeepAliveService.setOnCheckedChangeListener { _, isChecked ->
-            com.battery.analysis.service.BatteryMonitorService.setServiceEnabled(requireContext(), isChecked)
-            updateKeepAliveIntervalDisplay()
-            if (isChecked) {
-                (activity as? MainActivity)?.checkAndStartBatteryMonitorService()
-            } else {
-                com.battery.analysis.service.BatteryMonitorService.stop(requireContext())
-            }
+            com.battery.analysis.service.BatteryMonitorService.setNotificationDisplayEnabled(requireContext(), isChecked)
+            com.battery.analysis.service.BatteryMonitorService.updateNotificationVisibility(requireContext())
         }
 
         setupScreenOnIntervalPicker()
@@ -771,15 +772,164 @@ class SettingsFragment : Fragment() {
     }
 
     /**
-     * 更新亮屏刷新间隔与息屏采样间隔的副标题文本及可用状态。
+     * 初始化特权独立守护进程（方案二：终极防杀）板块的交互与控制逻辑。
+     * 绑定启动/停止按钮点击事件与 ADB 启动指南弹窗。
+     */
+    private fun setupPrivilegedDaemonSettings() {
+        updateDaemonStatusDisplay()
+
+        binding.btnDaemonToggle.setOnClickListener {
+            val status = DaemonManager.getDaemonStatus()
+            if (status.isRunning) {
+                // 当前正在运行，执行停止
+                val result = DaemonManager.stopDaemon()
+                result.onSuccess {
+                    Toast.makeText(requireContext(), getString(R.string.toast_daemon_stopped), Toast.LENGTH_SHORT).show()
+                    updateDaemonStatusDisplay()
+                }.onFailure { err ->
+                    Toast.makeText(requireContext(), err.message ?: "停止失败", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                // 当前未运行，尝试智能提权拉起
+                if (DaemonManager.isRootAvailable()) {
+                    val result = DaemonManager.startWithRoot(requireContext())
+                    result.onSuccess {
+                        Toast.makeText(requireContext(), getString(R.string.toast_daemon_started), Toast.LENGTH_SHORT).show()
+                        view?.postDelayed({ updateDaemonStatusDisplay() }, 1000L)
+                    }.onFailure { err ->
+                        Toast.makeText(requireContext(), err.message ?: "Root 启动失败", Toast.LENGTH_LONG).show()
+                    }
+                } else if (DaemonManager.isShizukuAvailable()) {
+                    val result = DaemonManager.startWithShizuku(requireContext())
+                    result.onSuccess {
+                        Toast.makeText(requireContext(), getString(R.string.toast_daemon_started), Toast.LENGTH_SHORT).show()
+                        view?.postDelayed({ updateDaemonStatusDisplay() }, 1000L)
+                    }.onFailure { err ->
+                        Toast.makeText(requireContext(), err.message ?: "Shizuku 启动失败", Toast.LENGTH_LONG).show()
+                    }
+                } else {
+                    // 既无 Root 也无可用 Shizuku，弹出 ADB 指南引导
+                    showDaemonAdbGuideDialog()
+                }
+            }
+        }
+
+        binding.btnDaemonAdbGuide.setOnClickListener {
+            showDaemonAdbGuideDialog()
+        }
+    }
+
+    /**
+     * 刷新特权独立守护进程在界面上的运行状态徽章与详细信息文本。
+     */
+    private fun updateDaemonStatusDisplay() {
+        val status = DaemonManager.getDaemonStatus()
+        if (status.isRunning) {
+            val statusText = if (status.isRoot()) {
+                getString(R.string.settings_daemon_status_running_root)
+            } else {
+                getString(R.string.settings_daemon_status_running_shell)
+            }
+            binding.tvDaemonStatus.text = statusText
+            binding.tvDaemonStatus.setTextColor(Color.parseColor("#10B981"))
+            binding.tvDaemonStatus.setBackgroundResource(R.drawable.bg_badge_btn)
+
+            binding.tvDaemonInfo.visibility = View.VISIBLE
+            binding.tvDaemonInfo.text = getString(R.string.settings_daemon_info_format, status.pid, status.reviveCount)
+
+            binding.btnDaemonToggle.text = getString(R.string.settings_daemon_btn_stop)
+            binding.btnDaemonToggle.setBackgroundResource(R.drawable.bg_setting_card_item)
+            binding.btnDaemonToggle.setTextColor(Color.parseColor("#EF4444"))
+        } else {
+            binding.tvDaemonStatus.text = getString(R.string.settings_daemon_status_stopped)
+            binding.tvDaemonStatus.setTextColor(Color.parseColor("#9CA3AF"))
+            binding.tvDaemonStatus.setBackgroundResource(R.drawable.bg_setting_card_item)
+
+            binding.tvDaemonInfo.visibility = View.GONE
+
+            val startBtnText = if (DaemonManager.isRootAvailable()) {
+                getString(R.string.settings_daemon_btn_start_root)
+            } else if (DaemonManager.isShizukuAvailable()) {
+                getString(R.string.settings_daemon_btn_start_shizuku)
+            } else {
+                getString(R.string.settings_daemon_btn_start)
+            }
+            binding.btnDaemonToggle.text = startBtnText
+            binding.btnDaemonToggle.setBackgroundResource(R.drawable.bg_dialog_btn_primary)
+            binding.btnDaemonToggle.setTextColor(Color.WHITE)
+        }
+    }
+
+    /**
+     * 弹出现代化 ADB 特权守护进程启动指南对话框，展示命令行并支持一键复制。
+     */
+    private fun showDaemonAdbGuideDialog() {
+        val ctx = context ?: return
+        val dialogView = layoutInflater.inflate(R.layout.dialog_daemon_adb_guide, null)
+
+        val tvCmdPreview = dialogView.findViewById<TextView>(R.id.tv_daemon_adb_cmd_preview)
+        val btnCopyCmd = dialogView.findViewById<TextView>(R.id.btn_copy_adb_cmd)
+        val btnCopyStopCmd = dialogView.findViewById<TextView>(R.id.btn_copy_adb_stop_cmd)
+        val btnClose = dialogView.findViewById<TextView>(R.id.btn_dialog_close)
+
+        val adbLaunchCmd = DaemonManager.getAdbCommand()
+        val adbStopCmd = DaemonManager.getAdbStopCommand()
+
+        tvCmdPreview.text = adbLaunchCmd
+
+        val dialog = AlertDialog.Builder(ctx)
+            .setView(dialogView)
+            .create()
+
+        btnCopyCmd.setOnClickListener {
+            copyToClipboard(adbLaunchCmd, "ADB Launch Command")
+            Toast.makeText(ctx, getString(R.string.toast_copy_success), Toast.LENGTH_SHORT).show()
+        }
+
+        btnCopyStopCmd.setOnClickListener {
+            copyToClipboard(adbStopCmd, "ADB Stop Command")
+            Toast.makeText(ctx, getString(R.string.toast_copy_success), Toast.LENGTH_SHORT).show()
+        }
+
+        btnClose.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        dialog.show()
+        dialog.window?.let { window ->
+            window.setBackgroundDrawableResource(android.R.color.transparent)
+            val width = (resources.displayMetrics.widthPixels * 0.92).toInt()
+            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT)
+            window.setGravity(android.view.Gravity.CENTER)
+        }
+    }
+
+    /**
+     * 将指定文本内容复制到系统剪贴板。
+     *
+     * @param text 要复制的字符串文本
+     * @param label 剪贴板内容标签
+     */
+    private fun copyToClipboard(text: String, label: String) {
+        val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+        val clip = ClipData.newPlainText(label, text)
+        clipboard.setPrimaryClip(clip)
+    }
+
+    /**
+     * 更新亮屏刷新间隔与息屏采样间隔的副标题文本。
+     * 常驻通知栏显示设置不影响亮屏和息屏采样间隔的可用状态。
      */
     private fun updateKeepAliveIntervalDisplay() {
-        val isServiceEnabled = com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())
         val onInterval = com.battery.analysis.service.BatteryMonitorService.getScreenOnIntervalMs(requireContext())
         val offInterval = com.battery.analysis.service.BatteryMonitorService.getScreenOffIntervalMs(requireContext())
 
-        binding.tvCurrentScreenOnInterval.text = getIntervalDisplay(onInterval)
+        binding.tvCurrentScreenOnInterval.text = when (onInterval) {
+            com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER -> getString(R.string.interval_never)
+            else -> getIntervalDisplay(onInterval)
+        }
         binding.tvCurrentScreenOffInterval.text = when (offInterval) {
+            com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER -> getString(R.string.interval_never)
             0L -> getString(R.string.interval_smart_eco)
             15000L -> getString(R.string.interval_15s)
             30000L -> getString(R.string.interval_30s)
@@ -789,25 +939,27 @@ class SettingsFragment : Fragment() {
             else -> "${offInterval / 1000}s"
         }
 
-        binding.layoutScreenOnInterval.alpha = if (isServiceEnabled) 1.0f else 0.45f
-        binding.layoutScreenOffInterval.alpha = if (isServiceEnabled) 1.0f else 0.45f
-        binding.layoutScreenOnInterval.isEnabled = isServiceEnabled
-        binding.layoutScreenOffInterval.isEnabled = isServiceEnabled
+        // 常驻通知栏显示不影响亮屏和息屏采样间隔，保持始终可用
+        binding.layoutScreenOnInterval.alpha = 1.0f
+        binding.layoutScreenOffInterval.alpha = 1.0f
+        binding.layoutScreenOnInterval.isEnabled = true
+        binding.layoutScreenOffInterval.isEnabled = true
     }
 
     /**
      * 初始化亮屏监控刷新间隔选择气泡菜单。
+     * 支持在不采样(-1L)与高频刷新间自由切换。
      */
     private fun setupScreenOnIntervalPicker() {
-        val intervalValues = listOf(1000L, 2000L, 3000L, 5000L, 10000L)
+        val intervalValues = listOf(
+            com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER,
+            1000L, 2000L, 3000L, 5000L, 10000L
+        )
         binding.layoutScreenOnInterval.setOnClickListener {
-            if (!com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())) {
-                return@setOnClickListener
-            }
             val currentVal = com.battery.analysis.service.BatteryMonitorService.getScreenOnIntervalMs(requireContext())
             val popupView = layoutInflater.inflate(R.layout.popup_interval_picker, null)
             val density = resources.displayMetrics.density
-            val popupWidth = (140 * density).toInt()
+            val popupWidth = (160 * density).toInt()
 
             val popupWindow = android.widget.PopupWindow(
                 popupView,
@@ -821,6 +973,7 @@ class SettingsFragment : Fragment() {
             }
 
             val optionViews = listOf(
+                popupView.findViewById<TextView>(R.id.tv_opt_never),
                 popupView.findViewById<TextView>(R.id.tv_opt_1s),
                 popupView.findViewById<TextView>(R.id.tv_opt_2s),
                 popupView.findViewById<TextView>(R.id.tv_opt_3s),
@@ -828,11 +981,12 @@ class SettingsFragment : Fragment() {
                 popupView.findViewById<TextView>(R.id.tv_opt_10s)
             )
 
-            optionViews[0].text = getString(R.string.interval_1s)
-            optionViews[1].text = getString(R.string.interval_2s)
-            optionViews[2].text = getString(R.string.interval_3s)
-            optionViews[3].text = getString(R.string.interval_5s)
-            optionViews[4].text = getString(R.string.interval_10s)
+            optionViews[0].text = getString(R.string.interval_never)
+            optionViews[1].text = getString(R.string.interval_1s)
+            optionViews[2].text = getString(R.string.interval_2s)
+            optionViews[3].text = getString(R.string.interval_3s)
+            optionViews[4].text = getString(R.string.interval_5s)
+            optionViews[5].text = getString(R.string.interval_10s)
 
             val normalColor = ContextCompat.getColor(requireContext(), R.color.popup_item_text)
             val activeColor = Color.parseColor("#2196F3")
@@ -859,13 +1013,14 @@ class SettingsFragment : Fragment() {
 
     /**
      * 初始化息屏待机采样间隔选择气泡菜单。
+     * 支持在不采样(-1L)、智能省电(0L)与定时轮询间自由切换。
      */
     private fun setupScreenOffIntervalPicker() {
-        val intervalValues = listOf(0L, 15000L, 30000L, 60000L, 120000L, 300000L)
+        val intervalValues = listOf(
+            com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER,
+            0L, 15000L, 30000L, 60000L, 120000L, 300000L
+        )
         binding.layoutScreenOffInterval.setOnClickListener {
-            if (!com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())) {
-                return@setOnClickListener
-            }
             val currentVal = com.battery.analysis.service.BatteryMonitorService.getScreenOffIntervalMs(requireContext())
             val popupView = layoutInflater.inflate(R.layout.popup_screen_off_interval_picker, null)
             val density = resources.displayMetrics.density
@@ -883,6 +1038,7 @@ class SettingsFragment : Fragment() {
             }
 
             val optionViews = listOf(
+                popupView.findViewById<TextView>(R.id.tv_opt_never),
                 popupView.findViewById<TextView>(R.id.tv_opt_smart_eco),
                 popupView.findViewById<TextView>(R.id.tv_opt_15s),
                 popupView.findViewById<TextView>(R.id.tv_opt_30s),
@@ -891,12 +1047,13 @@ class SettingsFragment : Fragment() {
                 popupView.findViewById<TextView>(R.id.tv_opt_300s)
             )
 
-            optionViews[0].text = getString(R.string.interval_smart_eco)
-            optionViews[1].text = getString(R.string.interval_15s)
-            optionViews[2].text = getString(R.string.interval_30s)
-            optionViews[3].text = getString(R.string.interval_60s)
-            optionViews[4].text = getString(R.string.interval_120s)
-            optionViews[5].text = getString(R.string.interval_300s)
+            optionViews[0].text = getString(R.string.interval_never)
+            optionViews[1].text = getString(R.string.interval_smart_eco)
+            optionViews[2].text = getString(R.string.interval_15s)
+            optionViews[3].text = getString(R.string.interval_30s)
+            optionViews[4].text = getString(R.string.interval_60s)
+            optionViews[5].text = getString(R.string.interval_120s)
+            optionViews[6].text = getString(R.string.interval_300s)
 
             val normalColor = ContextCompat.getColor(requireContext(), R.color.popup_item_text)
             val activeColor = Color.parseColor("#2196F3")

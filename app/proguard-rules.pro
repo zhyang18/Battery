@@ -145,3 +145,12 @@
 # ------------------------------------------------------------------------------
 -dontwarn org.json.**
 -dontnote **
+
+# ------------------------------------------------------------------------------
+# 9. 特权独立守护进程 (app_process 独立运行时反射入口)
+# ------------------------------------------------------------------------------
+-keep class com.battery.analysis.daemon.BatteryDaemonServer {
+    public static void main(java.lang.String[]);
+    *;
+}
+-keep class com.battery.analysis.daemon.DaemonManager** { *; }

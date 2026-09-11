@@ -464,14 +464,16 @@
     <string name="service_notification_discharging_title">🔋 电池放电中 (%1$d%%)</string>
     <string name="service_notification_discharging_title_with_power">🔋 电池放电中 (%1$d%%) · %2$.1fW</string>
     <string name="service_notification_content">电压: %1$.2fV | 温度: %2$.1f℃</string>
+    <string name="service_notification_silent_desc">后台电池监控静默运行中</string>
     <string name="settings_keep_alive_category">后台常驻与保活防杀</string>
-    <string name="settings_keep_alive_title">常驻通知栏监控</string>
-    <string name="settings_keep_alive_desc">在通知栏常驻显示电量与功耗，避免退至后台被系统杀死，确保插拔电源与充放电数据精准记录</string>
+    <string name="settings_keep_alive_title">常驻通知栏显示</string>
+    <string name="settings_keep_alive_desc">在系统通知栏常驻显示实时电量、瞬时功率与电压温度</string>
     <string name="settings_screen_on_interval_title">亮屏监控刷新间隔</string>
     <string name="settings_screen_on_interval_desc">屏幕点亮时常驻通知与走势采样的刷新频率 (默认 3 秒)</string>
     <string name="settings_screen_off_interval_title">息屏待机采样间隔</string>
     <string name="settings_screen_off_interval_desc">设备锁屏休眠时放电状态的后台采样策略 (推荐智能省电，待机零唤醒)</string>
-    <string name="interval_smart_eco">智能省电 (零唤醒，推荐)</string>
+    <string name="interval_never">不采样</string>
+    <string name="interval_smart_eco">智能省电 (推荐)</string>
     <string name="interval_15s">15 秒</string>
     <string name="interval_30s">30 秒</string>
     <string name="interval_60s">60 秒</string>
@@ -488,5 +490,24 @@
     <string name="dialog_lock_recents_content">由于部分手机系统（如澎湃/MIUI、ColorOS、OriginOS、鸿蒙等）在清理多任务卡片时会执行强制停止，导致系统广播全部被屏蔽，建议开启以下设置以保证插拔电源能被 100% 检测到：\n\n1. 【多任务锁定】：呼出最近任务列表，下拉或长按本应用卡片，点击“锁定”小锁图标；\n\n2. 【自启动权限】：在手机设置 -> 应用管理 -> 本应用 -> 自启动中，开启“允许自启动”；\n\n3. 【后台无限制】：在应用耗电管理中，选择“无限制”或“允许完全后台行为”；\n\n4. 【常驻通知栏】：开启本页上方的“常驻通知栏监控”，利用前台服务机制抵御系统杀进程。</string>
     <string name="toast_battery_optimization_granted">已加入电池优化白名单</string>
     <string name="toast_battery_optimization_request">请在弹窗中选择“允许”加白</string>
+
+    <!-- 特权独立守护进程 (方案二：终极防杀) -->
+    <string name="settings_daemon_title">特权独立守护进程 (终极防杀)</string>
+    <string name="settings_daemon_desc">脱离多任务划杀管控，OOM -1000 内核级最高免疫，被划杀或被系统清理时秒级自愈拉活</string>
+    <string name="settings_daemon_status_running_root">运行中 (Root 特权)</string>
+    <string name="settings_daemon_status_running_shell">运行中 (Shell 特权)</string>
+    <string name="settings_daemon_status_stopped">未运行</string>
+    <string name="settings_daemon_info_format">PID: %1$d | 已成功自愈拉活: %2$d 次</string>
+    <string name="settings_daemon_btn_start_root">Root 启动</string>
+    <string name="settings_daemon_btn_start_shizuku">Shizuku 启动</string>
+    <string name="settings_daemon_btn_start">启动守护</string>
+    <string name="settings_daemon_btn_stop">停止守护</string>
+    <string name="settings_daemon_btn_adb">ADB 指南</string>
+    <string name="dialog_daemon_adb_title">特权独立守护进程启动指南</string>
+    <string name="dialog_daemon_adb_content">特权守护进程通过 app_process 直接挂载于 Linux init (PID 1) 下，拥有最高 -1000 OOM 免疫级别，不受多任务划杀和厂商管家影响。\n\n【电脑 ADB 启动方法】：\n1. 手机连接电脑并开启“USB 调试”；\n2. 点击下方按钮复制 ADB 启动命令；\n3. 在电脑终端 (cmd / PowerShell / Terminal) 粘贴并执行即可后台常驻。\n\n【Root / Shizuku 启动】：\n若本机具备 Root 或 Shizuku 授权，可直接点击界面按钮一键静默拉起。</string>
+    <string name="btn_copy_adb_cmd">复制 ADB 启动命令</string>
+    <string name="btn_copy_adb_stop_cmd">复制停止命令</string>
+    <string name="toast_daemon_started">特权守护进程启动成功</string>
+    <string name="toast_daemon_stopped">特权守护进程已停止</string>
 </resources>
 

@@ -77,7 +77,9 @@ class NormalApiProvider : BatteryDataProvider {
         val rawCurrent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
         val currentNow = if (rawCurrent != 0 && rawCurrent != Int.MIN_VALUE) {
             val absCur = Math.abs(rawCurrent)
-            val curMa = if (absCur < 100000) absCur.toFloat() else absCur / 1000f
+            // Android 官方规范 BatteryManager.BATTERY_PROPERTY_CURRENT_NOW 单位为微安 (uA)
+            // 数值 >= 1000 代表微安并准确转换为毫安 (mA)；若极小老旧机型以毫安报告则保持原值
+            val curMa = if (absCur >= 1000) absCur / 1000f else absCur.toFloat()
             if (isCharging) curMa else -curMa
         } else null
 

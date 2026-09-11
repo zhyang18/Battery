@@ -463,14 +463,16 @@
     <string name="service_notification_discharging_title">🔋 Discharging (%1$d%%)</string>
     <string name="service_notification_discharging_title_with_power">🔋 Discharging (%1$d%%) · %2$.1fW</string>
     <string name="service_notification_content">Voltage: %1$.2fV | Temp: %2$.1f℃</string>
+    <string name="service_notification_silent_desc">Background battery monitor running silently</string>
     <string name="settings_keep_alive_category">Background &amp; Protection</string>
-    <string name="settings_keep_alive_title">Persistent Notification Monitor</string>
-    <string name="settings_keep_alive_desc">Display status in notification bar to prevent app from being killed in background, ensuring 100% accurate unplug &amp; charge detection.</string>
+    <string name="settings_keep_alive_title">Persistent Notification Display</string>
+    <string name="settings_keep_alive_desc">Display real-time battery level, power, voltage and temperature in notification bar</string>
     <string name="settings_screen_on_interval_title">Screen-on Refresh Interval</string>
     <string name="settings_screen_on_interval_desc">Notification and trend sampling frequency when screen is on (Default: 3s)</string>
     <string name="settings_screen_off_interval_title">Screen-off Standby Strategy</string>
     <string name="settings_screen_off_interval_desc">Background sampling strategy when screen is off (Smart Eco recommended for zero standby drain)</string>
-    <string name="interval_smart_eco">Smart Eco (Zero-Wake, Recommended)</string>
+    <string name="interval_never">No Sampling</string>
+    <string name="interval_smart_eco">Smart Eco (Recommended)</string>
     <string name="interval_15s">15 seconds</string>
     <string name="interval_30s">30 seconds</string>
     <string name="interval_60s">60 seconds</string>
@@ -487,5 +489,24 @@
     <string name="dialog_lock_recents_content">To ensure external power plug and unplug events are reliably detected even if recents are cleared:\n\n1. Lock App in Recents: Open recent tasks, pull down or long press this card and tap the lock icon;\n\n2. Allow Auto-start: Enable autostart permission in system app settings;\n\n3. Unrestricted Battery: Set battery management to No Restrictions;\n\n4. Enable Persistent Notification: Turn on the switch above to run foreground service.</string>
     <string name="toast_battery_optimization_granted">Battery optimization ignored</string>
     <string name="toast_battery_optimization_request">Please tap Allow in the popup</string>
+
+    <!-- Privileged Independent Daemon (Solution 2: Ultimate Protection) -->
+    <string name="settings_daemon_title">Privileged Daemon (Ultimate Protection)</string>
+    <string name="settings_daemon_desc">Escapes AMS recents swipe kills, kernel OOM -1000 immunity, sub-second self-healing when killed</string>
+    <string name="settings_daemon_status_running_root">Running (Root)</string>
+    <string name="settings_daemon_status_running_shell">Running (Shell)</string>
+    <string name="settings_daemon_status_stopped">Stopped</string>
+    <string name="settings_daemon_info_format">PID: %1$d | Revived: %2$d times</string>
+    <string name="settings_daemon_btn_start_root">Root Start</string>
+    <string name="settings_daemon_btn_start_shizuku">Shizuku Start</string>
+    <string name="settings_daemon_btn_start">Start Daemon</string>
+    <string name="settings_daemon_btn_stop">Stop</string>
+    <string name="settings_daemon_btn_adb">ADB Guide</string>
+    <string name="dialog_daemon_adb_title">Privileged Daemon Guide</string>
+    <string name="dialog_daemon_adb_content">The privileged daemon is spawned directly by app_process under Linux init (PID 1) with OOM -1000 immunity, completely unaffected by task killer or vendor battery managers.\n\n[PC ADB Method]:\n1. Connect phone to PC and enable USB Debugging;\n2. Click the button below to copy the ADB launch command;\n3. Paste and run in terminal (cmd / PowerShell / Terminal) to start in background.\n\n[Root / Shizuku]:\nIf device is rooted or Shizuku is authorized, simply click the button to launch directly.</string>
+    <string name="btn_copy_adb_cmd">Copy ADB Start Command</string>
+    <string name="btn_copy_adb_stop_cmd">Copy ADB Stop Command</string>
+    <string name="toast_daemon_started">Privileged daemon started</string>
+    <string name="toast_daemon_stopped">Privileged daemon stopped</string>
 </resources>
 

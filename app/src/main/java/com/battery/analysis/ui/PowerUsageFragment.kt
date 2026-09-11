@@ -85,6 +85,9 @@ class PowerUsageFragment : Fragment() {
     // 当前界面呈现的完整耗电数据包缓存
     private var lastRenderedPackage: FullPowerDataPackage? = null
 
+    // 记录 AppBarLayout 垂直偏移量，供 SwipeRefreshLayout 下拉判断使用
+    private var lastAppBarVerticalOffset: Int = 0
+
     private val SHIZUKU_POWER_REQUEST_CODE = 2001
 
     /**
@@ -220,7 +223,8 @@ class PowerUsageFragment : Fragment() {
     /**
      * 配置 CoordinatorLayout、AppBarLayout 与 NestedScrollView 原生联动滑动折叠效果。
      * 监听列表滑动方向联动控制 MainActivity 底部页签栏显隐，
-     * 并平滑折叠隐藏顶部耗电统计栏与大指标卡片，在顶部固定吸顶展示功率与时间两行指标。
+     * 并平滑折叠隐藏顶部耗电统计栏与大指标卡片，在折叠后半程固定吸顶展示功率与时间两行指标；
+     * 展开状态及充电模式下彻底隐藏吸顶卡片容器（View.GONE），确保顶部标题栏所有按钮点击顺畅穿透响应。
      */
     private fun setupCoordinatorScroll() {
         // 清除外层 AppBarLayout 与 Toolbar 默认背景及 Scrim，确保吸顶卡片外围无多余背景色
@@ -233,8 +237,9 @@ class PowerUsageFragment : Fragment() {
 
         // 1. 顶部 AppBarLayout 偏移联动：标题栏淡出、大指标卡片向上移动滚出屏幕、吸顶 mini 卡片在后半程淡入
         binding.appbarPower.addOnOffsetChangedListener { appBarLayout, verticalOffset ->
+            lastAppBarVerticalOffset = verticalOffset
             if (currentDisplayTab == 1) {
-                // 充电模式下完全禁用联动折叠动效，固定常驻完整展开标题栏
+                // 充电模式下完全禁用联动折叠动效，固定常驻完整展开标题栏，隐藏吸顶及放电卡片
                 binding.layoutExpandedHeader.alpha = 1f
                 binding.layoutExpandedHeader.visibility = View.VISIBLE
                 binding.layoutTitleBar.alpha = 1f
@@ -242,9 +247,9 @@ class PowerUsageFragment : Fragment() {
                 binding.cardPowerMetrics.translationY = 0f
                 binding.cardPowerMetrics.alpha = 1f
                 binding.cardPowerMetrics.visibility = View.GONE
+                binding.toolbarCollapsed.visibility = View.GONE
                 binding.cardCollapsedMetrics.visibility = View.GONE
                 binding.cardCollapsedMetrics.alpha = 0f
-                binding.swipeRefreshLayout.isEnabled = false
                 return@addOnOffsetChangedListener
             }
 
@@ -268,14 +273,16 @@ class PowerUsageFragment : Fragment() {
                 binding.layoutExpandedHeader.alpha = 1f
                 binding.layoutExpandedHeader.visibility = View.VISIBLE
 
-                // 3. 折叠吸顶 mini 卡片：在折叠后半程（fraction >= 0.65）平滑淡入吸顶
+                // 3. 折叠吸顶 mini 卡片：在折叠后半程（fraction >= 0.65）平滑淡入吸顶；在前半程及展开时彻底 GONE，杜绝遮挡标题栏按钮点击
                 val isMetricsActive = currentDisplayTab == 0
                 val collapsedAlpha = ((fraction - 0.65f) * 2.85f).coerceIn(0f, 1f)
                 binding.cardCollapsedMetrics.alpha = collapsedAlpha
                 if (collapsedAlpha > 0f && isMetricsActive) {
+                    binding.toolbarCollapsed.visibility = View.VISIBLE
                     binding.cardCollapsedMetrics.visibility = View.VISIBLE
                 } else {
-                    binding.cardCollapsedMetrics.visibility = View.INVISIBLE
+                    binding.toolbarCollapsed.visibility = View.GONE
+                    binding.cardCollapsedMetrics.visibility = View.GONE
                 }
             } else {
                 binding.layoutExpandedHeader.alpha = 1f
@@ -286,17 +293,12 @@ class PowerUsageFragment : Fragment() {
                 binding.cardPowerMetrics.translationY = 0f
                 binding.cardPowerMetrics.visibility = if (currentDisplayTab == 0) View.VISIBLE else View.GONE
                 binding.cardCollapsedMetrics.alpha = 0f
-                binding.cardCollapsedMetrics.visibility = View.INVISIBLE
-            }
-
-            // 下拉刷新防误触：仅当 AppBarLayout 处于完全展开位置（verticalOffset == 0）且列表在顶部时才允许下拉刷新
-            val isAtTop = verticalOffset == 0 && binding.nestedScrollView.scrollY == 0
-            if (currentDisplayTab == 0) {
-                binding.swipeRefreshLayout.isEnabled = isAtTop
+                binding.cardCollapsedMetrics.visibility = View.GONE
+                binding.toolbarCollapsed.visibility = View.GONE
             }
         }
 
-        // 2. 列表滚动监听：联动控制底部页签栏显隐与下拉刷新启用状态
+        // 2. 列表滚动监听：联动控制底部页签栏显隐
         binding.nestedScrollView.setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
             if (currentDisplayTab == 1) {
                 // 充电模式下完全禁用手势联动，底部导航栏保持显示，不触发任何显隐与刷新
@@ -314,12 +316,6 @@ class PowerUsageFragment : Fragment() {
             } else if (dy < -15) {
                 // 手指向下滑动列表，显示底部页签栏
                 (activity as? MainActivity)?.setBottomNavigationVisibility(true)
-            }
-
-            // 动态控制下拉刷新手势使能
-            val isAppBarExpanded = binding.appbarPower.top >= 0
-            if (currentDisplayTab == 0) {
-                binding.swipeRefreshLayout.isEnabled = (scrollY <= 0 && isAppBarExpanded)
             }
         }
     }
@@ -480,8 +476,6 @@ class PowerUsageFragment : Fragment() {
             powerManager.setPowerModeConfigured(true)
 
             binding.layoutFirstTimeSetup.visibility = View.GONE
-            binding.layoutPowerContent.visibility = View.VISIBLE
-            binding.cardPowerMetrics.visibility = View.VISIBLE
 
             val tip = if (currentMode == PowerUsageManager.MODE_SHIZUKU) {
                 getString(R.string.power_mode_tip_shizuku)
@@ -490,7 +484,10 @@ class PowerUsageFragment : Fragment() {
             }
             Toast.makeText(requireContext(), tip, Toast.LENGTH_SHORT).show()
 
-            loadData()
+            // 首次配置完成后，校准并对齐当前放电初始基准，根据当前设备实际充放电状态自适应呈现界面
+            powerManager.checkAndReconcileDischargeState()
+            val isCharging = chargingManager.isCharging()
+            applySmartChargingMode(isCharging = isCharging, showToast = false)
         }
     }
 
@@ -543,6 +540,9 @@ class PowerUsageFragment : Fragment() {
 
     /**
      * 初始化 SwipeRefreshLayout 下拉刷新控件。
+     * 配置主题色彩、刷新监听器以及子视图可上滑回调判断，
+     * 仅在耗电模式、AppBarLayout 完全展开（offset == 0）且列表处于最顶端时才拦截手势触发刷新，
+     * 避免手势抢占并杜绝下拉刷新偶尔失效问题。
      */
     private fun setupSwipeRefresh() {
         binding.swipeRefreshLayout.setColorSchemeColors(Color.parseColor("#1E88E5"))
@@ -560,6 +560,16 @@ class PowerUsageFragment : Fragment() {
                 loadData()
             } else {
                 binding.swipeRefreshLayout.isRefreshing = false
+            }
+        }
+
+        // 使用官方标准机制精准判断是否允许下拉刷新：
+        // 仅在耗电模式下、AppBarLayout 完全展开（lastAppBarVerticalOffset == 0）且列表已滚动至最顶端时才允许下拉刷新
+        binding.swipeRefreshLayout.setOnChildScrollUpCallback { _, _ ->
+            if (currentDisplayTab != 0) {
+                true
+            } else {
+                lastAppBarVerticalOffset != 0 || binding.nestedScrollView.canScrollVertically(-1)
             }
         }
     }
@@ -731,8 +741,8 @@ class PowerUsageFragment : Fragment() {
 
     /**
      * 根据设备当前充放电状态智能应用界面模式：
-     * 处于充电状态时呈现【充电统计】界面，底部页签动态更新为“充电”；
-     * 处于放电状态时呈现【耗电统计】界面，底部页签动态更新为“耗电”。
+     * 处于充电状态时呈现【充电统计】界面，底部页签动态更新为“充电”，隐藏放电大指标卡片与吸顶卡片容器，并刷新布局对齐贴顶；
+     * 处于放电状态时呈现【耗电统计】界面，底部页签动态更新为“耗电”，恢复原生可折叠联动与下拉刷新能力。
      *
      * @param isCharging 系统当前是否处于充电状态
      * @param showToast 是否弹出智能切换提示 Toast
@@ -749,6 +759,7 @@ class PowerUsageFragment : Fragment() {
             binding.layoutPowerContent.visibility = View.GONE
             binding.cardPowerMetrics.visibility = View.GONE
             binding.cardCollapsedMetrics.visibility = View.GONE
+            binding.toolbarCollapsed.visibility = View.GONE
             binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
             return
         }
@@ -766,6 +777,7 @@ class PowerUsageFragment : Fragment() {
             binding.cardPowerMetrics.visibility = View.GONE
             binding.cardCollapsedMetrics.visibility = View.GONE
             binding.cardCollapsedMetrics.alpha = 0f
+            binding.toolbarCollapsed.visibility = View.GONE
             binding.layoutChargingContent.layoutChargingRoot.visibility = View.VISIBLE
 
             // 充电状态下完全禁用联动折叠：展开并锁定 AppBarLayout，恢复底部页签栏常驻展示
@@ -777,6 +789,10 @@ class PowerUsageFragment : Fragment() {
             binding.layoutExpandedHeader.alpha = 1f
             binding.layoutExpandedHeader.visibility = View.VISIBLE
             (activity as? MainActivity)?.setBottomNavigationVisibility(true)
+
+            // 触发表层与内层容器重新布局，确保在去除放电大卡片后充电内容严密贴合标题栏，杜绝出现空白断层
+            binding.appbarPower.requestLayout()
+            binding.coordinatorPower.requestLayout()
 
             renderChargingData()
             startChargingPolling()
@@ -798,6 +814,8 @@ class PowerUsageFragment : Fragment() {
             binding.layoutTitleBar.alpha = 1f
             binding.layoutTitleBar.visibility = View.VISIBLE
             binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
+            binding.toolbarCollapsed.visibility = View.GONE
+            binding.cardCollapsedMetrics.visibility = View.GONE
 
             // 耗电模式下恢复原生联动折叠效果
             (binding.collapsingToolbar.layoutParams as? com.google.android.material.appbar.AppBarLayout.LayoutParams)?.let { params ->
@@ -805,6 +823,8 @@ class PowerUsageFragment : Fragment() {
                         com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_EXIT_UNTIL_COLLAPSED
                 binding.collapsingToolbar.layoutParams = params
             }
+            binding.appbarPower.requestLayout()
+            binding.coordinatorPower.requestLayout()
 
             loadData()
 

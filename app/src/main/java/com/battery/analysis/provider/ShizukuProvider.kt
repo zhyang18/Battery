@@ -68,7 +68,7 @@ class ShizukuProvider : BatteryDataProvider {
                 val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
                 val rawCur = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
                 if (rawCur != null && rawCur != Int.MIN_VALUE && rawCur != 0) {
-                    currentNow = if (Math.abs(rawCur) < 100000) rawCur.toFloat() else rawCur / 1000f
+                    currentNow = if (Math.abs(rawCur) >= 1000) rawCur / 1000f else rawCur.toFloat()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -159,9 +159,7 @@ class ShizukuProvider : BatteryDataProvider {
         if (rawCur == 0L) return null
         val abs = Math.abs(rawCur)
         return when {
-            abs in 1..9999 -> rawCur.toFloat() // 已经为 mA
-            abs in 10000..99999 -> rawCur / 10f // 0.1 mA
-            abs >= 100000 -> rawCur / 1000f // uA 微安转换为 mA
+            abs >= 1000 -> rawCur / 1000f // Linux 内核规范：CURRENT_NOW 单位为微安 (uA)，准确转换为毫安 (mA)
             else -> rawCur.toFloat()
         }
     }
@@ -248,7 +246,7 @@ class ShizukuProvider : BatteryDataProvider {
             if (trimLine.contains("POWER_SUPPLY_POWER_NOW=")) {
                 val rawPwr = trimLine.substringAfter("=").toLongOrNull()
                 if (rawPwr != null && rawPwr > 0) {
-                    powerWatts = if (rawPwr < 100000) rawPwr / 1000f else rawPwr / 1000000f
+                    powerWatts = if (rawPwr >= 10000) rawPwr / 1000000f else rawPwr / 1000f
                 }
             }
             if (trimLine.contains("POWER_SUPPLY_STATUS=")) {
@@ -307,7 +305,7 @@ class ShizukuProvider : BatteryDataProvider {
             if (trimLine.startsWith("power_now=") || trimLine.startsWith("batt_power=")) {
                 val raw = trimLine.substringAfter("=").toLongOrNull()
                 if (raw != null && raw > 0) {
-                    val w = if (raw < 100000) raw / 1000f else raw / 1000000f
+                    val w = if (raw >= 10000) raw / 1000000f else raw / 1000f
                     if (powerWatts == null) powerWatts = w
                 }
             }

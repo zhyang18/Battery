@@ -422,16 +422,33 @@
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
-                    <!-- 亮屏充电时间（格式 00:00） -->
-                    <TextView
-                        android:id="@+id/tv_charging_screen_on_duration"
-                        android:layout_width="65dp"
+                    <!-- 亮屏时间容器：包含亮屏图标与时间数值 -->
+                    <LinearLayout
+                        android:layout_width="74dp"
                         android:layout_height="wrap_content"
-                        android:gravity="end"
-                        android:singleLine="true"
-                        android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="12.5sp"
-                        tools:text="02:16" />
+                        android:gravity="end|center_vertical"
+                        android:orientation="horizontal">
+
+                        <!-- 亮屏图标 -->
+                        <ImageView
+                            android:id="@+id/iv_charging_screen_on"
+                            android:layout_width="13.5dp"
+                            android:layout_height="13.5dp"
+                            android:layout_marginEnd="3.5dp"
+                            android:contentDescription="亮屏"
+                            android:src="@drawable/ic_screen_on"
+                            app:tint="?android:attr/textColorSecondary" />
+
+                        <!-- 亮屏充电时间（格式 00:00） -->
+                        <TextView
+                            android:id="@+id/tv_charging_screen_on_duration"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="12.5sp"
+                            tools:text="02:16" />
+                    </LinearLayout>
 
                     <!-- 亮屏充入百分比 -->
                     <TextView
@@ -464,16 +481,33 @@
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
-                    <!-- 息屏充电时间（格式 00:00） -->
-                    <TextView
-                        android:id="@+id/tv_charging_screen_off_duration"
-                        android:layout_width="65dp"
+                    <!-- 息屏时间容器：包含息屏图标与时间数值 -->
+                    <LinearLayout
+                        android:layout_width="74dp"
                         android:layout_height="wrap_content"
-                        android:gravity="end"
-                        android:singleLine="true"
-                        android:textColor="?android:attr/textColorPrimary"
-                        android:textSize="12.5sp"
-                        tools:text="08:15" />
+                        android:gravity="end|center_vertical"
+                        android:orientation="horizontal">
+
+                        <!-- 息屏图标 -->
+                        <ImageView
+                            android:id="@+id/iv_charging_screen_off"
+                            android:layout_width="13.5dp"
+                            android:layout_height="13.5dp"
+                            android:layout_marginEnd="3.5dp"
+                            android:contentDescription="息屏"
+                            android:src="@drawable/ic_screen_off"
+                            app:tint="?android:attr/textColorSecondary" />
+
+                        <!-- 息屏充电时间（格式 00:00） -->
+                        <TextView
+                            android:id="@+id/tv_charging_screen_off_duration"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="12.5sp"
+                            tools:text="08:15" />
+                    </LinearLayout>
 
                     <!-- 息屏充入百分比 -->
                     <TextView

@@ -9,6 +9,19 @@
     android:orientation="vertical"
     android:paddingVertical="6dp">
 
+    <!-- 不采样 -->
+    <TextView
+        android:id="@+id/tv_opt_never"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:gravity="center"
+        android:paddingHorizontal="12dp"
+        android:text="@string/interval_never"
+        android:textColor="@color/popup_item_text"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+
     <!-- 智能省电 (推荐) -->
     <TextView
         android:id="@+id/tv_opt_smart_eco"

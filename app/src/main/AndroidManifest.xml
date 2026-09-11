@@ -67,6 +67,14 @@
             android:exported="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
+        <!-- 守护进程反向穿透拉活 Provider（破除 Android 12+ 前台服务后台启动拦截） -->
+        <provider
+            android:name=".daemon.KeepAliveProvider"
+            android:authorities="com.battery.analysis.daemon.provider"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false" />
+
         <!-- 后台电池实时监控前台服务 -->
         <service
             android:name=".service.BatteryMonitorService"

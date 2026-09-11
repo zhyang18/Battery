@@ -20,7 +20,8 @@ class DaemonManagerTest {
     fun testAdbLaunchCommandFormat() {
         val adbCmd = DaemonManager.getAdbCommand()
         assertTrue("命令必须以 adb shell 开头", adbCmd.startsWith("adb shell "))
-        assertTrue("必须包含 nohup 脱离终端", adbCmd.contains("nohup /system/bin/app_process"))
+        assertTrue("必须包含 export CLASSPATH 环境变量配置", adbCmd.contains("export CLASSPATH="))
+        assertTrue("必须包含 app_process 运行时拉起指令", adbCmd.contains("app_process"))
         assertTrue("必须指定守护服务主入口类", adbCmd.contains("com.battery.analysis.daemon.BatteryDaemonServer"))
         assertTrue("必须包含后台运行符号 &", adbCmd.endsWith("&\""))
     }
@@ -34,6 +35,7 @@ class DaemonManagerTest {
         assertTrue("停止命令必须包含 adb shell", stopCmd.startsWith("adb shell "))
         assertTrue("必须包含创建 stop 标记文件", stopCmd.contains("touch /data/local/tmp/battery_daemon.stop"))
         assertTrue("必须包含 pkill 终止目标类", stopCmd.contains("pkill -f com.battery.analysis.daemon.BatteryDaemonServer"))
+        assertTrue("必须包含取消 Shell 通知指令", stopCmd.contains("cmd notification cancel battery_daemon_tag"))
     }
 
     /**

@@ -186,6 +186,9 @@ class BatteryMonitorService : Service() {
         // 无论服务启动时处于充电还是放电状态，均自动开启全时态自适应采样轮询
         startMonitorSamplingLoop()
 
+        // 刷新应用活跃时间戳供特权独立守护进程感知
+        touchAliveFile()
+
         // 参考 BatteryRecorder 核心策略：启动 AlarmManager 心跳，每 15 分钟触发一次
         // 若服务被 OOM Killer 杀死，心跳 Alarm 唤醒进程后会自动重启服务，实现自愈拉活
         scheduleHeartbeatAlarm(this)
@@ -201,10 +204,26 @@ class BatteryMonitorService : Service() {
      * @return 保持服务常驻的返回值 [START_STICKY]
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 无论何种原因启动/重启，均续期下一次心跳
+        // 无论何种原因启动/重启，均续期下一次心跳与存活时间戳
+        touchAliveFile()
         scheduleHeartbeatAlarm(this)
         updateNotification(force = true)
         return START_STICKY
+    }
+
+    /**
+     * 向共享路径刷新主应用与前台服务活跃时间戳，供独立特权守护进程感知存活状态。
+     */
+    private fun touchAliveFile() {
+        try {
+            val file = java.io.File("/data/local/tmp/battery_app.alive")
+            val content = "${System.currentTimeMillis()}:${android.os.Process.myPid()}"
+            java.io.FileOutputStream(file).use { fos ->
+                fos.write(content.toByteArray(Charsets.UTF_8))
+                fos.flush()
+            }
+            file.setReadable(true, false)
+        } catch (_: Exception) {}
     }
 
     /**
@@ -317,6 +336,7 @@ class BatteryMonitorService : Service() {
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
 
             while (isActive) {
+                touchAliveFile()
                 val isCharging = chargingManager.isCharging()
                 val isInteractive = pm?.isInteractive ?: true
                 val screenOnInterval = getScreenOnIntervalMs(applicationContext)
@@ -641,6 +661,9 @@ class BatteryMonitorService : Service() {
          * @param context 应用程序上下文
          */
         fun start(context: Context) {
+            try {
+                java.io.File("/data/local/tmp/battery_app.manual_stop").delete()
+            } catch (_: Exception) {}
             val intent = Intent(context, BatteryMonitorService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -656,6 +679,12 @@ class BatteryMonitorService : Service() {
          * @param context 应用程序上下文
          */
         fun stop(context: Context) {
+            try {
+                java.io.File("/data/local/tmp/battery_app.alive").delete()
+                val stopFile = java.io.File("/data/local/tmp/battery_app.manual_stop")
+                java.io.FileOutputStream(stopFile).use { it.write("stop".toByteArray()) }
+                stopFile.setReadable(true, false)
+            } catch (_: Exception) {}
             val intent = Intent(context, BatteryMonitorService::class.java)
             context.stopService(intent)
             setServiceEnabled(context, false)

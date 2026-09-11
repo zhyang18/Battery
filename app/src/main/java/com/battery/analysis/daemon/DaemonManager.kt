@@ -104,14 +104,16 @@ object DaemonManager {
     }
 
     /**
-     * 获取拉起特权守护进程的纯 Shell 脚本命令（脱离终端执行 nohup app_process）。
+     * 获取拉起特权守护进程的纯 Shell 脚本命令（脱离终端并在后台运行 app_process）。
+     *
+     * 避免使用部分定制 ROM 未预装的 nohup 命令，改用标准 POSIX 子进程重定向与环境变量语法。
      *
      * @param context 应用程序上下文，用于获取 APK 安装包绝对路径
      * @return 组装完成的可执行 Shell 命令字符串
      */
     fun getLaunchShellCommand(context: Context): String {
         val apkPath = context.applicationInfo.sourceDir
-        return "nohup /system/bin/app_process -Djava.class.path=$apkPath /system/bin com.battery.analysis.daemon.BatteryDaemonServer >/dev/null 2>&1 &"
+        return "sh -c \"export CLASSPATH=$apkPath; exec /system/bin/app_process /system/bin com.battery.analysis.daemon.BatteryDaemonServer\" </dev/null >/dev/null 2>&1 &"
     }
 
     /**
@@ -122,7 +124,7 @@ object DaemonManager {
      * @return 供在电脑执行的标准 adb shell 命令
      */
     fun getAdbCommand(): String {
-        return "adb shell \"nohup /system/bin/app_process -Djava.class.path=\\$(pm path com.battery.analysis | head -n 1 | cut -d: -f2) /system/bin com.battery.analysis.daemon.BatteryDaemonServer >/dev/null 2>&1 &\""
+        return "adb shell \"sh -c \\\"export CLASSPATH=\\$(pm path com.battery.analysis | head -n 1 | cut -d: -f2); exec /system/bin/app_process /system/bin com.battery.analysis.daemon.BatteryDaemonServer\\\" </dev/null >/dev/null 2>&1 &\""
     }
 
     /**
@@ -131,7 +133,7 @@ object DaemonManager {
      * @return 停止守护进程的 adb shell 命令
      */
     fun getAdbStopCommand(): String {
-        return "adb shell \"touch /data/local/tmp/battery_daemon.stop && pkill -f com.battery.analysis.daemon.BatteryDaemonServer\""
+        return "adb shell \"touch /data/local/tmp/battery_daemon.stop && pkill -f com.battery.analysis.daemon.BatteryDaemonServer && cmd notification cancel battery_daemon_tag\""
     }
 
     /**
@@ -256,7 +258,7 @@ object DaemonManager {
             if (isRootAvailable()) {
                 try {
                     val killCmd = if (pid > 0) "kill -9 $pid" else "pkill -f com.battery.analysis.daemon.BatteryDaemonServer"
-                    Runtime.getRuntime().exec(arrayOf("su", "-c", "$killCmd; rm -f ${BatteryDaemonServer.STATUS_FILE_PATH} ${BatteryDaemonServer.STOP_FILE_PATH}")).waitFor()
+                    Runtime.getRuntime().exec(arrayOf("su", "-c", "$killCmd; rm -f ${BatteryDaemonServer.STATUS_FILE_PATH} ${BatteryDaemonServer.STOP_FILE_PATH}; cmd notification cancel battery_daemon_tag")).waitFor()
                 } catch (_: Exception) {}
             } else if (isShizukuAvailable()) {
                 // 3. 若拥有 Shizuku 权限，通过 Shizuku 执行 kill
@@ -272,7 +274,7 @@ object DaemonManager {
                     newProcessMethod.isAccessible = true
                     val proc = newProcessMethod.invoke(
                         null,
-                        arrayOf("sh", "-c", "$killCmd; rm -f ${BatteryDaemonServer.STATUS_FILE_PATH} ${BatteryDaemonServer.STOP_FILE_PATH}"),
+                        arrayOf("sh", "-c", "$killCmd; rm -f ${BatteryDaemonServer.STATUS_FILE_PATH} ${BatteryDaemonServer.STOP_FILE_PATH}; cmd notification cancel battery_daemon_tag"),
                         null,
                         null
                     ) as? Process

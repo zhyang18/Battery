@@ -170,14 +170,14 @@ data class AppPowerUsageItem(
     }
 
     /**
-     * 格式化指定的瓦特功率值为人类可读文本（如 "1.44W" 或 "--"）。
-     * 当功率低于有效统计门槛（0.05W）时显示为 "--"，杜绝微小底噪误报。
+     * 格式化指定的瓦特功率值为人类可读文本（如 "1.44W"、"0.01W" 或 "--"）。
+     * 当功率低于有效统计门槛（0.005W，即保留两位小数时无法达到 0.01W）时显示为 "--"，杜绝微小底噪误报与伪零显示。
      *
      * @param watts 待格式化的功率值（单位：W）
      * @return 格式化后的功率文本
      */
     private fun formatWatts(watts: Float): String {
-        return if (watts >= 0.05f) {
+        return if (watts >= 0.005f) {
             String.format(java.util.Locale.getDefault(), "%.2fW", watts)
         } else {
             "--"

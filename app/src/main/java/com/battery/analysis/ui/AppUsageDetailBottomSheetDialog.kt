@@ -139,11 +139,11 @@ class AppUsageDetailBottomSheetDialog(
         // 功率列
         val fgPwrStr = formatWattsValue(item.foregroundPowerWatts)
         val bgPwrStr = formatWattsValue(item.backgroundPowerWatts)
-        val primaryPwr = if (item.foregroundPowerWatts >= 0.05f) {
+        val primaryPwr = if (item.foregroundPowerWatts >= 0.005f) {
             fgPwrStr
-        } else if (item.backgroundPowerWatts >= 0.05f) {
+        } else if (item.backgroundPowerWatts >= 0.005f) {
             bgPwrStr
-        } else if (item.avgPowerWatts >= 0.05f) {
+        } else if (item.avgPowerWatts >= 0.005f) {
             formatWattsValue(item.avgPowerWatts)
         } else {
             "--"
@@ -245,13 +245,14 @@ class AppUsageDetailBottomSheetDialog(
     }
 
     /**
-     * 格式化瓦特功率值为可读文本（如 "1.10 W" 或 "--"）。
+     * 格式化功率为文本（如 "1.44 W"、"0.01 W" 或 "--"）。
+     * 当功率低于有效统计门槛（0.005W，即保留两位小数无法达到 0.01W）时显示为 "--"，杜绝微小底噪误报与伪零显示。
      *
      * @param watts 功率数值（单位：W）
      * @return 格式化后的功率文本
      */
     private fun formatWattsValue(watts: Float): String {
-        return if (watts >= 0.05f) {
+        return if (watts >= 0.005f) {
             String.format(Locale.getDefault(), "%.2f W", watts)
         } else {
             "--"

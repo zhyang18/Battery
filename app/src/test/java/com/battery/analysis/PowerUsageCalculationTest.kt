@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.regex.Pattern
+import com.battery.analysis.model.AppPowerUsageItem
 
 /**
  * 功耗与应用运行温度计算算法单元测试套件。
@@ -1004,6 +1005,50 @@ class PowerUsageCalculationTest {
                 (timeStr1.isNotEmpty() && timeStr1 == timeStr2)
 
         assertFalse("相隔2小时的不同放电记录绝不能判定为重复", isDuplicate)
+    }
+
+    /**
+     * 验证应用前台与后台组合平均功耗展示文本格式化：
+     * 1. 当后台长时间运行（如 10h40m）产生微小平均功耗（如 0.013W >= 0.005W）时，正确显示为 "0.01W" 而非被截断为 "--"；
+     * 2. 当后台功耗低于 0.005W（四舍五入为 0.00W）或为 0 时，显示为 "--" 过滤微小底噪。
+     */
+    @Test
+    fun testAppCombinedAvgWattsFormatting() {
+        // 场景 1：电池统计在后台长达 10h40m 消耗 0.139Wh，平均功耗约 0.013W
+        val longBgItem = AppPowerUsageItem(
+            packageName = "com.battery.analysis",
+            appName = "电池统计",
+            icon = null,
+            foregroundTimeMs = 738_000L, // 12m18s
+            avgPowerWatts = 1.00f,
+            avgTemperature = 33.2f,
+            maxTemperature = 39.0f,
+            lastUsedTimeMs = System.currentTimeMillis(),
+            backgroundTimeMs = 38_400_000L, // 10h40m
+            foregroundEnergyWh = 0.204f,
+            backgroundEnergyWh = 0.139f,
+            foregroundPowerWatts = 1.00f,
+            backgroundPowerWatts = 0.013f
+        )
+        assertEquals("前台 1.00W | 后台 0.01W", "1.00W | 0.01W", longBgItem.getFormattedCombinedAvgWatts())
+
+        // 场景 2：短时间轻微后台或无放电应用，功耗低于 0.005W 时过滤显示为 --
+        val zeroBgItem = AppPowerUsageItem(
+            packageName = "com.accubattery",
+            appName = "AccuBattery",
+            icon = null,
+            foregroundTimeMs = 1000L,
+            avgPowerWatts = 1.89f,
+            avgTemperature = 37.0f,
+            maxTemperature = 37.0f,
+            lastUsedTimeMs = System.currentTimeMillis(),
+            backgroundTimeMs = 72_000L, // 1m12s
+            foregroundEnergyWh = 0.0005f,
+            backgroundEnergyWh = 0f,
+            foregroundPowerWatts = 1.89f,
+            backgroundPowerWatts = 0f
+        )
+        assertEquals("前台 1.89W | 后台无明显能耗显示 --", "1.89W | --", zeroBgItem.getFormattedCombinedAvgWatts())
     }
 }
 

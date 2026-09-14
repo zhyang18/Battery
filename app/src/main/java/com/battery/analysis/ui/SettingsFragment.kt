@@ -1133,13 +1133,40 @@ class SettingsFragment : Fragment() {
 
     /**
      * 弹出各主流手机厂商后台防杀与多任务卡片加锁图文教程对话框。
+     * 采用现代化卡片布局展示各系统防杀步骤，并提供一键前往系统应用设置页面的快捷入口。
      */
     private fun showLockRecentsGuideDialog() {
-        AlertDialog.Builder(requireContext())
-            .setTitle(R.string.dialog_lock_recents_title)
-            .setMessage(R.string.dialog_lock_recents_content)
-            .setPositiveButton(R.string.understood, null)
-            .show()
+        val ctx = context ?: return
+        val dialogView = layoutInflater.inflate(R.layout.dialog_lock_recents_guide, null)
+        val dialog = AlertDialog.Builder(ctx)
+            .setView(dialogView)
+            .create()
+
+        val btnSettings = dialogView.findViewById<TextView>(R.id.btn_dialog_lock_recents_settings)
+        val btnClose = dialogView.findViewById<TextView>(R.id.btn_dialog_lock_recents_close)
+
+        btnSettings.setOnClickListener {
+            try {
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", ctx.packageName, null)
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(ctx, e.message ?: "", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        btnClose.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        dialog.show()
+        dialog.window?.let { window ->
+            window.setBackgroundDrawableResource(android.R.color.transparent)
+            val width = (resources.displayMetrics.widthPixels * 0.92).toInt()
+            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT)
+            window.setGravity(android.view.Gravity.CENTER)
+        }
     }
 
     /**

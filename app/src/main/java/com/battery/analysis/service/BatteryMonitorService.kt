@@ -67,6 +67,8 @@ class BatteryMonitorService : Service() {
     private var cachedTemperature: Float = 25.0f
     @Volatile
     private var cachedIsCharging: Boolean = false
+    @Volatile
+    private var cachedSingleLineInfo: String = "⚡ 电池监控持续运行中"
 
     /**
      * 内部动态广播接收器，用于在前台服务存活期间毫秒级捕获充放电广播、电池状态变动及屏幕亮灭事件。
@@ -212,12 +214,12 @@ class BatteryMonitorService : Service() {
     }
 
     /**
-     * 向共享路径刷新主应用与前台服务活跃时间戳，供独立特权守护进程感知存活状态。
+     * 向共享路径刷新主应用与前台服务活跃时间戳及最新参数，供独立特权守护进程感知存活状态与无缝接管通知。
      */
     private fun touchAliveFile() {
         try {
             val file = java.io.File("/data/local/tmp/battery_app.alive")
-            val content = "${System.currentTimeMillis()}:${android.os.Process.myPid()}"
+            val content = "${System.currentTimeMillis()}:${android.os.Process.myPid()}:$cachedSingleLineInfo"
             java.io.FileOutputStream(file).use { fos ->
                 fos.write(content.toByteArray(Charsets.UTF_8))
                 fos.flush()
@@ -446,7 +448,11 @@ class BatteryMonitorService : Service() {
         }
 
         val powerStr = if (powerWatts != null && powerWatts > 0.05f) {
-            String.format(Locale.getDefault(), "%.1fW", powerWatts)
+            if (isCharging) {
+                String.format(Locale.getDefault(), "%.1fW", powerWatts)
+            } else {
+                String.format(Locale.getDefault(), "-%.1fW", powerWatts)
+            }
         } else if (isCharging) {
             "0.0W"
         } else {
@@ -456,6 +462,7 @@ class BatteryMonitorService : Service() {
         val voltStr = String.format(Locale.getDefault(), "%.2fV", cachedVoltageVolts)
         val tempStr = String.format(Locale.getDefault(), "%.1f℃", cachedTemperature)
         val singleLineInfo = "$powerStr | $voltStr | $tempStr"
+        cachedSingleLineInfo = singleLineInfo
 
         val remoteViews = RemoteViews(packageName, R.layout.layout_notification_battery_single_line).apply {
             setTextViewText(R.id.notification_text, singleLineInfo)

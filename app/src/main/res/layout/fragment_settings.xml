@@ -637,7 +637,8 @@
             <LinearLayout
                 android:id="@+id/layout_screen_on_interval"
                 android:layout_width="match_parent"
-                android:layout_height="56dp"
+                android:layout_height="wrap_content"
+                android:minHeight="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:clickable="true"
@@ -645,7 +646,8 @@
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="12dp">
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="8dp">
 
                 <ImageView
                     android:layout_width="22dp"
@@ -696,7 +698,8 @@
             <LinearLayout
                 android:id="@+id/layout_screen_off_interval"
                 android:layout_width="match_parent"
-                android:layout_height="56dp"
+                android:layout_height="wrap_content"
+                android:minHeight="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
                 android:clickable="true"
@@ -704,7 +707,8 @@
                 android:clipToOutline="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:paddingHorizontal="12dp">
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="8dp">
 
                 <ImageView
                     android:layout_width="22dp"

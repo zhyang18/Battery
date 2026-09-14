@@ -32,8 +32,11 @@ class BatteryDaemonServer {
         const val APP_ALIVE_FILE_PATH = "/data/local/tmp/battery_app.alive"
         const val APP_MANUAL_STOP_PATH = "/data/local/tmp/battery_app.manual_stop"
 
-        private const val CHECK_INTERVAL_MS = 2500L
-        private const val ALIVE_TIMEOUT_MS = 6000L
+        private const val CHECK_INTERVAL_MS = 1000L
+        private const val ALIVE_TIMEOUT_MS = 3000L
+
+        @Volatile
+        private var lastKnownBatteryInfo: String = "⚡ 电池监控持续运行中"
 
         /**
          * 守护进程独立主入口函数，由 app_process 命令行直接调用。
@@ -86,9 +89,9 @@ class BatteryDaemonServer {
                         // 检测主应用监控服务是否处于存活状态
                         val isAppAlive = isHostAlive()
                         if (!isAppAlive) {
-                            logInfo("Host service is NOT alive! Triggering penetration revive...")
-                            // 发送 Shell 级备用通知兜底，保障通知栏绝不空白
-                            postShellNotification(reviveCount + 1)
+                            logInfo("Host service is NOT alive! Triggering instantaneous penetration revive...")
+                            // 发送 Shell 级备用通知兜底，继承最新电池参数，保障通知栏视觉无感平替
+                            postShellNotification(lastKnownBatteryInfo)
                             
                             val success = reviveService()
                             if (success) {
@@ -98,7 +101,7 @@ class BatteryDaemonServer {
                                 logInfo("Revive commands dispatched, waiting for state sync.")
                             }
                         } else {
-                            // 主服务恢复存活后，撤销 Shell 备用通知，由主服务前台通知接管
+                            // 主服务恢复存活后，撤销 Shell 备用通知，由主服务前台通知平滑接管
                             removeShellNotification()
                         }
                     } else {
@@ -108,7 +111,7 @@ class BatteryDaemonServer {
                     // 更新心跳状态
                     updateStatusFile(myPid, myUid, startTime, System.currentTimeMillis(), reviveCount, "RUNNING")
 
-                    // 休眠指定周期
+                    // 休眠指定周期（1 秒高速巡检）
                     Thread.sleep(CHECK_INTERVAL_MS)
                 } catch (e: InterruptedException) {
                     logInfo("Daemon loop interrupted: ${e.message}")
@@ -129,7 +132,7 @@ class BatteryDaemonServer {
 
         /**
          * 判定主应用前台监控服务当前是否真实存活。
-         * 优先检查高频更新的心跳文件时间戳，并辅助进程 PID 探测。
+         * 采用 PID 瞬时探针配合高频心跳时间戳，实现 0 延迟秒级确诊。
          *
          * @return 若主服务在最近超时窗口内保持活跃返回 true，否则返回 false
          */
@@ -139,8 +142,18 @@ class BatteryDaemonServer {
                 try {
                     val content = aliveFile.readText(Charsets.UTF_8).trim()
                     val parts = content.split(":")
-                    if (parts.isNotEmpty()) {
+                    if (parts.size >= 2) {
                         val timestamp = parts[0].toLongOrNull() ?: 0L
+                        val pid = parts[1].toIntOrNull() ?: -1
+                        if (parts.size >= 3 && parts[2].isNotBlank()) {
+                            lastKnownBatteryInfo = parts[2]
+                        }
+
+                        // 瞬时 PID 探针：如果记录的 PID 已从内核进程表中销毁，0 延迟即刻确诊死亡
+                        if (pid > 0 && !isPidDirectoryAlive(pid)) {
+                            return false
+                        }
+
                         val diff = System.currentTimeMillis() - timestamp
                         if (diff in 0..ALIVE_TIMEOUT_MS) {
                             return true
@@ -151,6 +164,20 @@ class BatteryDaemonServer {
 
             // 心跳文件不存在或超时，辅助通过 pidof 校验
             return isProcessRunningPidof(PACKAGE_NAME)
+        }
+
+        /**
+         * 探测指定 Linux PID 目录是否存在以确认进程是否仍然存活。
+         *
+         * @param pid 目标进程 PID
+         * @return 若进程目录存在返回 true，否则返回 false
+         */
+        private fun isPidDirectoryAlive(pid: Int): Boolean {
+            return try {
+                File("/proc/$pid").exists()
+            } catch (_: Exception) {
+                false
+            }
         }
 
         /**
@@ -201,13 +228,14 @@ class BatteryDaemonServer {
 
         /**
          * 在宿主进程被划杀期间，以 Shell (UID 2000) 身份向通知栏发送寄生常驻兜底通知。
+         * 继承主服务最新的电池监控数据，达到视觉上完全无缝无感的平替衔接效果。
          *
-         * @param count 当前自愈拉活累计计数值
+         * @param batteryInfo 最新电池参数文案（如功率、电压、温度）
          */
-        private fun postShellNotification(count: Int) {
+        private fun postShellNotification(batteryInfo: String) {
             try {
-                val title = "电池监控守护中"
-                val text = "应用后台自愈恢复中 (已守护拉活 $count 次)"
+                val title = batteryInfo.ifBlank { "⚡ 电池监控后台持续运行中" }
+                val text = "特权守护持续运行中 · 划杀自愈防护已激活"
                 executeShellCommand("cmd notification post -S bigtext -t \"$title\" \"battery_daemon_tag\" \"$text\"")
             } catch (_: Exception) {}
         }

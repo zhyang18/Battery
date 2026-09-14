@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog_surface"
+    android:clipToOutline="true"
+    android:gravity="center_horizontal"
+    android:orientation="vertical"
+    android:paddingHorizontal="16dp"
+    android:paddingVertical="20dp">
+
+    <!-- 顶部盾牌图标徽章 -->
+    <FrameLayout
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="@drawable/bg_badge_btn">
+
+        <ImageView
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_shield_check"
+            app:tint="@color/nav_item_selected" />
+    </FrameLayout>
+
+    <!-- 弹窗标题与副标题 -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/dialog_lock_recents_title"
+        android:textColor="?android:attr/textColorPrimary"
+        android:textSize="17sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="@string/dialog_lock_recents_subtitle"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="12.5sp" />
+
+    <!-- 滚动内容区 -->
+    <androidx.core.widget.NestedScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:maxHeight="420dp"
+        android:overScrollMode="never">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- 顶部引言提示条 -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_setting_card_item"
+                android:lineSpacingExtra="3dp"
+                android:padding="10dp"
+                android:text="@string/dialog_lock_recents_intro"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="12sp" />
+
+            <!-- 卡片 1: 多任务卡片加锁 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/dialog_lock_recents_step1_title"
+                    android:textColor="#2196F3"
+                    android:textSize="13.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:lineSpacingExtra="3dp"
+                    android:text="@string/dialog_lock_recents_step1_desc"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- 卡片 2: 开启应用自启动 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/dialog_lock_recents_step2_title"
+                    android:textColor="#10B981"
+                    android:textSize="13.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:lineSpacingExtra="3dp"
+                    android:text="@string/dialog_lock_recents_step2_desc"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- 卡片 3: 耗电策略设为无限制 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/dialog_lock_recents_step3_title"
+                    android:textColor="#F59E0B"
+                    android:textSize="13.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:lineSpacingExtra="3dp"
+                    android:text="@string/dialog_lock_recents_step3_desc"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- 卡片 4: 开启常驻通知栏 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/dialog_lock_recents_step4_title"
+                    android:textColor="@color/nav_item_selected"
+                    android:textSize="13.5sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:lineSpacingExtra="3dp"
+                    android:text="@string/dialog_lock_recents_step4_desc"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- 进阶特权方案提示 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_badge_btn"
+                android:clipToOutline="true"
+                android:orientation="horizontal"
+                android:padding="10dp">
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_marginTop="1dp"
+                    android:src="@drawable/ic_lightbulb_outline"
+                    app:tint="@color/nav_item_selected" />
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:lineSpacingExtra="2dp"
+                    android:text="@string/dialog_lock_recents_tip_daemon"
+                    android:textColor="@color/nav_item_selected"
+                    android:textSize="11.5sp" />
+            </LinearLayout>
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- 底部按钮操作栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal">
+
+        <!-- 前往应用设置按钮 -->
+        <TextView
+            android:id="@+id/btn_dialog_lock_recents_settings"
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_marginEnd="8dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_badge_btn"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="@string/dialog_lock_recents_btn_settings"
+            android:textColor="@color/nav_item_selected"
+            android:textSize="13.5sp"
+            android:textStyle="bold" />
+
+        <!-- 我知道了按钮 -->
+        <TextView
+            android:id="@+id/btn_dialog_lock_recents_close"
+            android:layout_width="0dp"
+            android:layout_height="42dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_dialog_btn_primary"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="@string/understood"
+            android:textColor="@color/nav_item_selected"
+            android:textSize="13.5sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+</LinearLayout>

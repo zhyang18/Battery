@@ -26,9 +26,10 @@
         android:id="@+id/notification_text"
         style="@style/TextAppearance.Compat.Notification.Title"
         android:layout_width="0dp"
+        android:textColor="@color/white"
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:ellipsize="end"
         android:singleLine="true"
-        android:textSize="14sp" />
+        android:textSize="13sp" />
 </LinearLayout>

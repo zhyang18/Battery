@@ -70,22 +70,19 @@ class NormalApiProvider : BatteryDataProvider {
 
         // 5. 获取电池电压（单位：mV）
         val voltRaw = batteryStatus?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
-        val voltage = if (voltRaw > 0) voltRaw.toFloat() else null
+        val voltage = if (voltRaw > 0) com.battery.analysis.util.BatteryUnitNormalizer.normalizeVoltageMv(voltRaw.toLong()) else null
 
         // 6. 获取电池电流（单位转换为 mA，放电为负，充电为正）
         val isCharging = rawStatus == BatteryManager.BATTERY_STATUS_CHARGING || rawStatus == BatteryManager.BATTERY_STATUS_FULL
         val rawCurrent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
         val currentNow = if (rawCurrent != 0 && rawCurrent != Int.MIN_VALUE) {
-            val absCur = Math.abs(rawCurrent)
-            // Android 官方规范 BatteryManager.BATTERY_PROPERTY_CURRENT_NOW 单位为微安 (uA)
-            // 数值 >= 1000 代表微安并准确转换为毫安 (mA)；若极小老旧机型以毫安报告则保持原值
-            val curMa = if (absCur >= 1000) absCur / 1000f else absCur.toFloat()
+            val curMa = com.battery.analysis.util.BatteryUnitNormalizer.normalizeCurrentMa(rawCurrent.toLong(), isCharging)
             if (isCharging) curMa else -curMa
         } else null
 
         // 7. 计算实时功率（单位：W，放电为负，充电为正）
         val powerWatts = if (voltage != null && currentNow != null) {
-            val pWatts = (voltage * Math.abs(currentNow)) / 1000000f
+            val pWatts = com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(voltage / 1000f, currentNow, isCharging)
             if (isCharging) pWatts else -pWatts
         } else null
 

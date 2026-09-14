@@ -17,7 +17,7 @@ import java.util.Locale
  * 2. 破除现代 Android cgroup freezer 进程冻结：逃逸至根 cgroup 节点；
  * 3. 持久化状态与双向心跳：写入状态至 /data/local/tmp/battery_daemon.status，读取 /data/local/tmp/battery_app.alive；
  * 4. ContentProvider 深度反向穿透拉活：破除 Android 12+ 前台服务后台启动限制，瞬间自愈拉活主应用前台监控服务；
- * 5. Shell 特权通知常驻兜底：寄生于 com.android.shell (UID 2000)，在划杀恢复期间保障通知栏持续常驻。
+ * 5. 纯粹底层守护：彻底摒弃 Shell 伪装常驻通知，通知完全由主应用规范呈现，守护进程专注于内核物理采样与底层防杀保活。
  */
 class BatteryDaemonServer {
 
@@ -28,7 +28,9 @@ class BatteryDaemonServer {
         private const val PROVIDER_URI = "content://com.battery.analysis.daemon.provider/revive"
         
         const val STATUS_FILE_PATH = "/data/local/tmp/battery_daemon.status"
+        const val EXTERNAL_STATUS_FILE_PATH = "/sdcard/Android/data/com.battery.analysis/files/battery_daemon.status"
         const val STOP_FILE_PATH = "/data/local/tmp/battery_daemon.stop"
+        const val EXTERNAL_STOP_FILE_PATH = "/sdcard/Android/data/com.battery.analysis/files/battery_daemon.stop"
         const val APP_ALIVE_FILE_PATH = "/data/local/tmp/battery_app.alive"
         const val EXTERNAL_ALIVE_FILE_PATH = "/sdcard/Android/data/com.battery.analysis/files/battery_app.alive"
         const val EXTERNAL_SAMPLES_FILE_PATH = "/sdcard/Android/data/com.battery.analysis/files/battery_samples.stream"
@@ -36,14 +38,13 @@ class BatteryDaemonServer {
         const val EXTERNAL_MANUAL_STOP_PATH = "/sdcard/Android/data/com.battery.analysis/files/battery_app.manual_stop"
 
         private const val NOTIFICATION_TAG = "battery_daemon_persistent"
+        private const val NOTIFICATION_TAG_LEGACY = "battery_daemon_tag"
         private const val NOTIFICATION_ID = 2020
         private const val CHECK_INTERVAL_MS = 1000L
         private const val ALIVE_TIMEOUT_MS = 3000L
 
         @Volatile
         private var lastKnownBatteryInfo: String = "⚡ 电池监控持续运行中"
-        @Volatile
-        private var lastPostedNotificationText: String = ""
 
         /**
          * 守护进程独立主入口函数，由 app_process 命令行直接调用。
@@ -59,14 +60,21 @@ class BatteryDaemonServer {
             if (stopFile.exists()) {
                 stopFile.delete()
             }
+            val extStopFile = File(EXTERNAL_STOP_FILE_PATH)
+            if (extStopFile.exists()) {
+                extStopFile.delete()
+            }
 
-            // 2. 提升 OOM 分数为 -1000（内核最高免疫级别）
+            // 2. 清理可能残留的历史 Shell 常驻通知，保持通知栏纯净
+            removeShellNotification()
+
+            // 3. 提升 OOM 分数为 -1000（内核最高免疫级别）
             setOomScoreAdj(-1000)
 
-            // 3. 逃逸 cgroup freezer 进程冻结组
+            // 4. 逃逸 cgroup freezer 进程冻结组
             escapeCgroups()
 
-            // 4. 预赋权共享文件，解除普通应用沙箱限制
+            // 5. 预赋权共享文件，解除普通应用沙箱限制
             prepareSharedFiles()
 
             val myPid = getMyProcessId()
@@ -76,17 +84,19 @@ class BatteryDaemonServer {
 
             logInfo("Daemon initialized. PID=$myPid, UID=$myUid, StartTime=$startTime")
 
-            // 5. 初始写入状态文件
+            // 6. 初始写入状态文件
             updateStatusFile(myPid, myUid, startTime, System.currentTimeMillis(), reviveCount, "RUNNING")
 
-            // 6. 核心守护、常驻通知托管与反向穿透拉活主循环
+            // 7. 核心守护、硬件物理采样与反向穿透拉活主循环（完全由宿主应用规范展示通知，守护进程不再发送 Shell 伪装通知）
             while (true) {
                 try {
                     // 检查是否有外部停止信号文件
-                    if (File(STOP_FILE_PATH).exists()) {
+                    if (File(STOP_FILE_PATH).exists() || File(EXTERNAL_STOP_FILE_PATH).exists()) {
                         logInfo("Stop signal received. Cleaning up and exiting.")
                         File(STOP_FILE_PATH).delete()
+                        File(EXTERNAL_STOP_FILE_PATH).delete()
                         File(STATUS_FILE_PATH).delete()
+                        File(EXTERNAL_STATUS_FILE_PATH).delete()
                         removeShellNotification()
                         System.exit(0)
                         return
@@ -96,21 +106,10 @@ class BatteryDaemonServer {
                     val isManualStopped = File(APP_MANUAL_STOP_PATH).exists() || File(EXTERNAL_MANUAL_STOP_PATH).exists()
 
                     if (!isManualStopped) {
-                        // 1. 获取最新电池数据（心跳文件优先，内核 sysfs 直采兜底）
-                        val currentBatteryInfo = getLatestBatteryInfo()
-                        if (currentBatteryInfo.isNotBlank() && currentBatteryInfo != lastPostedNotificationText) {
-                            postShellNotification(currentBatteryInfo)
-                            lastPostedNotificationText = currentBatteryInfo
-                        } else if (lastPostedNotificationText.isEmpty()) {
-                            val initialInfo = currentBatteryInfo.ifBlank { "⚡ 电池监控持续运行中" }
-                            postShellNotification(initialInfo)
-                            lastPostedNotificationText = initialInfo
-                        }
-
-                        // 2. 特权独立硬件物理采样引擎持续落盘（彻底消灭划杀中断断层，独立于宿主应用耗电模式）
+                        // 1. 特权独立硬件物理采样引擎持续落盘（彻底消灭划杀中断断层，独立于宿主应用耗电模式）
                         recordPhysicalSamplePoint()
 
-                        // 3. 检测主应用监控服务是否处于存活状态
+                        // 2. 检测主应用监控服务是否处于存活状态
                         val isAppAlive = isHostAlive()
                         if (!isAppAlive) {
                             logInfo("Host service is NOT alive! Triggering instantaneous penetration revive...")
@@ -123,9 +122,8 @@ class BatteryDaemonServer {
                             }
                         }
                     } else {
-                        // 用户主动停止服务时移除常驻通知
+                        // 用户主动停止服务时移除残留通知
                         removeShellNotification()
-                        lastPostedNotificationText = ""
                     }
 
                     // 更新心跳状态
@@ -146,6 +144,7 @@ class BatteryDaemonServer {
 
             // 退出清理
             File(STATUS_FILE_PATH).delete()
+            File(EXTERNAL_STATUS_FILE_PATH).delete()
             removeShellNotification()
             logInfo("BatteryDaemonServer terminated.")
         }
@@ -369,20 +368,6 @@ class BatteryDaemonServer {
         }
 
         /**
-         * 以 Shell (UID 2000) 身份向通知栏发送或刷新寄生常驻通知。
-         * 由于通知属于 com.android.shell，用户在多任务划杀应用时 NMS 绝不清除此通知，
-         * 呈现与主应用一致的纯净单行三项数值（功率 | 电压 | 温度），杜绝多余占位文案。
-         *
-         * @param batteryInfo 最新电池参数文案（如 -3.8W | 4.05V | 28.5℃）
-         */
-        private fun postShellNotification(batteryInfo: String) {
-            try {
-                val title = batteryInfo.ifBlank { "⚡ 电池监控持续运行中" }
-                executeShellCommand("cmd notification post -t \"$title\" \"$NOTIFICATION_TAG\" \"\"")
-            } catch (_: Exception) {}
-        }
-
-        /**
          * 特权独立硬件物理采样引擎。
          * 直接从 Linux 内核 sysfs 节点读取瞬时电流、电压、温度、充放电状态与电量，
          * 写入外部私有存储共享采样流文件 [EXTERNAL_SAMPLES_FILE_PATH]。
@@ -456,8 +441,8 @@ class BatteryDaemonServer {
         }
 
         /**
-         * 移除由 Shell 发送的常驻通知。
-         * 优先使用 Android 系统内部 INotificationManager 反射撤销，兼容各版本 Android 原生系统。
+         * 移除由 Shell 发送的历史常驻通知。
+         * 优先使用 Android 系统内部 INotificationManager 反射撤销，并结合 cmd notification cancel 双保险，兼容各版本 Android 原生系统。
          */
         private fun removeShellNotification() {
             try {
@@ -468,15 +453,17 @@ class BatteryDaemonServer {
                     val stubClass = Class.forName("android.app.INotificationManager\$Stub")
                     val asInterface = stubClass.getMethod("asInterface", android.os.IBinder::class.java)
                     val nm = asInterface.invoke(null, binder)
-                    for (m in nm.javaClass.methods) {
-                        if (m.name == "cancelNotificationWithTag") {
-                            val pts = m.parameterTypes
-                            if (pts.size == 4 && pts[0] == String::class.java && pts[1] == String::class.java) {
-                                m.invoke(nm, "com.android.shell", NOTIFICATION_TAG, NOTIFICATION_ID, 0)
-                                break
-                            } else if (pts.size == 5 && pts[0] == String::class.java && pts[1] == String::class.java) {
-                                m.invoke(nm, "com.android.shell", "com.android.shell", NOTIFICATION_TAG, NOTIFICATION_ID, 0)
-                                break
+                    for (tag in listOf(NOTIFICATION_TAG, NOTIFICATION_TAG_LEGACY)) {
+                        for (m in nm.javaClass.methods) {
+                            if (m.name == "cancelNotificationWithTag") {
+                                val pts = m.parameterTypes
+                                if (pts.size == 4 && pts[0] == String::class.java && pts[1] == String::class.java) {
+                                    m.invoke(nm, "com.android.shell", tag, NOTIFICATION_ID, 0)
+                                    break
+                                } else if (pts.size == 5 && pts[0] == String::class.java && pts[1] == String::class.java) {
+                                    m.invoke(nm, "com.android.shell", "com.android.shell", tag, NOTIFICATION_ID, 0)
+                                    break
+                                }
                             }
                         }
                     }
@@ -484,6 +471,7 @@ class BatteryDaemonServer {
             } catch (_: Exception) {}
             try {
                 executeShellCommand("cmd notification cancel $NOTIFICATION_TAG")
+                executeShellCommand("cmd notification cancel $NOTIFICATION_TAG_LEGACY")
             } catch (_: Exception) {}
         }
 
@@ -624,6 +612,7 @@ class BatteryDaemonServer {
             try {
                 val json = buildString {
                     append("{\n")
+                    append("  \"version\": 2,\n")
                     append("  \"pid\": $pid,\n")
                     append("  \"uid\": $uid,\n")
                     append("  \"startTime\": $startTime,\n")
@@ -633,18 +622,27 @@ class BatteryDaemonServer {
                     append("}\n")
                 }
 
-                val targetFile = File(STATUS_FILE_PATH)
-                val parent = targetFile.parentFile
-                if (parent != null && !parent.exists()) {
-                    parent.mkdirs()
-                }
+                val targetFiles = listOf(
+                    File(EXTERNAL_STATUS_FILE_PATH),
+                    File(STATUS_FILE_PATH)
+                )
 
-                // 写入状态文件并赋予通用可读权限 (rw-r--r--)
-                FileOutputStream(targetFile).use { fos ->
-                    fos.write(json.toByteArray(Charsets.UTF_8))
-                    fos.flush()
+                for (targetFile in targetFiles) {
+                    try {
+                        val parent = targetFile.parentFile
+                        if (parent != null && !parent.exists()) {
+                            parent.mkdirs()
+                        }
+
+                        // 写入状态文件并赋予通用可读可写权限
+                        FileOutputStream(targetFile).use { fos ->
+                            fos.write(json.toByteArray(Charsets.UTF_8))
+                            fos.flush()
+                        }
+                        targetFile.setReadable(true, false)
+                        targetFile.setWritable(true, false)
+                    } catch (_: Exception) {}
                 }
-                targetFile.setReadable(true, false)
             } catch (_: Exception) {}
         }
 

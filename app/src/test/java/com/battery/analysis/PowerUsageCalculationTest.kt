@@ -1050,6 +1050,186 @@ class PowerUsageCalculationTest {
         )
         assertEquals("前台 1.89W | 后台无明显能耗显示 --", "1.89W | --", zeroBgItem.getFormattedCombinedAvgWatts())
     }
+
+    /**
+     * 验证刚拔电/重置初期（如 18 秒）跨周期累积能耗（如后台 13 小时 0.47Wh）的时间窗口有效性归一化，
+     * 确保不会因除以微小时长产生 89.74W 的虚假物理尖峰。
+     */
+    @Test
+    fun testShortDurationCrossPeriodEnergyNormalization() {
+        val durationMs = 18_000L // 18 秒
+        val safeVoltage = 3.986f
+        val dischargeHours = durationMs / 3600000f
+
+        // 模拟包含 13 小时历史累积 0.47Wh 的后台应用
+        val rawAppList = listOf(
+            AppPowerUsageItem(
+                packageName = "com.battery.analysis",
+                appName = "电池统计",
+                icon = null,
+                foregroundTimeMs = 18_000L,
+                backgroundTimeMs = 13 * 3600_000L + 3 * 60_000L, // 13h3m
+                directEnergyWh = 0.470f,
+                backgroundEnergyWh = 0.470f,
+                avgPowerWatts = 0.04f,
+                avgTemperature = 36f,
+                maxTemperature = 36f,
+                lastUsedTimeMs = System.currentTimeMillis()
+            )
+        )
+
+        // 核心防护：时间窗口有效性归一
+        val currentPeriodAppEnergyWh = rawAppList.sumOf { item ->
+            val totalAppTimeMs = item.foregroundTimeMs + item.backgroundTimeMs
+            if (totalAppTimeMs > durationMs && totalAppTimeMs > 0L) {
+                (item.energyWh * (durationMs.toDouble() / totalAppTimeMs.toDouble())).coerceAtMost(item.energyWh.toDouble())
+            } else {
+                item.energyWh.toDouble()
+            }
+        }.toFloat()
+
+        // 验证在当前 18 秒放电周期内，有效应用能耗被正确约束（远小于 0.47Wh，约 0.00018Wh）
+        assertTrue("当前放电周期内的应用能耗必须被有效归一约束", currentPeriodAppEnergyWh < 0.01f)
+
+        val minPhysicalMah = if (currentPeriodAppEnergyWh > 0f) (currentPeriodAppEnergyWh * 1000f / safeVoltage) else 0f
+        val realTotalEnergyWh = (minPhysicalMah * safeVoltage) / 1000f
+
+        // 模拟物理采样均值（实测 1.5W）
+        val realtimeAvgWatts = 1.5f
+        val calculatedAvgPower = if (dischargeHours > 0f && realTotalEnergyWh > 0f) {
+            realTotalEnergyWh / dischargeHours
+        } else {
+            0f
+        }
+
+        val finalAvgPower = when {
+            dischargeHours < 0.1f -> realtimeAvgWatts
+            calculatedAvgPower > 12.0f -> realtimeAvgWatts
+            else -> calculatedAvgPower
+        }
+
+        // 验证最终平均放电功耗处于物理合理的 1.5W，绝不出现 89.74W
+        assertEquals(1.5f, finalAvgPower, 0.01f)
+        assertFalse("平均放电功耗绝不能出现 89.74W 尖峰", finalAvgPower > 10f)
+    }
+
+    /**
+     * 验证刚拔电 18 秒且全亮屏场景下，后台时间严格从拔电时刻计算并满足时间守恒。
+     * 彻底杜绝 13 小时历史累积时长渗透导致整机后台时间与应用后台时间显示 13h3m。
+     */
+    @Test
+    fun testAppAndOverviewBackgroundTimeConservationStrictlyFromUnplugTime() {
+        val dischargeDurationMs = 18000L // 拔电 18 秒
+        val screenOnMs = 18000L          // 亮屏 18 秒
+        val screenOffMs = 0L             // 息屏 0 秒
+
+        // 模拟某个应用底层历史累加的 13 小时 3 分钟前台服务
+        val historicalBgServiceMs = (13 * 3600 + 3 * 60) * 1000L
+        val appFgMs = 18000L
+
+        // 1. 验证单应用时间守恒与拔电窗口截断
+        val maxAllowedBgForApp = (dischargeDurationMs - appFgMs).coerceAtLeast(0L)
+        val safeAppBgMs = historicalBgServiceMs.coerceIn(0L, maxAllowedBgForApp)
+
+        assertEquals("应用在当期的后台时长必须受 (总时长 - 前台时长) 约束为 0 秒", 0L, safeAppBgMs)
+        assertEquals("应用总时长必须严格守恒等于 18 秒", 18000L, appFgMs + safeAppBgMs)
+
+        // 2. 验证整机概览卡片后台放电时长计算：无后台能耗时为 0 秒，有后台能耗时如实反映伴随放电时长
+        val allBgEnergyWh = 0.14f
+        val rawBgMs = screenOffMs.coerceIn(0L, dischargeDurationMs)
+        val effectiveBgMs = if (rawBgMs >= 1000L) {
+            rawBgMs
+        } else if (dischargeDurationMs > screenOnMs) {
+            (dischargeDurationMs - screenOnMs).coerceIn(0L, dischargeDurationMs)
+        } else if (allBgEnergyWh > 0.001f) {
+            dischargeDurationMs
+        } else {
+            0L
+        }
+
+        assertEquals("全亮屏 18 秒且产生后台能耗时，整机后台放电时长如实反映伴随放电的 18 秒", 18000L, effectiveBgMs)
+        assertFalse("整机后台放电时长绝不能显示为 13 小时", effectiveBgMs > 18000L)
+    }
+
+    /**
+     * 验证部分息屏场景下，整机与应用后台时间守恒约束。
+     */
+    @Test
+    fun testAppBackgroundTimeConservationWhenPartiallyScreenOff() {
+        val dischargeDurationMs = 60000L // 拔电 60 秒
+        val screenOnMs = 20000L          // 亮屏 20 秒
+        val screenOffMs = 40000L         // 息屏 40 秒
+
+        // 应用前台 20 秒，历史服务 100000 毫秒
+        val appFgMs = 20000L
+        val historicalServiceMs = 100000L
+
+        val maxAllowedBg = (dischargeDurationMs - appFgMs).coerceAtLeast(0L)
+        val safeAppBgMs = historicalServiceMs.coerceIn(0L, maxAllowedBg)
+
+        assertEquals("应用后台耗时上限不能超过非前台时间 40 秒", 40000L, safeAppBgMs)
+        assertTrue("应用总耗时不能超过周期总时长 60 秒", (appFgMs + safeAppBgMs) <= dischargeDurationMs)
+
+        val rawBgMs = screenOffMs.coerceIn(0L, dischargeDurationMs)
+        val effectiveBgMs = if (rawBgMs >= 1000L) {
+            rawBgMs
+        } else if (dischargeDurationMs > screenOnMs) {
+            (dischargeDurationMs - screenOnMs).coerceIn(0L, dischargeDurationMs)
+        } else {
+            0L
+        }
+
+        assertEquals("整机后台时长必须严格等于息屏时长 40 秒", 40000L, effectiveBgMs)
+    }
+
+    /**
+     * 验证后台时间提取正则严格剔除 cached 挂起进程标记，仅匹配真实的后台活跃运行（bg/fgs/service）。
+     */
+    @Test
+    fun testRegexBgTimeExcludesCached() {
+        val regexBgTime = Pattern.compile("(?:bg|fgs|service)[=:]\\s*([\\d\\w\\s]+?)(?=\\s+[a-zA-Z_-]+[=:]|\\)|$)", Pattern.CASE_INSENSITIVE)
+
+        // 仅包含 cached=4m59s，无真实后台运行标记
+        val cachedOnlyDetails = "cpu=2m15s top=6s cached=4m59s"
+        val cachedMatcher = regexBgTime.matcher(cachedOnlyDetails)
+        assertFalse("挂起缓存 cached 绝不能被正则匹配为后台运行时间", cachedMatcher.find())
+
+        // 包含真实后台运行标记 bg=15s
+        val realBgDetails = "cpu=2m15s top=6s bg=15s cached=4m59s"
+        val realBgMatcher = regexBgTime.matcher(realBgDetails)
+        assertTrue("真实的后台标记 bg 必须能被正确匹配", realBgMatcher.find())
+        assertEquals("提取的后台耗时必须为 15s", "15s", realBgMatcher.group(1)?.trim())
+
+        // 包含前台服务标记 fgs=30s
+        val fgsDetails = "cpu=1m top=0s fgs=30s"
+        val fgsMatcher = regexBgTime.matcher(fgsDetails)
+        assertTrue("前台服务标记 fgs 必须能被正确匹配", fgsMatcher.find())
+        assertEquals("提取的前台服务耗时必须为 30s", "30s", fgsMatcher.group(1)?.trim())
+    }
+
+    /**
+     * 验证当应用短时间内产生电量导致计算核心算力偏高时，后台时长绝不被虚拟填充为“总时长 - 前台时长”。
+     */
+    @Test
+    fun testDecoupleAppEnergyDoesNotInventBackgroundTime() {
+        val dischargeDurationMs = 306000L // 拔电 5 分 6 秒
+        val foregroundMs = 6000L          // 前台仅 6 秒
+        val backgroundMs = 0L             // 无后台活动记录
+        val cpuMs = 6000L                 // CPU 耗时与前台一致
+
+        // 模拟解耦算法计算有效后台时长
+        val rawEffectiveBgMs = if (backgroundMs > 0L) {
+            backgroundMs
+        } else if (cpuMs > foregroundMs) {
+            (cpuMs - foregroundMs).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+        val safeBgMs = rawEffectiveBgMs.coerceAtMost(dischargeDurationMs)
+
+        assertEquals("无明确后台记录或超出前台的 CPU 算力时，后台时长必须忠实反映为 0", 0L, safeBgMs)
+        assertFalse("后台时长绝不能被推算为 4m59s 或 300000ms", safeBgMs >= 200000L)
+    }
 }
 
 

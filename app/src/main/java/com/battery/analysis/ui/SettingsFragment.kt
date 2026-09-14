@@ -31,6 +31,7 @@ import com.battery.analysis.MainActivity
 import com.battery.analysis.R
 import com.battery.analysis.daemon.DaemonManager
 import com.battery.analysis.databinding.FragmentSettingsBinding
+import com.battery.analysis.service.KeepAliveAccessibilityService
 import com.battery.analysis.manager.LanguageManager
 import com.battery.analysis.model.BackupData
 import com.battery.analysis.viewmodel.BatteryViewModel
@@ -51,6 +52,9 @@ class SettingsFragment : Fragment() {
 
     private val viewModel: BatteryViewModel by activityViewModels()
     private lateinit var prefs: SharedPreferences
+
+    /** 特权守护进程启动状态轮询任务引用，用于启动成功检测与防止内存泄漏 */
+    private var daemonPollingRunnable: Runnable? = null
 
     /**
      * SAF 导出备份文件选择保存器 Launcher。
@@ -125,6 +129,7 @@ class SettingsFragment : Fragment() {
         binding.switchBootAutoStart.isChecked = com.battery.analysis.service.BatteryMonitorService.isBootAutoStartEnabled(requireContext())
         updateKeepAliveIntervalDisplay()
         updateBatteryOptimizationDisplay()
+        updateAccessibilityStatusDisplay()
         updateDaemonStatusDisplay()
     }
 
@@ -594,6 +599,7 @@ class SettingsFragment : Fragment() {
      * 绑定前台服务通知栏显示开关、亮屏与息屏刷新间隔选择气泡、开机自启动开关、电池优化白名单申请与防杀加锁教程弹窗。
      */
     private fun setupKeepAliveSettings() {
+        setupAccessibilityKeepAliveSettings()
         setupPrivilegedDaemonSettings()
 
         val isDisplayEnabled = com.battery.analysis.service.BatteryMonitorService.isNotificationDisplayEnabled(requireContext())
@@ -624,6 +630,45 @@ class SettingsFragment : Fragment() {
     }
 
     /**
+     * 初始化无障碍秒级自愈保活（方案一：免 Root / 免 ADB）板块的交互与控制逻辑。
+     * 绑定一键跳转系统无障碍设置页面的点击事件。
+     */
+    private fun setupAccessibilityKeepAliveSettings() {
+        updateAccessibilityStatusDisplay()
+
+        binding.btnAccessibilityToggle.setOnClickListener {
+            KeepAliveAccessibilityService.openAccessibilitySettings(requireContext())
+        }
+        binding.cardAccessibilityKeepAlive.setOnClickListener {
+            KeepAliveAccessibilityService.openAccessibilitySettings(requireContext())
+        }
+    }
+
+    /**
+     * 刷新无障碍秒级自愈保活在界面上的运行状态徽章与按钮文案。
+     */
+    private fun updateAccessibilityStatusDisplay() {
+        val isEnabled = KeepAliveAccessibilityService.isAccessibilityEnabled(requireContext())
+        if (isEnabled) {
+            binding.tvAccessibilityStatus.text = getString(R.string.settings_accessibility_status_enabled)
+            binding.tvAccessibilityStatus.setTextColor(Color.parseColor("#10B981"))
+            binding.tvAccessibilityStatus.setBackgroundResource(R.drawable.bg_badge_btn)
+
+            binding.btnAccessibilityToggle.text = getString(R.string.settings_accessibility_btn_manage)
+            binding.btnAccessibilityToggle.setBackgroundResource(R.drawable.bg_badge_btn)
+            binding.btnAccessibilityToggle.setTextColor(Color.parseColor("#10B981"))
+        } else {
+            binding.tvAccessibilityStatus.text = getString(R.string.settings_accessibility_status_disabled)
+            binding.tvAccessibilityStatus.setTextColor(Color.parseColor("#9CA3AF"))
+            binding.tvAccessibilityStatus.setBackgroundResource(R.drawable.bg_setting_card_item)
+
+            binding.btnAccessibilityToggle.text = getString(R.string.settings_accessibility_btn_enable)
+            binding.btnAccessibilityToggle.setBackgroundResource(R.drawable.bg_dialog_btn_primary)
+            binding.btnAccessibilityToggle.setTextColor(Color.WHITE)
+        }
+    }
+
+    /**
      * 初始化特权独立守护进程（方案二：终极防杀）板块的交互与控制逻辑。
      * 绑定启动/停止按钮点击事件与 ADB 启动指南弹窗。
      */
@@ -634,28 +679,32 @@ class SettingsFragment : Fragment() {
             val status = DaemonManager.getDaemonStatus()
             if (status.isRunning) {
                 // 当前正在运行，执行停止
+                binding.btnDaemonToggle.isEnabled = false
                 val result = DaemonManager.stopDaemon()
                 result.onSuccess {
                     Toast.makeText(requireContext(), getString(R.string.toast_daemon_stopped), Toast.LENGTH_SHORT).show()
-                    updateDaemonStatusDisplay()
+                    view?.postDelayed({
+                        binding.btnDaemonToggle.isEnabled = true
+                        updateDaemonStatusDisplay()
+                    }, 500L)
                 }.onFailure { err ->
+                    binding.btnDaemonToggle.isEnabled = true
                     Toast.makeText(requireContext(), err.message ?: "停止失败", Toast.LENGTH_SHORT).show()
+                    updateDaemonStatusDisplay()
                 }
             } else {
                 // 当前未运行，尝试智能提权拉起
                 if (DaemonManager.isRootAvailable()) {
                     val result = DaemonManager.startWithRoot(requireContext())
                     result.onSuccess {
-                        Toast.makeText(requireContext(), getString(R.string.toast_daemon_started), Toast.LENGTH_SHORT).show()
-                        view?.postDelayed({ updateDaemonStatusDisplay() }, 1000L)
+                        pollDaemonStartStatus()
                     }.onFailure { err ->
                         Toast.makeText(requireContext(), err.message ?: "Root 启动失败", Toast.LENGTH_LONG).show()
                     }
                 } else if (DaemonManager.isShizukuAvailable()) {
                     val result = DaemonManager.startWithShizuku(requireContext())
                     result.onSuccess {
-                        Toast.makeText(requireContext(), getString(R.string.toast_daemon_started), Toast.LENGTH_SHORT).show()
-                        view?.postDelayed({ updateDaemonStatusDisplay() }, 1000L)
+                        pollDaemonStartStatus()
                     }.onFailure { err ->
                         Toast.makeText(requireContext(), err.message ?: "Shizuku 启动失败", Toast.LENGTH_LONG).show()
                     }
@@ -669,6 +718,54 @@ class SettingsFragment : Fragment() {
         binding.btnDaemonAdbGuide.setOnClickListener {
             showDaemonAdbGuideDialog()
         }
+    }
+
+    /**
+     * 轮询检查特权守护进程启动状态，直到检测到活跃心跳或达到最大尝试次数。
+     *
+     * 解决 app_process 冷启动时因虚拟机加载延迟导致界面误判为“未运行”的问题。
+     *
+     * @param maxAttempts 最大轮询重试次数（默认 10 次）
+     * @param intervalMs 每次轮询间隔时间毫秒数（默认 400 毫秒，共覆盖 4 秒启动窗口）
+     */
+    private fun pollDaemonStartStatus(maxAttempts: Int = 10, intervalMs: Long = 400L) {
+        daemonPollingRunnable?.let { view?.removeCallbacks(it) }
+        var attempts = 0
+
+        // 设置按钮过渡加载状态
+        binding.btnDaemonToggle.isEnabled = false
+        binding.btnDaemonToggle.text = getString(R.string.settings_daemon_btn_starting)
+
+        val runnable = object : Runnable {
+            override fun run() {
+                if (_binding == null) return
+
+                val status = DaemonManager.getDaemonStatus()
+                if (status.isRunning) {
+                    binding.btnDaemonToggle.isEnabled = true
+                    updateDaemonStatusDisplay()
+                    context?.let { ctx ->
+                        Toast.makeText(ctx, getString(R.string.toast_daemon_started), Toast.LENGTH_SHORT).show()
+                    }
+                    daemonPollingRunnable = null
+                    return
+                }
+
+                attempts++
+                if (attempts < maxAttempts) {
+                    view?.postDelayed(this, intervalMs)
+                } else {
+                    binding.btnDaemonToggle.isEnabled = true
+                    updateDaemonStatusDisplay()
+                    context?.let { ctx ->
+                        Toast.makeText(ctx, getString(R.string.toast_daemon_timeout), Toast.LENGTH_SHORT).show()
+                    }
+                    daemonPollingRunnable = null
+                }
+            }
+        }
+        daemonPollingRunnable = runnable
+        view?.postDelayed(runnable, intervalMs)
     }
 
     /**
@@ -1021,11 +1118,14 @@ class SettingsFragment : Fragment() {
         }
     }
 
+
     /**
-     * 视图销毁时的清理工作。
+     * 视图销毁时的清理工作，移除未决的轮询任务并释放视图绑定引用。
      */
     override fun onDestroyView() {
         super.onDestroyView()
+        daemonPollingRunnable?.let { view?.removeCallbacks(it) }
+        daemonPollingRunnable = null
         _binding = null
     }
 

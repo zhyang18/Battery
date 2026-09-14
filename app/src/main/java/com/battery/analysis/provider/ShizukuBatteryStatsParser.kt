@@ -621,11 +621,12 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             screenOnDurationMs = if (sumFg > 0) sumFg.coerceAtMost(dischargeDurationMs) else 0L
         }
 
-        // 上限以本次放电周期的实际总时长 dischargeDurationMs 为准
+        // 上限以本次放电周期的实际总时长 dischargeDurationMs 为准，单应用前台与后台总耗时不可超过整机放电总时长
         val maxAllowedTimeMs = dischargeDurationMs
         val validatedList = userAppList.map { item ->
-            val safeFg = if (item.foregroundTimeMs > maxAllowedTimeMs) maxAllowedTimeMs else item.foregroundTimeMs
-            val safeBg = if (item.backgroundTimeMs > maxAllowedTimeMs) maxAllowedTimeMs else item.backgroundTimeMs
+            val safeFg = item.foregroundTimeMs.coerceIn(0L, maxAllowedTimeMs)
+            val maxBgForApp = (maxAllowedTimeMs - safeFg).coerceAtLeast(0L)
+            val safeBg = item.backgroundTimeMs.coerceIn(0L, maxBgForApp)
             if (safeFg != item.foregroundTimeMs || safeBg != item.backgroundTimeMs) {
                 item.copy(foregroundTimeMs = safeFg, backgroundTimeMs = safeBg)
             } else {
@@ -921,8 +922,6 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 val realFg = preciseTimes[pkg] ?: 0L
                 if (realFg > 0L) {
                     effectiveFg = realFg.coerceAtMost(dischargeMs)
-                } else if (pkg == context.packageName) {
-                    effectiveFg = dischargeMs.coerceAtLeast(1000L)
                 }
             }
 
@@ -945,7 +944,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 dischargeMs = dischargeMs,
                 isGame = isGame
             )
-            val effectiveFinalBg = safeBgMs
+            val maxAllowedBg = (dischargeMs - effectiveFg).coerceAtLeast(0L)
+            val effectiveFinalBg = safeBgMs.coerceIn(0L, maxAllowedBg)
 
             val fgHours = if (effectiveFg >= 1000L) effectiveFg / 3600000.0 else 0.0
             val bgHours = if (effectiveFinalBg >= 1000L) effectiveFinalBg / 3600000.0 else 0.0
@@ -1048,15 +1048,17 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     /**
      * 客观解耦应用在前台活跃期间与后台常驻/休眠期间的能量消耗与真实运行时长。
      * 针对前台使用场景施加物理功耗合理性保护，杜绝因未识别出后台时间导致后台消耗全量误判为前台算力。
+     * 严格依据底层系统权威记录的活跃时长（dumpsys 的 bg、fgs、wakelock 与实际 CPU 计算耗时），绝不虚拟推算或使用差值强行填补后台时间。
      *
      * @param totalEnergy 应用消耗的总电量（单位：瓦时 Wh）
-     * @param foregroundMs 前台活跃时长（毫秒）
-     * @param backgroundMs 后台活跃时长（毫秒）
-     * @param cpuMs 应用 CPU 计算总耗时（毫秒）
-     * @param dischargeMs 本次放电周期总时长（毫秒）
+     * @param foregroundMs 前台活跃时长（单位：毫秒）
+     * @param backgroundMs 后台活跃时长（单位：毫秒）
+     * @param cpuMs 应用 CPU 计算总耗时（单位：毫秒）
+     * @param dischargeMs 本次放电周期总时长（单位：毫秒）
      * @param isGame 是否为高能耗 3D 游戏
      * @return 包含前台能量、后台能量与有效后台时长的三元组 [Triple<Float, Float, Long>]
      */
+    @Suppress("UNUSED_PARAMETER")
     fun decoupleAppEnergyAndTimes(
         totalEnergy: Float,
         foregroundMs: Long,
@@ -1066,18 +1068,15 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         isGame: Boolean = false
     ): Triple<Float, Float, Long> {
         if (totalEnergy <= 0.0001f) {
-            return Triple(0f, 0f, backgroundMs)
+            return Triple(0f, 0f, backgroundMs.coerceIn(0L, dischargeMs))
         }
 
         // 纯后台应用（前台时长为 0）：能量 100% 归属于后台能量，前台能量严格为 0f
         if (foregroundMs <= 0L) {
             val effectiveBg = if (backgroundMs > 0L) {
-                backgroundMs
+                backgroundMs.coerceAtMost(dischargeMs)
             } else if (cpuMs > 0L) {
-                cpuMs.coerceAtMost(dischargeMs.coerceAtLeast(1000L))
-            } else if (totalEnergy > 0.0005f) {
-                val inferredMs = ((totalEnergy / 1.5f) * 3600000.0).toLong()
-                inferredMs.coerceIn(1000L, dischargeMs.coerceAtLeast(1000L))
+                cpuMs.coerceAtMost(dischargeMs)
             } else {
                 0L
             }
@@ -1087,12 +1086,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val fgHours = foregroundMs / 3600000.0
         if (fgHours <= 0.0) {
             val effectiveBg = if (backgroundMs > 0L) {
-                backgroundMs
+                backgroundMs.coerceAtMost(dischargeMs)
             } else if (cpuMs > 0L) {
-                cpuMs
-            } else if (totalEnergy > 0.0005f) {
-                val inferredMs = ((totalEnergy / 1.5f) * 3600000.0).toLong()
-                inferredMs.coerceIn(1000L, dischargeMs.coerceAtLeast(1000L))
+                cpuMs.coerceAtMost(dischargeMs)
             } else {
                 0L
             }
@@ -1102,24 +1098,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         // 前台核心纯算力功耗物理合理上限（不含恒定屏幕面板底座功率）：
         // 普通日常应用（微信、QQ、浏览器、系统界面等）核心算力功耗通常在 0.4W ~ 1.5W，单 App 物理极限不超过 2.2W；
         // 3D 游戏由于持续高负载图形渲染，核心算力功耗物理极限可达 4.5W
-        val maxReasonableCoreWatts = if (isGame) 4.5f else 2.2f
-        val rawCoreWatts = (totalEnergy / fgHours).toFloat()
-
         val fgEnergyWh: Float
         val bgEnergyWh: Float
 
-        if (rawCoreWatts > maxReasonableCoreWatts) {
-            // 核心算力功耗严重超出物理合理极限（如微信 20.46W），确凿表明应用在后台常驻期间累积消耗了绝大部分电量
-            val targetFgCoreWatts = if (isGame) {
-                maxReasonableCoreWatts
-            } else {
-                // 普通日常应用前台正常操作典型核心算力功耗约 0.8W ~ 1.2W
-                1.0f.coerceAtMost(maxReasonableCoreWatts)
-            }
-            val fgCalculatedEnergy = (targetFgCoreWatts * fgHours).toFloat()
-            fgEnergyWh = minOf(fgCalculatedEnergy, totalEnergy)
-            bgEnergyWh = (totalEnergy - fgEnergyWh).coerceAtLeast(0f)
-        } else if (backgroundMs > 0L) {
+        if (backgroundMs > 0L) {
             // 后台已明确记录了运行耗时，按前台与后台算力权重客观分配
             val bgHours = backgroundMs / 3600000.0
             val fgWeight = fgHours * 5.0 // 前台算力权重约为后台的 5 倍
@@ -1134,19 +1116,19 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 bgEnergyWh = 0f
             }
         } else if (cpuMs > foregroundMs) {
-            // CPU 计算耗时超出前台时长，超出的部分为后台算力
+            // CPU 计算耗时超出前台时长，超出的部分为真实后台算力
             val totalCpu = cpuMs.toFloat()
             val fgRatio = (foregroundMs.toFloat() / totalCpu).coerceIn(0.1f, 1.0f)
             fgEnergyWh = totalEnergy * fgRatio
             bgEnergyWh = (totalEnergy - fgEnergyWh).coerceAtLeast(0f)
         } else {
-            // 总能耗完全在前台物理功耗合理范围内且无后台活动：全额归属于前台
+            // 无任何后台运行记录或后台 CPU 算力：能量 100% 真实归属于前台，绝不凭空臆造后台能耗
             fgEnergyWh = totalEnergy
             bgEnergyWh = 0f
         }
 
-        // 后台活跃时长仅保留真实的后台记录时间或后台 CPU 算力时间，绝不虚拟成整机放电总时长
-        val rawEffectiveBgMs = if (backgroundMs > 0L) {
+        // 后台活跃时长仅保留系统真实记录的后台时间（dumpsys bg/fgs/service、wakelock）或真实的后台 CPU 算力时间，绝不使用总时长差值伪造
+        val effectiveBgMs = if (backgroundMs > 0L) {
             backgroundMs
         } else if (cpuMs > foregroundMs) {
             (cpuMs - foregroundMs).coerceAtLeast(0L)
@@ -1154,17 +1136,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             0L
         }
 
-        // 消除“后台分配了能量，但后台时间却显示 0s”的缺陷
-        val finalEffectiveBgMs = if (rawEffectiveBgMs > 0L) {
-            rawEffectiveBgMs
-        } else if (bgEnergyWh > 0.0005f) {
-            val inferredMs = ((bgEnergyWh / 1.5f) * 3600000.0).toLong()
-            inferredMs.coerceIn(1000L, dischargeMs.coerceAtLeast(1000L))
-        } else {
-            0L
-        }
-
-        return Triple(fgEnergyWh, bgEnergyWh, finalEffectiveBgMs)
+        return Triple(fgEnergyWh, bgEnergyWh, effectiveBgMs.coerceAtMost(dischargeMs))
     }
 
     /**
@@ -1521,7 +1493,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         private val REGEX_UID_POWER = Pattern.compile("Uid\\s+([\\w]+)(?:\\s*\\(([^\\)]+)\\))?:\\s*([\\d.]+)(?:\\s*\\((.*?)\\))?", Pattern.CASE_INSENSITIVE)
         private val REGEX_TOP_TIME = Pattern.compile("(?:top|fg)[=:]\\s*([\\d\\w\\s]+?)(?=\\s+[a-zA-Z_-]+[=:]|\\)|$)", Pattern.CASE_INSENSITIVE)
         private val REGEX_FG_TIME = Pattern.compile("fg[=:]\\s*([\\d\\w\\s]+?)(?=\\s+[a-zA-Z_-]+[=:]|\\)|$)", Pattern.CASE_INSENSITIVE)
-        private val REGEX_BG_TIME = Pattern.compile("(?:bg|fgs|service|cached)[=:]\\s*([\\d\\w\\s]+?)(?=\\s+[a-zA-Z_-]+[=:]|\\)|$)", Pattern.CASE_INSENSITIVE)
+        private val REGEX_BG_TIME = Pattern.compile("(?:bg|fgs|service)[=:]\\s*([\\d\\w\\s]+?)(?=\\s+[a-zA-Z_-]+[=:]|\\)|$)", Pattern.CASE_INSENSITIVE)
         private val REGEX_CPU_TIME = Pattern.compile("cpu[=:]\\s*([\\d\\w\\s]+?)(?=\\s+[a-zA-Z_-]+[=:]|\\)|$)", Pattern.CASE_INSENSITIVE)
         private val REGEX_ANDROID_UID = Pattern.compile("^u(\\d+)_?a(\\d+)$", Pattern.CASE_INSENSITIVE)
         private val REGEX_RESET_TIME = Pattern.compile("RESET:TIME:\\s*(\\d{4})-(\\d{2})-(\\d{2})-(\\d{2})-(\\d{2})-(\\d{2})", Pattern.CASE_INSENSITIVE)

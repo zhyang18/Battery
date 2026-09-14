@@ -78,6 +78,9 @@ class PowerUsageFragment : Fragment() {
     // 首次引导选择时暂存的模式状态
     private var tempSelectedSetupMode: Int = PowerUsageManager.MODE_SHIZUKU
 
+    // 标记当前是否在初次引导界面点击确认后等待 Shizuku 授权结果
+    private var isWaitingForShizukuAuthFromSetup: Boolean = false
+
     // 历史快照查看模式状态
     private var isViewingSnapshot: Boolean = false
     private var currentLoadedSnapshotTime: String? = null
@@ -117,9 +120,15 @@ class PowerUsageFragment : Fragment() {
         if (requestCode == SHIZUKU_POWER_REQUEST_CODE) {
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(requireContext(), getString(R.string.toast_shizuku_success), Toast.LENGTH_SHORT).show()
-                loadData()
+                if (isWaitingForShizukuAuthFromSetup || !powerManager.isPowerModeConfigured()) {
+                    isWaitingForShizukuAuthFromSetup = false
+                    completeSetupAndEnterMain(PowerUsageManager.MODE_SHIZUKU)
+                } else {
+                    loadData()
+                }
             } else {
                 Toast.makeText(requireContext(), getString(R.string.toast_shizuku_denied), Toast.LENGTH_SHORT).show()
+                isWaitingForShizukuAuthFromSetup = false
                 updateShizukuBannerState()
             }
         }
@@ -130,7 +139,10 @@ class PowerUsageFragment : Fragment() {
      */
     private val shizukuBinderReceivedListener = Shizuku.OnBinderReceivedListener {
         updateShizukuBannerState()
-        if (currentMode == PowerUsageManager.MODE_SHIZUKU && powerManager.isPowerModeConfigured()) {
+        if (isWaitingForShizukuAuthFromSetup && powerManager.isShizukuAuthorized()) {
+            isWaitingForShizukuAuthFromSetup = false
+            completeSetupAndEnterMain(PowerUsageManager.MODE_SHIZUKU)
+        } else if (currentMode == PowerUsageManager.MODE_SHIZUKU && powerManager.isPowerModeConfigured()) {
             loadData()
         }
     }
@@ -415,6 +427,13 @@ class PowerUsageFragment : Fragment() {
             return
         }
 
+        // 若处于初次模式配置向导中且正等待 Shizuku 授权（如用户切至 Shizuku 应用启动或授权后返回），检测到授权成功后自动进入主界面
+        if (!powerManager.isPowerModeConfigured() && isWaitingForShizukuAuthFromSetup && powerManager.isShizukuAuthorized()) {
+            isWaitingForShizukuAuthFromSetup = false
+            completeSetupAndEnterMain(PowerUsageManager.MODE_SHIZUKU)
+            return
+        }
+
         val isCharging = chargingManager.isCharging()
         applySmartChargingMode(isCharging = isCharging, showToast = false)
         applyKeepScreenOn(isCharging)
@@ -481,6 +500,7 @@ class PowerUsageFragment : Fragment() {
         }
 
         binding.cardSetupModeNormal.setOnClickListener {
+            isWaitingForShizukuAuthFromSetup = false
             tempSelectedSetupMode = PowerUsageManager.MODE_NORMAL
             updateSetupCardSelection(tempSelectedSetupMode)
         }
@@ -498,24 +518,47 @@ class PowerUsageFragment : Fragment() {
                 return@setOnClickListener
             }
 
-            currentMode = tempSelectedSetupMode
-            powerManager.setSelectedMode(currentMode)
-            powerManager.setPowerModeConfigured(true)
-
-            binding.layoutFirstTimeSetup.visibility = View.GONE
-
-            val tip = if (currentMode == PowerUsageManager.MODE_SHIZUKU) {
-                getString(R.string.power_mode_tip_shizuku)
+            if (tempSelectedSetupMode == PowerUsageManager.MODE_SHIZUKU) {
+                // Shizuku 模式：若已授权则直接进入主界面；若尚未授权则先触发授权，禁止直接进入主界面
+                if (powerManager.isShizukuAuthorized()) {
+                    isWaitingForShizukuAuthFromSetup = false
+                    completeSetupAndEnterMain(PowerUsageManager.MODE_SHIZUKU)
+                } else {
+                    isWaitingForShizukuAuthFromSetup = true
+                    requestShizukuPermission()
+                }
             } else {
-                getString(R.string.power_mode_tip_normal)
+                // 标准模式：直接保存并进入主界面
+                isWaitingForShizukuAuthFromSetup = false
+                completeSetupAndEnterMain(PowerUsageManager.MODE_NORMAL)
             }
-            Toast.makeText(requireContext(), tip, Toast.LENGTH_SHORT).show()
-
-            // 首次配置完成后，校准并对齐当前放电初始基准，根据当前设备实际充放电状态自适应呈现界面
-            powerManager.checkAndReconcileDischargeState()
-            val isCharging = chargingManager.isCharging()
-            applySmartChargingMode(isCharging = isCharging, showToast = false)
         }
+    }
+
+    /**
+     * 完成初次耗电检测模式配置并切换呈现主界面。
+     * 保存用户选中的工作模式为已配置，隐藏模式选择卡片，校准放电初始基准，并自适应呈现耗电或充电界面。
+     *
+     * @param mode 最终确认的工作模式（[PowerUsageManager.MODE_SHIZUKU] 或 [PowerUsageManager.MODE_NORMAL]）
+     */
+    private fun completeSetupAndEnterMain(mode: Int) {
+        currentMode = mode
+        powerManager.setSelectedMode(currentMode)
+        powerManager.setPowerModeConfigured(true)
+
+        binding.layoutFirstTimeSetup.visibility = View.GONE
+
+        val tip = if (currentMode == PowerUsageManager.MODE_SHIZUKU) {
+            getString(R.string.power_mode_tip_shizuku)
+        } else {
+            getString(R.string.power_mode_tip_normal)
+        }
+        Toast.makeText(requireContext(), tip, Toast.LENGTH_SHORT).show()
+
+        // 首次配置完成后，校准并对齐当前放电初始基准，根据当前设备实际充放电状态自适应呈现界面
+        powerManager.checkAndReconcileDischargeState()
+        val isCharging = chargingManager.isCharging()
+        applySmartChargingMode(isCharging = isCharging, showToast = false)
     }
 
     /**
@@ -672,6 +715,7 @@ class PowerUsageFragment : Fragment() {
                 openShizukuApp()
             }
         } catch (e: Exception) {
+            isWaitingForShizukuAuthFromSetup = false
             Toast.makeText(requireContext(), getString(R.string.toast_request_auth_failed, e.message ?: ""), Toast.LENGTH_SHORT).show()
         }
     }

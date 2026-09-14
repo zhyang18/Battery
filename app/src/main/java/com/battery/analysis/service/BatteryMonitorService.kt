@@ -115,7 +115,7 @@ class BatteryMonitorService : Service() {
                     val tempRaw = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1)
                     val statusRaw = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
                     if (level > 0) cachedLevelPercent = level
-                    if (voltRaw > 0) cachedVoltageVolts = voltRaw / 1000f
+                    if (voltRaw > 0) cachedVoltageVolts = com.battery.analysis.util.BatteryUnitNormalizer.normalizeVoltageVolts(voltRaw.toLong())
                     if (tempRaw > 0) cachedTemperature = tempRaw / 10f
                     cachedIsCharging = (statusRaw == BatteryManager.BATTERY_STATUS_CHARGING || statusRaw == BatteryManager.BATTERY_STATUS_FULL)
 
@@ -163,9 +163,10 @@ class BatteryMonitorService : Service() {
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
 
-        val isDaemonActive = com.battery.analysis.daemon.DaemonManager.isDaemonRunning()
-        val channelToUse = if (isDaemonActive) CHANNEL_ID_SILENT else CHANNEL_ID
-        val initialNotification = buildNotification(channelToUse)
+        // 清理历史版本可能遗留下来的 Shell 系统通知
+        cancelLegacyShellNotifications()
+
+        val initialNotification = buildNotification(CHANNEL_ID)
         startForeground(NOTIFICATION_ID, initialNotification)
         if (!isNotificationDisplayEnabled(this)) {
             // 若用户关闭了常驻通知栏显示，合规完成前台服务绑定后立即从通知栏彻底移除通知
@@ -419,13 +420,10 @@ class BatteryMonitorService : Service() {
             val batteryManager = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return null
             val rawCurrent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
             if (rawCurrent == 0 || rawCurrent == Int.MIN_VALUE) return null
-            val absCur = abs(rawCurrent)
-            // Android 官方 BatteryManager.BATTERY_PROPERTY_CURRENT_NOW 规范单位为微安 (uA)
-            // 当数值大于等于 1000 时，代表微安并准确转换为毫安 (mA)；若极小老旧机型以毫安报告则保持原值
-            val curMa: Float = if (absCur >= 1000) (absCur / 1000f) else absCur.toFloat()
+            val curMa = com.battery.analysis.util.BatteryUnitNormalizer.normalizeCurrentMa(rawCurrent.toLong(), isCharging = false)
             val voltage: Float = cachedVoltageVolts
             if (voltage > 0f && curMa > 0f) {
-                (voltage * curMa) / 1000f
+                com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(voltage, curMa, isCharging = false)
             } else {
                 null
             }
@@ -504,7 +502,6 @@ class BatteryMonitorService : Service() {
     /**
      * 刷新并推送最新的电池状态通知至系统通知栏。
      * 若用户关闭了常驻通知栏显示，则彻底从系统通知栏移除前台通知（stopForeground + cancel），通知栏完全关闭不显示，绝不在通知栏打扰用户；
-     * 若特权守护进程正在运行，常驻电量卡片已由守护进程以 Shell (UID 2000) 身份持久托管，主服务仅静默绑定前台以满足系统优先级要求，且通知内容同样保持实时三项数值；
      * 若处于息屏期间且非强制刷新，自动跳过以消除 SystemUI 绘制开销与 CPU 唤醒。
      *
      * @param force 是否强制触发系统通知栏刷新（如点亮屏幕瞬间或切换开关配置后）
@@ -524,15 +521,6 @@ class BatteryMonitorService : Service() {
                 return
             }
 
-            val isDaemonActive = com.battery.analysis.daemon.DaemonManager.isDaemonRunning()
-            if (isDaemonActive) {
-                // 特权守护进程活跃运行中：主服务仅静默绑定前台服务满足 Android 系统前台生命周期要求，呈现一致的三项数值
-                val silentNotification = buildNotification(CHANNEL_ID_SILENT)
-                startForeground(NOTIFICATION_ID, silentNotification)
-                notificationManager.cancel(NOTIFICATION_ID)
-                return
-            }
-
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
             val isInteractive = pm?.isInteractive ?: true
             if (!isInteractive && !force) {
@@ -541,6 +529,42 @@ class BatteryMonitorService : Service() {
             val notification = buildNotification(CHANNEL_ID)
             startForeground(NOTIFICATION_ID, notification)
             notificationManager.notify(NOTIFICATION_ID, notification)
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * 清理可能残留的 Shell 系统通知（由历史版本守护进程通过特权命令行发送）。
+     * 若检测到当前运行的是历史旧版守护进程，且环境具备 Root 或 Shizuku 提权，则自动升级重启为无通知的纯净新版。
+     */
+    private fun cancelLegacyShellNotifications() {
+        try {
+            val status = com.battery.analysis.daemon.DaemonManager.getDaemonStatus()
+            val canElevate = com.battery.analysis.daemon.DaemonManager.isRootAvailable() || com.battery.analysis.daemon.DaemonManager.isShizukuAvailable()
+            if (status.isLegacyVersion() && canElevate) {
+                // 自动热升级旧版守护进程（终止旧进程并以新逻辑无缝重启）
+                com.battery.analysis.daemon.DaemonManager.restartDaemon(this)
+                return
+            }
+
+            val cancelCmd = "cmd notification cancel battery_daemon_persistent; cmd notification cancel battery_daemon_tag"
+            if (com.battery.analysis.daemon.DaemonManager.isRootAvailable()) {
+                Runtime.getRuntime().exec(arrayOf("su", "-c", cancelCmd))
+            } else if (com.battery.analysis.daemon.DaemonManager.isShizukuAvailable()) {
+                val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
+                val newProcessMethod = shizukuClass.getDeclaredMethod(
+                    "newProcess",
+                    Array<String>::class.java,
+                    Array<String>::class.java,
+                    String::class.java
+                )
+                newProcessMethod.isAccessible = true
+                newProcessMethod.invoke(
+                    null,
+                    arrayOf("sh", "-c", cancelCmd),
+                    null,
+                    null
+                )
+            }
         } catch (_: Exception) {}
     }
 

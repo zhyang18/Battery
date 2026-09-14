@@ -322,7 +322,8 @@ class ChargingStatsManager private constructor(private val context: Context) {
         val temp = info.temperature ?: 25f
         val volt = (info.voltage ?: 4000f) / 1000f
         val curMa = abs(info.currentNow ?: 0f)
-        val rawPower = info.powerWatts ?: (if (charging) (volt * curMa / 1000f) else -(volt * curMa / 1000f))
+        val calculatedPower = com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(volt, curMa, charging)
+        val rawPower = info.powerWatts ?: (if (charging) calculatedPower else -calculatedPower)
         val power = if (charging) abs(rawPower) else -abs(rawPower)
 
         // 彻底移除 hardcoded power = 10.0f 假数据，忠实记录底层传感器与广播测得的真实功率与电流

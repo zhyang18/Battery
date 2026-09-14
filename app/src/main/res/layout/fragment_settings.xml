@@ -352,7 +352,87 @@
                 android:textColor="@color/nav_item_selected"
                 android:textSize="13sp" />
 
-            <!-- 条目: 特权独立守护进程 (终极防杀) -->
+            <!-- 条目: 无障碍秒级自愈保活 (方案一：免 Root / 免 ADB 推荐) -->
+            <LinearLayout
+                android:id="@+id/card_accessibility_keep_alive"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="6dp"
+                android:background="@drawable/bg_setting_card_item"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="10dp">
+
+                <!-- 头部：图标 + 标题 + 运行状态胶囊 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <ImageView
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:src="@drawable/ic_nav_detection"
+                        app:tint="@color/nav_item_selected" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:layout_weight="1"
+                        android:text="@string/settings_accessibility_title"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tv_accessibility_status"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_badge_btn"
+                        android:paddingHorizontal="8dp"
+                        android:paddingVertical="2dp"
+                        android:textSize="11.5sp"
+                        android:textStyle="bold"
+                        tools:text="已开启" />
+                </LinearLayout>
+
+                <!-- 描述文案 -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="32dp"
+                    android:layout_marginTop="2dp"
+                    android:text="@string/settings_accessibility_desc"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="11.5sp" />
+
+                <!-- 底部操作按钮栏 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="32dp"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/btn_accessibility_toggle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="30dp"
+                        android:background="@drawable/bg_dialog_btn_primary"
+                        android:gravity="center"
+                        android:paddingHorizontal="14dp"
+                        android:text="@string/settings_accessibility_btn_enable"
+                        android:textColor="@color/white"
+                        android:textSize="12.5sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 条目: 特权独立守护进程 (方案二：Root / ADB 终极防杀) -->
             <LinearLayout
                 android:id="@+id/card_daemon_keep_alive"
                 android:layout_width="match_parent"

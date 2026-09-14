@@ -163,7 +163,9 @@ class BatteryMonitorService : Service() {
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
 
-        val initialNotification = buildNotification()
+        val isDaemonActive = com.battery.analysis.daemon.DaemonManager.isDaemonRunning()
+        val channelToUse = if (isDaemonActive) CHANNEL_ID_SILENT else CHANNEL_ID
+        val initialNotification = buildNotification(channelToUse)
         startForeground(NOTIFICATION_ID, initialNotification)
         if (!isNotificationDisplayEnabled(this)) {
             // 若用户关闭了常驻通知栏显示，合规完成前台服务绑定后立即从通知栏彻底移除通知
@@ -215,16 +217,32 @@ class BatteryMonitorService : Service() {
 
     /**
      * 向共享路径刷新主应用与前台服务活跃时间戳及最新参数，供独立特权守护进程感知存活状态与无缝接管通知。
+     * 优先写入免权限的应用外部私有路径，若 /data/local/tmp 路径可写则同步写入备份。
      */
     private fun touchAliveFile() {
         try {
-            val file = java.io.File("/data/local/tmp/battery_app.alive")
             val content = "${System.currentTimeMillis()}:${android.os.Process.myPid()}:$cachedSingleLineInfo"
-            java.io.FileOutputStream(file).use { fos ->
+
+            // 1. 优先写入应用免运行时权限的外部私有存储目录
+            val extFile = com.battery.analysis.daemon.DaemonManager.getSharedAliveFile(this)
+            val parent = extFile.parentFile
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs()
+            }
+            java.io.FileOutputStream(extFile).use { fos ->
                 fos.write(content.toByteArray(Charsets.UTF_8))
                 fos.flush()
             }
-            file.setReadable(true, false)
+            extFile.setReadable(true, false)
+
+            // 2. 同步尝试写入 /data/local/tmp 路径（若守护进程已提前 chmod 赋予写权限）
+            val tmpFile = java.io.File("/data/local/tmp/battery_app.alive")
+            if (tmpFile.exists() && tmpFile.canWrite()) {
+                java.io.FileOutputStream(tmpFile).use { fos ->
+                    fos.write(content.toByteArray(Charsets.UTF_8))
+                    fos.flush()
+                }
+            }
         } catch (_: Exception) {}
     }
 
@@ -421,9 +439,10 @@ class BatteryMonitorService : Service() {
      * 采用自定义 [RemoteViews] 紧凑单行布局，彻底去除系统默认模板的小标题与多余换行，
      * 统一居中呈现单行实时监控数据：功率 | 电压 | 温度。
      *
+     * @param channelId 目标通知渠道 ID（默认为 [CHANNEL_ID]）
      * @return 配置完毕的单行紧凑前台系统通知 [Notification]
      */
-    private fun buildNotification(): Notification {
+    private fun buildNotification(channelId: String = CHANNEL_ID): Notification {
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
@@ -468,7 +487,7 @@ class BatteryMonitorService : Service() {
             setTextViewText(R.id.notification_text, singleLineInfo)
         }
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        return NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.drawable.ic_bolt)
             .setCustomContentView(remoteViews)
             .setContentTitle(singleLineInfo)
@@ -477,7 +496,7 @@ class BatteryMonitorService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(if (channelId == CHANNEL_ID_SILENT) NotificationCompat.PRIORITY_MIN else NotificationCompat.PRIORITY_LOW)
             .setContentIntent(pendingIntent)
             .build()
     }
@@ -485,6 +504,7 @@ class BatteryMonitorService : Service() {
     /**
      * 刷新并推送最新的电池状态通知至系统通知栏。
      * 若用户关闭了常驻通知栏显示，则彻底从系统通知栏移除前台通知（stopForeground + cancel），通知栏完全关闭不显示，绝不在通知栏打扰用户；
+     * 若特权守护进程正在运行，常驻电量卡片已由守护进程以 Shell (UID 2000) 身份持久托管，主服务仅静默绑定前台以满足系统优先级要求，且通知内容同样保持实时三项数值；
      * 若处于息屏期间且非强制刷新，自动跳过以消除 SystemUI 绘制开销与 CPU 唤醒。
      *
      * @param force 是否强制触发系统通知栏刷新（如点亮屏幕瞬间或切换开关配置后）
@@ -504,12 +524,21 @@ class BatteryMonitorService : Service() {
                 return
             }
 
+            val isDaemonActive = com.battery.analysis.daemon.DaemonManager.isDaemonRunning()
+            if (isDaemonActive) {
+                // 特权守护进程活跃运行中：主服务仅静默绑定前台服务满足 Android 系统前台生命周期要求，呈现一致的三项数值
+                val silentNotification = buildNotification(CHANNEL_ID_SILENT)
+                startForeground(NOTIFICATION_ID, silentNotification)
+                notificationManager.cancel(NOTIFICATION_ID)
+                return
+            }
+
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
             val isInteractive = pm?.isInteractive ?: true
             if (!isInteractive && !force) {
                 return
             }
-            val notification = buildNotification()
+            val notification = buildNotification(CHANNEL_ID)
             startForeground(NOTIFICATION_ID, notification)
             notificationManager.notify(NOTIFICATION_ID, notification)
         } catch (_: Exception) {}
@@ -670,6 +699,8 @@ class BatteryMonitorService : Service() {
         fun start(context: Context) {
             try {
                 java.io.File("/data/local/tmp/battery_app.manual_stop").delete()
+                val extStop = java.io.File(context.getExternalFilesDir(null), "battery_app.manual_stop")
+                extStop.delete()
             } catch (_: Exception) {}
             val intent = Intent(context, BatteryMonitorService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -687,10 +718,22 @@ class BatteryMonitorService : Service() {
          */
         fun stop(context: Context) {
             try {
+                // 1. 清理共享活跃心跳
                 java.io.File("/data/local/tmp/battery_app.alive").delete()
+                com.battery.analysis.daemon.DaemonManager.getSharedAliveFile(context).delete()
+
+                // 2. 写入停止标记（优先外部私有路径，再 tmp 路径）
+                val extStop = java.io.File(context.getExternalFilesDir(null), "battery_app.manual_stop")
+                java.io.FileOutputStream(extStop).use { it.write("stop".toByteArray()) }
+                extStop.setReadable(true, false)
+
                 val stopFile = java.io.File("/data/local/tmp/battery_app.manual_stop")
-                java.io.FileOutputStream(stopFile).use { it.write("stop".toByteArray()) }
-                stopFile.setReadable(true, false)
+                if (stopFile.canWrite() || !stopFile.exists()) {
+                    try {
+                        java.io.FileOutputStream(stopFile).use { it.write("stop".toByteArray()) }
+                        stopFile.setReadable(true, false)
+                    } catch (_: Exception) {}
+                }
             } catch (_: Exception) {}
             val intent = Intent(context, BatteryMonitorService::class.java)
             context.stopService(intent)

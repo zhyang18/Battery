@@ -30,13 +30,20 @@ class BatteryDaemonServer {
         const val STATUS_FILE_PATH = "/data/local/tmp/battery_daemon.status"
         const val STOP_FILE_PATH = "/data/local/tmp/battery_daemon.stop"
         const val APP_ALIVE_FILE_PATH = "/data/local/tmp/battery_app.alive"
+        const val EXTERNAL_ALIVE_FILE_PATH = "/sdcard/Android/data/com.battery.analysis/files/battery_app.alive"
+        const val EXTERNAL_SAMPLES_FILE_PATH = "/sdcard/Android/data/com.battery.analysis/files/battery_samples.stream"
         const val APP_MANUAL_STOP_PATH = "/data/local/tmp/battery_app.manual_stop"
+        const val EXTERNAL_MANUAL_STOP_PATH = "/sdcard/Android/data/com.battery.analysis/files/battery_app.manual_stop"
 
+        private const val NOTIFICATION_TAG = "battery_daemon_persistent"
+        private const val NOTIFICATION_ID = 2020
         private const val CHECK_INTERVAL_MS = 1000L
         private const val ALIVE_TIMEOUT_MS = 3000L
 
         @Volatile
         private var lastKnownBatteryInfo: String = "⚡ 电池监控持续运行中"
+        @Volatile
+        private var lastPostedNotificationText: String = ""
 
         /**
          * 守护进程独立主入口函数，由 app_process 命令行直接调用。
@@ -59,6 +66,9 @@ class BatteryDaemonServer {
             // 3. 逃逸 cgroup freezer 进程冻结组
             escapeCgroups()
 
+            // 4. 预赋权共享文件，解除普通应用沙箱限制
+            prepareSharedFiles()
+
             val myPid = getMyProcessId()
             val myUid = getMyUid()
             val startTime = System.currentTimeMillis()
@@ -66,10 +76,10 @@ class BatteryDaemonServer {
 
             logInfo("Daemon initialized. PID=$myPid, UID=$myUid, StartTime=$startTime")
 
-            // 4. 初始写入状态文件
+            // 5. 初始写入状态文件
             updateStatusFile(myPid, myUid, startTime, System.currentTimeMillis(), reviveCount, "RUNNING")
 
-            // 5. 核心守护与反向穿透拉活主循环
+            // 6. 核心守护、常驻通知托管与反向穿透拉活主循环
             while (true) {
                 try {
                     // 检查是否有外部停止信号文件
@@ -83,16 +93,27 @@ class BatteryDaemonServer {
                     }
 
                     // 检查用户是否在主应用设置中主动关闭了监控服务
-                    val isManualStopped = File(APP_MANUAL_STOP_PATH).exists()
+                    val isManualStopped = File(APP_MANUAL_STOP_PATH).exists() || File(EXTERNAL_MANUAL_STOP_PATH).exists()
 
                     if (!isManualStopped) {
-                        // 检测主应用监控服务是否处于存活状态
+                        // 1. 获取最新电池数据（心跳文件优先，内核 sysfs 直采兜底）
+                        val currentBatteryInfo = getLatestBatteryInfo()
+                        if (currentBatteryInfo.isNotBlank() && currentBatteryInfo != lastPostedNotificationText) {
+                            postShellNotification(currentBatteryInfo)
+                            lastPostedNotificationText = currentBatteryInfo
+                        } else if (lastPostedNotificationText.isEmpty()) {
+                            val initialInfo = currentBatteryInfo.ifBlank { "⚡ 电池监控持续运行中" }
+                            postShellNotification(initialInfo)
+                            lastPostedNotificationText = initialInfo
+                        }
+
+                        // 2. 特权独立硬件物理采样引擎持续落盘（彻底消灭划杀中断断层，独立于宿主应用耗电模式）
+                        recordPhysicalSamplePoint()
+
+                        // 3. 检测主应用监控服务是否处于存活状态
                         val isAppAlive = isHostAlive()
                         if (!isAppAlive) {
                             logInfo("Host service is NOT alive! Triggering instantaneous penetration revive...")
-                            // 发送 Shell 级备用通知兜底，继承最新电池参数，保障通知栏视觉无感平替
-                            postShellNotification(lastKnownBatteryInfo)
-                            
                             val success = reviveService()
                             if (success) {
                                 reviveCount++
@@ -100,12 +121,11 @@ class BatteryDaemonServer {
                             } else {
                                 logInfo("Revive commands dispatched, waiting for state sync.")
                             }
-                        } else {
-                            // 主服务恢复存活后，撤销 Shell 备用通知，由主服务前台通知平滑接管
-                            removeShellNotification()
                         }
                     } else {
+                        // 用户主动停止服务时移除常驻通知
                         removeShellNotification()
+                        lastPostedNotificationText = ""
                     }
 
                     // 更新心跳状态
@@ -131,35 +151,157 @@ class BatteryDaemonServer {
         }
 
         /**
+         * 预先在共享路径创建心跳文件并赋予全局可读写权限 (0666)，解决普通应用在 /data/local/tmp 权限受限的问题。
+         */
+        private fun prepareSharedFiles() {
+            try {
+                val file = File(APP_ALIVE_FILE_PATH)
+                if (!file.exists()) {
+                    file.createNewFile()
+                }
+                file.setReadable(true, false)
+                file.setWritable(true, false)
+                executeShellCommand("chmod 666 $APP_ALIVE_FILE_PATH")
+            } catch (_: Exception) {}
+        }
+
+        /**
+         * 获取当前最新的电池物理参数显示文本。
+         * 优先从宿主应用写入的心跳共享文件中读取；
+         * 若心跳文件不存在或超时（如宿主应用正在拉活中），则直接由特权守护进程读取 Linux 内核 sysfs 节点。
+         *
+         * @return 格式化好的单行电池监控文本（如 -3.8W | 4.05V | 28.5℃）
+         */
+        private fun getLatestBatteryInfo(): String {
+            // 1. 尝试从应用外部私有心跳文件读取
+            val extAliveFile = File(EXTERNAL_ALIVE_FILE_PATH)
+            val infoFromExt = readInfoFromAliveFile(extAliveFile)
+            if (!infoFromExt.isNullOrBlank()) {
+                return infoFromExt
+            }
+
+            // 2. 尝试从 /data/local/tmp 心跳文件读取
+            val tmpAliveFile = File(APP_ALIVE_FILE_PATH)
+            val infoFromTmp = readInfoFromAliveFile(tmpAliveFile)
+            if (!infoFromTmp.isNullOrBlank()) {
+                return infoFromTmp
+            }
+
+            // 3. 回退策略：直接读取 Linux 内核 sysfs 电池硬件节点（特权独立直采）
+            val infoFromKernel = readKernelBatteryInfo()
+            if (!infoFromKernel.isNullOrBlank()) {
+                return infoFromKernel
+            }
+
+            return lastKnownBatteryInfo
+        }
+
+        /**
+         * 从指定的心跳文件中解析最新上报的电池参数文本。
+         *
+         * @param file 目标心跳文件
+         * @return 解析得到的电池参数文本，超时或无效返回 null
+         */
+        private fun readInfoFromAliveFile(file: File): String? {
+            if (!file.exists() || !file.canRead()) return null
+            return try {
+                val content = file.readText(Charsets.UTF_8).trim()
+                val parts = content.split(":")
+                if (parts.size >= 3) {
+                    val timestamp = parts[0].toLongOrNull() ?: 0L
+                    val info = parts[2].trim()
+                    val diff = System.currentTimeMillis() - timestamp
+                    if (diff in 0..ALIVE_TIMEOUT_MS && info.isNotBlank()) {
+                        lastKnownBatteryInfo = info
+                        return info
+                    }
+                }
+                null
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        /**
+         * 直接通过 Linux 内核 sysfs 硬件节点读取当前电池功率、电压与温度。
+         * 在宿主进程被划杀、冷启动阶段提供零延迟物理参数兜底。
+         *
+         * @return 单行电池监控文本，读取失败返回 null
+         */
+        private fun readKernelBatteryInfo(): String? {
+            return try {
+                val basePath = "/sys/class/power_supply/battery"
+                val currentFile = File(basePath, "current_now")
+                val voltageFile = File(basePath, "voltage_now")
+                val tempFile = File(basePath, "temp")
+                val statusFile = File(basePath, "status")
+
+                if (!currentFile.exists() || !voltageFile.exists()) return null
+
+                val currentMicroA = currentFile.readText().trim().toLongOrNull() ?: return null
+                val voltageMicroV = voltageFile.readText().trim().toLongOrNull() ?: return null
+                val tempTenthC = if (tempFile.exists()) tempFile.readText().trim().toIntOrNull() ?: 250 else 250
+                val statusStr = if (statusFile.exists()) statusFile.readText().trim() else ""
+                val isCharging = statusStr.equals("Charging", ignoreCase = true)
+
+                val voltageVolts = voltageMicroV / 1_000_000.0f
+                val currentAmps = kotlin.math.abs(currentMicroA) / 1_000_000.0f
+                val powerWatts = voltageVolts * currentAmps
+                val tempC = tempTenthC / 10.0f
+
+                val powerStr = if (powerWatts > 0.05f) {
+                    if (isCharging) {
+                        String.format(Locale.getDefault(), "%.1fW", powerWatts)
+                    } else {
+                        String.format(Locale.getDefault(), "-%.1fW", powerWatts)
+                    }
+                } else if (isCharging) {
+                    "0.0W"
+                } else {
+                    "--W"
+                }
+                val voltStr = String.format(Locale.getDefault(), "%.2fV", voltageVolts)
+                val tempStr = String.format(Locale.getDefault(), "%.1f℃", tempC)
+                val singleLine = "$powerStr | $voltStr | $tempStr"
+                lastKnownBatteryInfo = singleLine
+                singleLine
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        /**
          * 判定主应用前台监控服务当前是否真实存活。
          * 采用 PID 瞬时探针配合高频心跳时间戳，实现 0 延迟秒级确诊。
          *
          * @return 若主服务在最近超时窗口内保持活跃返回 true，否则返回 false
          */
         private fun isHostAlive(): Boolean {
-            val aliveFile = File(APP_ALIVE_FILE_PATH)
-            if (aliveFile.exists() && aliveFile.canRead()) {
-                try {
-                    val content = aliveFile.readText(Charsets.UTF_8).trim()
-                    val parts = content.split(":")
-                    if (parts.size >= 2) {
-                        val timestamp = parts[0].toLongOrNull() ?: 0L
-                        val pid = parts[1].toIntOrNull() ?: -1
-                        if (parts.size >= 3 && parts[2].isNotBlank()) {
-                            lastKnownBatteryInfo = parts[2]
-                        }
+            for (path in listOf(EXTERNAL_ALIVE_FILE_PATH, APP_ALIVE_FILE_PATH)) {
+                val file = File(path)
+                if (file.exists() && file.canRead()) {
+                    try {
+                        val content = file.readText(Charsets.UTF_8).trim()
+                        val parts = content.split(":")
+                        if (parts.size >= 2) {
+                            val timestamp = parts[0].toLongOrNull() ?: 0L
+                            val pid = parts[1].toIntOrNull() ?: -1
+                            if (parts.size >= 3 && parts[2].isNotBlank()) {
+                                lastKnownBatteryInfo = parts[2].trim()
+                            }
 
-                        // 瞬时 PID 探针：如果记录的 PID 已从内核进程表中销毁，0 延迟即刻确诊死亡
-                        if (pid > 0 && !isPidDirectoryAlive(pid)) {
-                            return false
-                        }
+                            // 瞬时 PID 探针：如果记录的 PID 已从内核进程表中销毁，0 延迟即刻确诊死亡
+                            if (pid > 0 && !isPidDirectoryAlive(pid)) {
+                                return false
+                            }
 
-                        val diff = System.currentTimeMillis() - timestamp
-                        if (diff in 0..ALIVE_TIMEOUT_MS) {
-                            return true
+                            val diff = System.currentTimeMillis() - timestamp
+                            if (diff in 0..ALIVE_TIMEOUT_MS) {
+                                return true
+                            }
                         }
-                    }
-                } catch (_: Exception) {}
+                    } catch (_: Exception) {}
+                }
             }
 
             // 心跳文件不存在或超时，辅助通过 pidof 校验
@@ -227,25 +369,121 @@ class BatteryDaemonServer {
         }
 
         /**
-         * 在宿主进程被划杀期间，以 Shell (UID 2000) 身份向通知栏发送寄生常驻兜底通知。
-         * 继承主服务最新的电池监控数据，达到视觉上完全无缝无感的平替衔接效果。
+         * 以 Shell (UID 2000) 身份向通知栏发送或刷新寄生常驻通知。
+         * 由于通知属于 com.android.shell，用户在多任务划杀应用时 NMS 绝不清除此通知，
+         * 呈现与主应用一致的纯净单行三项数值（功率 | 电压 | 温度），杜绝多余占位文案。
          *
-         * @param batteryInfo 最新电池参数文案（如功率、电压、温度）
+         * @param batteryInfo 最新电池参数文案（如 -3.8W | 4.05V | 28.5℃）
          */
         private fun postShellNotification(batteryInfo: String) {
             try {
-                val title = batteryInfo.ifBlank { "⚡ 电池监控后台持续运行中" }
-                val text = "特权守护持续运行中 · 划杀自愈防护已激活"
-                executeShellCommand("cmd notification post -S bigtext -t \"$title\" \"battery_daemon_tag\" \"$text\"")
+                val title = batteryInfo.ifBlank { "⚡ 电池监控持续运行中" }
+                executeShellCommand("cmd notification post -t \"$title\" \"$NOTIFICATION_TAG\" \"\"")
             } catch (_: Exception) {}
         }
 
         /**
-         * 移除由 Shell 发送的备用通知。
+         * 特权独立硬件物理采样引擎。
+         * 直接从 Linux 内核 sysfs 节点读取瞬时电流、电压、温度、充放电状态与电量，
+         * 写入外部私有存储共享采样流文件 [EXTERNAL_SAMPLES_FILE_PATH]。
+         * 独立常驻运行于 init 下，不受应用多任务划杀影响，保障时间线轨迹零断层。
+         */
+        private fun recordPhysicalSamplePoint() {
+            try {
+                val basePath = "/sys/class/power_supply/battery"
+                val currentFile = File(basePath, "current_now")
+                val voltageFile = File(basePath, "voltage_now")
+                val tempFile = File(basePath, "temp")
+                val statusFile = File(basePath, "status")
+                val capacityFile = File(basePath, "capacity")
+
+                if (!currentFile.exists() || !voltageFile.exists()) return
+
+                val currentMicroA = currentFile.readText().trim().toLongOrNull() ?: return
+                val voltageMicroV = voltageFile.readText().trim().toLongOrNull() ?: return
+                val tempTenthC = if (tempFile.exists()) tempFile.readText().trim().toIntOrNull() ?: 250 else 250
+                val statusStr = if (statusFile.exists()) statusFile.readText().trim() else ""
+                val capacity = if (capacityFile.exists()) capacityFile.readText().trim().toIntOrNull() ?: 100 else 100
+                val isCharging = statusStr.equals("Charging", ignoreCase = true)
+
+                val voltageVolts = voltageMicroV / 1_000_000.0f
+                val currentMa = currentMicroA / 1000.0f
+                val powerWatts = (voltageVolts * kotlin.math.abs(currentMa)) / 1000.0f
+                val tempC = tempTenthC / 10.0f
+                val now = System.currentTimeMillis()
+
+                val line = String.format(
+                    Locale.US,
+                    "%d,%d,%.3f,%.1f,%.2f,%b,%.2f\n",
+                    now, capacity, voltageVolts, tempC, currentMa, isCharging, powerWatts
+                )
+
+                val targetFile = File(EXTERNAL_SAMPLES_FILE_PATH)
+                val parent = targetFile.parentFile
+                if (parent != null && !parent.exists()) {
+                    parent.mkdirs()
+                }
+
+                FileOutputStream(targetFile, true).use { fos ->
+                    fos.write(line.toByteArray(Charsets.UTF_8))
+                    fos.flush()
+                }
+
+                // 定期轮转修剪（超过 20000 行保留最新 10000 行，避免文件无限增大）
+                trimSampleStreamFileIfNeeded(targetFile)
+            } catch (_: Exception) {}
+        }
+
+        /**
+         * 检查并修剪采样流文件，当记录超过 20,000 点时保留最新 10,000 点。
+         *
+         * @param file 目标采样流文件
+         */
+        private fun trimSampleStreamFileIfNeeded(file: File) {
+            try {
+                if (!file.exists() || file.length() < 2 * 1024 * 1024) return
+                val lines = file.readLines(Charsets.UTF_8)
+                if (lines.size > 20000) {
+                    val keepLines = lines.takeLast(10000)
+                    FileOutputStream(file, false).use { fos ->
+                        for (l in keepLines) {
+                            fos.write((l + "\n").toByteArray(Charsets.UTF_8))
+                        }
+                        fos.flush()
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        /**
+         * 移除由 Shell 发送的常驻通知。
+         * 优先使用 Android 系统内部 INotificationManager 反射撤销，兼容各版本 Android 原生系统。
          */
         private fun removeShellNotification() {
             try {
-                executeShellCommand("cmd notification cancel \"battery_daemon_tag\"")
+                val smClass = Class.forName("android.os.ServiceManager")
+                val getService = smClass.getMethod("getService", String::class.java)
+                val binder = getService.invoke(null, "notification") as? android.os.IBinder
+                if (binder != null) {
+                    val stubClass = Class.forName("android.app.INotificationManager\$Stub")
+                    val asInterface = stubClass.getMethod("asInterface", android.os.IBinder::class.java)
+                    val nm = asInterface.invoke(null, binder)
+                    for (m in nm.javaClass.methods) {
+                        if (m.name == "cancelNotificationWithTag") {
+                            val pts = m.parameterTypes
+                            if (pts.size == 4 && pts[0] == String::class.java && pts[1] == String::class.java) {
+                                m.invoke(nm, "com.android.shell", NOTIFICATION_TAG, NOTIFICATION_ID, 0)
+                                break
+                            } else if (pts.size == 5 && pts[0] == String::class.java && pts[1] == String::class.java) {
+                                m.invoke(nm, "com.android.shell", "com.android.shell", NOTIFICATION_TAG, NOTIFICATION_ID, 0)
+                                break
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+            try {
+                executeShellCommand("cmd notification cancel $NOTIFICATION_TAG")
             } catch (_: Exception) {}
         }
 

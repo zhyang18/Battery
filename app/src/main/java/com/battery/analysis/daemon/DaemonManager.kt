@@ -111,6 +111,52 @@ object DaemonManager {
      * @param context 应用程序上下文，用于获取 APK 安装包绝对路径
      * @return 组装完成的可执行 Shell 命令字符串
      */
+    /** 应用外部私有存储共享心跳文件路径（普通应用沙箱具备读写豁免权限，守护进程亦可读写） */
+    const val EXTERNAL_ALIVE_FILE_PATH = "/sdcard/Android/data/com.battery.analysis/files/battery_app.alive"
+
+    /** 应用外部私有存储共享采样流文件路径（守护进程独立高精采样日志） */
+    const val EXTERNAL_SAMPLES_FILE_PATH = "/sdcard/Android/data/com.battery.analysis/files/battery_samples.stream"
+
+    /**
+     * 获取主应用与特权守护进程共享的活跃状态心跳文件对象。
+     *
+     * 优先返回无需运行时权限的应用外部私有文件路径，确保普通应用在沙箱内写入无权限阻碍。
+     *
+     * @param context 应用程序上下文
+     * @return 共享心跳 [File] 对象
+     */
+    fun getSharedAliveFile(context: Context): File {
+        val extDir = context.getExternalFilesDir(null)
+        return if (extDir != null) {
+            File(extDir, "battery_app.alive")
+        } else {
+            File(EXTERNAL_ALIVE_FILE_PATH)
+        }
+    }
+
+    /**
+     * 获取特权守护进程持久化写入的电池物理采样流文件。
+     *
+     * @param context 应用程序上下文
+     * @return 共享采样流 [File] 对象
+     */
+    fun getSharedSamplesFile(context: Context): File {
+        val extDir = context.getExternalFilesDir(null)
+        return if (extDir != null) {
+            File(extDir, "battery_samples.stream")
+        } else {
+            File(EXTERNAL_SAMPLES_FILE_PATH)
+        }
+    }
+
+    /**
+     * 获取拉起特权守护进程的纯 Shell 脚本命令（脱离终端并在后台运行 app_process）。
+     *
+     * 避免使用部分定制 ROM 未预装的 nohup 命令，改用标准 POSIX 子进程重定向与环境变量语法。
+     *
+     * @param context 应用程序上下文，用于获取 APK 安装包绝对路径
+     * @return 组装完成的可执行 Shell 命令字符串
+     */
     fun getLaunchShellCommand(context: Context): String {
         val apkPath = context.applicationInfo.sourceDir
         return "sh -c \"export CLASSPATH=$apkPath; exec /system/bin/app_process /system/bin com.battery.analysis.daemon.BatteryDaemonServer\" </dev/null >/dev/null 2>&1 &"
@@ -119,7 +165,7 @@ object DaemonManager {
     /**
      * 获取供用户在电脑终端直接执行的完整 ADB Shell 启动命令。
      *
-     * 动态使用 `pm path com.battery.analysis` 解析 APK 路径，具有跨机器通用性。
+     * 动态使用 `pm path com.battery.analysis` 解析 APK 路径，兼容 Windows CMD/PowerShell 与 Linux/macOS 终端。
      *
      * @return 供在电脑执行的标准 adb shell 命令
      */

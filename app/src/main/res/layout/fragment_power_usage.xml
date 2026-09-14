@@ -749,6 +749,7 @@
                                         android:layout_height="wrap_content">
 
                                         <TextView
+                                            android:id="@+id/tv_setup_shizuku_title"
                                             android:layout_width="wrap_content"
                                             android:layout_height="wrap_content"
                                             android:text="@string/power_mode_shizuku"
@@ -762,7 +763,7 @@
                                             android:layout_height="wrap_content"
                                             android:layout_alignParentEnd="true"
                                             android:layout_centerVertical="true"
-                                            android:checked="true"
+                                            android:checked="false"
                                             android:clickable="false"
                                             android:focusable="false" />
                                     </RelativeLayout>

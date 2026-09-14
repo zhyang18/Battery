@@ -373,6 +373,8 @@
     <string name="toast_already_authorized">已获授权，无需重复申请</string>
     <string name="toast_shizuku_not_connected">Shizuku 未连接，正在打开</string>
     <string name="toast_shizuku_not_found">未安装 Shizuku</string>
+    <string name="toast_shizuku_not_installed_tip">当前设备未安装 Shizuku，无法启用该模式。请先安装 Shizuku 或选择标准模式。</string>
+    <string name="power_mode_shizuku_not_installed">Shizuku 模式 (未安装)</string>
 
     <!-- 历史记录加载与断电自动记录 -->
     <string name="btn_load_snapshot">加载查看</string>

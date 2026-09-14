@@ -181,88 +181,7 @@
                 android:textSize="13sp"
                  />
 
-            <!-- 条目 3: 开启实时自动刷新 -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="56dp"
-                android:layout_marginBottom="6dp"
-                android:background="@drawable/bg_setting_card_item"
-                android:clipToOutline="true"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingHorizontal="12dp">
 
-                <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:src="@drawable/ic_bolt"
-                    app:tint="?android:attr/textColorPrimary" />
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:layout_weight="1"
-                    android:text="@string/setting_auto_refresh"
-                    android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="15sp"
-                     />
-
-                <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/switch_auto_refresh"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:scaleX="0.82"
-                    android:scaleY="0.82"
-                    app:thumbTint="@color/selector_switch_thumb"
-                    app:trackTint="@color/selector_switch_track" />
-            </LinearLayout>
-
-            <!-- 条目 4: 刷新时间间隔 -->
-            <LinearLayout
-                android:id="@+id/layout_interval_setting"
-                android:layout_width="match_parent"
-                android:layout_height="56dp"
-                android:layout_marginBottom="6dp"
-                android:background="@drawable/bg_setting_card_item"
-                android:clickable="true"
-                android:focusable="true"
-                android:clipToOutline="true"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingHorizontal="12dp">
-
-                <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:src="@drawable/ic_timer"
-                    app:tint="?android:attr/textColorPrimary" />
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:layout_weight="1"
-                    android:text="@string/setting_refresh_interval"
-                    android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="15sp"
-                     />
-
-                <TextView
-                    android:id="@+id/tv_current_interval"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="6dp"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="14sp"
-                    tools:text="2 秒" />
-
-                <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
-                    android:src="@drawable/ic_arrow_drop_down"
-                    app:tint="?android:attr/textColorSecondary" />
-            </LinearLayout>
 
             <!-- 条目 4.5: 充电时保持屏幕常亮 -->
             <LinearLayout
@@ -346,50 +265,7 @@
                     app:tint="?android:attr/textColorSecondary" />
             </LinearLayout>
 
-            <!-- 条目: 曲线采样精度 -->
-            <LinearLayout
-                android:id="@+id/layout_sampling_mode_setting"
-                android:layout_width="match_parent"
-                android:layout_height="56dp"
-                android:layout_marginBottom="6dp"
-                android:background="@drawable/bg_setting_card_item"
-                android:clickable="true"
-                android:focusable="true"
-                android:clipToOutline="true"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingHorizontal="12dp">
 
-                <ImageView
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:src="@drawable/ic_battery_power"
-                    app:tint="?android:attr/textColorPrimary" />
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:layout_weight="1"
-                    android:text="@string/setting_sampling_mode"
-                    android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="15sp" />
-
-                <TextView
-                    android:id="@+id/tv_current_sampling_mode"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="6dp"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="13.5sp"
-                    tools:text="🍃 极限省电 (默认)" />
-
-                <ImageView
-                    android:layout_width="20dp"
-                    android:layout_height="20dp"
-                    android:src="@drawable/ic_arrow_drop_down"
-                    app:tint="?android:attr/textColorSecondary" />
-            </LinearLayout>
 
             <!-- 3. Shizuku 提权 分类 -->
             <TextView

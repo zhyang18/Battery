@@ -372,6 +372,8 @@
     <string name="toast_already_authorized">Already authorized</string>
     <string name="toast_shizuku_not_connected">Shizuku disconnected, opening...</string>
     <string name="toast_shizuku_not_found">Shizuku not installed</string>
+    <string name="toast_shizuku_not_installed_tip">Shizuku is not installed on this device. Please install Shizuku first or select Standard mode.</string>
+    <string name="power_mode_shizuku_not_installed">⚡ Shizuku Mode (Not Installed)</string>
 
     <!-- History Snapshot Loading & Power Unplug Auto-Record -->
     <string name="btn_load_snapshot">Load &amp; View</string>

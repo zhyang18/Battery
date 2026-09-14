@@ -100,9 +100,8 @@ class SettingsFragment : Fragment() {
 
         setupLanguageSettings()
         setupThemeSettings()
-        setupRefreshSettings()
+        setupChargingKeepScreenOnSettings()
         setupPowerModeSettings()
-        setupSamplingModeSettings()
         setupShizukuSettings()
         setupKeepAliveSettings()
         setupBackupRestoreSettings()
@@ -111,14 +110,13 @@ class SettingsFragment : Fragment() {
     }
 
     /**
-     * 界面恢复至前台时的生命周期回调，同步最新的耗电模式、采样精度副标题及 Shizuku 连接与权限状态。
+     * 界面恢复至前台时的生命周期回调，同步最新的耗电模式及 Shizuku 连接与权限状态。
      */
     override fun onResume() {
         super.onResume()
         (activity as? MainActivity)?.updateShizukuStatusState()
         val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(requireContext())
         updatePowerModeDisplay(powerManager.getSelectedMode())
-        updateSamplingModeDisplay(powerManager.getSamplingMode())
 
         val chargingPrefs = requireContext().getSharedPreferences("charging_stats_prefs", Context.MODE_PRIVATE)
         binding.switchChargingKeepScreenOn.isChecked = chargingPrefs.getBoolean("pref_charging_keep_screen_on", false)
@@ -162,8 +160,17 @@ class SettingsFragment : Fragment() {
             val normalColor = ContextCompat.getColor(requireContext(), R.color.popup_item_text)
             val activeColor = Color.parseColor("#2196F3")
 
-            tvShizuku.setTextColor(if (currentMode == com.battery.analysis.manager.PowerUsageManager.MODE_SHIZUKU) activeColor else normalColor)
-            tvNormal.setTextColor(if (currentMode == com.battery.analysis.manager.PowerUsageManager.MODE_NORMAL) activeColor else normalColor)
+            val isShizukuInstalled = powerManager.isShizukuInstalled()
+            if (!isShizukuInstalled) {
+                tvShizuku.text = getString(R.string.power_mode_shizuku_not_installed)
+                tvShizuku.alpha = 0.5f
+            } else {
+                tvShizuku.text = getString(R.string.power_mode_shizuku)
+                tvShizuku.alpha = 1.0f
+            }
+
+            tvShizuku.setTextColor(if (currentMode == com.battery.analysis.manager.PowerUsageManager.MODE_SHIZUKU && isShizukuInstalled) activeColor else normalColor)
+            tvNormal.setTextColor(if (currentMode == com.battery.analysis.manager.PowerUsageManager.MODE_NORMAL || !isShizukuInstalled) activeColor else normalColor)
 
             val selectMode = { which: Int ->
                 powerManager.setSelectedMode(which)
@@ -179,7 +186,15 @@ class SettingsFragment : Fragment() {
             }
 
             tvShizuku.setOnClickListener {
-                selectMode(com.battery.analysis.manager.PowerUsageManager.MODE_SHIZUKU)
+                if (!powerManager.isShizukuInstalled()) {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.toast_shizuku_not_installed_tip),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    selectMode(com.battery.analysis.manager.PowerUsageManager.MODE_SHIZUKU)
+                }
             }
 
             tvNormal.setOnClickListener {
@@ -197,99 +212,21 @@ class SettingsFragment : Fragment() {
 
     /**
      * 更新耗电统计检测模式副标题文本。
+     * 若未安装 Shizuku，自适应显示为标准模式。
      *
      * @param mode 当前工作模式
      */
     private fun updatePowerModeDisplay(mode: Int) {
-        binding.tvCurrentPowerMode.text = if (mode == com.battery.analysis.manager.PowerUsageManager.MODE_SHIZUKU) {
+        val ctx = context ?: return
+        val isShizukuInstalled = com.battery.analysis.manager.PowerUsageManager.getInstance(ctx).isShizukuInstalled()
+        binding.tvCurrentPowerMode.text = if (mode == com.battery.analysis.manager.PowerUsageManager.MODE_SHIZUKU && isShizukuInstalled) {
             "⚡ Shizuku"
         } else {
             getString(R.string.power_mode_normal)
         }
     }
 
-    /**
-     * 初始化曲线采样精度设置项与下拉气泡弹窗交互。
-     * 点击时弹出气泡菜单，供用户在极限省电模式、标准智能模式与极客高精模式间自由切换。
-     */
-    private fun setupSamplingModeSettings() {
-        val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(requireContext())
-        updateSamplingModeDisplay(powerManager.getSamplingMode())
 
-        binding.layoutSamplingModeSetting.setOnClickListener {
-            val currentMode = powerManager.getSamplingMode()
-
-            val popupView = layoutInflater.inflate(R.layout.popup_sampling_mode_picker, null)
-            val density = resources.displayMetrics.density
-            val popupWidth = (230 * density).toInt()
-
-            val popupWindow = android.widget.PopupWindow(
-                popupView,
-                popupWidth,
-                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-                true
-            )
-
-            popupWindow.isOutsideTouchable = true
-            popupWindow.isFocusable = true
-            popupWindow.animationStyle = R.style.Animation_PopupTopRight
-
-            val tvPowerSave = popupView.findViewById<TextView>(R.id.tv_sampling_power_save)
-            val tvBalanced = popupView.findViewById<TextView>(R.id.tv_sampling_balanced)
-            val tvHighPrecision = popupView.findViewById<TextView>(R.id.tv_sampling_high_precision)
-
-            val normalColor = ContextCompat.getColor(requireContext(), R.color.popup_item_text)
-            val activeColor = Color.parseColor("#2196F3")
-
-            tvPowerSave.setTextColor(if (currentMode == com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_POWER_SAVE) activeColor else normalColor)
-            tvBalanced.setTextColor(if (currentMode == com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_BALANCED) activeColor else normalColor)
-            tvHighPrecision.setTextColor(if (currentMode == com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_HIGH_PRECISION) activeColor else normalColor)
-
-            val selectMode = { which: Int ->
-                powerManager.setSamplingMode(which)
-                updateSamplingModeDisplay(which)
-                popupWindow.dismiss()
-                val tip = when (which) {
-                    com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_HIGH_PRECISION -> getString(R.string.sampling_mode_tip_high_precision)
-                    com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_BALANCED -> getString(R.string.sampling_mode_tip_balanced)
-                    else -> getString(R.string.sampling_mode_tip_power_save)
-                }
-                Toast.makeText(requireContext(), tip, Toast.LENGTH_SHORT).show()
-            }
-
-            tvPowerSave.setOnClickListener {
-                selectMode(com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_POWER_SAVE)
-            }
-
-            tvBalanced.setOnClickListener {
-                selectMode(com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_BALANCED)
-            }
-
-            tvHighPrecision.setOnClickListener {
-                selectMode(com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_HIGH_PRECISION)
-            }
-
-            popupWindow.showAsDropDown(
-                binding.layoutSamplingModeSetting,
-                0,
-                (4 * density).toInt(),
-                android.view.Gravity.END
-            )
-        }
-    }
-
-    /**
-     * 更新曲线采样精度副标题展示文本。
-     *
-     * @param mode 当前配置的采样模式常量
-     */
-    private fun updateSamplingModeDisplay(mode: Int) {
-        binding.tvCurrentSamplingMode.text = when (mode) {
-            com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_HIGH_PRECISION -> getString(R.string.sampling_mode_high_precision_short)
-            com.battery.analysis.manager.PowerUsageManager.SAMPLING_MODE_BALANCED -> getString(R.string.sampling_mode_balanced_short)
-            else -> getString(R.string.sampling_mode_power_save_short)
-        }
-    }
 
     /**
      * 初始化多语言切换设置项与右上角展开气泡弹窗交互。
@@ -432,22 +369,9 @@ class SettingsFragment : Fragment() {
     }
 
     /**
-     * 初始化实时刷新与间隔时间设置。
+     * 初始化充电时保持屏幕常亮设置交互。
      */
-    private fun setupRefreshSettings() {
-        val isAutoRefreshEnabled = prefs.getBoolean("auto_refresh_enabled", false)
-        val refreshIntervalMs = prefs.getLong("refresh_interval_ms", 2000L)
-
-        binding.switchAutoRefresh.isChecked = isAutoRefreshEnabled
-        binding.tvCurrentInterval.text = getIntervalDisplay(refreshIntervalMs)
-
-        val mainActivity = activity as? MainActivity
-
-        binding.switchAutoRefresh.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean("auto_refresh_enabled", isChecked).apply()
-            mainActivity?.setAutoRefreshEnabled(isChecked)
-        }
-
+    private fun setupChargingKeepScreenOnSettings() {
         val chargingPrefs = requireContext().getSharedPreferences("charging_stats_prefs", Context.MODE_PRIVATE)
         binding.switchChargingKeepScreenOn.isChecked = chargingPrefs.getBoolean("pref_charging_keep_screen_on", false)
         binding.switchChargingKeepScreenOn.setOnCheckedChangeListener { _, isChecked ->
@@ -456,67 +380,6 @@ class SettingsFragment : Fragment() {
         binding.layoutChargingKeepScreenOnSetting.setOnClickListener {
             val newChecked = !binding.switchChargingKeepScreenOn.isChecked
             binding.switchChargingKeepScreenOn.isChecked = newChecked
-        }
-
-        binding.layoutIntervalSetting.setOnClickListener { _ ->
-            val intervalValues = arrayOf(1000L, 2000L, 3000L, 5000L, 10000L)
-            val currentVal = prefs.getLong("refresh_interval_ms", 2000L)
-
-            val popupView = layoutInflater.inflate(R.layout.popup_interval_picker, null)
-            val density = resources.displayMetrics.density
-            val popupWidth = (140 * density).toInt()
-
-            val popupWindow = android.widget.PopupWindow(
-                popupView,
-                popupWidth,
-                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-                true
-            )
-
-            popupWindow.isOutsideTouchable = true
-            popupWindow.isFocusable = true
-            popupWindow.animationStyle = R.style.Animation_PopupTopRight
-
-            val optionViews = listOf(
-                popupView.findViewById<TextView>(R.id.tv_opt_1s),
-                popupView.findViewById<TextView>(R.id.tv_opt_2s),
-                popupView.findViewById<TextView>(R.id.tv_opt_3s),
-                popupView.findViewById<TextView>(R.id.tv_opt_5s),
-                popupView.findViewById<TextView>(R.id.tv_opt_10s)
-            )
-
-            // 多语言刷新间隔文本配置
-            optionViews[0].text = getString(R.string.interval_1s)
-            optionViews[1].text = getString(R.string.interval_2s)
-            optionViews[2].text = getString(R.string.interval_3s)
-            optionViews[3].text = getString(R.string.interval_5s)
-            optionViews[4].text = getString(R.string.interval_10s)
-
-            val normalColor = androidx.core.content.ContextCompat.getColor(requireContext(), R.color.popup_item_text)
-            val activeColor = Color.parseColor("#2196F3")
-
-            optionViews.forEachIndexed { index, textView ->
-                val intervalVal = intervalValues[index]
-                if (intervalVal == currentVal) {
-                    textView.setTextColor(activeColor)
-                } else {
-                    textView.setTextColor(normalColor)
-                }
-
-                textView.setOnClickListener {
-                    prefs.edit().putLong("refresh_interval_ms", intervalVal).apply()
-                    binding.tvCurrentInterval.text = getIntervalDisplay(intervalVal)
-                    mainActivity?.updateRefreshInterval(intervalVal)
-                    popupWindow.dismiss()
-                }
-            }
-
-            popupWindow.showAsDropDown(
-                binding.layoutIntervalSetting,
-                0,
-                (4 * density).toInt(),
-                android.view.Gravity.END
-            )
         }
     }
 
@@ -642,8 +505,6 @@ class SettingsFragment : Fragment() {
 
         val settingsList = mutableListOf<String>()
         if (backupData.settings.themeMode != null) settingsList.add(getString(R.string.setting_follow_system_theme))
-        if (backupData.settings.autoRefreshEnabled != null) settingsList.add(getString(R.string.setting_auto_refresh))
-        if (backupData.settings.refreshIntervalMs != null) settingsList.add(getString(R.string.setting_refresh_interval))
 
         if (settingsList.isNotEmpty()) {
             tvSettingsInfo.text = settingsList.joinToString("、")
@@ -701,26 +562,17 @@ class SettingsFragment : Fragment() {
 
         binding.switchFollowSystem.setOnCheckedChangeListener(null)
         binding.switchDarkMode.setOnCheckedChangeListener(null)
-        binding.switchAutoRefresh.setOnCheckedChangeListener(null)
 
         binding.switchFollowSystem.isChecked = isFollowSystem
         binding.switchDarkMode.isChecked = isDarkMode
         binding.switchDarkMode.isEnabled = !isFollowSystem
         binding.layoutDarkMode.alpha = if (isFollowSystem) 0.5f else 1.0f
 
-        val isAutoRefreshEnabled = prefs.getBoolean("auto_refresh_enabled", false)
-        val refreshIntervalMs = prefs.getLong("refresh_interval_ms", 2000L)
-        binding.switchAutoRefresh.isChecked = isAutoRefreshEnabled
-        binding.tvCurrentInterval.text = getIntervalDisplay(refreshIntervalMs)
-
         setupLanguageSettings()
         setupThemeSettings()
-        setupRefreshSettings()
+        setupChargingKeepScreenOnSettings()
 
         AppCompatDelegate.setDefaultNightMode(currentThemeMode)
-        val mainActivity = activity as? MainActivity
-        mainActivity?.setAutoRefreshEnabled(isAutoRefreshEnabled)
-        mainActivity?.updateRefreshInterval(refreshIntervalMs)
     }
 
     /**

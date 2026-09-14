@@ -72,12 +72,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         const val MODE_SHIZUKU = 0
         const val MODE_NORMAL = 1
 
-        const val SAMPLING_MODE_POWER_SAVE = 0
-        const val SAMPLING_MODE_BALANCED = 1
-        const val SAMPLING_MODE_HIGH_PRECISION = 2
-
         private const val PREF_KEY_POWER_MODE = "pref_power_stats_mode"
-        private const val PREF_KEY_SAMPLING_MODE = "pref_curve_sampling_mode"
         private const val PREF_KEY_POWER_CONFIGURED = "pref_power_mode_configured"
         const val PREF_KEY_LAST_UNPLUG_TIME = "pref_last_unplug_time"
         const val PREF_KEY_LAST_UNPLUG_LEVEL = "pref_last_unplug_level"
@@ -646,12 +641,54 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 获取当前选中的工作模式（默认优先为 Shizuku 高精度模式）。
+     * 检查当前系统环境是否已安装 Shizuku 应用程序。
      *
-     * @return [MODE_SHIZUKU] 或 [MODE_NORMAL]
+     * @return 若已安装返回 true，未安装或查询异常返回 false
+     */
+    fun isShizukuInstalled(): Boolean {
+        // 优先检查 Binder：若服务已连接运行，则必然已安装
+        if (isShizukuRunning()) {
+            return true
+        }
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(
+                    "moe.shizuku.privileged.api",
+                    PackageManager.PackageInfoFlags.of(0)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo("moe.shizuku.privileged.api", 0)
+            }
+            true
+        } catch (_: PackageManager.NameNotFoundException) {
+            false
+        } catch (_: Exception) {
+            // 兼容性降级：尝试通过 LaunchIntent 确认安装状态
+            try {
+                context.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api") != null
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+
+    /**
+     * 获取当前选中的工作模式。
+     * 若用户未曾主动配置过偏好，则根据当前设备是否安装 Shizuku 智能选择默认模式：
+     * 安装了 Shizuku 则优先使用 [MODE_SHIZUKU]，未安装则降级为 [MODE_NORMAL]。
+     *
+     * @return 当前生效的工作模式（[MODE_SHIZUKU] 或 [MODE_NORMAL]）
      */
     fun getSelectedMode(): Int {
-        return prefs.getInt(PREF_KEY_POWER_MODE, MODE_SHIZUKU)
+        val defaultMode = if (isShizukuInstalled()) MODE_SHIZUKU else MODE_NORMAL
+        val mode = prefs.getInt(PREF_KEY_POWER_MODE, defaultMode)
+        // 防呆校准：若之前记录为 Shizuku 模式但检测到设备未安装 Shizuku，自动降级为普通模式
+        return if (mode == MODE_SHIZUKU && !isShizukuInstalled()) {
+            MODE_NORMAL
+        } else {
+            mode
+        }
     }
 
     /**
@@ -663,23 +700,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         prefs.edit().putInt(PREF_KEY_POWER_MODE, mode).apply()
     }
 
-    /**
-     * 获取当前配置的曲线采样精度模式（默认极限省电模式）。
-     *
-     * @return 采样模式常量 [SAMPLING_MODE_POWER_SAVE], [SAMPLING_MODE_BALANCED], [SAMPLING_MODE_HIGH_PRECISION]
-     */
-    fun getSamplingMode(): Int {
-        return prefs.getInt(PREF_KEY_SAMPLING_MODE, SAMPLING_MODE_POWER_SAVE)
-    }
 
-    /**
-     * 设置并持久化保存曲线采样精度模式。
-     *
-     * @param mode 目标采样模式常量（[SAMPLING_MODE_POWER_SAVE], [SAMPLING_MODE_BALANCED], [SAMPLING_MODE_HIGH_PRECISION]）
-     */
-    fun setSamplingMode(mode: Int) {
-        prefs.edit().putInt(PREF_KEY_SAMPLING_MODE, mode).apply()
-    }
 
     /**
      * 检查 Shizuku 服务当前是否正在运行且已连接。

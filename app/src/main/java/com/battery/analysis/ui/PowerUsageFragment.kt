@@ -329,6 +329,12 @@ class PowerUsageFragment : Fragment() {
             val isCharging = chargingManager.isCharging()
             applySmartChargingMode(isCharging = isCharging, showToast = false)
         } else {
+            val isShizukuInstalled = powerManager.isShizukuInstalled()
+            tempSelectedSetupMode = if (isShizukuInstalled) {
+                PowerUsageManager.MODE_SHIZUKU
+            } else {
+                PowerUsageManager.MODE_NORMAL
+            }
             binding.layoutFirstTimeSetup.visibility = View.VISIBLE
             binding.layoutPowerContent.visibility = View.GONE
             binding.cardPowerMetrics.visibility = View.GONE
@@ -458,9 +464,18 @@ class PowerUsageFragment : Fragment() {
 
     /**
      * 初始化首次启动模式选择卡片交互与确认逻辑。
+     * 若未安装 Shizuku，点击 Shizuku 模式卡片或确认按钮时触发友好提示并阻止选中。
      */
     private fun setupFirstTimeGuideUI() {
         binding.cardSetupModeShizuku.setOnClickListener {
+            if (!powerManager.isShizukuInstalled()) {
+                Toast.makeText(
+                    requireContext(),
+                    getString(R.string.toast_shizuku_not_installed_tip),
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
             tempSelectedSetupMode = PowerUsageManager.MODE_SHIZUKU
             updateSetupCardSelection(tempSelectedSetupMode)
         }
@@ -471,6 +486,18 @@ class PowerUsageFragment : Fragment() {
         }
 
         binding.btnSetupConfirm.setOnClickListener {
+            // 防呆校验：若当前意图选择 Shizuku 模式但设备并未安装 Shizuku，拦截并提醒
+            if (tempSelectedSetupMode == PowerUsageManager.MODE_SHIZUKU && !powerManager.isShizukuInstalled()) {
+                Toast.makeText(
+                    requireContext(),
+                    getString(R.string.toast_shizuku_not_installed_tip),
+                    Toast.LENGTH_SHORT
+                ).show()
+                tempSelectedSetupMode = PowerUsageManager.MODE_NORMAL
+                updateSetupCardSelection(tempSelectedSetupMode)
+                return@setOnClickListener
+            }
+
             currentMode = tempSelectedSetupMode
             powerManager.setSelectedMode(currentMode)
             powerManager.setPowerModeConfigured(true)
@@ -493,11 +520,23 @@ class PowerUsageFragment : Fragment() {
 
     /**
      * 更新初次引导界面中两个模式卡片的选中边框与单选按钮状态。
+     * 若检测到当前设备未安装 Shizuku，动态将 Shizuku 卡片置灰半透明并显示未安装标签。
      *
      * @param selectedMode 选中的模式（[PowerUsageManager.MODE_SHIZUKU] 或 [PowerUsageManager.MODE_NORMAL]）
      */
     private fun updateSetupCardSelection(selectedMode: Int) {
-        if (selectedMode == PowerUsageManager.MODE_SHIZUKU) {
+        val isShizukuInstalled = powerManager.isShizukuInstalled()
+
+        // 依据是否安装 Shizuku 动态更新卡片视觉样式与标题
+        if (isShizukuInstalled) {
+            binding.tvSetupShizukuTitle.text = getString(R.string.power_mode_shizuku)
+            binding.cardSetupModeShizuku.alpha = 1.0f
+        } else {
+            binding.tvSetupShizukuTitle.text = getString(R.string.power_mode_shizuku_not_installed)
+            binding.cardSetupModeShizuku.alpha = 0.55f
+        }
+
+        if (selectedMode == PowerUsageManager.MODE_SHIZUKU && isShizukuInstalled) {
             binding.cardSetupModeShizuku.strokeColor = Color.parseColor("#2196F3")
             binding.cardSetupModeShizuku.strokeWidth = (2 * resources.displayMetrics.density).toInt()
             binding.radioSetupShizuku.isChecked = true

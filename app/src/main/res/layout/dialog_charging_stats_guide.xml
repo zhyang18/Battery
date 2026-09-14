@@ -156,7 +156,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:lineSpacingExtra="4dp"
-                    android:text="• 智能双模：插上电源自动进入充电监测，拔出电源自动生成充电历史记录并切回耗电统计。\n• 曲线精度：可在设置中自由切换极限省电、标准智能或极客高精（1秒级）采样。\n• 常亮选项：支持设置充电时屏幕常亮，方便实时观察快充曲线走势。"
+                    android:text="• 智能双模：插上电源自动进入充电监测，拔出电源自动生成充电历史记录并切回耗电统计。\n• 常亮选项：支持设置充电时屏幕常亮，方便实时观察快充曲线走势。"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="13sp" />
             </LinearLayout>

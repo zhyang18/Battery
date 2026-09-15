@@ -1174,17 +1174,6 @@
                                         app:trackTint="@color/selector_switch_track" />
 
                                     <ImageView
-                                        android:id="@+id/btn_scene_swap"
-                                        android:layout_width="32dp"
-                                        android:layout_height="32dp"
-                                        android:background="?attr/selectableItemBackgroundBorderless"
-                                        android:clickable="true"
-                                        android:contentDescription="@string/power_sort_duration"
-                                        android:focusable="true"
-                                        android:padding="6dp"
-                                        android:src="@drawable/ic_swap_horiz" />
-
-                                    <ImageView
                                         android:id="@+id/btn_scene_sort"
                                         android:layout_width="32dp"
                                         android:layout_height="32dp"

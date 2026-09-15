@@ -792,18 +792,6 @@ class PowerUsageFragment : Fragment() {
             updateBackgroundStatsVisibility(isChecked)
         }
 
-        // 场景排序切换按钮（双向箭头）：在“按时长”、“按功耗”与“按电量”之间循环快速切换
-        binding.btnSceneSwap.setOnClickListener {
-            currentSortIndex = (currentSortIndex + 1) % 3
-            adapter.setSortMode(currentSortIndex)
-            val tip = when (currentSortIndex) {
-                0 -> getString(R.string.power_sort_duration)
-                1 -> getString(R.string.power_sort_power)
-                else -> getString(R.string.power_sort_energy)
-            }
-            Toast.makeText(requireContext(), tip, Toast.LENGTH_SHORT).show()
-        }
-
         // 场景排序菜单按钮（漏斗）：弹出多选排序弹窗
         binding.btnSceneSort.setOnClickListener {
             showSortChoiceDialog()
@@ -1349,9 +1337,9 @@ class PowerUsageFragment : Fragment() {
 
     /**
      * 更新后台统计数据及指标卡片的显示与隐藏状态。
-     * 控制顶部核心指标卡片与折叠吸顶 Mini 卡片中后台列的显隐，并通知适配器切换展示纯前台或前后台组合数据。
+     * 控制顶部核心指标卡片与折叠吸顶 Mini 卡片中后台列的显隐，并通知适配器切换展示纯前台或前后台组合数据及控制后台运行应用的显隐。
      *
-     * @param show 是否显示后台统计相关数据与卡片列
+     * @param show 是否显示后台统计相关数据与卡片列，以及是否在列表中展示后台运行应用
      */
     private fun updateBackgroundStatsVisibility(show: Boolean) {
         val visibility = if (show) View.VISIBLE else View.GONE

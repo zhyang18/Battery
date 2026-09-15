@@ -131,7 +131,7 @@ object DaemonManager {
      * @return 停止守护进程的 adb shell 命令
      */
     fun getAdbStopCommand(): String {
-        return "adb shell \"touch /data/local/tmp/battery_daemon.stop && pkill -f com.battery.analysis.daemon.BatteryDaemonServer\""
+        return "adb shell \"touch /data/local/tmp/battery_daemon.stop && pkill -f com.battery.analysis.daemon.BatteryDaemonServer; rm -f /data/local/tmp/battery_daemon.status /data/local/tmp/battery_daemon.stop /data/local/tmp/battery_daemon.lock\""
     }
 
     /**
@@ -234,7 +234,7 @@ object DaemonManager {
     /**
      * 终止正在运行的特权守护进程。
      *
-     * 写入退出标志文件，并在具备 Root 或 Shizuku 权限时直接向进程发送 SIGKILL。
+     * 写入退出标志文件，并在具备 Root 或 Shizuku 权限时直接向指定 PID 发送终止信号并清理锁资源。
      *
      * @return 操作结果包装对象
      */
@@ -247,19 +247,22 @@ object DaemonManager {
                     fos.write("stop\n".toByteArray())
                     fos.flush()
                 }
+                stopFile.setReadable(true, false)
             } catch (_: Exception) {}
 
             val status = getDaemonStatus()
             val pid = status.pid
 
-            // 2. 若拥有 Root 权限，直接执行 kill
+            val cleanupFiles = "rm -f ${BatteryDaemonServer.STATUS_FILE_PATH} ${BatteryDaemonServer.STOP_FILE_PATH} ${BatteryDaemonServer.LOCK_FILE_PATH}"
+
+            // 2. 若拥有 Root 权限，直接针对 PID 执行 kill（PID 无效时以进程名兜底）
             if (isRootAvailable()) {
                 try {
                     val killCmd = if (pid > 0) "kill -9 $pid" else "pkill -f com.battery.analysis.daemon.BatteryDaemonServer"
-                    Runtime.getRuntime().exec(arrayOf("su", "-c", "$killCmd; rm -f ${BatteryDaemonServer.STATUS_FILE_PATH} ${BatteryDaemonServer.STOP_FILE_PATH}")).waitFor()
+                    Runtime.getRuntime().exec(arrayOf("su", "-c", "$killCmd; $cleanupFiles")).waitFor()
                 } catch (_: Exception) {}
             } else if (isShizukuAvailable()) {
-                // 3. 若拥有 Shizuku 权限，通过 Shizuku 执行 kill
+                // 3. 若拥有 Shizuku 权限，通过 Shizuku 执行定向 kill
                 try {
                     val killCmd = if (pid > 0) "kill -9 $pid" else "pkill -f com.battery.analysis.daemon.BatteryDaemonServer"
                     val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
@@ -272,7 +275,7 @@ object DaemonManager {
                     newProcessMethod.isAccessible = true
                     val proc = newProcessMethod.invoke(
                         null,
-                        arrayOf("sh", "-c", "$killCmd; rm -f ${BatteryDaemonServer.STATUS_FILE_PATH} ${BatteryDaemonServer.STOP_FILE_PATH}"),
+                        arrayOf("sh", "-c", "$killCmd; $cleanupFiles"),
                         null,
                         null
                     ) as? Process
@@ -280,9 +283,10 @@ object DaemonManager {
                 } catch (_: Exception) {}
             }
 
-            // 清理本地状态缓存
+            // 清理本地状态与锁缓存
             try {
                 File(BatteryDaemonServer.STATUS_FILE_PATH).delete()
+                File(BatteryDaemonServer.LOCK_FILE_PATH).delete()
             } catch (_: Exception) {}
 
             Result.success(Unit)

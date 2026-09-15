@@ -16,12 +16,16 @@ import java.util.Locale
  */
 class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolder>() {
 
-    private val items = mutableListOf<AppPowerUsageItem>()
+    // 原始完整应用功耗数据集合
+    private val allItems = mutableListOf<AppPowerUsageItem>()
+
+    // 当前经筛选与排序后供列表渲染呈现的应用数据集合
+    private val displayItems = mutableListOf<AppPowerUsageItem>()
 
     // 排序模式：0-按使用时长降序，1-按平均功耗降序，2-按消耗电量(Wh)降序，3-按应用名称升序
     private var sortMode: Int = 0
 
-    // 是否展示后台统计数据（默认开启）
+    // 是否展示后台统计数据及后台运行应用（默认开启）
     private var showBackgroundStats: Boolean = true
 
     /**
@@ -30,14 +34,16 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
     var onItemClickListener: ((AppPowerUsageItem) -> Unit)? = null
 
     /**
-     * 设置是否展示后台统计数据并刷新列表视图。
+     * 设置是否展示后台统计数据及后台运行应用，并刷新列表视图。
+     * 当开启时，显示全部应用（包含后台运行应用）及各应用的后台统计指标；
+     * 当关闭时，过滤掉纯后台运行应用，仅显示前台运行应用（foregroundTimeMs > 0L）。
      *
-     * @param show 是否展示各应用的后台平均功耗、后台运行时长与后台消耗能量
+     * @param show 是否展示后台运行应用及各应用的后台指标
      */
     fun setShowBackgroundStats(show: Boolean) {
         if (showBackgroundStats != show) {
             showBackgroundStats = show
-            applySort()
+            applyFilterAndSort()
             notifyDataSetChanged()
         }
     }
@@ -77,7 +83,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
      * @param position 数据项索引
      */
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val item = items[position]
+        val item = displayItems[position]
         holder.itemView.setOnClickListener {
             onItemClickListener?.invoke(item)
         }
@@ -130,17 +136,17 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
      *
      * @return 列表大小
      */
-    override fun getItemCount(): Int = items.size
+    override fun getItemCount(): Int = displayItems.size
 
     /**
-     * 提交并更新应用功耗列表数据源。
+     * 提交并更新应用功耗列表原始数据源，并根据当前过滤规则与排序方式刷新展示列表。
      *
      * @param newItems 新的应用功耗列表
      */
     fun submitList(newItems: List<AppPowerUsageItem>) {
-        items.clear()
-        items.addAll(newItems)
-        applySort()
+        allItems.clear()
+        allItems.addAll(newItems)
+        applyFilterAndSort()
         notifyDataSetChanged()
     }
 
@@ -151,23 +157,32 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
      */
     fun setSortMode(mode: Int) {
         sortMode = mode
-        applySort()
+        applyFilterAndSort()
         notifyDataSetChanged()
     }
 
     /**
-     * 根据当前选中的排序模式对内部数据进行排序。
+     * 根据后台统计开关对应用列表进行过滤，并依据当前排序模式对展示列表进行排序。
+     * 若开启后台统计则展示包含后台应用在内的全部应用；若关闭后台统计则过滤掉纯后台运行应用，仅保留前台运行应用（foregroundTimeMs > 0L）。
+     * 排序模式 0（按使用时长）始终按前台使用时长（foregroundTimeMs）降序排序。
      */
-    private fun applySort() {
+    private fun applyFilterAndSort() {
+        displayItems.clear()
+        if (showBackgroundStats) {
+            displayItems.addAll(allItems)
+        } else {
+            displayItems.addAll(allItems.filter { it.foregroundTimeMs > 0L })
+        }
+
         when (sortMode) {
-            0 -> items.sortByDescending { it.foregroundTimeMs }
-            1 -> items.sortByDescending { it.avgPowerWatts }
+            0 -> displayItems.sortByDescending { it.foregroundTimeMs }
+            1 -> displayItems.sortByDescending { it.avgPowerWatts }
             2 -> if (showBackgroundStats) {
-                items.sortByDescending { it.energyWh }
+                displayItems.sortByDescending { it.energyWh }
             } else {
-                items.sortByDescending { it.getForegroundEnergyValue() }
+                displayItems.sortByDescending { it.getForegroundEnergyValue() }
             }
-            3 -> items.sortBy { it.appName }
+            3 -> displayItems.sortBy { it.appName }
         }
     }
 }

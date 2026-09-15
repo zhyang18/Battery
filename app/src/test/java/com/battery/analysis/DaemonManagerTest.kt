@@ -34,6 +34,7 @@ class DaemonManagerTest {
         assertTrue("停止命令必须包含 adb shell", stopCmd.startsWith("adb shell "))
         assertTrue("必须包含创建 stop 标记文件", stopCmd.contains("touch /data/local/tmp/battery_daemon.stop"))
         assertTrue("必须包含 pkill 终止目标类", stopCmd.contains("pkill -f com.battery.analysis.daemon.BatteryDaemonServer"))
+        assertTrue("必须包含清理锁文件", stopCmd.contains("battery_daemon.lock"))
     }
 
     /**

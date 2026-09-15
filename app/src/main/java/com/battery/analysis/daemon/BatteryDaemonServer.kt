@@ -1,7 +1,11 @@
 package com.battery.analysis.daemon
 
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
+import java.nio.channels.FileChannel
+import java.nio.channels.FileLock
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -11,10 +15,11 @@ import java.util.Locale
  *
  * 本类脱离 Android 原生应用组件树，由 /system/bin/app_process 直接拉起并托管于 Linux init (PID 1) 进程下。
  * 核心机制：
- * 1. 内核级 OOM 分数置顶：向 /proc/self/oom_score_adj 写入 -1000，免疫系统低内存查杀；
- * 2. 破除现代 Android cgroup freezer 进程冻结：逃逸至根 cgroup 节点；
- * 3. 持久化状态与心跳：写入状态至 /data/local/tmp/battery_daemon.status，支持双向探针；
- * 4. 毫秒级反向穿透拉活：后台死循环轮询宿主 App 进程与 BatteryMonitorService 存活状态，
+ * 1. 内核级单实例独占锁：通过 /data/local/tmp/battery_daemon.lock 独占排他锁，彻底杜绝重复拉起与多实例争抢；
+ * 2. 内核级 OOM 分数置顶：向 /proc/self/oom_score_adj 写入 -1000，免疫系统低内存查杀；
+ * 3. 破除现代 Android cgroup freezer 进程冻结：逃逸至根 cgroup 节点；
+ * 4. 持久化状态与心跳：写入状态至 /data/local/tmp/battery_daemon.status，支持双向探针；
+ * 5. 毫秒级反向穿透拉活：后台死循环轮询宿主 App 进程与 BatteryMonitorService 存活状态，
  *    一旦检测到被用户划杀或被系统管家清理，立即调用特权 am start-foreground-service 瞬间自愈拉活。
  */
 class BatteryDaemonServer {
@@ -26,8 +31,13 @@ class BatteryDaemonServer {
         
         const val STATUS_FILE_PATH = "/data/local/tmp/battery_daemon.status"
         const val STOP_FILE_PATH = "/data/local/tmp/battery_daemon.stop"
+        const val LOCK_FILE_PATH = "/data/local/tmp/battery_daemon.lock"
 
         private const val CHECK_INTERVAL_MS = 3000L
+
+        private var lockRaf: RandomAccessFile? = null
+        private var lockChannel: FileChannel? = null
+        private var fileLock: FileLock? = null
 
         /**
          * 守护进程独立主入口函数，由 app_process 命令行直接调用。
@@ -44,10 +54,24 @@ class BatteryDaemonServer {
                 stopFile.delete()
             }
 
-            // 2. 提升 OOM 分数为 -1000（内核最高免疫级别）
+            // 2. 双重单实例防重校验：先检查既有活跃实例状态与 PID 存活性
+            if (isExistingInstanceAlive()) {
+                logInfo("Another active BatteryDaemonServer instance is already running. Exiting cleanly.")
+                System.exit(0)
+                return
+            }
+
+            // 3. 抢占内核级文件排他锁，抢占失败说明已有并发实例正在运行
+            if (!acquireProcessLock()) {
+                logInfo("Failed to acquire process lock ($LOCK_FILE_PATH). Another instance is running. Exiting cleanly.")
+                System.exit(0)
+                return
+            }
+
+            // 4. 提升 OOM 分数为 -1000（内核最高免疫级别）
             setOomScoreAdj(-1000)
 
-            // 3. 逃逸 cgroup freezer 进程冻结组
+            // 5. 逃逸 cgroup freezer 进程冻结组
             escapeCgroups()
 
             val myPid = getMyProcessId()
@@ -57,10 +81,10 @@ class BatteryDaemonServer {
 
             logInfo("Daemon initialized. PID=$myPid, UID=$myUid, StartTime=$startTime")
 
-            // 4. 初始写入状态文件
+            // 6. 初始写入状态文件
             updateStatusFile(myPid, myUid, startTime, System.currentTimeMillis(), reviveCount, "RUNNING")
 
-            // 5. 核心守护与反向拉活主循环
+            // 7. 核心守护与反向拉活主循环
             while (true) {
                 try {
                     // 检查是否有外部停止信号文件
@@ -68,6 +92,7 @@ class BatteryDaemonServer {
                         logInfo("Stop signal received. Cleaning up and exiting.")
                         File(STOP_FILE_PATH).delete()
                         File(STATUS_FILE_PATH).delete()
+                        releaseProcessLock()
                         System.exit(0)
                         return
                     }
@@ -103,7 +128,104 @@ class BatteryDaemonServer {
 
             // 退出清理
             File(STATUS_FILE_PATH).delete()
+            releaseProcessLock()
             logInfo("BatteryDaemonServer terminated.")
+        }
+
+        /**
+         * 探测系统中是否已有正在活跃运行的守护进程实例。
+         *
+         * 读取 /data/local/tmp/battery_daemon.status 中的 PID 与心跳时间戳，
+         * 并校验 /proc/<pid>/cmdline 是否包含 BatteryDaemonServer 且心跳在 12 秒有效期内。
+         *
+         * @return 若已有活跃实例运行返回 true，否则返回 false
+         */
+        private fun isExistingInstanceAlive(): Boolean {
+            val statusFile = File(STATUS_FILE_PATH)
+            if (!statusFile.exists() || !statusFile.canRead()) return false
+            return try {
+                val content = statusFile.readText(Charsets.UTF_8).trim()
+                if (content.isEmpty()) return false
+                val json = JSONObject(content)
+                val pid = json.optInt("pid", -1)
+                val lastHeartbeat = json.optLong("lastHeartbeat", 0L)
+                val now = System.currentTimeMillis()
+                if (pid > 0 && (now - lastHeartbeat) < 12000L && pid != getMyProcessId()) {
+                    val cmdlineFile = File("/proc/$pid/cmdline")
+                    if (cmdlineFile.exists() && cmdlineFile.canRead()) {
+                        val cmd = cmdlineFile.readBytes()
+                        val cmdStr = String(cmd).replace("\u0000", " ")
+                        if (cmdStr.contains("BatteryDaemonServer")) {
+                            return true
+                        }
+                    }
+                }
+                false
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        /**
+         * 尝试获取全局单实例 Linux 内核文件排他独占锁。
+         *
+         * 若获取成功，会将当前进程真实 PID 写入锁文件；
+         * 若锁已被其他进程持有，则说明已有存活的守护进程实例正在运行。
+         * 内核级保证：持有锁的进程被杀或退出时，内核会自动释放文件锁，绝不造成死锁。
+         *
+         * @return 获取独占锁成功返回 true，获取失败返回 false
+         */
+        private fun acquireProcessLock(): Boolean {
+            return try {
+                val lockFile = File(LOCK_FILE_PATH)
+                val parent = lockFile.parentFile
+                if (parent != null && !parent.exists()) {
+                    parent.mkdirs()
+                }
+                val raf = RandomAccessFile(lockFile, "rw")
+                lockRaf = raf
+                val channel = raf.channel
+                lockChannel = channel
+                val lock = channel.tryLock()
+                if (lock != null && lock.isValid) {
+                    fileLock = lock
+                    raf.setLength(0)
+                    val pidStr = "${getMyProcessId()}\n"
+                    raf.write(pidStr.toByteArray(Charsets.UTF_8))
+                    lockFile.setReadable(true, false)
+                    true
+                } else {
+                    releaseProcessLock()
+                    false
+                }
+            } catch (_: Exception) {
+                releaseProcessLock()
+                false
+            }
+        }
+
+        /**
+         * 释放全局单实例文件独占锁并清理锁资源。
+         */
+        private fun releaseProcessLock() {
+            try {
+                fileLock?.release()
+            } catch (_: Exception) {}
+            fileLock = null
+
+            try {
+                lockChannel?.close()
+            } catch (_: Exception) {}
+            lockChannel = null
+
+            try {
+                lockRaf?.close()
+            } catch (_: Exception) {}
+            lockRaf = null
+
+            try {
+                File(LOCK_FILE_PATH).delete()
+            } catch (_: Exception) {}
         }
 
         /**

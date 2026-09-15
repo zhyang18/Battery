@@ -35,8 +35,10 @@ import com.battery.analysis.service.KeepAliveAccessibilityService
 import com.battery.analysis.manager.LanguageManager
 import com.battery.analysis.model.BackupData
 import com.battery.analysis.viewmodel.BatteryViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -52,9 +54,6 @@ class SettingsFragment : Fragment() {
 
     private val viewModel: BatteryViewModel by activityViewModels()
     private lateinit var prefs: SharedPreferences
-
-    /** 特权守护进程启动状态轮询任务引用，用于启动成功检测与防止内存泄漏 */
-    private var daemonPollingRunnable: Runnable? = null
 
     /**
      * SAF 导出备份文件选择保存器 Launcher。
@@ -679,32 +678,30 @@ class SettingsFragment : Fragment() {
             val status = DaemonManager.getDaemonStatus()
             if (status.isRunning) {
                 // 当前正在运行，执行停止
-                binding.btnDaemonToggle.isEnabled = false
                 val result = DaemonManager.stopDaemon()
                 result.onSuccess {
                     Toast.makeText(requireContext(), getString(R.string.toast_daemon_stopped), Toast.LENGTH_SHORT).show()
-                    view?.postDelayed({
-                        binding.btnDaemonToggle.isEnabled = true
-                        updateDaemonStatusDisplay()
-                    }, 500L)
-                }.onFailure { err ->
-                    binding.btnDaemonToggle.isEnabled = true
-                    Toast.makeText(requireContext(), err.message ?: "停止失败", Toast.LENGTH_SHORT).show()
                     updateDaemonStatusDisplay()
+                }.onFailure { err ->
+                    Toast.makeText(requireContext(), err.message ?: "停止失败", Toast.LENGTH_SHORT).show()
                 }
             } else {
                 // 当前未运行，尝试智能提权拉起
                 if (DaemonManager.isRootAvailable()) {
                     val result = DaemonManager.startWithRoot(requireContext())
                     result.onSuccess {
-                        pollDaemonStartStatus()
+                        Toast.makeText(requireContext(), getString(R.string.toast_daemon_started), Toast.LENGTH_SHORT).show()
+                        view?.postDelayed({ updateDaemonStatusDisplay() }, 1000L)
+                        view?.postDelayed({ updateDaemonStatusDisplay() }, 2500L)
                     }.onFailure { err ->
                         Toast.makeText(requireContext(), err.message ?: "Root 启动失败", Toast.LENGTH_LONG).show()
                     }
                 } else if (DaemonManager.isShizukuAvailable()) {
                     val result = DaemonManager.startWithShizuku(requireContext())
                     result.onSuccess {
-                        pollDaemonStartStatus()
+                        Toast.makeText(requireContext(), getString(R.string.toast_daemon_started), Toast.LENGTH_SHORT).show()
+                        view?.postDelayed({ updateDaemonStatusDisplay() }, 1000L)
+                        view?.postDelayed({ updateDaemonStatusDisplay() }, 2500L)
                     }.onFailure { err ->
                         Toast.makeText(requireContext(), err.message ?: "Shizuku 启动失败", Toast.LENGTH_LONG).show()
                     }
@@ -718,54 +715,6 @@ class SettingsFragment : Fragment() {
         binding.btnDaemonAdbGuide.setOnClickListener {
             showDaemonAdbGuideDialog()
         }
-    }
-
-    /**
-     * 轮询检查特权守护进程启动状态，直到检测到活跃心跳或达到最大尝试次数。
-     *
-     * 解决 app_process 冷启动时因虚拟机加载延迟导致界面误判为“未运行”的问题。
-     *
-     * @param maxAttempts 最大轮询重试次数（默认 10 次）
-     * @param intervalMs 每次轮询间隔时间毫秒数（默认 400 毫秒，共覆盖 4 秒启动窗口）
-     */
-    private fun pollDaemonStartStatus(maxAttempts: Int = 10, intervalMs: Long = 400L) {
-        daemonPollingRunnable?.let { view?.removeCallbacks(it) }
-        var attempts = 0
-
-        // 设置按钮过渡加载状态
-        binding.btnDaemonToggle.isEnabled = false
-        binding.btnDaemonToggle.text = getString(R.string.settings_daemon_btn_starting)
-
-        val runnable = object : Runnable {
-            override fun run() {
-                if (_binding == null) return
-
-                val status = DaemonManager.getDaemonStatus()
-                if (status.isRunning) {
-                    binding.btnDaemonToggle.isEnabled = true
-                    updateDaemonStatusDisplay()
-                    context?.let { ctx ->
-                        Toast.makeText(ctx, getString(R.string.toast_daemon_started), Toast.LENGTH_SHORT).show()
-                    }
-                    daemonPollingRunnable = null
-                    return
-                }
-
-                attempts++
-                if (attempts < maxAttempts) {
-                    view?.postDelayed(this, intervalMs)
-                } else {
-                    binding.btnDaemonToggle.isEnabled = true
-                    updateDaemonStatusDisplay()
-                    context?.let { ctx ->
-                        Toast.makeText(ctx, getString(R.string.toast_daemon_timeout), Toast.LENGTH_SHORT).show()
-                    }
-                    daemonPollingRunnable = null
-                }
-            }
-        }
-        daemonPollingRunnable = runnable
-        view?.postDelayed(runnable, intervalMs)
     }
 
     /**
@@ -1120,12 +1069,10 @@ class SettingsFragment : Fragment() {
 
 
     /**
-     * 视图销毁时的清理工作，移除未决的轮询任务并释放视图绑定引用。
+     * 视图销毁时的清理工作，释放视图绑定引用。
      */
     override fun onDestroyView() {
         super.onDestroyView()
-        daemonPollingRunnable?.let { view?.removeCallbacks(it) }
-        daemonPollingRunnable = null
         _binding = null
     }
 

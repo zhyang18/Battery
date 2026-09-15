@@ -21,10 +21,26 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
     // 排序模式：0-按使用时长降序，1-按平均功耗降序，2-按消耗电量(Wh)降序，3-按应用名称升序
     private var sortMode: Int = 0
 
+    // 是否展示后台统计数据（默认开启）
+    private var showBackgroundStats: Boolean = true
+
     /**
      * 列表项点击事件回调监听器，向调用方传递被点击的应用使用场景数据实体。
      */
     var onItemClickListener: ((AppPowerUsageItem) -> Unit)? = null
+
+    /**
+     * 设置是否展示后台统计数据并刷新列表视图。
+     *
+     * @param show 是否展示各应用的后台平均功耗、后台运行时长与后台消耗能量
+     */
+    fun setShowBackgroundStats(show: Boolean) {
+        if (showBackgroundStats != show) {
+            showBackgroundStats = show
+            applySort()
+            notifyDataSetChanged()
+        }
+    }
 
     /**
      * 视图持有者，绑定 item_app_power_usage 视图层级。
@@ -80,20 +96,32 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
             }
 
             tvAppName.text = item.appName
-            val pwrStr = item.getFormattedCombinedAvgWatts()
+            val pwrStr = if (showBackgroundStats) {
+                item.getFormattedCombinedAvgWatts()
+            } else {
+                item.getFormattedForegroundAvgWatts()
+            }
             tvAvgInfo.text = String.format(
                 Locale.getDefault(),
                 "AVG: %s",
                 pwrStr
             )
-            tvAppEnergy.text = item.getFormattedCombinedEnergyWh()
+            tvAppEnergy.text = if (showBackgroundStats) {
+                item.getFormattedCombinedEnergyWh()
+            } else {
+                item.getFormattedForegroundEnergyWh()
+            }
             tvMaxTemp.text = String.format(
                 Locale.getDefault(),
                 "%.1f℃ | MAX: %.1f℃",
                 item.avgTemperature,
                 item.maxTemperature
             )
-            tvDuration.text = item.getFormattedCombinedDuration()
+            tvDuration.text = if (showBackgroundStats) {
+                item.getFormattedCombinedDuration()
+            } else {
+                item.getFormattedDuration()
+            }
         }
     }
 
@@ -134,7 +162,11 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
         when (sortMode) {
             0 -> items.sortByDescending { it.foregroundTimeMs }
             1 -> items.sortByDescending { it.avgPowerWatts }
-            2 -> items.sortByDescending { it.energyWh }
+            2 -> if (showBackgroundStats) {
+                items.sortByDescending { it.energyWh }
+            } else {
+                items.sortByDescending { it.getForegroundEnergyValue() }
+            }
             3 -> items.sortBy { it.appName }
         }
     }

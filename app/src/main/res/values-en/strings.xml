@@ -54,6 +54,8 @@
     <string name="power_sort_duration">Sort by Duration</string>
     <string name="power_sort_energy">Sort by Energy (Wh)</string>
     <string name="power_sort_name">Sort by Name</string>
+    <string name="power_background_stats_label">Background stats</string>
+    <string name="power_background_stats_desc">When enabled, per-app background power, background duration, background energy and header card background metrics will be displayed</string>
     <string name="power_mode_shizuku">⚡ Shizuku Mode (High Precision)</string>
     <string name="power_mode_normal">Standard Mode (UsageStats)</string>
     <string name="power_mode_tip_shizuku">Shizuku high-precision mode enabled</string>

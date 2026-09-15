@@ -28,9 +28,13 @@ class ShizukuProvider : BatteryDataProvider {
             return BatteryInfo(source = "Shizuku (无权限)")
         }
 
-        val sysfsInfo = readFromSysfs()
-        val dumpsysInfo = readFromDumpsys()
-        val vendorInfo = readFromVendor()
+        val sysfsFuture = java.util.concurrent.CompletableFuture.supplyAsync({ readFromSysfs() }, asyncExecutor)
+        val dumpsysFuture = java.util.concurrent.CompletableFuture.supplyAsync({ readFromDumpsys(context) }, asyncExecutor)
+        val vendorFuture = java.util.concurrent.CompletableFuture.supplyAsync({ readFromVendor() }, asyncExecutor)
+
+        val sysfsInfo = try { sysfsFuture.get(8, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { BatteryInfo() }
+        val dumpsysInfo = try { dumpsysFuture.get(8, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { BatteryInfo() }
+        val vendorInfo = try { vendorFuture.get(8, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { BatteryInfo() }
 
         // 优先层级与数据聚合
         val designCap = sysfsInfo.designCapacity
@@ -76,8 +80,9 @@ class ShizukuProvider : BatteryDataProvider {
         }
 
         // 规范化电流正负号：放电为负，充电为正
-        if (currentNow != null) {
-            val absCur = Math.abs(currentNow)
+        val curVal = currentNow
+        if (curVal != null) {
+            val absCur = if (curVal < 0f) -curVal else curVal
             currentNow = if (isCharging) absCur else -absCur
         }
 
@@ -95,12 +100,15 @@ class ShizukuProvider : BatteryDataProvider {
         }
 
         // 实时电池功率计算（支持直接读取功率节点或通过电压与电流计算：P = U * I / 10^6，放电为负，充电为正）
-        val rawPowerWatts = sysfsInfo.powerWatts ?: if (voltage != null && currentNow != null) {
-            (voltage * Math.abs(currentNow)) / 1000000f
+        val curForPower = currentNow
+        val rawPowerWatts = sysfsInfo.powerWatts ?: if (voltage != null && curForPower != null) {
+            val absCur = if (curForPower < 0f) -curForPower else curForPower
+            (voltage * absCur) / 1000000f
         } else null
 
-        val powerWatts = if (rawPowerWatts != null) {
-            val absPwr = Math.abs(rawPowerWatts)
+        val pwrVal = rawPowerWatts
+        val powerWatts = if (pwrVal != null) {
+            val absPwr = if (pwrVal < 0f) -pwrVal else pwrVal
             if (isCharging) absPwr else -absPwr
         } else null
 
@@ -329,11 +337,12 @@ class ShizukuProvider : BatteryDataProvider {
     }
 
     /**
-     * 通过执行 dumpsys (battery, batterystats, broadcasts) 命令读取电池信息。
+     * 通过执行 dumpsys 命令并结合系统粘性广播读取电池硬件信息。
      *
-     * @return 解析 dumpsys 得到的电池信息
+     * @param context 应用程序上下文，用于快速读取电池粘性广播
+     * @return 解析得到的电池信息对象 [BatteryInfo]
      */
-    private fun readFromDumpsys(): BatteryInfo {
+    private fun readFromDumpsys(context: Context): BatteryInfo {
         var designCapacity: Float? = null
         var fullChargeCapacity: Float? = null
         var currentCapacity: Float? = null
@@ -426,13 +435,25 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        // 3. 从 dumpsys activity broadcasts 中提取系统电池粘性广播里的循环次数
-        val broadcastsOutput = executeCommand("dumpsys activity broadcasts")
-        val matchBroadcastCycle = REGEX_BROADCAST_CYCLE.find(broadcastsOutput)
-        if (matchBroadcastCycle != null) {
-            val count = matchBroadcastCycle.groupValues[1].toIntOrNull()
-            if (count != null && count > 0) {
-                if (cycleCount == null || count > cycleCount) {
+        // 3. 从系统电池粘性广播中提取循环次数（优先使用轻量广播 Intent 字段，避免 dumpsys activity broadcasts 遍历全系统巨量广播导致数百毫秒卡顿）
+        try {
+            val stickyIntent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val broadcastCycle = stickyIntent?.getIntExtra("android.os.extra.CYCLE_COUNT", -1) ?: -1
+            if (broadcastCycle > 0) {
+                if (cycleCount == null || broadcastCycle > cycleCount) {
+                    cycleCount = broadcastCycle
+                }
+            }
+        } catch (_: Exception) {
+        }
+
+        // 若粘性广播未携带且当前未探测到循环次数，通过轻量过滤指令兜底提取
+        if (cycleCount == null) {
+            val broadcastsOutput = executeCommand("dumpsys activity broadcasts 2>/dev/null | grep -i 'extra.CYCLE_COUNT'")
+            val matchBroadcastCycle = REGEX_BROADCAST_CYCLE.find(broadcastsOutput)
+            if (matchBroadcastCycle != null) {
+                val count = matchBroadcastCycle.groupValues[1].toIntOrNull()
+                if (count != null && count > 0) {
                     cycleCount = count
                 }
             }
@@ -584,6 +605,9 @@ class ShizukuProvider : BatteryDataProvider {
         private var newProcessMethod: java.lang.reflect.Method? = null
         @Volatile
         private var hasInitMethod: Boolean = false
+
+        /** 并发执行底层电池信息读取命令的线程池 */
+        private val asyncExecutor = java.util.concurrent.Executors.newCachedThreadPool()
 
         private val REGEX_CHARGE_COUNTER = Regex("(?m)^\\s*Charge counter:\\s*(\\d+)")
         private val REGEX_LEVEL = Regex("(?m)^\\s*level:\\s*(\\d+)")

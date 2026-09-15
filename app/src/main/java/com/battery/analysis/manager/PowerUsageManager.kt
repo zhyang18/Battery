@@ -129,6 +129,11 @@ class PowerUsageManager private constructor(private val context: Context) {
     private var unsavedDischargeSamplesCount = 0
 
     /**
+     * 游戏应用包名内存缓存，避免高频重复调用 PackageManager 进行 IPC Binder 查询。
+     */
+    private val gameAppCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    /**
      * 记录放电过程中的实时瞬时采样点。
      * 包含秒级时间戳、瞬时电量、电压、温度、瞬时功耗及屏幕开关状态。
      * 采用纯内存快速追加与批处理异步刷盘机制，确保极低 CPU 与磁盘 I/O 消耗。
@@ -764,16 +769,22 @@ class PowerUsageManager private constructor(private val context: Context) {
     /**
      * 当取得 Shizuku 权限后，自动通过 ADB Shell 提权为本应用授予系统“使用情况访问权限” (GET_USAGE_STATS)。
      * 免除用户手动跳转系统深层设置界面的繁琐操作，实现开箱即用的高精度前台使用统计。
+     * 若已拥有权限则直接短路返回，避免冷启动与每次刷新时无谓执行昂贵的 Shell 子进程。
      *
      * @return 赋权操作后是否已成功拥有使用情况访问权限
      */
     fun grantUsageStatsPermissionViaShizuku(): Boolean {
-        if (!isShizukuAuthorized()) return hasUsageStatsPermission()
+        // 先验短路检查：若当前应用已拥有使用情况访问权限，立即返回 true，避免耗费 600ms~1500ms 重复执行 Shell 命令
+        if (hasUsageStatsPermission()) {
+            return true
+        }
+        if (!isShizukuAuthorized()) {
+            return false
+        }
         try {
             val pkg = context.packageName
-            shizukuParser.executeShizukuShellCommand("appops set $pkg GET_USAGE_STATS allow")
-            shizukuParser.executeShizukuShellCommand("appops set $pkg android:get_usage_stats allow")
-            shizukuParser.executeShizukuShellCommand("pm grant $pkg android.permission.PACKAGE_USAGE_STATS")
+            // 合并为单次 Shell 调用执行，减少两次子进程创建与 Binder 交互开销
+            shizukuParser.executeShizukuShellCommand("appops set $pkg GET_USAGE_STATS allow && appops set $pkg android:get_usage_stats allow && pm grant $pkg android.permission.PACKAGE_USAGE_STATS")
         } catch (_: Exception) {
         }
         return hasUsageStatsPermission()
@@ -1433,7 +1444,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 判断指定包名是否为游戏应用。
-     * 优先通过 PackageManager 检查系统内置类别 CATEGORY_GAME 或应用清单中的 FLAG_IS_GAME 标识；
+     * 优先从内存缓存中获取；若未命中则通过 PackageManager 检查系统内置类别 CATEGORY_GAME 或应用清单中的 FLAG_IS_GAME 标识；
      * 并容错检查常见游戏特质包名（如包含 .game、.clash 等）。
      *
      * @param packageName 目标应用包名
@@ -1442,7 +1453,10 @@ class PowerUsageManager private constructor(private val context: Context) {
     @Suppress("DEPRECATION")
     fun isGameApp(packageName: String): Boolean {
         if (packageName.isBlank()) return false
-        return try {
+        val cached = gameAppCache[packageName]
+        if (cached != null) return cached
+
+        val result = try {
             val pm = context.packageManager
             val appInfo = pm.getApplicationInfo(packageName, 0)
             val isCatGame = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -1458,6 +1472,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             packageName.contains(".game", ignoreCase = true) ||
                     packageName.contains(".clash", ignoreCase = true)
         }
+        gameAppCache[packageName] = result
+        return result
     }
 
     /**

@@ -213,6 +213,62 @@ data class AppPowerUsageItem(
 
         return "${formatWatts(fgPwr)} | ${formatWatts(bgPwr)}"
     }
+
+    /**
+     * 计算并获取纯前台活跃状态下消耗的能量值（单位：瓦时 Wh）。
+     * 若已明确记录前台或后台能量，直接返回前台能量；否则按前后台活跃时长比例客观拆分总能耗。
+     *
+     * @return 前台活跃消耗能量（单位：瓦时 Wh）
+     */
+    fun getForegroundEnergyValue(): Float {
+        return if (foregroundEnergyWh > 0f || backgroundEnergyWh > 0f) {
+            foregroundEnergyWh
+        } else {
+            val total = energyWh
+            if (total <= 0f) {
+                0f
+            } else if (foregroundTimeMs <= 0L && backgroundTimeMs > 0L) {
+                0f
+            } else if (foregroundTimeMs > 0L && backgroundTimeMs <= 0L) {
+                total
+            } else if (foregroundTimeMs > 0L && backgroundTimeMs > 0L) {
+                val totalTime = (foregroundTimeMs + backgroundTimeMs).toDouble()
+                val fgRatio = (foregroundTimeMs / totalTime).toFloat()
+                total * fgRatio
+            } else {
+                0f
+            }
+        }
+    }
+
+    /**
+     * 获取纯前台亮屏运行平均功耗展示文本（如 "1.44W" 或 "--"）。
+     * 当未处于前台运行或运行时长不足有效统计门槛（1秒）时显示为 "--"。
+     *
+     * @return 格式化后的纯前台平均功耗文本
+     */
+    fun getFormattedForegroundAvgWatts(): String {
+        val fgPwr = if (foregroundPowerWatts > 0f) {
+            foregroundPowerWatts
+        } else if (foregroundTimeMs >= 1000L && foregroundEnergyWh > 0f) {
+            (foregroundEnergyWh / (foregroundTimeMs / 3600000f)).coerceAtLeast(0f)
+        } else if (foregroundTimeMs >= 1000L && avgPowerWatts > 0f) {
+            avgPowerWatts
+        } else {
+            0f
+        }
+        return formatWatts(fgPwr)
+    }
+
+    /**
+     * 获取纯前台活跃状态下消耗能量的展示文本（格式如 "0.250Wh"）。
+     *
+     * @return 格式化后的纯前台能量消耗文本
+     */
+    fun getFormattedForegroundEnergyWh(): String {
+        val fg = getForegroundEnergyValue()
+        return formatSingleEnergyWh(fg)
+    }
 }
 
 

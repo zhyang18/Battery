@@ -17,6 +17,8 @@ import com.battery.analysis.databinding.FragmentDetectionBinding
 import com.battery.analysis.viewmodel.BatteryViewModel
 import com.google.android.material.tabs.TabLayoutMediator
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import android.content.Intent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -150,7 +152,7 @@ class DetectionFragment : Fragment() {
                 1 -> {
                     viewModel.refreshShizuku(ctx)
                     viewLifecycleOwner.lifecycleScope.launch {
-                        delay(500)
+                        viewModel.isShizukuRefreshing.drop(1).first { !it }
                         if (_binding != null) {
                             binding.swipeRefreshLayout.isRefreshing = false
                             Toast.makeText(requireContext(), getString(R.string.toast_shizuku_data_updated), Toast.LENGTH_SHORT).show()

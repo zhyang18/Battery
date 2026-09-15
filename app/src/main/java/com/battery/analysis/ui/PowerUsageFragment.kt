@@ -149,6 +149,8 @@ class PowerUsageFragment : Fragment() {
 
     companion object {
         private const val PREF_KEY_KEEP_SCREEN_ON = "pref_charging_keep_screen_on"
+        private const val PREF_KEY_ENABLE_BACKGROUND_STATS = "enable_background_stats"
+        private const val PREFS_POWER_STATS = "power_stats_prefs"
 
         /**
          * 存储从历史快照详情页面待载入至主页展示的快照记录实体对象。
@@ -779,6 +781,17 @@ class PowerUsageFragment : Fragment() {
             showPowerSceneGuideDialog()
         }
 
+        // 场景后台统计开关：控制是否展示各应用后台数据及顶部卡片后台指标
+        val statsPrefs = requireContext().getSharedPreferences(PREFS_POWER_STATS, Context.MODE_PRIVATE)
+        val isBgStatsEnabled = statsPrefs.getBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, true)
+        binding.switchBackgroundStats.isChecked = isBgStatsEnabled
+        updateBackgroundStatsVisibility(isBgStatsEnabled)
+
+        binding.switchBackgroundStats.setOnCheckedChangeListener { _, isChecked ->
+            statsPrefs.edit().putBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, isChecked).apply()
+            updateBackgroundStatsVisibility(isChecked)
+        }
+
         // 场景排序切换按钮（双向箭头）：在“按时长”、“按功耗”与“按电量”之间循环快速切换
         binding.btnSceneSwap.setOnClickListener {
             currentSortIndex = (currentSortIndex + 1) % 3
@@ -1329,6 +1342,30 @@ class PowerUsageFragment : Fragment() {
 
         // 3. 刷新应用场景列表
         adapter.submitList(fullPackage.appList)
+
+        // 4. 根据当前开关状态同步卡片与列表后台指标可见性
+        updateBackgroundStatsVisibility(binding.switchBackgroundStats.isChecked)
+    }
+
+    /**
+     * 更新后台统计数据及指标卡片的显示与隐藏状态。
+     * 控制顶部核心指标卡片与折叠吸顶 Mini 卡片中后台列的显隐，并通知适配器切换展示纯前台或前后台组合数据。
+     *
+     * @param show 是否显示后台统计相关数据与卡片列
+     */
+    private fun updateBackgroundStatsVisibility(show: Boolean) {
+        val visibility = if (show) View.VISIBLE else View.GONE
+        with(binding) {
+            tvHeaderBackground.visibility = visibility
+            tvTimeBackground.visibility = visibility
+            tvPowerBackground.visibility = visibility
+            tvEnergyBackground.visibility = visibility
+            tvRemainingBackground.visibility = visibility
+
+            tvMiniTimeBackground.visibility = visibility
+            tvMiniPowerBackground.visibility = visibility
+        }
+        adapter.setShowBackgroundStats(show)
     }
 
     /**

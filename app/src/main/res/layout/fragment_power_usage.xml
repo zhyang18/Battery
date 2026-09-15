@@ -178,6 +178,7 @@
                                 android:text="@string/power_header_screen_off" />
 
                             <TextView
+                                android:id="@+id/tv_header_background"
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
@@ -1145,13 +1146,32 @@
                                         android:src="@drawable/ic_help_circle" />
                                 </LinearLayout>
 
-                                <!-- 右侧操作按钮组：切换与排序 -->
+                                <!-- 右侧操作按钮组：后台统计开关、切换与排序 -->
                                 <LinearLayout
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
                                     android:layout_alignParentEnd="true"
                                     android:layout_centerVertical="true"
+                                    android:gravity="center_vertical"
                                     android:orientation="horizontal">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:text="@string/power_background_stats_label"
+                                        android:textColor="?android:attr/textColorSecondary"
+                                        android:textSize="12sp" />
+
+                                    <com.google.android.material.materialswitch.MaterialSwitch
+                                        android:id="@+id/switch_background_stats"
+                                        android:layout_width="wrap_content"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginStart="2dp"
+                                        android:layout_marginEnd="6dp"
+                                        android:scaleX="0.75"
+                                        android:scaleY="0.75"
+                                        app:thumbTint="@color/selector_switch_thumb"
+                                        app:trackTint="@color/selector_switch_track" />
 
                                     <ImageView
                                         android:id="@+id/btn_scene_swap"

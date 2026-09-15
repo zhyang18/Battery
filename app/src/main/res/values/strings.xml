@@ -54,6 +54,8 @@
     <string name="power_sort_duration">按使用时长排序</string>
     <string name="power_sort_energy">按消耗电量排序</string>
     <string name="power_sort_name">按名称排序</string>
+    <string name="power_background_stats_label">后台统计</string>
+    <string name="power_background_stats_desc">启用后将统计并展示各应用的后台平均功耗、后台运行时长、后台能量消耗及顶部卡片后台指标</string>
     <string name="power_mode_shizuku">Shizuku 模式 (高精度推荐)</string>
     <string name="power_mode_normal">标准模式 (UsageStats)</string>
     <string name="power_mode_tip_shizuku">已启用 Shizuku 高精度模式</string>

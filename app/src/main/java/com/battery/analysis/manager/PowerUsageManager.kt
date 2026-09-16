@@ -1726,11 +1726,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                 // 仅对合理时间间隔（1ms ~ 120s）进行连续切片数值梯形微积分
                 if (dt in 1L..120_000L) {
                     val midTs = (prev.timestamp + curr.timestamp) / 2
-                    // 1. 优先使用采样点自身打上的置顶应用包名（对标 BatteryRecorder 实时栈顶记录）
-                    val matchedPkg = prev.packageName?.takeIf { it.isNotEmpty() && it == curr.packageName }
-                        ?: prev.packageName?.takeIf { it.isNotEmpty() }
+                    // 严格对标 BatteryRecorder RecordAppStatsComputer.kt 第54行逻辑：
+                    // 每个时间切片的能量和时长归属完全由前一个记录点（prev）的前台包名决定
+                    val matchedPkg = prev.packageName?.takeIf { it.isNotEmpty() }
                         ?: curr.packageName?.takeIf { it.isNotEmpty() }
-                        // 2. 次优先结合 UsageEvents 前台切片区间匹配
                         ?: appIntervals.firstOrNull { midTs in it.startTs..it.endTs }?.packageName
 
                     if (matchedPkg != null) {
@@ -3044,10 +3043,13 @@ class PowerUsageManager private constructor(private val context: Context) {
             val p1 = samples[i]
             val dtMs = (p1.timestamp - p0.timestamp).coerceAtLeast(0L)
             if (dtMs in 1L..(3600_000L * 2)) {
+                // 严格对标 BatteryRecorder RecordDetailPowerStatsComputer 第104行逻辑：
+                // 区间的亮/灭屏归属仅由前一个采样点（p0）的屏幕状态决定，
+                // 不要求两端都满足（避免跨屏幕切换区间的误分类）
                 val match = when (filterScreenOn) {
-                    null -> true
-                    true -> p0.isScreenOn && p1.isScreenOn
-                    false -> !p0.isScreenOn && !p1.isScreenOn
+                    null  -> true
+                    true  -> p0.isScreenOn
+                    false -> !p0.isScreenOn
                 }
                 if (match) {
                     val avgWatts = ((p0.powerWatts + p1.powerWatts) / 2.0).coerceAtLeast(0.0)

@@ -69,14 +69,11 @@ class ShizukuTabFragment : Fragment() {
     private fun setupScrollListener() {
         binding.nestedScrollView.setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
             val dy = scrollY - oldScrollY
-            if (scrollY <= 0) {
-                // 滚动至列表最顶端，强制恢复底部页签栏展示
-                (activity as? MainActivity)?.setBottomNavigationVisibility(true)
-            } else if (dy > 6) {
-                // 手指向上滑动列表，隐藏底部页签栏
+            if (dy > 4) {
+                // 手指向上滑动列表，灵敏联动隐藏底部页签栏
                 (activity as? MainActivity)?.setBottomNavigationVisibility(false)
-            } else if (dy < -12) {
-                // 手指向下滑动列表，显示底部页签栏
+            } else if (dy < -8 || (dy < 0 && scrollY <= 0)) {
+                // 手指向下滑动列表或已回滚至最顶端，恢复展示底部页签栏
                 (activity as? MainActivity)?.setBottomNavigationVisibility(true)
             }
         }
@@ -89,11 +86,11 @@ class ShizukuTabFragment : Fragment() {
                 }
                 android.view.MotionEvent.ACTION_MOVE -> {
                     val deltaY = event.rawY - startTouchY
-                    if (deltaY < -20f) {
-                        // 手指持续向上拖动，确保底部导航栏保持隐藏
+                    if (deltaY < -12f) {
+                        // 手指向上拖动，确保立即联动隐藏底部导航栏，避免遮挡底部内容
                         (activity as? MainActivity)?.setBottomNavigationVisibility(false)
                         startTouchY = event.rawY
-                    } else if (deltaY > 20f && binding.nestedScrollView.scrollY <= 0) {
+                    } else if (deltaY > 15f && binding.nestedScrollView.scrollY <= 0) {
                         // 处于最顶部且手指向下拉动，恢复展示底部导航栏
                         (activity as? MainActivity)?.setBottomNavigationVisibility(true)
                         startTouchY = event.rawY

@@ -207,6 +207,11 @@ class PowerUsageFragment : Fragment() {
         setupFirstTimeGuideUI()
         setupCoordinatorScroll()
 
+        // 监听视口尺寸变化，动态更新短列表滑动折叠限制
+        binding.coordinatorPower.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            updateScrollLimitForShortList()
+        }
+
         checkFirstTimeConfiguration()
 
         // 动态注册充放电与电池状态广播
@@ -269,10 +274,10 @@ class PowerUsageFragment : Fragment() {
             }
 
             // AppBarLayout 向上收拢手势感知：当用户上滑折叠顶部卡片时，立即联动隐藏底部页签栏
-            if (verticalOffset < prevOffset && verticalOffset < -10) {
+            if (verticalOffset < prevOffset && verticalOffset < -4) {
                 (activity as? MainActivity)?.setBottomNavigationVisibility(false)
-            } else if (verticalOffset == 0 && binding.nestedScrollView.scrollY <= 0) {
-                // 完全展开且停留在最顶端时，恢复展示底部页签栏
+            } else if (verticalOffset > prevOffset && verticalOffset >= 0 && binding.nestedScrollView.scrollY <= 0) {
+                // 向下滑回最顶端且完全展开时，恢复展示底部页签栏
                 (activity as? MainActivity)?.setBottomNavigationVisibility(true)
             }
 
@@ -330,14 +335,11 @@ class PowerUsageFragment : Fragment() {
             }
 
             val dy = scrollY - oldScrollY
-            if (scrollY <= 0 && lastAppBarVerticalOffset == 0) {
-                // 滚动至列表最顶端且顶部卡片完全展开，强制恢复底部页签栏展示
-                (activity as? MainActivity)?.setBottomNavigationVisibility(true)
-            } else if (dy > 6) {
-                // 手指向上滑动列表，隐藏底部页签栏（灵敏度阈值从 15 调优为 6）
+            if (dy > 4) {
+                // 手指向上滑动列表，灵敏联动隐藏底部页签栏
                 (activity as? MainActivity)?.setBottomNavigationVisibility(false)
-            } else if (dy < -12) {
-                // 手指向下滑动列表，显示底部页签栏
+            } else if (dy < -8 || (dy < 0 && scrollY <= 0 && lastAppBarVerticalOffset == 0)) {
+                // 手指向下滑动列表或已回滚至最顶端，恢复展示底部页签栏
                 (activity as? MainActivity)?.setBottomNavigationVisibility(true)
             }
         }
@@ -346,17 +348,18 @@ class PowerUsageFragment : Fragment() {
         var startTouchY = 0f
         binding.nestedScrollView.setOnTouchListener { _, event ->
             if (currentDisplayTab == 1) return@setOnTouchListener false
+
             when (event.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
                     startTouchY = event.rawY
                 }
                 android.view.MotionEvent.ACTION_MOVE -> {
                     val deltaY = event.rawY - startTouchY
-                    if (deltaY < -20f) {
-                        // 手指持续向上拖动，确保底部导航栏保持隐藏（解决滑到底部后 scrollY 无法再增大的边界场景）
+                    if (deltaY < -12f) {
+                        // 手指向上拖动，立即平滑联动隐藏底部导航栏，避免遮挡底部列表内容
                         (activity as? MainActivity)?.setBottomNavigationVisibility(false)
                         startTouchY = event.rawY
-                    } else if (deltaY > 20f && binding.nestedScrollView.scrollY <= 0 && lastAppBarVerticalOffset == 0) {
+                    } else if (deltaY > 15f && binding.nestedScrollView.scrollY <= 0 && lastAppBarVerticalOffset == 0) {
                         // 处于最顶部且手指向下拉动，恢复展示底部导航栏
                         (activity as? MainActivity)?.setBottomNavigationVisibility(true)
                         startTouchY = event.rawY
@@ -1366,6 +1369,9 @@ class PowerUsageFragment : Fragment() {
 
         // 4. 根据当前开关状态同步卡片与列表后台指标可见性
         updateBackgroundStatsVisibility(binding.switchBackgroundStats.isChecked)
+
+        // 5. 依据列表数据量动态校准上滑边界，确保短列表底部与视口底端恰好保留 10dp 空白区域
+        updateScrollLimitForShortList()
     }
 
     /**
@@ -1387,6 +1393,39 @@ class PowerUsageFragment : Fragment() {
             tvMiniPowerBackground.visibility = View.GONE
         }
         adapter.setShowBackgroundStats(show)
+        updateScrollLimitForShortList()
+    }
+
+    /**
+     * 依据当前应用列表数据行数与实际内容总高度，自适应校准上滑最大滚动边界。
+     * 当数据仅有一行或几行（内容不足一屏或超出极少）时，限制或锁定上滑折叠，
+     * 确保向上滑动到底时列表卡片底部与视口底端恰好保留 10dp 空白区域，杜绝列表悬空与底部巨大空白。
+     */
+    private fun updateScrollLimitForShortList() {
+        if (_binding == null || currentDisplayTab != 0) return
+        binding.nestedScrollView.post {
+            if (_binding == null || currentDisplayTab != 0) return@post
+            val coordinatorH = binding.coordinatorPower.height
+            if (coordinatorH <= 0) return@post
+
+            val targetBottomGapPx = (10 * resources.displayMetrics.density).toInt()
+            val headerH = binding.layoutExpandedHeader.height
+            val contentH = binding.layoutPowerContent.height
+            val totalContentH = headerH + contentH + targetBottomGapPx
+
+            val collapsingToolbarParams = binding.collapsingToolbar.layoutParams as? com.google.android.material.appbar.AppBarLayout.LayoutParams
+            if (totalContentH <= coordinatorH) {
+                // 1. 数据极少（一屏内完全呈现）：禁用折叠与上滑，保持完整展开且底部留白恰好协调
+                collapsingToolbarParams?.scrollFlags = 0
+                binding.collapsingToolbar.layoutParams = collapsingToolbarParams
+                binding.appbarPower.setExpanded(true, false)
+            } else {
+                // 2. 超出一屏：恢复原生联动折叠能力，由联动机制自然滑动到底部（留白 10dp）
+                collapsingToolbarParams?.scrollFlags = com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_SCROLL or
+                        com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_EXIT_UNTIL_COLLAPSED
+                binding.collapsingToolbar.layoutParams = collapsingToolbarParams
+            }
+        }
     }
 
     /**

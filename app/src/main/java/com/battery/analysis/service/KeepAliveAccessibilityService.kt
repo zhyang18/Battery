@@ -64,6 +64,12 @@ class KeepAliveAccessibilityService : AccessibilityService() {
                 Log.e(TAG, "跳转系统无障碍设置失败: ${e.message}", e)
             }
         }
+        /**
+         * 当前通过系统无障碍事件捕获到的置顶前台应用包名。
+         * 0 延迟、0 轮询开销，供监控服务为硬件采样点打上前台标签。
+         */
+        @Volatile
+        var currentForegroundPackage: String? = null
     }
 
     /**
@@ -84,12 +90,21 @@ class KeepAliveAccessibilityService : AccessibilityService() {
 
     /**
      * 接收系统分发的无障碍事件。
-     * 为保持极致省电与隐私安全，本服务不处理任何事件。
+     * 毫秒级捕获窗口状态变动，精准提取当前置顶应用包名。
      *
      * @param event 无障碍事件对象，可能为空
      */
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // 极简设计：不处理任何界面无障碍事件，保证 0 CPU 负担与用户绝对隐私
+        if (event == null) return
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val pkg = event.packageName?.toString()
+            if (!pkg.isNullOrEmpty() &&
+                !pkg.startsWith("com.android.systemui") &&
+                !pkg.startsWith("android")
+            ) {
+                currentForegroundPackage = pkg
+            }
+        }
     }
 
     /**

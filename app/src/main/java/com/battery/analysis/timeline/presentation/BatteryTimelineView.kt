@@ -443,10 +443,10 @@ class BatteryTimelineView @JvmOverloads constructor(
         val screenBarBottom = timeTickTop - dp2
         val screenBarTop = screenBarBottom - dp3_5
 
-        // 曲线区域使用完整图表高度，允许与下方纵向堆叠的应用图标产生自然的视觉交叠
-        val mainChartHeight = screenBarTop - dp12
+        // 曲线区域底部预留 10dp 安全间距（mainChartHeight 间距 6dp + bottomPadding 4dp），避免底部空白区过大
+        val mainChartHeight = screenBarTop - dp6
         val topPadding = dp36
-        val bottomPadding = dp6
+        val bottomPadding = dp4
         val availableH = max(1f, mainChartHeight - topPadding - bottomPadding)
 
         // 确保 App 图标排布已就绪

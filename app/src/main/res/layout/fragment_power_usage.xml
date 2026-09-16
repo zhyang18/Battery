@@ -1110,7 +1110,7 @@
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
+                        android:layout_marginTop="10dp"
                         app:cardBackgroundColor="#14888888"
                         app:cardCornerRadius="14dp"
                         app:cardElevation="0dp"

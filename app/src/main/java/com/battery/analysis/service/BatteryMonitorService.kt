@@ -27,6 +27,7 @@ import com.battery.analysis.model.PowerUsageRecord
 import com.battery.analysis.provider.NormalApiProvider
 import com.battery.analysis.receiver.HeartbeatAlarmReceiver
 import com.battery.analysis.util.SysfsBatterySampler
+import com.battery.analysis.util.ShizukuForegroundAppDetector
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import kotlinx.coroutines.CoroutineScope
@@ -336,6 +337,8 @@ class BatteryMonitorService : Service() {
                     break
                 }
 
+                val loopStartRealtime = SystemClock.elapsedRealtime()
+
                 if (isCharging) {
                     chargingManager.sampleCurrentPoint()
                 } else {
@@ -351,7 +354,8 @@ class BatteryMonitorService : Service() {
                             fallbackVoltageVolts = cachedVoltageVolts,
                             fallbackTempCelsius = cachedTemperature
                         )
-                        val pWatts = hwSample?.powerWatts ?: (getDischargePowerWatts() ?: 0f)
+                        // 若本次采样未能获取有效功率，复用上次缓存的实测值（避免再次调用 sampleHardwareDischarge 造成双重采样）
+                        val pWatts = hwSample?.powerWatts ?: (cachedDischargePowerWatts ?: 0f)
                         val currentVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
                         val currentTemp = hwSample?.temperatureCelsius ?: cachedTemperature
                         val currentPkg = if (isInteractive) getForegroundPackageName() else null
@@ -376,45 +380,74 @@ class BatteryMonitorService : Service() {
                 // 息屏期间自动跳过通知刷新，亮屏期间才刷新
                 updateNotification(force = false)
 
-                val sleepInterval = if (isInteractive) {
+                val targetInterval = if (isInteractive) {
                     if (screenOnInterval == INTERVAL_NEVER) 5000L else screenOnInterval.coerceAtLeast(1000L)
                 } else {
                     if (isCharging) 15000L else screenOffInterval.coerceAtLeast(15000L)
                 }
+                val costMs = SystemClock.elapsedRealtime() - loopStartRealtime
+                val sleepInterval = (targetInterval - costMs).coerceAtLeast(100L)
                 delay(sleepInterval)
             }
         }
     }
 
+    /** 最近一次成功探测到的置顶前台应用包名缓存 */
+    @Volatile
+    private var lastKnownForegroundPackage: String? = null
+
     /**
      * 获取当前处于系统最前台运行的应用包名。
-     * 基于 UsageStatsManager 事件探测置顶活跃包名，为秒级硬件采样点精准打上归属标签。
+     * 多级高精度探测：优先从无障碍服务 [KeepAliveAccessibilityService] 毫秒级读取；
+     * 其次通过 [UsageStatsManager] 提取最近事件并保持状态（亮屏期间未切应用时持续沿用），
+     * 为秒级硬件采样点精准打上前台应用归属标签，彻底杜绝采样点包名丢失为 null。
      *
      * @return 当前置顶前台应用包名，若无法获取则返回 null
      */
     private fun getForegroundPackageName(): String? {
+        // 1. 最高优先级：通过 Shizuku 特权 Binder 直调 IActivityTaskManager (对标 BatteryRecorder 架构，无需无障碍)
+        val shizukuPkg = ShizukuForegroundAppDetector.getForegroundPackageName()
+        if (!shizukuPkg.isNullOrEmpty()) {
+            lastKnownForegroundPackage = shizukuPkg
+            return shizukuPkg
+        }
+
+        // 2. 次优先级：采用无障碍服务毫秒级捕获的置顶应用（若用户开启了无障碍）
+        val accessibilityPkg = KeepAliveAccessibilityService.currentForegroundPackage
+        if (!accessibilityPkg.isNullOrEmpty()) {
+            lastKnownForegroundPackage = accessibilityPkg
+            return accessibilityPkg
+        }
+
+        // 3. 兜底策略：基于 UsageStatsManager 事件探测，时间窗口扩大至 120 秒
         val now = System.currentTimeMillis()
         try {
             val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
             if (usm != null) {
-                val events = usm.queryEvents(now - 15000L, now)
+                val events = usm.queryEvents(now - 120_000L, now)
                 val event = UsageEvents.Event()
-                var lastResumedPkg: String? = null
-                var lastResumedTs = 0L
+                var latestResumedPkg: String? = null
+                var latestResumedTs = 0L
                 while (events.hasNextEvent()) {
                     events.getNextEvent(event)
-                    if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED && event.timeStamp >= lastResumedTs) {
-                        lastResumedPkg = event.packageName
-                        lastResumedTs = event.timeStamp
+                    if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED && event.timeStamp >= latestResumedTs) {
+                        val pkg = event.packageName
+                        if (!pkg.isNullOrEmpty() && !pkg.startsWith("com.android.systemui")) {
+                            latestResumedPkg = pkg
+                            latestResumedTs = event.timeStamp
+                        }
                     }
                 }
-                if (!lastResumedPkg.isNullOrEmpty()) {
-                    return lastResumedPkg
+                if (!latestResumedPkg.isNullOrEmpty()) {
+                    lastKnownForegroundPackage = latestResumedPkg
+                    return latestResumedPkg
                 }
             }
         } catch (_: Throwable) {
         }
-        return null
+
+        // 3. 亮屏持续运行状态保持：若本周期内无新的 RESUMED 事件，持续沿用上一已知前台包名
+        return lastKnownForegroundPackage
     }
 
     /**

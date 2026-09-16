@@ -3,6 +3,7 @@ package com.battery.analysis.provider
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import com.battery.analysis.model.AppPowerUsageItem
@@ -761,12 +762,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     }
 
     /**
-     * 判断指定包名是否为用户安装的三方应用（非纯底层系统进程或具有桌面启动入口）。
-     * 优先命中全局内存缓存；利用系统标志快速短路，仅对未更新的系统内置应用才回退检查启动器 Intent，
-     * 彻底消除列表快速排序时的数百次沉重 IPC 阻塞。
+     * 判断指定包名是否为用户应用（三方应用、可更新系统应用、有桌面图标或属于桌面启动器）。
      *
-     * @param packageName 目标包名
-     * @return 若为用户三方应用返回 true，否则返回 false
+     * @param packageName 目标应用包名
+     * @return 若属于用户交互应用返回 true，否则返回 false
      */
     private fun isUserInstalledApp(packageName: String): Boolean {
         val cached = userInstalledAppCache[packageName]
@@ -780,13 +779,32 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             if (!isSystem || isUpdatedSystem) {
                 true
             } else {
-                pm.getLaunchIntentForPackage(packageName) != null
+                pm.getLaunchIntentForPackage(packageName) != null || isHomeLauncher(packageName)
             }
         } catch (_: Exception) {
             false
         }
         userInstalledAppCache[packageName] = result
         return result
+    }
+
+    /**
+     * 检查指定包名是否为系统内置或当前的桌面启动器（Launcher / Home）。
+     *
+     * @param packageName 目标应用包名
+     * @return 若为桌面启动器返回 true，否则返回 false
+     */
+    fun isHomeLauncher(packageName: String): Boolean {
+        return try {
+            val pm = context.packageManager
+            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            val resolveInfos = pm.queryIntentActivities(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            resolveInfos.any { it.activityInfo?.packageName == packageName } ||
+                    packageName.contains("launcher", ignoreCase = true) ||
+                    packageName.contains("home", ignoreCase = true)
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /**

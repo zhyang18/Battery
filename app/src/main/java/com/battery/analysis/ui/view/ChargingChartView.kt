@@ -53,6 +53,7 @@ class ChargingChartView @JvmOverloads constructor(
 
     // 预计算物理像素尺寸
     private val dp1 = dpToPx(1f)
+    private val dp1_5 = dpToPx(1.5f)
     private val dp2 = dpToPx(2f)
     private val dp2_2 = dpToPx(2.2f)
     private val dp3 = dpToPx(3f)
@@ -83,6 +84,18 @@ class ChargingChartView @JvmOverloads constructor(
     val colorPower = colorPowerCharge
     val colorLevel = Color.parseColor("#2196F3")
     val colorTemp = Color.parseColor("#FF5252")
+
+    // 底部亮屏状态指示条画笔（绿色表示亮屏）
+    private val screenOnBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#34C759")
+    }
+
+    // 底部息屏状态指示条画笔（红色表示息屏待机）
+    private val screenOffBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#FF3B30")
+    }
 
     // 绘制画笔：功率曲线
     private val powerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -274,7 +287,7 @@ class ChargingChartView @JvmOverloads constructor(
         val paddingRight = dp14
         // 预留顶部固定看板高度 (dp2 ~ dp24)，折线图绘制区始于 dp30
         val chartTop = dp30
-        val chartBottom = h - dp22
+        val chartBottom = h - dp24
 
         val chartWidth = w - paddingLeft - paddingRight
         val chartHeight = chartBottom - chartTop
@@ -416,7 +429,10 @@ class ChargingChartView @JvmOverloads constructor(
         // 6. 在曲线的关键位置绘制峰谷值小数字
         drawPeakAndValleyBadges(canvas, chartTop, chartBottom, paddingLeft, w - paddingRight)
 
-        // 7. 绘制 X 轴时间刻度线与时间刻度文字（严格对应时间轴刻度居中显示）
+        // 7. 绘制图表底部横向亮屏/息屏指示条（绿色表示亮屏，红色表示息屏待机）
+        drawScreenOnOffIndicator(canvas, paddingLeft, chartWidth, chartBottom)
+
+        // 8. 绘制 X 轴时间刻度线与时间刻度文字（严格对应时间轴刻度居中显示）
         val timeStepCount = 4
         for (step in 0..timeStepCount) {
             val ratio = step.toFloat() / timeStepCount
@@ -431,16 +447,16 @@ class ChargingChartView @JvmOverloads constructor(
             canvas.drawPath(gridPath, gridPaint)
 
             // 刻度小短线
-            canvas.drawLine(tickX, chartBottom, tickX, chartBottom + dp3, gridPaint)
+            canvas.drawLine(tickX, chartBottom, tickX, chartBottom + dp2, gridPaint)
 
             // 文字以刻度点 tickX 为中心严格居中对齐，并在左右屏幕物理边缘做防截断保护
             val textWidth = axisTextPaint.measureText(timeText)
             val halfW = textWidth / 2f
             val textX = tickX.coerceIn(halfW + dp2, w - halfW - dp2)
-            canvas.drawText(timeText, textX, h - dp6, axisTextPaint)
+            canvas.drawText(timeText, textX, h - dp5, axisTextPaint)
         }
 
-        // 8. 绘制触控标尺（取消浮动弹框，仅保留垂直十字标尺线与曲线上高亮点）
+        // 9. 绘制触控标尺（取消浮动弹框，仅保留垂直十字标尺线与曲线上高亮点）
         if (isTouching && selectedIndex in dataPoints.indices) {
             drawTouchRuler(
                 canvas = canvas,
@@ -448,6 +464,69 @@ class ChargingChartView @JvmOverloads constructor(
                 chartHeight = chartHeight
             )
         }
+    }
+
+    /**
+     * 绘制图表底部横向亮屏/息屏指示条（绿色表示亮屏，红色表示息屏，整条连续平滑一体无分段断裂缝隙）。
+     *
+     * @param canvas 绘制画布
+     * @param chartLeft 图表左边界 X 坐标
+     * @param chartWidth 图表净宽
+     * @param gridBottomY 图表主网格底线 Y 坐标
+     */
+    private fun drawScreenOnOffIndicator(
+        canvas: Canvas,
+        chartLeft: Float,
+        chartWidth: Float,
+        gridBottomY: Float
+    ) {
+        if (dataPoints.isEmpty() || powerPoints.isEmpty()) return
+
+        val barTop = gridBottomY + dp2
+        val barBottom = barTop + dp3
+        val cornerRadius = dp1_5
+
+        val n = dataPoints.size
+        // 1. 裁剪整个长条底线的外轮廓圆角矩形，保证两端圆润而内部各状态区间无缝连接
+        val barPath = Path().apply {
+            addRoundRect(
+                chartLeft,
+                barTop,
+                chartLeft + chartWidth,
+                barBottom,
+                cornerRadius,
+                cornerRadius,
+                Path.Direction.CW
+            )
+        }
+
+        canvas.save()
+        canvas.clipPath(barPath)
+
+        // 2. 将相邻相同状态的采样点合并为一个连续完整色块，彻底消除逐点画圆角带来的分段与黑缝隙
+        var curStatus = dataPoints[0].isScreenOn
+        var segStartX = chartLeft
+
+        for (i in 1 until n) {
+            val pt = dataPoints[i]
+            if (pt.isScreenOn != curStatus) {
+                val segEndX = if (i < powerPoints.size) {
+                    (powerPoints[i - 1].x + powerPoints[i].x) / 2f
+                } else {
+                    chartLeft + chartWidth * (i.toFloat() / n)
+                }
+                val paint = if (curStatus) screenOnBarPaint else screenOffBarPaint
+                canvas.drawRect(segStartX, barTop, segEndX, barBottom, paint)
+                curStatus = pt.isScreenOn
+                segStartX = segEndX
+            }
+        }
+
+        // 绘制末尾最后一段连续区间
+        val lastPaint = if (curStatus) screenOnBarPaint else screenOffBarPaint
+        canvas.drawRect(segStartX, barTop, chartLeft + chartWidth, barBottom, lastPaint)
+
+        canvas.restore()
     }
 
     /**

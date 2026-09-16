@@ -65,26 +65,52 @@ object SysfsBatterySampler {
     /** 所有已知的电流节点候选路径（按常见设备优先级排序） */
     private val CURRENT_PATHS = listOf(
         "/sys/class/power_supply/battery/current_now",
+        "/sys/class/power_supply/Battery/current_now",
         "/sys/class/power_supply/bms/current_now",
         "/sys/class/power_supply/battery_gauge/current_now",
-        "/sys/class/power_supply/qcom-battery/current_now"
+        "/sys/class/power_supply/bq27z561-0/current_now",
+        "/sys/class/power_supply/sc8545-standalone/current_now",
+        "/sys/class/power_supply/qcom-battery/current_now",
+        "/sys/class/power_supply/battery/current_avg",
+        "/sys/class/power_supply/Battery/current_avg"
     )
 
     /** 所有已知的电压节点候选路径 */
     private val VOLTAGE_PATHS = listOf(
         "/sys/class/power_supply/battery/voltage_now",
+        "/sys/class/power_supply/Battery/voltage_now",
         "/sys/class/power_supply/bms/voltage_now",
         "/sys/class/power_supply/battery_gauge/voltage_now",
+        "/sys/class/power_supply/bq27z561-0/voltage_now",
+        "/sys/class/power_supply/sc8545-standalone/voltage_now",
         "/sys/class/power_supply/qcom-battery/voltage_now"
     )
 
     /** 所有已知的温度节点候选路径 */
     private val TEMP_PATHS = listOf(
         "/sys/class/power_supply/battery/temp",
+        "/sys/class/power_supply/Battery/temp",
         "/sys/class/power_supply/bms/temp",
         "/sys/class/power_supply/battery_gauge/temp",
+        "/sys/class/power_supply/bq27z561-0/temp",
+        "/sys/class/power_supply/sc8545-standalone/temp",
         "/sys/class/power_supply/qcom-battery/temp"
     )
+
+    /** 所有已知的状态节点候选路径 */
+    private val STATUS_PATHS = listOf(
+        "/sys/class/power_supply/battery/status",
+        "/sys/class/power_supply/Battery/status",
+        "/sys/class/power_supply/bms/status",
+        "/sys/class/power_supply/battery_gauge/status",
+        "/sys/class/power_supply/qcom-battery/status"
+    )
+
+    /**
+     * 已验证可用的状态 sysfs 节点路径缓存。
+     */
+    @Volatile
+    private var cachedStatusPath: String? = null
 
     init {
         try {
@@ -150,9 +176,9 @@ object SysfsBatterySampler {
     /**
      * 瞬时硬件采样物理指标数据类。
      *
-     * @property currentMa 瞬时电流（毫安 mA，放电为正值）
+     * @property currentMa 瞬时电流（毫安 mA，充电正向，净放电为负值）
      * @property voltageVolts 瞬时电压（伏特 V）
-     * @property powerWatts 瞬时物理功率（瓦特 W）
+     * @property powerWatts 瞬时物理功率（瓦特 W，充电正向，净放电为负值）
      * @property temperatureCelsius 瞬时电池温度（摄氏度 ℃），可为 null
      */
     data class HardwareSample(
@@ -163,18 +189,25 @@ object SysfsBatterySampler {
     )
 
     /**
-     * 从 Linux 底层节点直接采样当前瞬时放电硬件物理指标。
+     * 从 Linux 底层节点直接采样当前瞬时硬件物理指标（通用方法，支持充电与放电场景）。
      *
      * 依次尝试：JNI 原生缓存直读 → 直接文件读取 → Shizuku Shell 特权通道；
      * 若均受权限限制，自动回退至系统 [BatteryManager] 软件滤波值（最终兜底）。
      *
+     * 充电场景下：
+     * 若硬件底层识别为净放电（例如 `status` 节点为 Discharging / Not charging，或电流上报为负值），
+     * 保持真实的物理方向，返回负向功率（如 -12.3W）与负向电流，供图表在 0W 基准线下方绘制，
+     * 杜绝将重载/弱充时的放电尖峰错误统计为正向充电峰值功率。
+     *
      * @param context 应用程序上下文（用于 BatteryManager 回退）
+     * @param isCharging 是否处于充电连接状态
      * @param fallbackVoltageVolts 广播提供的备用电压（伏特 V）
      * @param fallbackTempCelsius 广播提供的备用温度（摄氏度 ℃）
      * @return 包含电流、电压、功率与温度的硬件采样实体，若无法获取则返回 null
      */
-    fun sampleHardwareDischarge(
+    fun sampleHardwareBattery(
         context: Context,
+        isCharging: Boolean,
         fallbackVoltageVolts: Float = 3.85f,
         fallbackTempCelsius: Float? = null
     ): HardwareSample? {
@@ -187,15 +220,28 @@ object SysfsBatterySampler {
                 val rawCur = nativeGetCurrent()
                 val rawVolt = nativeGetVoltage()
                 val rawTemp = nativeGetTemp()
+                val rawStatus = nativeGetStatus()
                 if (rawCur != 0L && rawVolt > 0L) {
                     val curMa = normalizeCurrentToMa(Math.abs(rawCur))
                     val voltV = normalizeVoltageToVolts(rawVolt)
                     val tempC = if (rawTemp > 0) (if (rawTemp >= 100) rawTemp / 10f else rawTemp.toFloat()) else fallbackTempCelsius
                     val pWatts = (curMa * voltV) / 1000f
+                    val isDischargingStatus = rawStatus == 'D'.code || rawStatus == 'd'.code || rawStatus == 'N'.code || rawStatus == 'n'.code
+                    val isNetDischarging = isDischargingStatus || (rawCur < 0L)
+                    val signedPower = if (isCharging) {
+                        if (isNetDischarging) -pWatts else pWatts
+                    } else {
+                        pWatts.coerceAtLeast(0f)
+                    }
+                    val signedCur = if (isCharging) {
+                        if (isNetDischarging) -curMa else curMa
+                    } else {
+                        curMa
+                    }
                     return HardwareSample(
-                        currentMa = curMa,
+                        currentMa = signedCur,
                         voltageVolts = voltV,
-                        powerWatts = (Math.round(pWatts * 1000f) / 1000f).coerceAtLeast(0f),
+                        powerWatts = Math.round(signedPower * 1000f) / 1000f,
                         temperatureCelsius = tempC
                     )
                 }
@@ -204,8 +250,8 @@ object SysfsBatterySampler {
 
         // 2. 尝试通过 Shizuku 单次进程批量读取全部节点（避免多次 fork 进程耗时）
         if (isShizukuAvailable()) {
-            val batchSample = readHardwareBatchViaShizuku(fallbackVoltageVolts, fallbackTempCelsius)
-            if (batchSample != null && batchSample.currentMa > 0f) {
+            val batchSample = readHardwareBatchViaShizuku(fallbackVoltageVolts, fallbackTempCelsius, isCharging)
+            if (batchSample != null && Math.abs(batchSample.currentMa) > 0f) {
                 return batchSample
             }
         }
@@ -214,6 +260,7 @@ object SysfsBatterySampler {
         val sysfsCurrent = readSysfsCurrentMa()
         val sysfsVoltage = readSysfsVoltageVolts()
         val sysfsTemp = readSysfsTemperature()
+        val sysfsStatus = readSysfsStatus()
 
         val finalVoltage = if (sysfsVoltage != null && sysfsVoltage in 2.5f..15.0f) {
             sysfsVoltage
@@ -222,12 +269,24 @@ object SysfsBatterySampler {
         }
         val finalTemp = sysfsTemp ?: fallbackTempCelsius
 
-        if (sysfsCurrent != null && sysfsCurrent > 0f) {
-            val pWatts = (sysfsCurrent * finalVoltage) / 1000f
+        if (sysfsCurrent != null && Math.abs(sysfsCurrent) > 0f) {
+            val pWatts = (Math.abs(sysfsCurrent) * finalVoltage) / 1000f
+            val isDischargingStatus = sysfsStatus != null && (sysfsStatus.startsWith("D", ignoreCase = true) || sysfsStatus.startsWith("N", ignoreCase = true))
+            val isNetDischarging = isDischargingStatus || (sysfsCurrent < 0f)
+            val signedPower = if (isCharging) {
+                if (isNetDischarging) -pWatts else pWatts
+            } else {
+                pWatts.coerceAtLeast(0f)
+            }
+            val signedCur = if (isCharging) {
+                if (isNetDischarging) -Math.abs(sysfsCurrent) else Math.abs(sysfsCurrent)
+            } else {
+                Math.abs(sysfsCurrent)
+            }
             return HardwareSample(
-                currentMa = sysfsCurrent,
+                currentMa = signedCur,
                 voltageVolts = finalVoltage,
-                powerWatts = (Math.round(pWatts * 1000f) / 1000f).coerceAtLeast(0f),
+                powerWatts = Math.round(signedPower * 1000f) / 1000f,
                 temperatureCelsius = finalTemp
             )
         }
@@ -238,13 +297,24 @@ object SysfsBatterySampler {
                 ?: return null
             val rawCur = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
             if (rawCur != 0 && rawCur != Int.MIN_VALUE) {
-                val curMa = BatteryUnitNormalizer.normalizeCurrentMa(rawCur.toLong(), isCharging = false)
+                val curMa = BatteryUnitNormalizer.normalizeCurrentMa(rawCur.toLong(), isCharging = isCharging)
                 if (curMa > 0f && finalVoltage > 0f) {
-                    val pWatts = (curMa * finalVoltage) / 1000f
+                    val pWatts = BatteryUnitNormalizer.calculatePowerWatts(finalVoltage, curMa, isCharging = isCharging)
+                    val isNetDischarging = rawCur < 0
+                    val signedPower = if (isCharging) {
+                        if (isNetDischarging) -pWatts else pWatts
+                    } else {
+                        pWatts.coerceAtLeast(0f)
+                    }
+                    val signedCur = if (isCharging) {
+                        if (isNetDischarging) -curMa else curMa
+                    } else {
+                        curMa
+                    }
                     HardwareSample(
-                        currentMa = curMa,
+                        currentMa = signedCur,
                         voltageVolts = finalVoltage,
-                        powerWatts = (Math.round(pWatts * 1000f) / 1000f).coerceAtLeast(0f),
+                        powerWatts = Math.round(signedPower * 1000f) / 1000f,
                         temperatureCelsius = finalTemp
                     )
                 } else null
@@ -252,6 +322,38 @@ object SysfsBatterySampler {
         } catch (_: Throwable) {
             null
         }
+    }
+
+    /**
+     * 从 Linux 底层节点直接采样当前瞬时放电硬件物理指标。
+     *
+     * @param context 应用程序上下文
+     * @param fallbackVoltageVolts 广播提供的备用电压（伏特 V）
+     * @param fallbackTempCelsius 广播提供的备用温度（摄氏度 ℃）
+     * @return 包含放电电流、电压、功率与温度的硬件采样实体，若无法获取则返回 null
+     */
+    fun sampleHardwareDischarge(
+        context: Context,
+        fallbackVoltageVolts: Float = 3.85f,
+        fallbackTempCelsius: Float? = null
+    ): HardwareSample? {
+        return sampleHardwareBattery(context, isCharging = false, fallbackVoltageVolts, fallbackTempCelsius)
+    }
+
+    /**
+     * 从 Linux 底层节点直接采样当前瞬时充电硬件物理指标（深度对标 BatteryRecorder JNI 直读架构）。
+     *
+     * @param context 应用程序上下文
+     * @param fallbackVoltageVolts 广播提供的备用电压（伏特 V）
+     * @param fallbackTempCelsius 广播提供的备用温度（摄氏度 ℃）
+     * @return 包含充电电流、电压、功率与温度的硬件采样实体，若无法获取则返回 null
+     */
+    fun sampleHardwareCharging(
+        context: Context,
+        fallbackVoltageVolts: Float = 3.85f,
+        fallbackTempCelsius: Float? = null
+    ): HardwareSample? {
+        return sampleHardwareBattery(context, isCharging = true, fallbackVoltageVolts, fallbackTempCelsius)
     }
 
     /**
@@ -406,7 +508,80 @@ object SysfsBatterySampler {
         return null
     }
 
+    /**
+     * 从 Linux 内核 sysfs 节点读取电池状态字符串（例如 "Charging", "Discharging", "Not charging", "Full"）。
+     *
+     * 优先级：JNI 原生直读 → 缓存路径文件读取 → 全量候选路径扫描 → Shizuku 通道。
+     *
+     * @return 电池状态文本，若无可用节点则返回 null
+     */
+    fun readSysfsStatus(): String? {
+        // ── 1. JNI 原生通道 ──
+        if (jniLoaded) {
+            try {
+                if (!jniInitialized) {
+                    jniInitialized = (nativeInit() == 1)
+                }
+                val rawChar = nativeGetStatus()
+                if (rawChar != 0) {
+                    return when (rawChar.toChar().uppercaseChar()) {
+                        'C' -> "Charging"
+                        'D' -> "Discharging"
+                        'N' -> "Not charging"
+                        'F' -> "Full"
+                        else -> rawChar.toChar().toString()
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+
+        // ── 2. 缓存路径直接文件读取 ──
+        cachedStatusPath?.let { path ->
+            val result = tryReadStatusFile(path)
+            if (result != null) return result
+            cachedStatusPath = null
+        }
+
+        // ── 3. 全量候选路径扫描 ──
+        for (path in STATUS_PATHS) {
+            val result = tryReadStatusFile(path)
+            if (result != null) {
+                cachedStatusPath = path
+                return result
+            }
+        }
+
+        // ── 4. Shizuku 通道 ──
+        if (isShizukuAvailable()) {
+            val candidates = if (cachedStatusPath != null) listOf(cachedStatusPath!!) else STATUS_PATHS
+            for (path in candidates) {
+                val text = readViaShizuku(path) ?: continue
+                if (text.isNotEmpty()) {
+                    cachedStatusPath = path
+                    return text
+                }
+            }
+        }
+
+        return null
+    }
+
     // ──────────────────────────── 私有辅助方法 ────────────────────────────
+
+    /**
+     * 直接尝试从指定路径读取状态文本原始值（不调用 exists()）。
+     *
+     * @param path sysfs 节点文件绝对路径
+     * @return 状态文本，若读取失败则返回 null
+     */
+    private fun tryReadStatusFile(path: String): String? {
+        return try {
+            val raw = File(path).readText().trim()
+            if (raw.isNotEmpty()) raw else null
+        } catch (_: Throwable) {
+            null
+        }
+    }
 
     /**
      * 直接尝试从指定路径读取电流原始值（不调用 exists()）。
@@ -537,19 +712,22 @@ object SysfsBatterySampler {
     }
 
     /**
-     * 通过 Shizuku 单次进程并发读取电流、电压和温度节点，极大降低系统 fork 进程开销并提升采样准度。
+     * 通过 Shizuku 单次进程并发读取电流、电压、温度与状态节点，极大降低系统 fork 进程开销并提升采样准度。
      *
      * @param fallbackVoltage 兜底电压
      * @param fallbackTemp 兜底温度
+     * @param isCharging 是否处于充电连接状态
      * @return 硬件采样结果，失败返回 null
      */
     fun readHardwareBatchViaShizuku(
         fallbackVoltage: Float,
-        fallbackTemp: Float?
+        fallbackTemp: Float?,
+        isCharging: Boolean = false
     ): HardwareSample? {
         val curPath = cachedCurrentPath ?: CURRENT_PATHS.firstOrNull() ?: return null
         val voltPath = cachedVoltagePath ?: VOLTAGE_PATHS.firstOrNull() ?: return null
         val tempPath = cachedTempPath ?: TEMP_PATHS.firstOrNull() ?: return null
+        val statusPath = cachedStatusPath ?: STATUS_PATHS.firstOrNull()
 
         return try {
             val method = Shizuku::class.java.getDeclaredMethod(
@@ -558,9 +736,14 @@ object SysfsBatterySampler {
                 Array<String>::class.java,
                 String::class.java
             ).apply { isAccessible = true }
+            val cmd = if (statusPath != null) {
+                "cat $curPath $voltPath $tempPath $statusPath 2>/dev/null"
+            } else {
+                "cat $curPath $voltPath $tempPath 2>/dev/null"
+            }
             val proc = method.invoke(
                 null,
-                arrayOf("sh", "-c", "cat $curPath $voltPath $tempPath 2>/dev/null"),
+                arrayOf("sh", "-c", cmd),
                 null,
                 null
             ) as? Process ?: return null
@@ -571,6 +754,7 @@ object SysfsBatterySampler {
                 val rawCur = lines[0].trim().toLongOrNull() ?: return null
                 val rawVolt = lines[1].trim().toLongOrNull() ?: return null
                 val rawTemp = if (lines.size >= 3) lines[2].trim().toFloatOrNull() else null
+                val rawStatus = if (lines.size >= 4) lines[3].trim() else null
 
                 val curMa = normalizeCurrentToMa(Math.abs(rawCur))
                 val voltV = normalizeVoltageToVolts(rawVolt)
@@ -584,11 +768,26 @@ object SysfsBatterySampler {
                     cachedCurrentPath = curPath
                     cachedVoltagePath = voltPath
                     if (rawTemp != null) cachedTempPath = tempPath
+                    if (rawStatus != null && rawStatus.isNotEmpty()) cachedStatusPath = statusPath
+
                     val pWatts = (curMa * voltV) / 1000f
+                    val isDischargingStatus = rawStatus != null && (rawStatus.startsWith("D", ignoreCase = true) || rawStatus.startsWith("N", ignoreCase = true))
+                    val isNetDischarging = isDischargingStatus || (rawCur < 0L)
+                    val signedPower = if (isCharging) {
+                        if (isNetDischarging) -pWatts else pWatts
+                    } else {
+                        pWatts.coerceAtLeast(0f)
+                    }
+                    val signedCur = if (isCharging) {
+                        if (isNetDischarging) -curMa else curMa
+                    } else {
+                        curMa
+                    }
+
                     HardwareSample(
-                        currentMa = curMa,
+                        currentMa = signedCur,
                         voltageVolts = voltV,
-                        powerWatts = (Math.round(pWatts * 1000f) / 1000f).coerceAtLeast(0f),
+                        powerWatts = Math.round(signedPower * 1000f) / 1000f,
                         temperatureCelsius = tempC
                     )
                 } else null

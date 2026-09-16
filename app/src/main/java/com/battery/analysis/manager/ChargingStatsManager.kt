@@ -47,16 +47,18 @@ class ChargingStatsManager private constructor(private val context: Context) {
     @Volatile
     private var lastPersistedStartTimestamp: Long = 0L
 
-    // 上一次采样时刻与电量，用于精准核算息屏增量
+    // 上一次采样时刻与电量、瞬时功率，用于精准核算梯形微元能量与息屏增量
     @Volatile
     private var lastSampleTimestamp: Long = 0L
     @Volatile
     private var lastSampleLevel: Int = -1
+    @Volatile
+    private var lastSamplePower: Float = 0f
 
     companion object {
         private const val PREF_KEY_SAVED_SUMMARY = "pref_last_charging_summary"
         private const val PREF_KEY_SAVED_POINTS = "pref_last_charging_points"
-        private const val MAX_SAMPLE_POINTS = 1500
+        private const val MAX_SAMPLE_POINTS = 5000
 
         @Volatile
         private var instance: ChargingStatsManager? = null
@@ -106,14 +108,22 @@ class ChargingStatsManager private constructor(private val context: Context) {
         if (currentSummary.isCharging && !nowCharging) {
             val duration = (now - currentSummary.startTimestamp).coerceAtLeast(1000L)
             val levelGain = (currentLevel - currentSummary.startLevel).coerceAtLeast(0)
+            val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 5000f
+            val effectiveCapMah = if (designCapMah in 500f..30000f) designCapMah else 5000f
+            val fallbackEnergyWh = (levelGain / 100.0f) * effectiveCapMah * 3.85f / 1000.0f
             val finalChargedEnergyWh = if (currentSummary.chargedEnergyWh > 0.005f) {
                 currentSummary.chargedEnergyWh
             } else if (levelGain > 0) {
-                val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 5000f
-                val effectiveCapMah = if (designCapMah in 500f..30000f) designCapMah else 5000f
-                (levelGain / 100.0f) * effectiveCapMah * 3.85f / 1000.0f
+                fallbackEnergyWh
             } else {
                 0f
+            }
+
+            val durationHours = duration / 3600000.0f
+            val finalAvgPower = if (durationHours > 0.001f && finalChargedEnergyWh > 0f) {
+                finalChargedEnergyWh / durationHours
+            } else {
+                currentSummary.avgPowerWatts
             }
 
             val alreadyPersisted = hasPersistedCurrentSession || (currentSummary.startTimestamp > 0L && currentSummary.startTimestamp == lastPersistedStartTimestamp)
@@ -133,7 +143,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
                         endLevel = currentLevel,
                         levelGain = levelGain,
                         chargedEnergyWh = finalChargedEnergyWh,
-                        avgPowerWatts = currentSummary.avgPowerWatts,
+                        avgPowerWatts = finalAvgPower,
                         maxPowerWatts = currentSummary.maxPowerWatts,
                         maxTemperature = currentSummary.maxTemperature,
                         chargeType = currentSummary.chargeType,
@@ -154,7 +164,8 @@ class ChargingStatsManager private constructor(private val context: Context) {
                 endTimestamp = now,
                 currentLevel = currentLevel,
                 isCharging = false,
-                chargedEnergyWh = finalChargedEnergyWh
+                chargedEnergyWh = finalChargedEnergyWh,
+                avgPowerWatts = finalAvgPower
             )
             saveChargingSessionToPrefs()
             reconciled = true
@@ -262,19 +273,35 @@ class ChargingStatsManager private constructor(private val context: Context) {
         val now = System.currentTimeMillis()
         isCurrentlyCharging = true
         hasPersistedCurrentSession = false
+
+        val provider = NormalApiProvider()
+        val info = provider.getBatteryInfo(context)
+        val fallbackTemp = info.temperature ?: 25f
+        val fallbackVolt = (info.voltage ?: 4000f) / 1000f
+
+        // 优先采用 BatteryRecorder JNI / sysfs 硬件直读通道获取无滤波瞬时快充物理指标
+        val hwSample = com.battery.analysis.util.SysfsBatterySampler.sampleHardwareCharging(
+            context = context,
+            fallbackVoltageVolts = fallbackVolt,
+            fallbackTempCelsius = fallbackTemp
+        )
+
+        val currentVolt = hwSample?.voltageVolts ?: fallbackVolt
+        val currentMa = hwSample?.currentMa ?: (info.currentNow ?: 0f)
+        val currentTemp = hwSample?.temperatureCelsius ?: fallbackTemp
+        val rawPower = hwSample?.powerWatts ?: (info.powerWatts ?: com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(currentVolt, currentMa, isCharging = true))
+        val currentPower = rawPower
+
         lastSampleTimestamp = now
         lastSampleLevel = initialLevel
+        lastSamplePower = currentPower
 
         synchronized(samplePoints) {
             samplePoints.clear()
         }
 
-        val provider = NormalApiProvider()
-        val info = provider.getBatteryInfo(context)
-        val currentPower = info.powerWatts ?: 0f
-        val currentTemp = info.temperature ?: 25f
-        val currentVolt = (info.voltage ?: 4000f) / 1000f
-        val currentMa = abs(info.currentNow ?: 0f)
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val isInteractive = pm?.isInteractive ?: true
 
         val firstPoint = ChargingSamplePoint(
             timestamp = now,
@@ -282,17 +309,20 @@ class ChargingStatsManager private constructor(private val context: Context) {
             batteryLevel = initialLevel,
             temperature = currentTemp,
             voltageVolts = currentVolt,
-            currentMa = currentMa
+            currentMa = currentMa,
+            isScreenOn = isInteractive
         )
-        samplePoints.add(firstPoint)
+        synchronized(samplePoints) {
+            samplePoints.add(firstPoint)
+        }
 
         currentSummary = ChargingSessionSummary(
             startTimestamp = now,
             endTimestamp = now,
             startLevel = initialLevel,
             currentLevel = initialLevel,
-            maxPowerWatts = currentPower,
-            avgPowerWatts = currentPower,
+            maxPowerWatts = max(0f, currentPower),
+            avgPowerWatts = max(0f, currentPower),
             maxTemperature = currentTemp,
             avgTemperature = currentTemp,
             chargedEnergyWh = 0f,
@@ -308,6 +338,8 @@ class ChargingStatsManager private constructor(private val context: Context) {
 
     /**
      * 周期性采样并记录当前瞬时充电指标（功率、电量、温度、电压与电流），同时累计息屏充电数据。
+     * 深度对标 BatteryRecorder 架构：优先通过 JNI / sysfs 原生内核文件描述符直读芯片寄存器，
+     * 绕过 Android Framework 低通滤波，并在权限受限时自动平滑降级至 Shizuku 与 BatteryManager 兜底。
      *
      * @return 采样生成的最新 [ChargingSamplePoint] 数据点，若未在充电则返回最新合成点
      */
@@ -319,14 +351,24 @@ class ChargingStatsManager private constructor(private val context: Context) {
         val info = provider.getBatteryInfo(context)
 
         val level = info.level ?: 50
-        val temp = info.temperature ?: 25f
-        val volt = (info.voltage ?: 4000f) / 1000f
-        val curMa = abs(info.currentNow ?: 0f)
-        val calculatedPower = com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(volt, curMa, charging)
-        val rawPower = info.powerWatts ?: (if (charging) calculatedPower else -calculatedPower)
-        val power = if (charging) abs(rawPower) else -abs(rawPower)
+        val fallbackTemp = info.temperature ?: 25f
+        val fallbackVolt = (info.voltage ?: 4000f) / 1000f
 
-        // 彻底移除 hardcoded power = 10.0f 假数据，忠实记录底层传感器与广播测得的真实功率与电流
+        // 优先通过 BatteryRecorder JNI / sysfs 硬件直读通道获取真实瞬时快充物理指标
+        val hwSample = com.battery.analysis.util.SysfsBatterySampler.sampleHardwareCharging(
+            context = context,
+            fallbackVoltageVolts = fallbackVolt,
+            fallbackTempCelsius = fallbackTemp
+        )
+
+        val volt = hwSample?.voltageVolts ?: fallbackVolt
+        val curMa = hwSample?.currentMa ?: (info.currentNow ?: 0f)
+        val temp = hwSample?.temperatureCelsius ?: fallbackTemp
+        val rawPower = hwSample?.powerWatts ?: (info.powerWatts ?: com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(volt, curMa, charging))
+        val power = rawPower
+
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val isInteractive = pm?.isInteractive ?: true
 
         val point = ChargingSamplePoint(
             timestamp = now,
@@ -334,12 +376,36 @@ class ChargingStatsManager private constructor(private val context: Context) {
             batteryLevel = level,
             temperature = temp,
             voltageVolts = volt,
-            currentMa = curMa
+            currentMa = curMa,
+            isScreenOn = isInteractive
         )
 
+        // 梯形数值积分微元：计算本采样周期的能量增量 dE
+        var deltaEnergyWh = 0f
+        if (lastSampleTimestamp > 0L && now > lastSampleTimestamp) {
+            val dtMs = (now - lastSampleTimestamp).coerceAtLeast(0L)
+            if (dtMs in 100L..1800000L) { // 0.1秒到30分钟内的有效采样切片
+                val avgSlicePower = (lastSamplePower.coerceAtLeast(0f) + power.coerceAtLeast(0f)) / 2f
+                val dtHours = dtMs / 3600000.0
+                val powerEnergy = (avgSlicePower * dtHours).toFloat()
+
+                val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 5000f
+                val effectiveCapMah = if (designCapMah in 500f..30000f) designCapMah else 5000f
+                val deltaLevel = (level - lastSampleLevel).coerceAtLeast(0)
+                val levelEnergy = (deltaLevel / 100.0f) * effectiveCapMah * volt / 1000.0f
+
+                // 若物理功率微积分有效优先采用；若硬件传感器受限读数为0且电量有净增，则使用电量增量物理守恒兜底
+                deltaEnergyWh = if (powerEnergy > 0.00001f) {
+                    powerEnergy
+                } else if (deltaLevel > 0) {
+                    levelEnergy
+                } else {
+                    0f
+                }
+            }
+        }
+
         // 息屏采样与增量累计逻辑
-        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-        val isInteractive = pm?.isInteractive ?: true
         var deltaScreenOffMs = 0L
         var deltaScreenOffEnergy = 0f
         var deltaScreenOffGain = 0
@@ -348,7 +414,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
             if (lastSampleTimestamp > 0L) {
                 val dt = (now - lastSampleTimestamp).coerceIn(0L, 120000L)
                 deltaScreenOffMs = dt
-                deltaScreenOffEnergy = (power.coerceAtLeast(0f) * (dt / 3600000.0f)).coerceAtLeast(0f)
+                deltaScreenOffEnergy = deltaEnergyWh
             }
             if (lastSampleLevel in 0..100 && level > lastSampleLevel) {
                 deltaScreenOffGain = level - lastSampleLevel
@@ -356,6 +422,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
         }
         lastSampleTimestamp = now
         lastSampleLevel = level
+        lastSamplePower = power
 
         synchronized(samplePoints) {
             // 若长时间跨度或列表为空，初始化首点
@@ -368,14 +435,21 @@ class ChargingStatsManager private constructor(private val context: Context) {
                 )
             }
             samplePoints.add(point)
-            // 控制容量上限，必要时抽稀前部样本
+            // 控制容量上限，满时进行等距全局稀疏抽稀（抽稀50%），始终保留从起始时刻至当前时刻的完整全局时间轴
             if (samplePoints.size > MAX_SAMPLE_POINTS) {
-                samplePoints.removeAt(0)
+                val downsampled = mutableListOf<ChargingSamplePoint>()
+                downsampled.add(samplePoints.first())
+                for (i in 1 until samplePoints.size - 1 step 2) {
+                    downsampled.add(samplePoints[i])
+                }
+                downsampled.add(samplePoints.last())
+                samplePoints.clear()
+                samplePoints.addAll(downsampled)
             }
         }
 
         // 重新计算并汇总指标
-        updateSummaryMetrics(point, type, charging, deltaScreenOffMs, deltaScreenOffGain, deltaScreenOffEnergy)
+        updateSummaryMetrics(point, type, charging, deltaEnergyWh, deltaScreenOffMs, deltaScreenOffGain, deltaScreenOffEnergy)
         saveChargingSessionToPrefs()
 
         return point
@@ -383,12 +457,13 @@ class ChargingStatsManager private constructor(private val context: Context) {
 
     /**
      * 根据新加入的采样点动态更新内存中的会话摘要指标，并累加息屏统计数据。
-     * 采用标准的梯形时间数值积分法计算充入能量与时间加权平均功率，避免由于采样间隔不均导致算术平均失真；
+     * 采用标准的梯形微元时间积分持续累加充入能量与时间加权平均功率，避免重新遍历局部抽稀列表导致的能量丢失；
      * 当硬件电流传感器受限导致瞬时功率为 0 但电量实际增长时，基于电量增量与电池有效容量进行物理守恒核算。
      *
      * @param latestPoint 最新采样的物理数据点
      * @param chargeType 当前充电类型
      * @param isCharging 是否正在充电
+     * @param deltaEnergyWh 本周期新增充入能量（Wh）
      * @param deltaScreenOffMs 本周期新增息屏时长（毫秒）
      * @param deltaScreenOffGain 本周期新增息屏充入电量百分比
      * @param deltaScreenOffEnergy 本周期新增息屏充入能量（Wh）
@@ -397,6 +472,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
         latestPoint: ChargingSamplePoint,
         chargeType: String,
         isCharging: Boolean,
+        deltaEnergyWh: Float,
         deltaScreenOffMs: Long = 0L,
         deltaScreenOffGain: Int = 0,
         deltaScreenOffEnergy: Float = 0f
@@ -404,56 +480,50 @@ class ChargingStatsManager private constructor(private val context: Context) {
         val pointsSnapshot = synchronized(samplePoints) { samplePoints.toList() }
         if (pointsSnapshot.isEmpty()) return
 
-        var maxP = 0f
-        var maxT = 0f
+        var maxP = currentSummary.maxPowerWatts
+        var maxT = currentSummary.maxTemperature
         var sumT = 0f
 
         for (p in pointsSnapshot) {
-            if (p.powerWatts > maxP) maxP = p.powerWatts
+            if (p.powerWatts > maxP && p.powerWatts > 0f) maxP = p.powerWatts
             if (p.temperature > maxT) maxT = p.temperature
             sumT += p.temperature
         }
+        if (latestPoint.powerWatts > maxP && latestPoint.powerWatts > 0f) maxP = latestPoint.powerWatts
+        if (latestPoint.temperature > maxT) maxT = latestPoint.temperature
 
         val count = pointsSnapshot.size
-        val avgT = if (count > 0) sumT / count else 0f
+        val avgT = if (count > 0) sumT / count else latestPoint.temperature
 
-        // 1. 采用时序梯形积分法计算累计充入能量 Wh，精准应对亮屏高频与息屏低频采样间隔不一致
-        var integratedEnergyWh = 0.0
-        for (i in 0 until pointsSnapshot.size - 1) {
-            val p1 = pointsSnapshot[i]
-            val p2 = pointsSnapshot[i + 1]
-            val dtHours = (p2.timestamp - p1.timestamp).coerceAtLeast(0L) / 3600000.0
-            if (dtHours in 0.0001..0.5) { // 过滤过大异常断层（>30分钟）
-                val avgSlicePower = (p1.powerWatts.coerceAtLeast(0f) + p2.powerWatts.coerceAtLeast(0f)) / 2.0
-                integratedEnergyWh += avgSlicePower * dtHours
-            }
-        }
+        // 1. 采用时序微元持续累加充入能量 Wh，保证单调递增，绝不因前端或内存抽稀而丢失已累计能量
+        val accumulatedEnergyWh = (currentSummary.chargedEnergyWh + deltaEnergyWh).coerceAtLeast(0f)
 
-        // 2. 若硬件电流传感器不支持或处于握手盲区导致采样积分偏低，结合电量百分比增量与有效电池容量物理核算
+        // 2. 基于电量增量与有效电池容量进行物理守恒下限核算，杜绝硬件读数断流导致能量被严重低估
         val levelGain = (latestPoint.batteryLevel - currentSummary.startLevel).coerceAtLeast(0)
         val durationHours = ((latestPoint.timestamp - currentSummary.startTimestamp).coerceAtLeast(0L)) / 3600000.0f
         val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 5000f
         val effectiveCapMah = if (designCapMah in 500f..30000f) designCapMah else 5000f
         val levelGainEnergyWh = (levelGain / 100.0f) * effectiveCapMah * (latestPoint.voltageVolts.coerceIn(3.0f, 4.5f)) / 1000.0f
 
-        // 充入能量优先取采样时间积分，若采样缺失（如设备不支持电流直读）则基于电量增量补充
-        val chargedWh = if (integratedEnergyWh > 0.005) {
-            integratedEnergyWh.toFloat()
+        val finalChargedWh = if (accumulatedEnergyWh > 0.005f) {
+            accumulatedEnergyWh
         } else if (levelGain > 0) {
             levelGainEnergyWh
         } else {
             0f
         }
 
-        // 时间加权平均充电功率
-        val avgP = if (durationHours > 0.002f && chargedWh > 0f) {
-            chargedWh / durationHours
+        // 3. 时间加权平均充电功率：总充入能量 / 总充电时长
+        val avgP = if (durationHours > 0.001f && finalChargedWh > 0f) {
+            finalChargedWh / durationHours
+        } else if (latestPoint.powerWatts > 0f) {
+            latestPoint.powerWatts
         } else if (count > 0 && maxP > 0f) {
-            pointsSnapshot.map { it.powerWatts.coerceAtLeast(0f) }.filter { it > 0f }.let { validList ->
+            pointsSnapshot.map { it.powerWatts }.filter { it > 0f }.let { validList ->
                 if (validList.isNotEmpty()) validList.average().toFloat() else 0f
             }
         } else {
-            0f
+            currentSummary.avgPowerWatts
         }
 
         currentSummary = currentSummary.copy(
@@ -463,7 +533,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
             avgPowerWatts = avgP,
             maxTemperature = maxT,
             avgTemperature = avgT,
-            chargedEnergyWh = chargedWh,
+            chargedEnergyWh = finalChargedWh,
             chargeType = if (chargeType.isNotEmpty()) chargeType else currentSummary.chargeType,
             isCharging = isCharging,
             screenOffDurationMs = currentSummary.screenOffDurationMs + deltaScreenOffMs,
@@ -492,15 +562,37 @@ class ChargingStatsManager private constructor(private val context: Context) {
 
         isCurrentlyCharging = false
         val now = System.currentTimeMillis()
+        val duration = currentSummary.getDurationMs()
+        val levelGain = currentSummary.getLevelGain()
+
+        val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 5000f
+        val effectiveCapMah = if (designCapMah in 500f..30000f) designCapMah else 5000f
+        val fallbackEnergyWh = (levelGain / 100.0f) * effectiveCapMah * 3.85f / 1000.0f
+        val finalEnergy = if (currentSummary.chargedEnergyWh > 0.005f) {
+            currentSummary.chargedEnergyWh
+        } else if (levelGain > 0) {
+            fallbackEnergyWh
+        } else {
+            0f
+        }
+
+        val durationHours = duration / 3600000.0f
+        val finalAvgPower = if (durationHours > 0.001f && finalEnergy > 0f) {
+            finalEnergy / durationHours
+        } else {
+            currentSummary.avgPowerWatts
+        }
+
         currentSummary = currentSummary.copy(
             endTimestamp = now,
-            isCharging = false
+            isCharging = false,
+            chargedEnergyWh = finalEnergy,
+            avgPowerWatts = finalAvgPower
         )
         saveChargingSessionToPrefs()
 
         // 3. 充电持续时长超过 10 秒或充入能量大于 0.005Wh 或有电量增量时，自动持久化至充电历史数据库
-        val duration = currentSummary.getDurationMs()
-        if (duration >= 10000L || currentSummary.chargedEnergyWh > 0.005f || currentSummary.getLevelGain() > 0) {
+        if (duration >= 10000L || finalEnergy > 0.005f || levelGain > 0) {
             try {
                 val recordTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(now))
                 val snapshotPoints = synchronized(samplePoints) { samplePoints.toList() }
@@ -514,9 +606,9 @@ class ChargingStatsManager private constructor(private val context: Context) {
                     durationMs = duration,
                     startLevel = currentSummary.startLevel,
                     endLevel = currentSummary.currentLevel,
-                    levelGain = currentSummary.getLevelGain(),
-                    chargedEnergyWh = currentSummary.chargedEnergyWh,
-                    avgPowerWatts = currentSummary.avgPowerWatts,
+                    levelGain = levelGain,
+                    chargedEnergyWh = finalEnergy,
+                    avgPowerWatts = finalAvgPower,
                     maxPowerWatts = currentSummary.maxPowerWatts,
                     maxTemperature = currentSummary.maxTemperature,
                     chargeType = currentSummary.chargeType,
@@ -578,11 +670,13 @@ class ChargingStatsManager private constructor(private val context: Context) {
         )
         lastSampleTimestamp = 0L
         lastSampleLevel = -1
+        lastSamplePower = 0f
         prefs.edit().clear().apply()
     }
 
     /**
      * 将当前充电会话摘要与采样点持久化存入本地 SharedPreferences。
+     * 采样点采用跨越全局时间轴的等距均匀抽样，最多保存 500 个点，确保图表恢复后完整呈现从头至尾的时间跨度。
      */
     private fun saveChargingSessionToPrefs() {
         try {
@@ -603,11 +697,17 @@ class ChargingStatsManager private constructor(private val context: Context) {
                 put("screenOffEnergyWh", currentSummary.screenOffEnergyWh.toDouble())
             }
 
-            // 保存最近 200 个最具代表性的点以节省 IO
+            // 全局等距均匀抽样保留至多 500 个点，跨越完整起止时间轴
             val pointsArray = JSONArray()
             val pointsToSave = synchronized(samplePoints) {
-                if (samplePoints.size > 200) {
-                    samplePoints.takeLast(200)
+                if (samplePoints.size > 500) {
+                    val sampled = mutableListOf<ChargingSamplePoint>()
+                    val step = (samplePoints.size - 1).toFloat() / 499f
+                    for (i in 0 until 500) {
+                        val index = (i * step).toInt().coerceIn(0, samplePoints.size - 1)
+                        sampled.add(samplePoints[index])
+                    }
+                    sampled
                 } else {
                     samplePoints.toList()
                 }
@@ -621,6 +721,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
                     put("tp", p.temperature.toDouble())
                     put("vt", p.voltageVolts.toDouble())
                     put("cm", p.currentMa.toDouble())
+                    put("so", p.isScreenOn)
                 }
                 pointsArray.put(item)
             }
@@ -674,11 +775,18 @@ class ChargingStatsManager private constructor(private val context: Context) {
                                 batteryLevel = obj.optInt("lv"),
                                 temperature = obj.optDouble("tp").toFloat(),
                                 voltageVolts = obj.optDouble("vt").toFloat(),
-                                currentMa = obj.optDouble("cm").toFloat()
+                                currentMa = obj.optDouble("cm").toFloat(),
+                                isScreenOn = obj.optBoolean("so", true)
                             )
                         )
                     }
                 }
+            }
+
+            lastSampleTimestamp = currentSummary.endTimestamp
+            lastSampleLevel = currentSummary.currentLevel
+            lastSamplePower = synchronized(samplePoints) {
+                samplePoints.lastOrNull()?.powerWatts ?: currentSummary.avgPowerWatts
             }
         } catch (e: Exception) {
             e.printStackTrace()

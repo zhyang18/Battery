@@ -10,6 +10,7 @@ package com.battery.analysis.model
  * @property temperature 电池实时温度（单位：℃）
  * @property voltageVolts 电池端电压（单位：V）
  * @property currentMa 充电瞬时电流（单位：mA，充电时通常为正值）
+ * @property isScreenOn 采样瞬间屏幕是否处于亮屏唤醒状态（true 表示亮屏，false 表示息屏）
  */
 data class ChargingSamplePoint(
     val timestamp: Long,
@@ -17,5 +18,6 @@ data class ChargingSamplePoint(
     val batteryLevel: Int,
     val temperature: Float,
     val voltageVolts: Float,
-    val currentMa: Float
+    val currentMa: Float,
+    val isScreenOn: Boolean = true
 )

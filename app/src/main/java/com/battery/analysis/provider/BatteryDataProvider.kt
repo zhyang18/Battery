@@ -73,17 +73,19 @@ class NormalApiProvider : BatteryDataProvider {
         val voltage = if (voltRaw > 0) com.battery.analysis.util.BatteryUnitNormalizer.normalizeVoltageMv(voltRaw.toLong()) else null
 
         // 6. 获取电池电流（单位转换为 mA，放电为负，充电为正）
-        val isCharging = rawStatus == BatteryManager.BATTERY_STATUS_CHARGING || rawStatus == BatteryManager.BATTERY_STATUS_FULL
+        val isPlugged = rawStatus == BatteryManager.BATTERY_STATUS_CHARGING || rawStatus == BatteryManager.BATTERY_STATUS_FULL
         val rawCurrent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
         val currentNow = if (rawCurrent != 0 && rawCurrent != Int.MIN_VALUE) {
-            val curMa = com.battery.analysis.util.BatteryUnitNormalizer.normalizeCurrentMa(rawCurrent.toLong(), isCharging)
-            if (isCharging) curMa else -curMa
+            val curMa = com.battery.analysis.util.BatteryUnitNormalizer.normalizeCurrentMa(rawCurrent.toLong(), isPlugged)
+            // 当 rawCurrent < 0 时表示净电流流出电池（放电，哪怕接入了充电器），忠实反映物理方向
+            val isNetDischarging = rawCurrent < 0 || rawStatus == BatteryManager.BATTERY_STATUS_DISCHARGING || rawStatus == BatteryManager.BATTERY_STATUS_NOT_CHARGING
+            if (isNetDischarging) -curMa else curMa
         } else null
 
         // 7. 计算实时功率（单位：W，放电为负，充电为正）
         val powerWatts = if (voltage != null && currentNow != null) {
-            val pWatts = com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(voltage / 1000f, currentNow, isCharging)
-            if (isCharging) pWatts else -pWatts
+            val pWatts = com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(voltage / 1000f, currentNow, isPlugged)
+            if (currentNow < 0f) -pWatts else pWatts
         } else null
 
         // 8. 获取电池技术类型

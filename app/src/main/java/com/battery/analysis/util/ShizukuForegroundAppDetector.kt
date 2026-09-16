@@ -95,9 +95,10 @@ object ShizukuForegroundAppDetector {
     }
 
     /**
-     * 通过 IActivityTaskManager (activity_task) 的 getTasks(1) 获取置顶前台应用包名。
+     * 通过 IActivityTaskManager (activity_task) 的 getFocusedRootTaskInfo 或 getTasks 获取置顶前台应用包名。
+     * 深度对标 BatteryRecorder 架构，优先读取当前聚焦的 RootTaskInfo，杜绝最近任务栈顺序导致的桌面包名误判。
      *
-     * @return 置顶应用包名，失败返回 null
+     * @return 置顶前台应用包名，失败返回 null
      */
     private fun getForegroundPackageViaAtm(): String? {
         try {
@@ -105,17 +106,38 @@ object ShizukuForegroundAppDetector {
             if (service == null) {
                 val binder = SystemServiceHelper.getSystemService("activity_task") ?: return null
                 val stubClass = Class.forName("android.app.IActivityTaskManager\$Stub")
-                val asInterfaceMethod = stubClass.getMethod("asInterface", IBinder::class.java)
+                val asInterfaceMethod = stubClass.getMethod("asInterface", IBinder::class.java).apply { isAccessible = true }
                 service = asInterfaceMethod.invoke(null, binder)
                 cachedAtmService = service
             }
             if (service == null) return null
 
+            val atmInterface = try {
+                Class.forName("android.app.IActivityTaskManager")
+            } catch (_: Throwable) {
+                service.javaClass
+            }
+
+            // 1. 最高优先级：调用 getFocusedRootTaskInfo()（与 BatteryRecorder 完全一致，获取真实聚焦窗口）
+            try {
+                val getFocusedMethod = atmInterface.getMethod("getFocusedRootTaskInfo").apply { isAccessible = true }
+                val rootTask = getFocusedMethod.invoke(service)
+                if (rootTask != null) {
+                    val topActivity = extractTopActivity(rootTask)
+                    val pkg = normalizeForegroundPackage(topActivity?.packageName)
+                    if (!pkg.isNullOrEmpty()) {
+                        return pkg
+                    }
+                }
+            } catch (_: Throwable) {
+            }
+
+            // 2. 次优先级：调用 getTasks(1, false, false) 提取当前可见顶层任务（filterOnlyVisibleRecents 必须为 false 以防过滤桌面）
             val getTasksMethod = try {
-                service.javaClass.getMethod("getTasks", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
+                atmInterface.getMethod("getTasks", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType).apply { isAccessible = true }
             } catch (_: NoSuchMethodException) {
                 try {
-                    service.javaClass.getMethod("getTasks", Int::class.javaPrimitiveType)
+                    atmInterface.getMethod("getTasks", Int::class.javaPrimitiveType).apply { isAccessible = true }
                 } catch (_: NoSuchMethodException) {
                     null
                 }
@@ -129,8 +151,8 @@ object ShizukuForegroundAppDetector {
 
             val topTask = tasks?.firstOrNull() ?: return null
             val topActivity = extractTopActivity(topTask)
-            val pkg = topActivity?.packageName
-            if (!pkg.isNullOrEmpty() && !pkg.startsWith("com.android.systemui")) {
+            val pkg = normalizeForegroundPackage(topActivity?.packageName)
+            if (!pkg.isNullOrEmpty()) {
                 return pkg
             }
         } catch (e: Throwable) {
@@ -138,6 +160,27 @@ object ShizukuForegroundAppDetector {
             Log.w(TAG, "getForegroundPackageViaAtm 失败: ${e.message}")
         }
         return null
+    }
+
+    /**
+     * 规范化并清洗前台应用包名，过滤系统底层覆盖层与输入法。
+     *
+     * @param rawPkg 原始提取到的组件包名
+     * @return 规范化后的前台主应用包名，若为系统无效覆盖层则返回 null
+     */
+    fun normalizeForegroundPackage(rawPkg: String?): String? {
+        if (rawPkg.isNullOrEmpty()) return null
+        // 过滤系统 SystemUI、输入法等底层遮罩层
+        if (rawPkg.startsWith("com.android.systemui") ||
+            rawPkg.startsWith("com.android.inputmethod") ||
+            rawPkg.startsWith("com.google.android.inputmethod") ||
+            rawPkg.startsWith("com.baidu.input") ||
+            rawPkg.startsWith("com.sohu.inputmethod") ||
+            rawPkg.startsWith("com.tencent.qqpinyin")
+        ) {
+            return null
+        }
+        return rawPkg
     }
 
     /**
@@ -151,17 +194,23 @@ object ShizukuForegroundAppDetector {
             if (service == null) {
                 val binder = SystemServiceHelper.getSystemService("activity") ?: return null
                 val stubClass = Class.forName("android.app.IActivityManager\$Stub")
-                val asInterfaceMethod = stubClass.getMethod("asInterface", IBinder::class.java)
+                val asInterfaceMethod = stubClass.getMethod("asInterface", IBinder::class.java).apply { isAccessible = true }
                 service = asInterfaceMethod.invoke(null, binder)
                 cachedAmService = service
             }
             if (service == null) return null
 
+            val amInterface = try {
+                Class.forName("android.app.IActivityManager")
+            } catch (_: Throwable) {
+                service.javaClass
+            }
+
             val getTasksMethod = try {
-                service.javaClass.getMethod("getTasks", Int::class.javaPrimitiveType)
+                amInterface.getMethod("getTasks", Int::class.javaPrimitiveType).apply { isAccessible = true }
             } catch (_: NoSuchMethodException) {
                 try {
-                    service.javaClass.getMethod("getRunningTasks", Int::class.javaPrimitiveType)
+                    amInterface.getMethod("getRunningTasks", Int::class.javaPrimitiveType).apply { isAccessible = true }
                 } catch (_: NoSuchMethodException) {
                     null
                 }
@@ -170,8 +219,8 @@ object ShizukuForegroundAppDetector {
             val tasks = getTasksMethod.invoke(service, 1) as? List<*>
             val topTask = tasks?.firstOrNull() ?: return null
             val topActivity = extractTopActivity(topTask)
-            val pkg = topActivity?.packageName
-            if (!pkg.isNullOrEmpty() && !pkg.startsWith("com.android.systemui")) {
+            val pkg = normalizeForegroundPackage(topActivity?.packageName)
+            if (!pkg.isNullOrEmpty()) {
                 return pkg
             }
         } catch (e: Throwable) {
@@ -182,26 +231,51 @@ object ShizukuForegroundAppDetector {
     }
 
     /**
-     * 从 RunningTaskInfo 反射提取 topActivity 或 baseActivity 组件名。
+     * 沿着类继承链深度反射提取 topActivity、realActivity、baseActivity、origActivity 或 baseIntent 组件名。
+     * 克服 Android Framework 及厂商定制 ROM 中 TaskInfo 父类私有字段反射权限限制。
      *
-     * @param taskInfo 任务信息对象
+     * @param taskInfo 任务信息对象（RootTaskInfo / RunningTaskInfo / TaskInfo）
      * @return 顶部 Activity 的 ComponentName，失败返回 null
      */
     private fun extractTopActivity(taskInfo: Any): ComponentName? {
-        return try {
-            val topActivityField = taskInfo.javaClass.getField("topActivity")
-            (topActivityField.get(taskInfo) as? ComponentName) ?: run {
-                val baseActivityField = taskInfo.javaClass.getField("baseActivity")
-                baseActivityField.get(taskInfo) as? ComponentName
+        var clazz: Class<*>? = taskInfo.javaClass
+        while (clazz != null && clazz != Any::class.java) {
+            for (fieldName in listOf("topActivity", "realActivity", "baseActivity", "origActivity")) {
+                try {
+                    val field = clazz.getDeclaredField(fieldName).apply { isAccessible = true }
+                    val value = field.get(taskInfo) as? ComponentName
+                    if (value != null && !value.packageName.isNullOrEmpty()) {
+                        return value
+                    }
+                } catch (_: Throwable) {
+                }
             }
-        } catch (_: Throwable) {
+            for (methodName in listOf("getTopActivity", "getRealActivity", "getBaseActivity")) {
+                try {
+                    val method = clazz.getDeclaredMethod(methodName).apply { isAccessible = true }
+                    val value = method.invoke(taskInfo) as? ComponentName
+                    if (value != null && !value.packageName.isNullOrEmpty()) {
+                        return value
+                    }
+                } catch (_: Throwable) {
+                }
+            }
             try {
-                val origActivityField = taskInfo.javaClass.getField("origActivity")
-                origActivityField.get(taskInfo) as? ComponentName
+                val field = clazz.getDeclaredField("baseIntent").apply { isAccessible = true }
+                val intent = field.get(taskInfo) as? android.content.Intent
+                val comp = intent?.component
+                if (comp != null && !comp.packageName.isNullOrEmpty()) {
+                    return comp
+                }
+                val pkg = intent?.`package`
+                if (!pkg.isNullOrEmpty()) {
+                    return ComponentName(pkg, "")
+                }
             } catch (_: Throwable) {
-                null
             }
+            clazz = clazz.superclass
         }
+        return null
     }
 
     /**

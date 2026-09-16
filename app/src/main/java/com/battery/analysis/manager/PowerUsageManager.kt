@@ -232,8 +232,16 @@ class PowerUsageManager private constructor(private val context: Context) {
             packageName = packageName
         )
         dischargeRealtimeSamples.add(point)
+        // 达到容量上限时进行全局等距抽稀（50%），确保从拔电初始到当前时刻的放电走势时间轴完整保留
         if (dischargeRealtimeSamples.size > 5000) {
-            dischargeRealtimeSamples.removeAt(0)
+            val downsampled = mutableListOf<PowerDischargePoint>()
+            downsampled.add(dischargeRealtimeSamples.first())
+            for (i in 1 until dischargeRealtimeSamples.size - 1 step 2) {
+                downsampled.add(dischargeRealtimeSamples[i])
+            }
+            downsampled.add(dischargeRealtimeSamples.last())
+            dischargeRealtimeSamples.clear()
+            dischargeRealtimeSamples.addAll(downsampled)
         }
 
         // 同步记录时序温度点
@@ -383,8 +391,16 @@ class PowerUsageManager private constructor(private val context: Context) {
         val lastPoint = dischargeTempPoints.lastOrNull()
         if (lastPoint == null || (timestamp - lastPoint.first) >= 10000L || Math.abs(formatted - lastPoint.second) >= 0.2f) {
             dischargeTempPoints.add(Pair(timestamp, formatted))
+            // 达到容量上限时进行全局等距抽稀（50%），确保放电温度时间轴完整
             if (dischargeTempPoints.size > 3000) {
-                dischargeTempPoints.removeAt(0)
+                val downsampled = mutableListOf<Pair<Long, Float>>()
+                downsampled.add(dischargeTempPoints.first())
+                for (i in 1 until dischargeTempPoints.size - 1 step 2) {
+                    downsampled.add(dischargeTempPoints[i])
+                }
+                downsampled.add(dischargeTempPoints.last())
+                dischargeTempPoints.clear()
+                dischargeTempPoints.addAll(downsampled)
             }
         }
     }
@@ -1093,7 +1109,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 // 当放电时间较短（如刚拔电/重置 < 5分钟）或者数学除法计算出的平均功耗超过物理极限（> 12.0W）时，
                 // 优先采用后台服务在当前放电周期内连续实测的物理采样点（dischargeRealtimeSamples）真实均值，
                 // 彻底杜绝 0.47Wh / 18s 除出 89.74W 的荒谬计算
-                val recentSamples = getDischargeRealtimeSamples().filter { it.timestamp in startTs..now }
+                val recentSamples = getDischargeRealtimeSamples().filter { it.timestamp in (startTs - 60_000L)..now }
                 val realtimeAvgWatts = if (recentSamples.size >= 2) {
                     val validPowers = recentSamples.map { it.powerWatts }.filter { it > 0.1f }
                     if (validPowers.isNotEmpty()) validPowers.average().toFloat() else null
@@ -1382,10 +1398,10 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 判断指定包名是否为用户安装的三方应用（非纯底层系统进程或具有桌面启动入口）。
+     * 判断指定包名是否为用户应用（三方应用、可更新系统应用、有桌面启动入口或属于桌面启动器）。
      *
      * @param packageName 目标包名
-     * @return 若为用户三方应用返回 true，否则返回 false
+     * @return 若为用户交互应用返回 true，否则返回 false
      */
     fun isUserInstalledApp(packageName: String): Boolean {
         return try {
@@ -1394,7 +1410,27 @@ class PowerUsageManager private constructor(private val context: Context) {
             val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
             val isUpdatedSystem = (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
             val hasLauncher = pm.getLaunchIntentForPackage(packageName) != null
-            !isSystem || isUpdatedSystem || hasLauncher
+            val isHome = isHomeLauncher(packageName)
+            !isSystem || isUpdatedSystem || hasLauncher || isHome
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * 检查指定包名是否为系统内置或当前的桌面启动器（Launcher / Home）。
+     *
+     * @param packageName 目标应用包名
+     * @return 若为桌面启动器返回 true，否则返回 false
+     */
+    fun isHomeLauncher(packageName: String): Boolean {
+        return try {
+            val pm = context.packageManager
+            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            val resolveInfos = pm.queryIntentActivities(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            resolveInfos.any { it.activityInfo?.packageName == packageName } ||
+                    packageName.contains("launcher", ignoreCase = true) ||
+                    packageName.contains("home", ignoreCase = true)
         } catch (_: Exception) {
             false
         }
@@ -1795,23 +1831,21 @@ class PowerUsageManager private constructor(private val context: Context) {
                     finalFgWatts = (Math.round(sampledWatts * 100f) / 100f).coerceAtLeast(0f)
                     finalFgEnergy = (finalFgWatts * fgHours).coerceAtLeast(0f)
                 } else {
-                    // 2. 短时运行应用（如 28 秒桌面未形成连续两点梯形）：优先查找活跃时间窗口内的真实亮屏瞬时采样均值
+                    // 2. 短时运行应用（如切片采样点不足）：优先查找活跃时间窗口内的真实亮屏瞬时采样均值，或回退至整机亮屏平均功耗
                     val refTs = intervalMap[item.packageName]?.lastOrNull()?.endTs ?: item.lastUsedTimeMs
                     val windowStart = refTs - (item.foregroundTimeMs * 2).coerceAtLeast(30_000L)
                     val windowEnd = refTs + 5000L
                     val windowSamples = sortedSamples.filter { it.isScreenOn && it.powerWatts > 0f && it.timestamp in windowStart..windowEnd }
-                    val windowAvgWatts = if (windowSamples.isNotEmpty()) {
+                    val windowAvgWatts = if (windowSamples.size >= 2) {
                         windowSamples.map { it.powerWatts }.average().toFloat()
                     } else {
                         null
                     }
 
-                    val closestSample = sortedSamples.filter { it.isScreenOn && it.powerWatts > 0f }
-                        .minByOrNull { Math.abs(it.timestamp - refTs) }
                     val avgSampleScreenWatts = sortedSamples.filter { it.isScreenOn && it.powerWatts > 0f }
                         .map { it.powerWatts }.takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 0f
-                    val baselineWatts = if (screenOnWatts > 0.05f) screenOnWatts else if (avgSampleScreenWatts > 0.05f) avgSampleScreenWatts else 1.2f
-                    val fallbackWatts = windowAvgWatts ?: closestSample?.powerWatts ?: baselineWatts
+                    val baselineWatts = if (screenOnWatts > 0.05f) screenOnWatts else if (avgSampleScreenWatts > 0.05f) avgSampleScreenWatts else 1.5f
+                    val fallbackWatts = windowAvgWatts ?: baselineWatts
                     finalFgWatts = (Math.round(fallbackWatts * 100f) / 100f).coerceAtLeast(0f)
                     finalFgEnergy = (finalFgWatts * fgHours).coerceAtLeast(0f)
                 }

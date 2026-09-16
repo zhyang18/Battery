@@ -150,7 +150,8 @@ data class ChargingHistoryRecord(
                             batteryLevel = obj.optInt("lv", 0),
                             temperature = obj.optDouble("tp", 25.0).toFloat(),
                             voltageVolts = obj.optDouble("vt", 3.85).toFloat(),
-                            currentMa = obj.optDouble("cm", 0.0).toFloat()
+                            currentMa = obj.optDouble("cm", 0.0).toFloat(),
+                            isScreenOn = obj.optBoolean("so", true)
                         )
                     )
                 }
@@ -195,6 +196,12 @@ data class ChargingHistoryRecord(
 
             val volt = 3.85f + 0.5f * progress
             val currMa = if (volt > 0.1f) (power * 1000f / volt) else 0f
+            val isScreenOnSynthetic = if (screenOffDurationMs > 0L) {
+                // 若记录有息屏时长，模拟在中间段息屏
+                (progress < 0.1f || progress > 0.9f)
+            } else {
+                true
+            }
 
             result.add(
                 ChargingSamplePoint(
@@ -203,7 +210,8 @@ data class ChargingHistoryRecord(
                     batteryLevel = level,
                     temperature = temp,
                     voltageVolts = volt,
-                    currentMa = currMa
+                    currentMa = currMa,
+                    isScreenOn = isScreenOnSynthetic
                 )
             )
         }
@@ -243,6 +251,7 @@ data class ChargingHistoryRecord(
                         put("tp", p.temperature.toDouble())
                         put("vt", p.voltageVolts.toDouble())
                         put("cm", p.currentMa.toDouble())
+                        put("so", p.isScreenOn)
                     }
                     array.put(obj)
                 }

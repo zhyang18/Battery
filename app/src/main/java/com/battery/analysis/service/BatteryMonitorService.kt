@@ -506,20 +506,20 @@ class BatteryMonitorService : Service() {
 
         val powerWatts = if (isCharging) {
             val chargingPoint = chargingManager.getSamplePoints().lastOrNull()
-            if (chargingPoint != null && chargingPoint.powerWatts > 0.05f) {
+            if (chargingPoint != null) {
                 chargingPoint.powerWatts
             } else {
-                getDischargePowerWatts() ?: 0f
+                getDischargePowerWatts()?.let { -it } ?: 0f
             }
         } else {
             cachedDischargePowerWatts ?: getDischargePowerWatts()
         }
 
-        val powerStr = if (powerWatts != null && powerWatts > 0.05f) {
-            if (isCharging) {
+        val powerStr = if (powerWatts != null && abs(powerWatts) > 0.05f) {
+            if (powerWatts > 0f) {
                 String.format(Locale.getDefault(), "%.1fW", powerWatts)
             } else {
-                String.format(Locale.getDefault(), "-%.1fW", powerWatts)
+                String.format(Locale.getDefault(), "-%.1fW", abs(powerWatts))
             }
         } else if (isCharging) {
             "0.0W"

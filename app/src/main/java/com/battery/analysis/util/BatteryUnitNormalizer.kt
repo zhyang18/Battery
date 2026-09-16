@@ -59,26 +59,13 @@ object BatteryUnitNormalizer {
                 // 极大量程（0.1uA 步进，例如 35,000,000 -> 3500mA）
                 absCur / 10000f
             }
-            absCur >= 1_000_000L -> {
-                // 百万级量纲（通常为 uA 或 0.1uA）
-                val curDiv1000 = absCur / 1000f
-                if (!isCharging && curDiv1000 >= 3000f) {
-                    // 放电场景下，日常放电电流通常 < 2500mA，若除以 1000 高达 3000mA 以上，
-                    // 说明底层单位为 0.1uA（十倍放大），除以 10000 恢复真实 300~800mA 放电电流
-                    absCur / 10000f
-                } else if (isCharging && curDiv1000 > 15000f) {
-                    // 充电场景下若超过 15A，同样为 0.1uA
-                    absCur / 10000f
-                } else {
-                    curDiv1000
-                }
-            }
-            absCur in 1000..999_999 -> {
+            absCur >= 10_000L -> {
                 // 标准 Android 规范微安 (uA) -> 转换为毫安 (mA)
+                // 例如 500,000 uA -> 500mA，1,200,000 uA -> 1200mA (约 4.8W)，3,000,000 uA -> 3000mA (约 12W)
                 absCur / 1000f
             }
-            absCur in 1..999 -> {
-                // 少数老旧或特定机型直接以毫安 (mA) 报告
+            absCur in 1..9_999 -> {
+                // 部分机型直接以毫安 (mA) 报告（例如 500mA、1200mA、3500mA）
                 absCur.toFloat()
             }
             else -> 0f

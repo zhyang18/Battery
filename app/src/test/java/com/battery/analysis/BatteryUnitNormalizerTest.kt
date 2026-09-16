@@ -38,9 +38,13 @@ class BatteryUnitNormalizerTest {
         val normalCur = BatteryUnitNormalizer.normalizeCurrentMa(350_000L, isCharging = false)
         assertEquals(350f, normalCur, 0.01f)
 
-        // 异常十倍量纲 (3,500,000 -> 识别为 0.1uA，准确除以 10000 恢复为 350mA)
-        val inflatedCur = BatteryUnitNormalizer.normalizeCurrentMa(3_500_000L, isCharging = false)
-        assertEquals(350f, inflatedCur, 0.01f)
+        // 真实高负载放电 (3,500,000 uA -> 3500 mA)
+        val heavyCur = BatteryUnitNormalizer.normalizeCurrentMa(3_500_000L, isCharging = false)
+        assertEquals(3500f, heavyCur, 0.01f)
+
+        // 极大量程 0.1uA (35,000,000 -> 识别为 0.1uA，除以 10000 恢复为 3500mA)
+        val inflatedCur = BatteryUnitNormalizer.normalizeCurrentMa(35_000_000L, isCharging = false)
+        assertEquals(3500f, inflatedCur, 0.01f)
 
         // 负数放电输入测试
         val negativeCur = BatteryUnitNormalizer.normalizeCurrentMa(-350_000L, isCharging = false)

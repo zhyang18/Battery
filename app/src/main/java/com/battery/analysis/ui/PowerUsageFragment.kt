@@ -451,6 +451,7 @@ class PowerUsageFragment : Fragment() {
 
     /**
      * 界面恢复可见时的生命周期回调，同步设置页可能修改的最新模式、充电采样及底栏页签状态。
+     * 当用户从桌面或其它应用切回本界面时，无条件触发数据重新加载与渲染，确保功耗与时长实时对齐最新状态。
      */
     override fun onResume() {
         super.onResume()
@@ -480,9 +481,9 @@ class PowerUsageFragment : Fragment() {
             val latestMode = powerManager.getSelectedMode()
             if (latestMode != currentMode) {
                 currentMode = latestMode
-                if (!isCharging) {
-                    loadData()
-                }
+            }
+            if (!isViewingSnapshot && !isCharging && currentDisplayTab == 0) {
+                loadData()
             }
             updateShizukuBannerState()
             checkNormalPermissionBanner()

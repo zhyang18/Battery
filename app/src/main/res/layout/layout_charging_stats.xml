@@ -424,7 +424,7 @@
 
                     <!-- 亮屏时间容器：包含亮屏图标与时间数值 -->
                     <LinearLayout
-                        android:layout_width="74dp"
+                        android:layout_width="78dp"
                         android:layout_height="wrap_content"
                         android:gravity="end|center_vertical"
                         android:orientation="horizontal">
@@ -434,7 +434,7 @@
                             android:id="@+id/iv_charging_screen_on"
                             android:layout_width="13.5dp"
                             android:layout_height="13.5dp"
-                            android:layout_marginEnd="3.5dp"
+                            android:layout_marginEnd="6dp"
                             android:contentDescription="亮屏"
                             android:src="@drawable/ic_screen_on"
                             app:tint="?android:attr/textColorSecondary" />
@@ -483,19 +483,20 @@
 
                     <!-- 息屏时间容器：包含息屏图标与时间数值 -->
                     <LinearLayout
-                        android:layout_width="74dp"
+                        android:layout_width="78dp"
                         android:layout_height="wrap_content"
                         android:gravity="end|center_vertical"
                         android:orientation="horizontal">
 
-                        <!-- 息屏图标 -->
+                        <!-- 息屏图标（采用灰色太阳图标） -->
                         <ImageView
                             android:id="@+id/iv_charging_screen_off"
                             android:layout_width="13.5dp"
                             android:layout_height="13.5dp"
-                            android:layout_marginEnd="3.5dp"
+                            android:layout_marginEnd="6dp"
                             android:contentDescription="息屏"
-                            android:src="@drawable/ic_screen_off"
+                            android:src="@drawable/ic_screen_on"
+                            android:alpha="0.45"
                             app:tint="?android:attr/textColorSecondary" />
 
                         <!-- 息屏充电时间（格式 00:00） -->

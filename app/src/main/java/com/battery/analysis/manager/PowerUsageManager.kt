@@ -1417,6 +1417,44 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
     }
 
+    @Volatile
+    private var cachedDefaultHomePackage: String? = null
+
+    /**
+     * 获取当前系统默认桌面（Home Launcher）包名。
+     * 优先直接读取静态缓存；若未命中则通过 PackageManager 解析 Intent.CATEGORY_HOME 意图，
+     * 确保秒级精准获取当前生效的系统桌面包名（如荣耀桌面 com.hihonor.android.launcher）。
+     *
+     * @return 默认桌面启动器包名，若无法解析则返回 null
+     */
+    fun getDefaultHomeLauncherPackage(): String? {
+        val cached = cachedDefaultHomePackage
+        if (!cached.isNullOrEmpty()) return cached
+
+        return try {
+            val pm = context.packageManager
+            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            val resolveInfo = pm.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            val pkg = resolveInfo?.activityInfo?.packageName
+            if (!pkg.isNullOrEmpty() && pkg != "android") {
+                cachedDefaultHomePackage = pkg
+                pkg
+            } else {
+                val resolveInfos = pm.queryIntentActivities(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+                val found = resolveInfos.firstOrNull {
+                    val p = it.activityInfo?.packageName ?: ""
+                    p.isNotEmpty() && p != "android"
+                }?.activityInfo?.packageName
+                if (!found.isNullOrEmpty()) {
+                    cachedDefaultHomePackage = found
+                }
+                found
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     /**
      * 检查指定包名是否为系统内置或当前的桌面启动器（Launcher / Home）。
      *
@@ -1424,6 +1462,10 @@ class PowerUsageManager private constructor(private val context: Context) {
      * @return 若为桌面启动器返回 true，否则返回 false
      */
     fun isHomeLauncher(packageName: String): Boolean {
+        if (packageName.isBlank()) return false
+        val defaultHome = getDefaultHomeLauncherPackage()
+        if (defaultHome == packageName) return true
+
         return try {
             val pm = context.packageManager
             val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
@@ -1432,7 +1474,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                     packageName.contains("launcher", ignoreCase = true) ||
                     packageName.contains("home", ignoreCase = true)
         } catch (_: Exception) {
-            false
+            packageName.contains("launcher", ignoreCase = true) ||
+                    packageName.contains("home", ignoreCase = true)
         }
     }
 
@@ -1473,7 +1516,8 @@ class PowerUsageManager private constructor(private val context: Context) {
     /**
      * 基于 UsageEvents 精准提取指定时间区间 [startTime, endTime] 内各应用的前台活跃毫秒数。
      * 采用严格的单前台应用生命周期状态机，仅认准 ACTIVITY_RESUMED 至 ACTIVITY_PAUSED，
-     * 并向前回溯探测区间开始时刻处于活跃的应用，彻底杜绝孤立事件或后台被杀（ACTIVITY_STOPPED）导致的误判与虚高。
+     * 并将前台应用 PAUSED 后到下一个应用 RESUMED 之间的亮屏交互时长准确归集至系统桌面 Launcher，
+     * 彻底杜绝桌面停留时长丢失导致的功耗计算失真。
      *
      * @param usm UsageStatsManager 实例
      * @param startTime 统计起始时间戳（毫秒）
@@ -1488,6 +1532,8 @@ class PowerUsageManager private constructor(private val context: Context) {
         val resultMap = mutableMapOf<String, Long>()
         if (startTime >= endTime) return resultMap
 
+        val defaultHome = getDefaultHomeLauncherPackage()
+
         try {
             // 向前回溯探测在 startTime 瞬间正处于前台活跃状态的应用（最多回溯 15 分钟）
             val lookbackStart = (startTime - 15 * 60 * 1000L).coerceAtLeast(0L)
@@ -1495,32 +1541,58 @@ class PowerUsageManager private constructor(private val context: Context) {
             val event = UsageEvents.Event()
             var currentForegroundPkg: String? = null
             var currentForegroundStartTs: Long = 0L
+            var isScreenOn = true
 
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
-                val pkg = event.packageName ?: continue
+                val pkg = event.packageName
                 val ts = event.timeStamp
 
                 when (event.eventType) {
                     UsageEvents.Event.ACTIVITY_RESUMED -> {
-                        // 若先前已有应用在前台且未收到 PAUSE 事件（被新 Activity 覆盖），结算其有效前台时长
-                        if (currentForegroundPkg != null) {
-                            val activeStart = maxOf(currentForegroundStartTs, startTime)
-                            val activeEnd = minOf(ts, endTime)
-                            if (activeEnd > activeStart) {
-                                resultMap[currentForegroundPkg] = (resultMap[currentForegroundPkg] ?: 0L) + (activeEnd - activeStart)
+                        if (!pkg.isNullOrEmpty()) {
+                            if (currentForegroundPkg != null) {
+                                val activeStart = maxOf(currentForegroundStartTs, startTime)
+                                val activeEnd = minOf(ts, endTime)
+                                if (activeEnd > activeStart) {
+                                    resultMap[currentForegroundPkg] = (resultMap[currentForegroundPkg] ?: 0L) + (activeEnd - activeStart)
+                                }
                             }
+                            currentForegroundPkg = pkg
+                            currentForegroundStartTs = ts
                         }
-                        currentForegroundPkg = pkg
-                        currentForegroundStartTs = ts
                     }
                     UsageEvents.Event.ACTIVITY_PAUSED -> {
-                        // 仅当当前离开前台的应用正是记录中的前台应用时才进行结算，杜绝后台事件或旧事件误判
                         if (currentForegroundPkg == pkg) {
                             val activeStart = maxOf(currentForegroundStartTs, startTime)
                             val activeEnd = minOf(ts, endTime)
                             if (activeEnd > activeStart) {
                                 resultMap[pkg] = (resultMap[pkg] ?: 0L) + (activeEnd - activeStart)
+                            }
+                            // 切出当前应用后，若屏幕处于亮屏状态，自动归属为系统桌面
+                            if (isScreenOn && !defaultHome.isNullOrEmpty()) {
+                                currentForegroundPkg = defaultHome
+                                currentForegroundStartTs = ts
+                            } else {
+                                currentForegroundPkg = null
+                                currentForegroundStartTs = 0L
+                            }
+                        }
+                    }
+                    UsageEvents.Event.SCREEN_INTERACTIVE -> {
+                        isScreenOn = true
+                        if (currentForegroundPkg == null && !defaultHome.isNullOrEmpty()) {
+                            currentForegroundPkg = defaultHome
+                            currentForegroundStartTs = ts
+                        }
+                    }
+                    UsageEvents.Event.SCREEN_NON_INTERACTIVE -> {
+                        isScreenOn = false
+                        if (currentForegroundPkg != null) {
+                            val activeStart = maxOf(currentForegroundStartTs, startTime)
+                            val activeEnd = minOf(ts, endTime)
+                            if (activeEnd > activeStart) {
+                                resultMap[currentForegroundPkg] = (resultMap[currentForegroundPkg] ?: 0L) + (activeEnd - activeStart)
                             }
                             currentForegroundPkg = null
                             currentForegroundStartTs = 0L
@@ -1529,7 +1601,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
             }
 
-            // 处理在 endTime 时刻仍然驻留前台的应用
+            // 处理在 endTime 时刻仍然驻留前台的应用（包含桌面）
             if (currentForegroundPkg != null) {
                 val activeStart = maxOf(currentForegroundStartTs, startTime)
                 val activeEnd = endTime
@@ -1831,7 +1903,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                     finalFgWatts = (Math.round(sampledWatts * 100f) / 100f).coerceAtLeast(0f)
                     finalFgEnergy = (finalFgWatts * fgHours).coerceAtLeast(0f)
                 } else {
-                    // 2. 短时运行应用（如切片采样点不足）：优先查找活跃时间窗口内的真实亮屏瞬时采样均值，或回退至整机亮屏平均功耗
+                    // 2. 短时运行应用（如切片采样点不足）：优先查找活跃时间窗口内的真实亮屏瞬时采样均值，次选应用自身真实能耗换算功耗
                     val refTs = intervalMap[item.packageName]?.lastOrNull()?.endTs ?: item.lastUsedTimeMs
                     val windowStart = refTs - (item.foregroundTimeMs * 2).coerceAtLeast(30_000L)
                     val windowEnd = refTs + 5000L
@@ -1842,10 +1914,24 @@ class PowerUsageManager private constructor(private val context: Context) {
                         null
                     }
 
+                    val selfCalcWatts = if (item.foregroundPowerWatts > 0.05f) {
+                        item.foregroundPowerWatts
+                    } else if (item.foregroundEnergyWh > 0.0001f && fgHours > 0f) {
+                        (item.foregroundEnergyWh / fgHours).toFloat()
+                    } else if (item.avgPowerWatts > 0.05f && !isHomeLauncher(item.packageName)) {
+                        item.avgPowerWatts
+                    } else {
+                        null
+                    }
+
                     val avgSampleScreenWatts = sortedSamples.filter { it.isScreenOn && it.powerWatts > 0f }
                         .map { it.powerWatts }.takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 0f
                     val baselineWatts = if (screenOnWatts > 0.05f) screenOnWatts else if (avgSampleScreenWatts > 0.05f) avgSampleScreenWatts else 1.5f
-                    val fallbackWatts = windowAvgWatts ?: baselineWatts
+
+                    // 桌面应用属于轻量交互场景，若无切片且无窗口采样，保底功耗客观评估为 1.25W，杜绝机械套用整机高负载爆发均值
+                    val isHome = isHomeLauncher(item.packageName)
+                    val fallbackWatts = windowAvgWatts ?: selfCalcWatts ?: if (isHome) 1.25f else baselineWatts
+
                     finalFgWatts = (Math.round(fallbackWatts * 100f) / 100f).coerceAtLeast(0f)
                     finalFgEnergy = (finalFgWatts * fgHours).coerceAtLeast(0f)
                 }
@@ -1919,6 +2005,8 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return Pair(appIntervals, screenIntervals)
 
+        val defaultHome = getDefaultHomeLauncherPackage()
+
         try {
             val lookbackStart = (startTime - 60 * 60 * 1000L).coerceAtLeast(0L)
             val events = usm.queryEvents(lookbackStart, endTime)
@@ -1956,12 +2044,22 @@ class PowerUsageManager private constructor(private val context: Context) {
                             if (activeEnd > activeStart) {
                                 appIntervals.add(AppActivityInterval(pkg, activeStart, activeEnd))
                             }
-                            currentForegroundPkg = null
-                            currentForegroundStartTs = 0L
+                            // 切出当前应用后，若屏幕依然点亮，后续活跃时间自动归属于系统桌面 Launcher
+                            if (screenOnStart != null && !defaultHome.isNullOrEmpty()) {
+                                currentForegroundPkg = defaultHome
+                                currentForegroundStartTs = ts
+                            } else {
+                                currentForegroundPkg = null
+                                currentForegroundStartTs = 0L
+                            }
                         }
                     }
                     UsageEvents.Event.SCREEN_INTERACTIVE -> {
                         screenOnStart = ts
+                        if (currentForegroundPkg == null && !defaultHome.isNullOrEmpty()) {
+                            currentForegroundPkg = defaultHome
+                            currentForegroundStartTs = ts
+                        }
                     }
                     UsageEvents.Event.SCREEN_NON_INTERACTIVE -> {
                         val onStart = screenOnStart ?: startTime
@@ -1969,6 +2067,15 @@ class PowerUsageManager private constructor(private val context: Context) {
                         val activeEnd = minOf(ts, endTime)
                         if (activeEnd > activeStart) {
                             screenIntervals.add(ScreenInteractiveInterval(activeStart, activeEnd))
+                        }
+                        if (currentForegroundPkg != null) {
+                            val fgStart = maxOf(currentForegroundStartTs, startTime)
+                            val fgEnd = minOf(ts, endTime)
+                            if (fgEnd > fgStart) {
+                                appIntervals.add(AppActivityInterval(currentForegroundPkg, fgStart, fgEnd))
+                            }
+                            currentForegroundPkg = null
+                            currentForegroundStartTs = 0L
                         }
                         screenOnStart = null
                     }

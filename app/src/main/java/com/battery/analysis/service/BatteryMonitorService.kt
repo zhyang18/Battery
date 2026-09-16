@@ -406,7 +406,7 @@ class BatteryMonitorService : Service() {
      */
     private fun getForegroundPackageName(): String? {
         // 1. 最高优先级：通过 Shizuku 特权 Binder 直调 IActivityTaskManager (对标 BatteryRecorder 架构，无需无障碍)
-        val shizukuPkg = ShizukuForegroundAppDetector.getForegroundPackageName()
+        val shizukuPkg = ShizukuForegroundAppDetector.getForegroundPackageName(this)
         if (!shizukuPkg.isNullOrEmpty()) {
             lastKnownForegroundPackage = shizukuPkg
             return shizukuPkg
@@ -419,6 +419,10 @@ class BatteryMonitorService : Service() {
             return accessibilityPkg
         }
 
+        // 获取系统当前生效的默认桌面启动器包名
+        val defaultHomePkg = ShizukuForegroundAppDetector.getDefaultHomePackage(this)
+            ?: PowerUsageManager.getInstance(this).getDefaultHomeLauncherPackage()
+
         // 3. 兜底策略：基于 UsageStatsManager 事件探测，时间窗口扩大至 120 秒
         val now = System.currentTimeMillis()
         try {
@@ -428,16 +432,34 @@ class BatteryMonitorService : Service() {
                 val event = UsageEvents.Event()
                 var latestResumedPkg: String? = null
                 var latestResumedTs = 0L
+                var latestPausedTs = 0L
+
                 while (events.hasNextEvent()) {
                     events.getNextEvent(event)
-                    if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED && event.timeStamp >= latestResumedTs) {
-                        val pkg = event.packageName
-                        if (!pkg.isNullOrEmpty() && !pkg.startsWith("com.android.systemui")) {
-                            latestResumedPkg = pkg
-                            latestResumedTs = event.timeStamp
+                    val pkg = event.packageName
+                    if (pkg.isNullOrEmpty() || pkg.startsWith("com.android.systemui")) continue
+
+                    when (event.eventType) {
+                        UsageEvents.Event.ACTIVITY_RESUMED -> {
+                            if (event.timeStamp >= latestResumedTs) {
+                                latestResumedPkg = pkg
+                                latestResumedTs = event.timeStamp
+                            }
+                        }
+                        UsageEvents.Event.ACTIVITY_PAUSED -> {
+                            if (event.timeStamp >= latestPausedTs) {
+                                latestPausedTs = event.timeStamp
+                            }
                         }
                     }
                 }
+
+                // 若最新事件为前台应用 PAUSED，且之后没有新的三方应用 RESUMED，说明用户已退出应用处于桌面
+                if (latestPausedTs > latestResumedTs && !defaultHomePkg.isNullOrEmpty()) {
+                    lastKnownForegroundPackage = defaultHomePkg
+                    return defaultHomePkg
+                }
+
                 if (!latestResumedPkg.isNullOrEmpty()) {
                     lastKnownForegroundPackage = latestResumedPkg
                     return latestResumedPkg
@@ -446,7 +468,11 @@ class BatteryMonitorService : Service() {
         } catch (_: Throwable) {
         }
 
-        // 3. 亮屏持续运行状态保持：若本周期内无新的 RESUMED 事件，持续沿用上一已知前台包名
+        // 4. 亮屏持续运行状态保持：若本周期内无明确应用事件且有默认桌面，优先对齐默认桌面，次选沿用上一已知前台包名
+        if (!defaultHomePkg.isNullOrEmpty() && (lastKnownForegroundPackage == null || PowerUsageManager.getInstance(this).isHomeLauncher(lastKnownForegroundPackage ?: ""))) {
+            lastKnownForegroundPackage = defaultHomePkg
+            return defaultHomePkg
+        }
         return lastKnownForegroundPackage
     }
 

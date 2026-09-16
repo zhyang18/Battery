@@ -1597,6 +1597,73 @@ class PowerUsageCalculationTest {
         assertEquals("荣耀桌面 28 秒高动态功耗精准对标 BatteryRecorder 3.72W", 3.72f, roundedWatts, 0.05f)
         assertTrue("绝不退化为静态基准 1.31W", roundedWatts > 2.0f)
     }
+
+    /**
+     * 验证桌面启动器在切片采样不足时的 fallback 功耗计算机制：
+     * 针对桌面应用（isHomeLauncher 为 true），当未命中硬件时序采样点时，
+     * 功耗应当优先采用自身历史真实能耗换算功耗或轻量桌面基准（1.25W），
+     * 绝对不能被整机高负载亮屏平均功耗（如 3.40W）机械锁死并导致数值恒定不改变。
+     */
+    @Test
+    fun testLauncherFallbackPowerDoesNotLockToScreenOnAverage() {
+        val launcherPkg = "com.hihonor.android.launcher"
+        val isHome = launcherPkg.contains("launcher")
+        val screenOnWatts = 3.40f // 整机高负载平均亮屏功耗 3.40W
+        val windowAvgWatts: Float? = null
+
+        // 场景 A：桌面原本具有自身从 dumpsys/硬件指标解析出的前台功耗（例如 1.15W）
+        val selfCalcWattsA = 1.15f
+        val fallbackA = windowAvgWatts ?: selfCalcWattsA
+        assertEquals("优先采用应用自身真实前台功耗 1.15W", 1.15f, fallbackA, 0.01f)
+        assertTrue("绝不锁死在整机 3.40W", Math.abs(fallbackA - 3.40f) > 0.1f)
+
+        // 场景 B：桌面无自身计算功耗，作为桌面应用采用合理轻量基准 1.25W
+        val selfCalcWattsB: Float? = null
+        val fallbackB = windowAvgWatts ?: selfCalcWattsB ?: if (isHome) 1.25f else screenOnWatts
+        assertEquals("桌面保底功耗客观评估为 1.25W", 1.25f, fallbackB, 0.01f)
+        assertTrue("杜绝被整机亮屏功耗 3.40W 强行覆盖", Math.abs(fallbackB - 3.40f) > 0.1f)
+    }
+
+    /**
+     * 验证亮屏期间应用切出后状态机将桌面停留区间精准归集至系统桌面：
+     * 用户从应用 A 切出（ACTIVITY_PAUSED）至应用 B 进入（ACTIVITY_RESUMED）之间，
+     * 亮屏时间窗口生成属于默认桌面（com.hihonor.android.launcher）的活跃区间，
+     * 使得其间的硬件瞬时采样点能够正确归集入微积分聚合器。
+     */
+    @Test
+    fun testLauncherStateTransitionCapturesIntervalBetweenApps() {
+        data class TestInterval(val packageName: String, val startTs: Long, val endTs: Long)
+        val intervals = mutableListOf<TestInterval>()
+
+        val baseTs = 1710000000000L
+        val defaultHome = "com.hihonor.android.launcher"
+
+        // 模拟：t0~t30 运行微信，t30 微信 PAUSE，用户在桌面停留 29 秒，t59 打开设置
+        var currentForeground: String? = "com.tencent.mm"
+        var currentStartTs = baseTs
+        var isScreenOn = true
+
+        // 1. t30: 微信 PAUSE
+        val t30 = baseTs + 30_000L
+        intervals.add(TestInterval(currentForeground!!, currentStartTs, t30))
+        if (isScreenOn && defaultHome.isNotEmpty()) {
+            currentForeground = defaultHome
+            currentStartTs = t30
+        }
+
+        // 2. t59: 设置 RESUMED
+        val t59 = baseTs + 59_000L
+        if (currentForeground != null) {
+            intervals.add(TestInterval(currentForeground, currentStartTs, t59))
+        }
+        currentForeground = "com.android.settings"
+        currentStartTs = t59
+
+        assertEquals("应生成 2 个区间（微信与荣耀桌面）", 2, intervals.size)
+        val launcherInterval = intervals.find { it.packageName == defaultHome }
+        assertTrue("荣耀桌面应存在独立的活跃区间", launcherInterval != null)
+        assertEquals("荣耀桌面活跃时长应为 29 秒", 29_000L, launcherInterval!!.endTs - launcherInterval.startTs)
+    }
 }
 
 

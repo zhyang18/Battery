@@ -834,6 +834,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val resultMap = mutableMapOf<String, Long>()
         if (startTime >= endTime) return resultMap
 
+        val defaultHome = com.battery.analysis.manager.PowerUsageManager.getInstance(context).getDefaultHomeLauncherPackage()
+
         try {
             // 向前回溯探测在 startTime 瞬间正处于前台活跃状态的应用（最多回溯 15 分钟）
             val lookbackStart = (startTime - 15 * 60 * 1000L).coerceAtLeast(0L)
@@ -841,6 +843,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             val event = UsageEvents.Event()
             var currentForegroundPkg: String? = null
             var currentForegroundStartTs: Long = 0L
+            var isScreenOn = true
 
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
@@ -868,6 +871,31 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             if (activeEnd > activeStart) {
                                 resultMap[pkg] = (resultMap[pkg] ?: 0L) + (activeEnd - activeStart)
                             }
+                            // 切出应用后若屏幕点亮，自动归属为系统桌面
+                            if (isScreenOn && !defaultHome.isNullOrEmpty()) {
+                                currentForegroundPkg = defaultHome
+                                currentForegroundStartTs = ts
+                            } else {
+                                currentForegroundPkg = null
+                                currentForegroundStartTs = 0L
+                            }
+                        }
+                    }
+                    UsageEvents.Event.SCREEN_INTERACTIVE -> {
+                        isScreenOn = true
+                        if (currentForegroundPkg == null && !defaultHome.isNullOrEmpty()) {
+                            currentForegroundPkg = defaultHome
+                            currentForegroundStartTs = ts
+                        }
+                    }
+                    UsageEvents.Event.SCREEN_NON_INTERACTIVE -> {
+                        isScreenOn = false
+                        if (currentForegroundPkg != null) {
+                            val activeStart = maxOf(currentForegroundStartTs, startTime)
+                            val activeEnd = minOf(ts, endTime)
+                            if (activeEnd > activeStart) {
+                                resultMap[currentForegroundPkg] = (resultMap[currentForegroundPkg] ?: 0L) + (activeEnd - activeStart)
+                            }
                             currentForegroundPkg = null
                             currentForegroundStartTs = 0L
                         }
@@ -875,7 +903,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 }
             }
 
-            // 处理在 endTime 时刻仍然驻留前台的应用
+            // 处理在 endTime 时刻仍然驻留前台的应用（包含桌面）
             if (currentForegroundPkg != null) {
                 val activeStart = maxOf(currentForegroundStartTs, startTime)
                 val activeEnd = endTime

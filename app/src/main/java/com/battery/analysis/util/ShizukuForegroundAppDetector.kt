@@ -48,6 +48,43 @@ object ShizukuForegroundAppDetector {
         }
     }
 
+    @Volatile
+    private var cachedHomePackage: String? = null
+
+    /**
+     * 获取或更新设备当前系统默认桌面（Home Launcher）包名。
+     *
+     * @param context 应用程序上下文，可选
+     * @return 默认桌面启动器包名，若无法解析则返回 null
+     */
+    fun getDefaultHomePackage(context: android.content.Context? = null): String? {
+        val cached = cachedHomePackage
+        if (!cached.isNullOrEmpty()) return cached
+        if (context == null) return null
+
+        return try {
+            val intent = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME)
+            val resolve = context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            val pkg = resolve?.activityInfo?.packageName
+            if (!pkg.isNullOrEmpty() && pkg != "android") {
+                cachedHomePackage = pkg
+                pkg
+            } else {
+                val list = context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                val found = list.firstOrNull {
+                    val p = it.activityInfo?.packageName ?: ""
+                    p.isNotEmpty() && p != "android"
+                }?.activityInfo?.packageName
+                if (!found.isNullOrEmpty()) {
+                    cachedHomePackage = found
+                }
+                found
+            }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     /**
      * 通过 Shizuku 特权 Binder 获取当前置顶在屏幕最前台运行的应用包名。
      *
@@ -55,9 +92,13 @@ object ShizukuForegroundAppDetector {
      * 其次通过 `activity` (Android 9 及以下) 的 `getTasks(1)` 获取；
      * 若均失败，通过特权命令轻量查询兜底。
      *
+     * @param context 应用程序上下文，可选
      * @return 当前置顶前台应用包名，若未授权或无法获取则返回 null
      */
-    fun getForegroundPackageName(): String? {
+    fun getForegroundPackageName(context: android.content.Context? = null): String? {
+        if (context != null && cachedHomePackage == null) {
+            getDefaultHomePackage(context)
+        }
         val now = System.currentTimeMillis()
         if (now - lastQueryTs < CACHE_EXPIRE_MS && lastForegroundPackage != null) {
             return lastForegroundPackage
@@ -95,8 +136,35 @@ object ShizukuForegroundAppDetector {
     }
 
     /**
+     * 检查指定的任务信息对象是否属于系统桌面 Home 任务（ACTIVITY_TYPE_HOME = 2）。
+     *
+     * @param taskInfo 任务信息对象
+     * @return 若为系统桌面任务返回 true，否则返回 false
+     */
+    private fun isHomeTaskInfo(taskInfo: Any): Boolean {
+        return try {
+            val actType = try {
+                val field = taskInfo.javaClass.getField("activityType")
+                field.getInt(taskInfo)
+            } catch (_: Throwable) {
+                val method = taskInfo.javaClass.getMethod("getActivityType")
+                method.invoke(taskInfo) as? Int ?: 0
+            }
+            if (actType == 2) {
+                true
+            } else {
+                val isHomeMethod = taskInfo.javaClass.getMethod("isActivityTypeHome")
+                isHomeMethod.invoke(taskInfo) as? Boolean ?: false
+            }
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
      * 通过 IActivityTaskManager (activity_task) 的 getFocusedRootTaskInfo 或 getTasks 获取置顶前台应用包名。
-     * 深度对标 BatteryRecorder 架构，优先读取当前聚焦的 RootTaskInfo，杜绝最近任务栈顺序导致的桌面包名误判。
+     * 深度对标 BatteryRecorder 架构，优先读取当前聚焦的 RootTaskInfo，特别识别 ACTIVITY_TYPE_HOME（桌面启动器），
+     * 杜绝最近任务栈顺序导致的桌面包名误判为上一个普通应用。
      *
      * @return 置顶前台应用包名，失败返回 null
      */
@@ -123,10 +191,13 @@ object ShizukuForegroundAppDetector {
                 val getFocusedMethod = atmInterface.getMethod("getFocusedRootTaskInfo").apply { isAccessible = true }
                 val rootTask = getFocusedMethod.invoke(service)
                 if (rootTask != null) {
+                    val isHome = isHomeTaskInfo(rootTask)
                     val topActivity = extractTopActivity(rootTask)
                     val pkg = normalizeForegroundPackage(topActivity?.packageName)
                     if (!pkg.isNullOrEmpty()) {
                         return pkg
+                    } else if (isHome) {
+                        cachedHomePackage?.let { return it }
                     }
                 }
             } catch (_: Throwable) {
@@ -149,11 +220,16 @@ object ShizukuForegroundAppDetector {
                 else -> null
             }
 
-            val topTask = tasks?.firstOrNull() ?: return null
-            val topActivity = extractTopActivity(topTask)
-            val pkg = normalizeForegroundPackage(topActivity?.packageName)
-            if (!pkg.isNullOrEmpty()) {
-                return pkg
+            val topTask = tasks?.firstOrNull()
+            if (topTask != null) {
+                if (isHomeTaskInfo(topTask)) {
+                    cachedHomePackage?.let { return it }
+                }
+                val topActivity = extractTopActivity(topTask)
+                val pkg = normalizeForegroundPackage(topActivity?.packageName)
+                if (!pkg.isNullOrEmpty()) {
+                    return pkg
+                }
             }
         } catch (e: Throwable) {
             cachedAtmService = null
@@ -280,6 +356,9 @@ object ShizukuForegroundAppDetector {
 
     /**
      * 通过 Shizuku 执行轻量特权命令获取当前聚焦前台应用。
+     * 优先通过 `dumpsys activity activities` 提取最新处于 Resumed 状态的 Activity 组件；
+     * 其次通过 `dumpsys window` 提取当前获得焦点的窗口组件；
+     * 并容错识别系统默认桌面 Launcher。
      *
      * @return 前台应用包名，失败返回 null
      */
@@ -291,9 +370,10 @@ object ShizukuForegroundAppDetector {
                 Array<String>::class.java,
                 String::class.java
             ).apply { isAccessible = true }
+            val cmd = "dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity|topResumedActivity' | head -n 1"
             val proc = method.invoke(
                 null,
-                arrayOf("sh", "-c", "dumpsys window visible-apps 2>/dev/null | grep -E 'package=' | head -n 1"),
+                arrayOf("sh", "-c", cmd),
                 null,
                 null
             ) as? Process ?: return null
@@ -301,13 +381,37 @@ object ShizukuForegroundAppDetector {
             val text = proc.inputStream.bufferedReader().use { it.readText().trim() }
             proc.waitFor()
             if (text.isNotEmpty()) {
-                val match = Regex("package=([a-zA-Z0-9._]+)").find(text)
-                match?.groupValues?.getOrNull(1)
-            } else {
-                null
+                val match = Regex("([a-zA-Z0-9._]+)/[a-zA-Z0-9._]+").find(text)
+                val rawPkg = match?.groupValues?.getOrNull(1)
+                val pkg = normalizeForegroundPackage(rawPkg)
+                if (!pkg.isNullOrEmpty()) {
+                    return pkg
+                }
             }
+
+            // 次选通过 WindowManager 焦点窗口提取
+            val winProc = method.invoke(
+                null,
+                arrayOf("sh", "-c", "dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' | head -n 1"),
+                null,
+                null
+            ) as? Process
+            if (winProc != null) {
+                val winText = winProc.inputStream.bufferedReader().use { it.readText().trim() }
+                winProc.waitFor()
+                if (winText.isNotEmpty()) {
+                    val match = Regex("([a-zA-Z0-9._]+)/[a-zA-Z0-9._]+").find(winText)
+                    val rawPkg = match?.groupValues?.getOrNull(1)
+                    val pkg = normalizeForegroundPackage(rawPkg)
+                    if (!pkg.isNullOrEmpty()) {
+                        return pkg
+                    }
+                }
+            }
+
+            cachedHomePackage
         } catch (_: Throwable) {
-            null
+            cachedHomePackage
         }
     }
 }

@@ -15,6 +15,7 @@ import android.graphics.drawable.Drawable
  * @property activeAppIcons 在当前时间段内活跃的应用图标列表，用于折线图打点堆叠展示
  * @property isScreenOn 当前采样时间段是否处于亮屏状态（true 为亮屏绿色，false 为息屏红色）
  * @property activeAppNames 在当前时间段内活跃的应用名称列表，用于悬浮气泡探查展示
+ * @property packageName 在采样瞬间处于置顶前台的应用包名（可为 null）
  */
 data class PowerDischargePoint(
     val timestamp: Long,
@@ -25,7 +26,8 @@ data class PowerDischargePoint(
     val powerWatts: Float = 2.1f,
     val activeAppIcons: List<Drawable> = emptyList(),
     val isScreenOn: Boolean = true,
-    val activeAppNames: List<String> = emptyList()
+    val activeAppNames: List<String> = emptyList(),
+    val packageName: String? = null
 ) {
     /**
      * 获取用于 X 轴或浮窗气泡展示的格式化时间描述。

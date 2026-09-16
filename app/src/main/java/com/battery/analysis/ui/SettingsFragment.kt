@@ -110,6 +110,48 @@ class SettingsFragment : Fragment() {
         setupBackupRestoreSettings()
         setupHelpSection()
         setupAboutSection()
+        setupScrollListener()
+    }
+
+    /**
+     * 配置设置界面滚动与手势监听，联动控制 MainActivity 底部页签栏的显示与隐藏。
+     */
+    private fun setupScrollListener() {
+        binding.scrollView.setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
+            val dy = scrollY - oldScrollY
+            if (scrollY <= 0) {
+                // 滚动至列表最顶端，强制恢复底部页签栏展示
+                (activity as? MainActivity)?.setBottomNavigationVisibility(true)
+            } else if (dy > 6) {
+                // 手指向上滑动列表，隐藏底部页签栏
+                (activity as? MainActivity)?.setBottomNavigationVisibility(false)
+            } else if (dy < -12) {
+                // 手指向下滑动列表，显示底部页签栏
+                (activity as? MainActivity)?.setBottomNavigationVisibility(true)
+            }
+        }
+
+        var startTouchY = 0f
+        binding.scrollView.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    startTouchY = event.rawY
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val deltaY = event.rawY - startTouchY
+                    if (deltaY < -20f) {
+                        // 手指持续向上拖动，确保底部导航栏保持隐藏
+                        (activity as? MainActivity)?.setBottomNavigationVisibility(false)
+                        startTouchY = event.rawY
+                    } else if (deltaY > 20f && binding.scrollView.scrollY <= 0) {
+                        // 处于最顶部且手指向下拉动，恢复展示底部导航栏
+                        (activity as? MainActivity)?.setBottomNavigationVisibility(true)
+                        startTouchY = event.rawY
+                    }
+                }
+            }
+            false
+        }
     }
 
     /**

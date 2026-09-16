@@ -187,6 +187,7 @@
                                 android:textColor="?android:attr/textColorSecondary"
                                 android:textSize="11.5sp"
                                 android:textStyle="bold"
+                                android:visibility="gone"
                                 android:text="@string/power_header_background" />
                         </LinearLayout>
 
@@ -258,6 +259,7 @@
                                 android:textColor="?android:attr/textColorPrimary"
                                 android:textSize="11.5sp"
                                 android:textStyle="bold"
+                                android:visibility="gone"
                                 tools:text="0m0s" />
                         </LinearLayout>
 
@@ -329,6 +331,7 @@
                                 android:textColor="?android:attr/textColorPrimary"
                                 android:textSize="11.5sp"
                                 android:textStyle="bold"
+                                android:visibility="gone"
                                 tools:text="0.64W" />
                         </LinearLayout>
 
@@ -400,6 +403,7 @@
                                 android:textColor="?android:attr/textColorPrimary"
                                 android:textSize="11.5sp"
                                 android:textStyle="bold"
+                                android:visibility="gone"
                                 tools:text="0.11Wh" />
                         </LinearLayout>
 
@@ -471,6 +475,7 @@
                                 android:textColor="?android:attr/textColorPrimary"
                                 android:textSize="11.5sp"
                                 android:textStyle="bold"
+                                android:visibility="gone"
                                 tools:text="--" />
                         </LinearLayout>
                     </LinearLayout>
@@ -583,6 +588,7 @@
                                 android:textColor="?android:attr/textColorPrimary"
                                 android:textSize="11.5sp"
                                 android:textStyle="bold"
+                                android:visibility="gone"
                                 tools:text="0m0s" />
                         </LinearLayout>
 
@@ -653,6 +659,7 @@
                                 android:textColor="?android:attr/textColorPrimary"
                                 android:textSize="11.5sp"
                                 android:textStyle="bold"
+                                android:visibility="gone"
                                 tools:text="0.64W" />
                         </LinearLayout>
                     </LinearLayout>
@@ -677,7 +684,7 @@
             android:fillViewport="true"
             android:paddingStart="14dp"
             android:paddingEnd="14dp"
-            android:paddingBottom="16dp">
+            android:paddingBottom="10dp">
 
             <LinearLayout
                 android:layout_width="match_parent"

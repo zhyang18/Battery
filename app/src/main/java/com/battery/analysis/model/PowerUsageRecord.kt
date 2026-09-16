@@ -122,6 +122,7 @@ data class PowerUsageRecord(
                 }
 
                 val bgTime = obj.optLong("bgTime", 0L)
+                val fgsTime = obj.optLong("fgsTime", 0L)
                 val fgEnergy = obj.optDouble("fgEnergy", 0.0).toFloat()
                 val bgEnergy = obj.optDouble("bgEnergy", 0.0).toFloat()
                 val directEnergy = obj.optDouble("directEnergy", (fgEnergy + bgEnergy).toDouble()).toFloat()
@@ -143,7 +144,8 @@ data class PowerUsageRecord(
                         foregroundEnergyWh = fgEnergy,
                         backgroundEnergyWh = bgEnergy,
                         foregroundPowerWatts = fgPwr,
-                        backgroundPowerWatts = bgPwr
+                        backgroundPowerWatts = bgPwr,
+                        fgsDurationMs = fgsTime
                     )
                 )
             }
@@ -342,6 +344,7 @@ data class PowerUsageRecord(
                     put("maxTemp", item.maxTemperature)
                     put("lastUsed", item.lastUsedTimeMs)
                     put("bgTime", item.backgroundTimeMs)
+                    put("fgsTime", item.fgsDurationMs)
                     put("fgEnergy", item.foregroundEnergyWh.toDouble())
                     put("bgEnergy", item.backgroundEnergyWh.toDouble())
                     put("directEnergy", item.energyWh.toDouble())

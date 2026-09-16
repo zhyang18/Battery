@@ -28,7 +28,7 @@ object BatteryUnitNormalizer {
             rawVolt in 1..24 -> rawVolt * 1000f // 伏特 V（如 4 -> 4000.0 mV）
             else -> 4000f
         }
-        return mv.coerceIn(2500f, 12000f)
+        return mv.coerceAtLeast(0f)
     }
 
     /**
@@ -84,12 +84,12 @@ object BatteryUnitNormalizer {
             else -> 0f
         }
 
-        return ma.coerceIn(0f, 25000f)
+        return ma.coerceAtLeast(0f)
     }
 
     /**
      * 根据电池电压（V）与电流（mA）精确计算瞬时功率（瓦特 W）。
-     * 忠实遵循物理公式 P = (U * I) / 1000，不人为限制或缩小高功率放电工况。
+     * 忠实遵循物理公式 P = (U * I) / 1000，不人为限制或缩小高功率工况。
      *
      * @param voltageVolts 电池电压（单位：V）
      * @param currentMa 电池电流（单位：mA，绝对值或正负均可）
@@ -98,11 +98,11 @@ object BatteryUnitNormalizer {
      */
     @Suppress("UNUSED_PARAMETER")
     fun calculatePowerWatts(voltageVolts: Float, currentMa: Float, isCharging: Boolean = false): Float {
-        val safeVolt = if (voltageVolts in 2.5f..12.0f) voltageVolts else 4.0f
+        val safeVolt = if (voltageVolts > 0f) voltageVolts else 4.0f
         val safeCur = abs(currentMa)
         if (safeVolt <= 0f || safeCur <= 0f) return 0f
 
         val pWatts = (safeVolt * safeCur) / 1000f
-        return (Math.round(pWatts * 100f) / 100f).coerceIn(0f, 150f)
+        return (Math.round(pWatts * 100f) / 100f).coerceAtLeast(0f)
     }
 }

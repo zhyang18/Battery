@@ -26,6 +26,9 @@ import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.PowerUsageRecord
 import com.battery.analysis.provider.NormalApiProvider
 import com.battery.analysis.receiver.HeartbeatAlarmReceiver
+import com.battery.analysis.util.SysfsBatterySampler
+import android.app.usage.UsageEvents
+import android.app.usage.UsageStatsManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -67,6 +70,8 @@ class BatteryMonitorService : Service() {
     private var cachedTemperature: Float = 25.0f
     @Volatile
     private var cachedIsCharging: Boolean = false
+    @Volatile
+    private var cachedDischargePowerWatts: Float? = null
     @Volatile
     private var cachedSingleLineInfo: String = "⚡ 电池监控持续运行中"
 
@@ -341,14 +346,29 @@ class BatteryMonitorService : Service() {
                     }
 
                     if (shouldSample) {
-                        val pWatts = getDischargePowerWatts() ?: 0f
+                        val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
+                            context = this@BatteryMonitorService,
+                            fallbackVoltageVolts = cachedVoltageVolts,
+                            fallbackTempCelsius = cachedTemperature
+                        )
+                        val pWatts = hwSample?.powerWatts ?: (getDischargePowerWatts() ?: 0f)
+                        val currentVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
+                        val currentTemp = hwSample?.temperatureCelsius ?: cachedTemperature
+                        val currentPkg = if (isInteractive) getForegroundPackageName() else null
+
+                        // 同步刷新本地缓存
+                        if (hwSample?.voltageVolts != null) cachedVoltageVolts = currentVolt
+                        if (hwSample?.temperatureCelsius != null) cachedTemperature = currentTemp
+                        cachedDischargePowerWatts = pWatts
+
                         powerManager.recordDischargeRealtimeSample(
                             timestamp = System.currentTimeMillis(),
                             batteryLevel = cachedLevelPercent,
-                            voltageVolts = cachedVoltageVolts,
-                            temperature = cachedTemperature,
+                            voltageVolts = currentVolt,
+                            temperature = currentTemp,
                             powerWatts = pWatts,
-                            isScreenOn = isInteractive
+                            isScreenOn = isInteractive,
+                            packageName = currentPkg
                         )
                     }
                 }
@@ -357,7 +377,7 @@ class BatteryMonitorService : Service() {
                 updateNotification(force = false)
 
                 val sleepInterval = if (isInteractive) {
-                    if (screenOnInterval == INTERVAL_NEVER) 5000L else screenOnInterval
+                    if (screenOnInterval == INTERVAL_NEVER) 5000L else screenOnInterval.coerceAtLeast(1000L)
                 } else {
                     if (isCharging) 15000L else screenOffInterval.coerceAtLeast(15000L)
                 }
@@ -367,13 +387,53 @@ class BatteryMonitorService : Service() {
     }
 
     /**
+     * 获取当前处于系统最前台运行的应用包名。
+     * 基于 UsageStatsManager 事件探测置顶活跃包名，为秒级硬件采样点精准打上归属标签。
+     *
+     * @return 当前置顶前台应用包名，若无法获取则返回 null
+     */
+    private fun getForegroundPackageName(): String? {
+        val now = System.currentTimeMillis()
+        try {
+            val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
+            if (usm != null) {
+                val events = usm.queryEvents(now - 15000L, now)
+                val event = UsageEvents.Event()
+                var lastResumedPkg: String? = null
+                var lastResumedTs = 0L
+                while (events.hasNextEvent()) {
+                    events.getNextEvent(event)
+                    if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED && event.timeStamp >= lastResumedTs) {
+                        lastResumedPkg = event.packageName
+                        lastResumedTs = event.timeStamp
+                    }
+                }
+                if (!lastResumedPkg.isNullOrEmpty()) {
+                    return lastResumedPkg
+                }
+            }
+        } catch (_: Throwable) {
+        }
+        return null
+    }
+
+    /**
      * 获取设备当前实时的瞬时放电功耗（单位：瓦特 W）。
-     * 直接读取底层硬件库仑计电流寄存器并结合缓存电压推算，
-     * 准确按照 Android 规范单位换算（微安 uA 转换为毫安 mA），杜绝临时注册广播引发的 IPC 开销。
+     * 优先采用硬件直读采样器 [SysfsBatterySampler] 直接读取内核 sysfs 节点，
+     * 若受权限限制或返回无效，则安全回退至读取底层硬件库仑计电流寄存器并结合缓存电压推算。
      *
      * @return 瞬时放电功耗数值（绝对值，单位：W），若不可用则返回 null
      */
     private fun getDischargePowerWatts(): Float? {
+        val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
+            context = this,
+            fallbackVoltageVolts = cachedVoltageVolts,
+            fallbackTempCelsius = cachedTemperature
+        )
+        if (hwSample != null && hwSample.powerWatts > 0f) {
+            return hwSample.powerWatts
+        }
+
         return try {
             val batteryManager = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return null
             val rawCurrent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
@@ -419,7 +479,7 @@ class BatteryMonitorService : Service() {
                 getDischargePowerWatts() ?: 0f
             }
         } else {
-            getDischargePowerWatts()
+            cachedDischargePowerWatts ?: getDischargePowerWatts()
         }
 
         val powerStr = if (powerWatts != null && powerWatts > 0.05f) {
@@ -531,7 +591,7 @@ class BatteryMonitorService : Service() {
         const val KEY_SCREEN_ON_INTERVAL_MS = "pref_screen_on_interval_ms"
         const val KEY_SCREEN_OFF_INTERVAL_MS = "pref_screen_off_interval_ms"
         const val INTERVAL_NEVER = -1L
-        const val DEFAULT_SCREEN_ON_INTERVAL_MS = 3000L
+        const val DEFAULT_SCREEN_ON_INTERVAL_MS = 1000L
         const val DEFAULT_SCREEN_OFF_INTERVAL_MS = 0L
 
         /**

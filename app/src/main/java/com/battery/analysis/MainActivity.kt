@@ -244,21 +244,20 @@ class MainActivity : AppCompatActivity() {
     private var isBottomNavVisible: Boolean = true
 
     /**
-     * 设置底部导航栏联动显隐状态，配合平滑动效实现滑入或滑出。
+     * 设置底部导航栏联动显隐状态，配合平滑动效实现平滑滑入或滑出。
+     * 隐藏时自动附加安全冗余位移，防止在高分辨率屏幕或全面屏手势条下残留边缘线条。
      *
      * @param visible 是否显示底部导航栏（true 为显示，false 为隐藏）
      */
     fun setBottomNavigationVisibility(visible: Boolean) {
         if (isBottomNavVisible == visible) return
         isBottomNavVisible = visible
-        val targetTranslationY = if (visible) {
-            0f
-        } else {
-            binding.layoutBottomNavContainer.height.toFloat().takeIf { it > 0f } ?: 200f
-        }
+        val containerHeight = binding.layoutBottomNavContainer.height.toFloat().takeIf { it > 0f } ?: 300f
+        val targetTranslationY = if (visible) 0f else (containerHeight + 120f)
+        binding.layoutBottomNavContainer.animate().cancel()
         binding.layoutBottomNavContainer.animate()
             .translationY(targetTranslationY)
-            .setDuration(250L)
+            .setDuration(220L)
             .setInterpolator(androidx.interpolator.view.animation.FastOutSlowInInterpolator())
             .start()
     }

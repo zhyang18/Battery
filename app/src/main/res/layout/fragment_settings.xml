@@ -25,6 +25,7 @@
     </LinearLayout>
 
     <ScrollView
+        android:id="@+id/scroll_view"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:clipToPadding="false"
@@ -35,7 +36,7 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:paddingHorizontal="12dp"
-            android:paddingBottom="65dp">
+            android:paddingBottom="10dp">
 
             <!-- 1. 用户界面 分类 -->
             <TextView

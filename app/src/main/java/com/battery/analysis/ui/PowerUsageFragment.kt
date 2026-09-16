@@ -251,6 +251,7 @@ class PowerUsageFragment : Fragment() {
 
         // 1. 顶部 AppBarLayout 偏移联动：标题栏淡出、大指标卡片向上移动滚出屏幕、吸顶 mini 卡片在后半程淡入
         binding.appbarPower.addOnOffsetChangedListener { appBarLayout, verticalOffset ->
+            val prevOffset = lastAppBarVerticalOffset
             lastAppBarVerticalOffset = verticalOffset
             if (currentDisplayTab == 1) {
                 // 充电模式下完全禁用联动折叠动效，固定常驻完整展开标题栏，隐藏吸顶及放电卡片
@@ -265,6 +266,14 @@ class PowerUsageFragment : Fragment() {
                 binding.cardCollapsedMetrics.visibility = View.GONE
                 binding.cardCollapsedMetrics.alpha = 0f
                 return@addOnOffsetChangedListener
+            }
+
+            // AppBarLayout 向上收拢手势感知：当用户上滑折叠顶部卡片时，立即联动隐藏底部页签栏
+            if (verticalOffset < prevOffset && verticalOffset < -10) {
+                (activity as? MainActivity)?.setBottomNavigationVisibility(false)
+            } else if (verticalOffset == 0 && binding.nestedScrollView.scrollY <= 0) {
+                // 完全展开且停留在最顶端时，恢复展示底部页签栏
+                (activity as? MainActivity)?.setBottomNavigationVisibility(true)
             }
 
             val totalRange = appBarLayout.totalScrollRange
@@ -321,16 +330,40 @@ class PowerUsageFragment : Fragment() {
             }
 
             val dy = scrollY - oldScrollY
-            if (scrollY <= 0) {
-                // 滚动至列表最顶端，强制恢复底部页签栏展示
+            if (scrollY <= 0 && lastAppBarVerticalOffset == 0) {
+                // 滚动至列表最顶端且顶部卡片完全展开，强制恢复底部页签栏展示
                 (activity as? MainActivity)?.setBottomNavigationVisibility(true)
-            } else if (dy > 15) {
-                // 手指向上滑动列表，隐藏底部页签栏
+            } else if (dy > 6) {
+                // 手指向上滑动列表，隐藏底部页签栏（灵敏度阈值从 15 调优为 6）
                 (activity as? MainActivity)?.setBottomNavigationVisibility(false)
-            } else if (dy < -15) {
+            } else if (dy < -12) {
                 // 手指向下滑动列表，显示底部页签栏
                 (activity as? MainActivity)?.setBottomNavigationVisibility(true)
             }
+        }
+
+        // 3. 触摸手势辅助监听：优化触底边界与慢速拖动时的手势感知
+        var startTouchY = 0f
+        binding.nestedScrollView.setOnTouchListener { _, event ->
+            if (currentDisplayTab == 1) return@setOnTouchListener false
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    startTouchY = event.rawY
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val deltaY = event.rawY - startTouchY
+                    if (deltaY < -20f) {
+                        // 手指持续向上拖动，确保底部导航栏保持隐藏（解决滑到底部后 scrollY 无法再增大的边界场景）
+                        (activity as? MainActivity)?.setBottomNavigationVisibility(false)
+                        startTouchY = event.rawY
+                    } else if (deltaY > 20f && binding.nestedScrollView.scrollY <= 0 && lastAppBarVerticalOffset == 0) {
+                        // 处于最顶部且手指向下拉动，恢复展示底部导航栏
+                        (activity as? MainActivity)?.setBottomNavigationVisibility(true)
+                        startTouchY = event.rawY
+                    }
+                }
+            }
+            false
         }
     }
 
@@ -781,9 +814,9 @@ class PowerUsageFragment : Fragment() {
             showPowerSceneGuideDialog()
         }
 
-        // 场景后台统计开关：控制是否展示各应用后台数据及顶部卡片后台指标
+        // 场景后台统计开关：控制是否在下方应用列表中展示各应用后台数据
         val statsPrefs = requireContext().getSharedPreferences(PREFS_POWER_STATS, Context.MODE_PRIVATE)
-        val isBgStatsEnabled = statsPrefs.getBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, true)
+        val isBgStatsEnabled = statsPrefs.getBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, false)
         binding.switchBackgroundStats.isChecked = isBgStatsEnabled
         updateBackgroundStatsVisibility(isBgStatsEnabled)
 
@@ -1336,22 +1369,22 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 更新后台统计数据及指标卡片的显示与隐藏状态。
-     * 控制顶部核心指标卡片与折叠吸顶 Mini 卡片中后台列的显隐，并通知适配器切换展示纯前台或前后台组合数据及控制后台运行应用的显隐。
+     * 更新应用使用场景列表中后台统计数据的显示与隐藏状态。
+     * 顶部核心指标卡片与折叠吸顶 Mini 卡片始终聚焦于【亮屏】、【综合】、【息屏】物理三态，
+     * 此开关专门控制列表适配器切换展示纯前台或前后台组合数据，以及是否在列表中展示仅在后台运行的应用。
      *
-     * @param show 是否显示后台统计相关数据与卡片列，以及是否在列表中展示后台运行应用
+     * @param show 是否在应用列表中展示后台运行应用及各应用后台工时与能耗
      */
     private fun updateBackgroundStatsVisibility(show: Boolean) {
-        val visibility = if (show) View.VISIBLE else View.GONE
         with(binding) {
-            tvHeaderBackground.visibility = visibility
-            tvTimeBackground.visibility = visibility
-            tvPowerBackground.visibility = visibility
-            tvEnergyBackground.visibility = visibility
-            tvRemainingBackground.visibility = visibility
+            tvHeaderBackground.visibility = View.GONE
+            tvTimeBackground.visibility = View.GONE
+            tvPowerBackground.visibility = View.GONE
+            tvEnergyBackground.visibility = View.GONE
+            tvRemainingBackground.visibility = View.GONE
 
-            tvMiniTimeBackground.visibility = visibility
-            tvMiniPowerBackground.visibility = visibility
+            tvMiniTimeBackground.visibility = View.GONE
+            tvMiniPowerBackground.visibility = View.GONE
         }
         adapter.setShowBackgroundStats(show)
     }

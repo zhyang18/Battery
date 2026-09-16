@@ -64,4 +64,19 @@ class BatteryUnitNormalizerTest {
         val chargingWatts = BatteryUnitNormalizer.calculatePowerWatts(9.0f, 5000f, isCharging = true)
         assertEquals(45.0f, chargingWatts, 0.1f)
     }
+
+    /**
+     * 测试移除所有人为物理上限后，极大功率充电（如 240W 快充）与高电压不被 150W 或 12V 截断。
+     */
+    @Test
+    fun testUncappedHighPowerAndVoltage() {
+        // 20V, 12000mA (12A) 对应 240W 超级快充，忠实反映真实 240.0W，不再被 150W 截断
+        val ultraChargingWatts = BatteryUnitNormalizer.calculatePowerWatts(20.0f, 12000f, isCharging = true)
+        assertEquals(240.0f, ultraChargingWatts, 0.1f)
+
+        // 15V 原生伏特测试 (1..24 -> rawVolt * 1000f)
+        val directVoltsMv = BatteryUnitNormalizer.normalizeVoltageMv(15L) // 15 V -> 15000 mV
+        assertEquals(15000f, directVoltsMv, 0.01f)
+        assertEquals(15.0f, BatteryUnitNormalizer.normalizeVoltageVolts(15L), 0.001f)
+    }
 }

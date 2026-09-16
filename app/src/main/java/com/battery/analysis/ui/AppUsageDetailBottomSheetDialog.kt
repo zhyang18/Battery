@@ -111,7 +111,12 @@ class AppUsageDetailBottomSheetDialog(
         // 2. 状态标签（根据真实前后台活动时长设定）
         val hasFg = item.foregroundTimeMs >= 1000L
         val hasBg = item.backgroundTimeMs >= 1000L
+        val hasFgs = item.fgsDurationMs >= 1000L
         when {
+            hasFg && hasFgs -> {
+                tvStatusBadge.text = "前台+常驻"
+                tvStatusBadge.setTextColor(Color.parseColor("#2196F3"))
+            }
             hasFg && hasBg -> {
                 tvStatusBadge.text = "前台+后台"
                 tvStatusBadge.setTextColor(Color.parseColor("#2196F3"))
@@ -119,6 +124,10 @@ class AppUsageDetailBottomSheetDialog(
             hasFg -> {
                 tvStatusBadge.text = "前台活跃"
                 tvStatusBadge.setTextColor(Color.parseColor("#34C759"))
+            }
+            hasFgs -> {
+                tvStatusBadge.text = "常驻服务"
+                tvStatusBadge.setTextColor(Color.parseColor("#2196F3"))
             }
             hasBg -> {
                 tvStatusBadge.text = "纯后台运行"
@@ -130,43 +139,43 @@ class AppUsageDetailBottomSheetDialog(
             }
         }
 
-        // 3. 核心指标矩阵（前台与后台独立换行展示，去除分隔符）
+        // 3. 核心指标矩阵（严格遵循 BatteryRecorder 规范：仅基于前台物理切片统计功耗与能量，后台只统计工时）
         // 能量列
-        tvEnergyPrimary.text = formatEnergyValue(item.energyWh)
-        tvEnergyFg.text = "前: ${formatEnergyValue(item.foregroundEnergyWh)}"
-        tvEnergyBg.text = "后: ${formatEnergyValue(item.backgroundEnergyWh)}"
+        val fgEnergyVal = item.foregroundEnergyWh
+        tvEnergyPrimary.text = formatEnergyValue(fgEnergyVal)
+        tvEnergyFg.text = "前: ${formatEnergyValue(fgEnergyVal)}"
+        tvEnergyBg.text = "后: --"
 
         // 功率列
-        val fgPwrStr = formatWattsValue(item.foregroundPowerWatts)
-        val bgPwrStr = formatWattsValue(item.backgroundPowerWatts)
-        val primaryPwr = if (item.foregroundPowerWatts >= 0.005f) {
-            fgPwrStr
-        } else if (item.backgroundPowerWatts >= 0.005f) {
-            bgPwrStr
-        } else if (item.avgPowerWatts >= 0.005f) {
+        val fgPwrStr = if (item.foregroundPowerWatts >= 0.005f) {
+            formatWattsValue(item.foregroundPowerWatts)
+        } else if (item.foregroundTimeMs >= 1000L && item.avgPowerWatts >= 0.005f) {
             formatWattsValue(item.avgPowerWatts)
         } else {
             "--"
         }
-        tvPowerPrimary.text = primaryPwr
+        tvPowerPrimary.text = fgPwrStr
         tvPowerFg.text = "前: $fgPwrStr"
-        tvPowerBg.text = "后: $bgPwrStr"
+        tvPowerBg.text = "后: --"
 
         // 温度列
         tvTempPrimary.text = String.format(Locale.getDefault(), "%.1f ℃", item.avgTemperature)
         tvTempAvg.text = String.format(Locale.getDefault(), "平均: %.1f ℃", item.avgTemperature)
         tvTempMax.text = String.format(Locale.getDefault(), "最高: %.1f ℃", item.maxTemperature)
 
-        // 4. 工况运行时长（明确区分前台、后台与总时长）
+        // 4. 工况运行时长（明确区分前台、后台实际工作与常驻挂载总时长）
         tvFgDuration.text = formatDurationMs(item.foregroundTimeMs)
-        tvBgDuration.text = formatDurationMs(item.backgroundTimeMs)
+        tvBgDuration.text = if (hasFgs) {
+            "${formatDurationMs(item.backgroundTimeMs)} (常驻: ${formatDurationMs(item.fgsDurationMs)})"
+        } else {
+            formatDurationMs(item.backgroundTimeMs)
+        }
         tvTotalDuration.text = formatDurationMs(item.foregroundTimeMs + item.backgroundTimeMs)
 
-        // 5. 电量消耗分配（精确到小数点后三位）
-        val totalE = item.energyWh
-        tvFgEnergy.text = formatEnergyWithRatio(item.foregroundEnergyWh, totalE)
-        tvBgEnergy.text = formatEnergyWithRatio(item.backgroundEnergyWh, totalE)
-        tvTotalEnergy.text = formatEnergyValue(totalE)
+        // 5. 电量消耗分配（严格遵循 BatteryRecorder 物理切片准则）
+        tvFgEnergy.text = formatEnergyValue(fgEnergyVal)
+        tvBgEnergy.text = "-- (整机息屏统一统计)"
+        tvTotalEnergy.text = formatEnergyValue(fgEnergyVal)
 
         // 6. 硬件系统开销
         tvCpuTime.text = formatDurationMs(item.cpuTimeMs)

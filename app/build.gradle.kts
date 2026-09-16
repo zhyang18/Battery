@@ -15,6 +15,22 @@ android {
         targetSdk = 34
         versionCode = 31
         versionName = "1.9.1"
+
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17"
+            }
+        }
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
     // 正确位置：splits 必须与 defaultConfig 平级，放在 android 闭包下
     splits {

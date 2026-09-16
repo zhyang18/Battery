@@ -25,6 +25,7 @@ import android.graphics.drawable.Drawable
  * @property gpsTimeMs GPS 定位使用时长（单位：毫秒，默认 0L）
  * @property foregroundPowerWatts 前台活跃点亮屏幕综合平均放电功耗（单位：瓦特 W，默认 0f）
  * @property backgroundPowerWatts 后台运行活跃放电平均功耗（单位：瓦特 W，默认 0f）
+ * @property fgsDurationMs 前台服务（Foreground Service）常驻挂载时长（单位：毫秒，默认 0L）
  */
 data class AppPowerUsageItem(
     val packageName: String,
@@ -44,17 +45,22 @@ data class AppPowerUsageItem(
     val wakelockTimeMs: Long = 0L,
     val gpsTimeMs: Long = 0L,
     val foregroundPowerWatts: Float = 0f,
-    val backgroundPowerWatts: Float = 0f
+    val backgroundPowerWatts: Float = 0f,
+    val fgsDurationMs: Long = 0L
 ) {
     /**
      * 计算该应用消耗的总电量（单位：瓦时 Wh）。
-     * 优先使用前后台消耗能量之和，其次使用 directEnergyWh，若均无直接测量值则基于平均功耗与运行总时长计算。
+     * 严格对标 BatteryRecorder 物理积分规范：功耗与能量仅统计应用前台物理放电切片，后台不统计虚拟能耗。
      */
     val energyWh: Float
-        get() = if (foregroundEnergyWh > 0f || backgroundEnergyWh > 0f) {
-            foregroundEnergyWh + backgroundEnergyWh
+        get() = if (foregroundEnergyWh > 0f) {
+            foregroundEnergyWh
+        } else if (directEnergyWh != null && directEnergyWh > 0f && foregroundTimeMs > 0L) {
+            directEnergyWh
+        } else if (avgPowerWatts > 0f && foregroundTimeMs >= 1000L) {
+            (avgPowerWatts * (foregroundTimeMs / 3600000f)).coerceAtLeast(0f)
         } else {
-            directEnergyWh ?: (avgPowerWatts * ((foregroundTimeMs + backgroundTimeMs) / 3600000f)).coerceAtLeast(0f)
+            0f
         }
 
     /**
@@ -68,29 +74,31 @@ data class AppPowerUsageItem(
         if (totalSeconds < 60) {
             return "${totalSeconds}s"
         }
-        val minutes = (totalSeconds / 60) % 60
-        val hours = totalSeconds / 3600
+        val totalMinutes = totalSeconds / 60
         val remainingSeconds = totalSeconds % 60
+        val hours = totalMinutes / 60
+        val remainingMinutes = totalMinutes % 60
+
         return if (hours > 0) {
-            "${hours}h${minutes}m"
+            if (remainingMinutes > 0) "${hours}h${remainingMinutes}m" else "${hours}h"
         } else {
-            "${minutes}m${remainingSeconds}s"
+            if (remainingSeconds > 0) "${remainingMinutes}m${remainingSeconds}s" else "${remainingMinutes}m"
         }
     }
 
     /**
-     * 格式化指定的瓦时能量为文本（精确到三位小数，如 "0.123Wh"、"<0.001Wh"、"0.000Wh"）。
+     * 格式化单项能量数值为易读字符串（如 "0.12Wh" 或 "<0.01Wh"）。
      *
-     * @param wh 待格式化的瓦时能量值
+     * @param wh 瓦时数值
      * @return 格式化后的能量文本
      */
     private fun formatSingleEnergyWh(wh: Float): String {
-        return if (wh <= 0f) {
-            "0.000Wh"
-        } else if (wh < 0.001f) {
-            "<0.001Wh"
+        return if (wh >= 0.005f) {
+            String.format(java.util.Locale.getDefault(), "%.2fWh", wh)
+        } else if (wh > 0.0001f) {
+            "<0.01Wh"
         } else {
-            String.format(java.util.Locale.getDefault(), "%.3fWh", wh)
+            "--"
         }
     }
 
@@ -105,39 +113,15 @@ data class AppPowerUsageItem(
     }
 
     /**
-     * 获取前台与后台组合能量消耗展示文本（格式："前台能量 | 后台能量"，如 "0.25Wh | 0.08Wh"）。
-     * 如实反映系统真实测得的前台与后台能耗；当底层仅提供未分拆总能耗时，依据实际活动时长客观归属，杜绝将后台能耗误计入前台。
+     * 获取前后台模式下的能量消耗展示文本。
+     * 严格遵循 BatteryRecorder 算法：功耗与能量仅统计前台真实物理放电；
+     * 若应用在前台运行则展示真实前台能量，纯后台运行应用如实显示为 "--"，杜绝虚假发配后台电量。
      *
-     * @return 格式化后的组合能量文本
+     * @return 格式化后的能量展示文本
      */
     fun getFormattedCombinedEnergyWh(): String {
-        val (fg, bg) = if (foregroundEnergyWh > 0f || backgroundEnergyWh > 0f) {
-            // 如实反映真测的前台与后台能量
-            Pair(foregroundEnergyWh, backgroundEnergyWh)
-        } else {
-            val total = energyWh
-            if (total <= 0f) {
-                Pair(0f, 0f)
-            } else if (foregroundTimeMs <= 0L && backgroundTimeMs > 0L) {
-                // 实测仅在后台运行，总能量如实归属于后台
-                Pair(0f, total)
-            } else if (foregroundTimeMs > 0L && backgroundTimeMs <= 0L) {
-                // 实测仅在前台运行，总能量如实归属于前台
-                Pair(total, 0f)
-            } else if (foregroundTimeMs > 0L && backgroundTimeMs > 0L) {
-                // 均有时长记录，按实测时长比例客观分配
-                val totalTime = (foregroundTimeMs + backgroundTimeMs).toDouble()
-                val fgRatio = (foregroundTimeMs / totalTime).toFloat()
-                val fgVal = total * fgRatio
-                Pair(fgVal, (total - fgVal).coerceAtLeast(0f))
-            } else {
-                // 均无活动时长，默认归属于后台基础底噪
-                Pair(0f, total)
-            }
-        }
-        val fgStr = formatSingleEnergyWh(fg)
-        val bgStr = formatSingleEnergyWh(bg)
-        return "$fgStr | $bgStr"
+        val fgEnergy = getForegroundEnergyValue()
+        return formatSingleEnergyWh(fgEnergy)
     }
 
     /**
@@ -159,14 +143,28 @@ data class AppPowerUsageItem(
     }
 
     /**
-     * 获取前台使用时长与后台运行活跃时长的组合展示文本（格式："前台时长 | 后台时长"，如 "19m38s | 1h20m"）。
+     * 获取格式化后的前台服务常驻挂载时长字符串（如 12h30m、15m）。
+     *
+     * @return 格式化后的前台服务常驻时长文本
+     */
+    fun getFormattedFgsDuration(): String {
+        return formatDurationMs(fgsDurationMs)
+    }
+
+    /**
+     * 获取前台使用时长与后台运行活跃时长的组合展示文本（格式："前台时长 | 后台时长" 或 "后台: xx"）。
      *
      * @return 格式化后的组合时长文本
      */
     fun getFormattedCombinedDuration(): String {
-        val fgStr = formatDurationMs(foregroundTimeMs)
-        val bgStr = formatDurationMs(backgroundTimeMs)
-        return "$fgStr | $bgStr"
+        val hasFg = foregroundTimeMs >= 1000L
+        val hasBg = backgroundTimeMs >= 1000L
+        return when {
+            hasFg && hasBg -> "${formatDurationMs(foregroundTimeMs)} | 后台 ${formatDurationMs(backgroundTimeMs)}"
+            hasFg -> formatDurationMs(foregroundTimeMs)
+            hasBg -> "后台: ${formatDurationMs(backgroundTimeMs)}"
+            else -> "0s"
+        }
     }
 
     /**
@@ -185,33 +183,14 @@ data class AppPowerUsageItem(
     }
 
     /**
-     * 获取前台亮屏平均功耗与后台活跃放电平均功耗的组合展示文本（格式："前台AVG | 后台AVG"，如 "1.44W | 0.08W"、"1.44W | --"、"-- | 0.12W"、"-- | --"）。
-     * 如实区分前台点亮屏幕运行工况与后台活跃放电工况；当应用在对应场景未运行或时长不足有效统计门槛（1秒）时，如实显示为 "--"。
+     * 获取前后台模式下的平均放电功耗展示文本。
+     * 严格遵循 BatteryRecorder 算法：平均功耗仅基于前台屏幕点亮与独占交互物理切片计算；
+     * 纯后台运行应用因在硬件上无法切出独立放电电流，诚实显示为 "--"，杜绝模糊估算。
      *
-     * @return 格式化后的组合平均功耗展示文本
+     * @return 格式化后的平均功耗展示文本
      */
     fun getFormattedCombinedAvgWatts(): String {
-        val fgPwr = if (foregroundPowerWatts > 0f) {
-            foregroundPowerWatts
-        } else if (foregroundTimeMs >= 1000L && foregroundEnergyWh > 0f) {
-            (foregroundEnergyWh / (foregroundTimeMs / 3600000f)).coerceAtLeast(0f)
-        } else if (foregroundTimeMs >= 1000L && avgPowerWatts > 0f) {
-            avgPowerWatts
-        } else {
-            0f
-        }
-
-        val bgPwr = if (backgroundPowerWatts > 0f) {
-            backgroundPowerWatts
-        } else if (backgroundTimeMs >= 1000L && backgroundEnergyWh > 0f) {
-            (backgroundEnergyWh / (backgroundTimeMs / 3600000f)).coerceAtLeast(0f)
-        } else if (foregroundTimeMs <= 0L && backgroundTimeMs >= 1000L && avgPowerWatts > 0f) {
-            avgPowerWatts
-        } else {
-            0f
-        }
-
-        return "${formatWatts(fgPwr)} | ${formatWatts(bgPwr)}"
+        return getFormattedForegroundAvgWatts()
     }
 
     /**

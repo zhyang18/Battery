@@ -270,14 +270,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 val percent = amountMatcher.group(1)?.toFloatOrNull() ?: 0f
                 if (percent > 0f) {
                     val rawOffMah = (percent / 100f) * capacityMah
-                    // 若息屏时长较短（<15分钟），实施基于物理最大待机功耗（3.0W）的平滑防量化尖峰保护，杜绝 45W 虚高
-                    val offHours = screenOffDurationMs / 3600000f
-                    if (screenOffDurationMs > 0L && offHours < 0.25f) {
-                        val maxPhysicalMah = (MAX_STANDBY_POWER_WATTS * 1000f / voltageVolts.coerceAtLeast(3.7f)) * offHours
-                        screenOffDrainMah = rawOffMah.coerceAtMost(maxPhysicalMah)
-                    } else {
-                        screenOffDrainMah = rawOffMah
-                    }
+                    screenOffDrainMah = rawOffMah.coerceAtLeast(0f)
                 }
             }
         }
@@ -485,7 +478,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             val baseBg = if (hw != null) {
                                 val bgCpu = (hw.getTotalCpuMs() - foregroundMs).coerceAtLeast(0L)
                                 val directBg = hw.cpuBackgroundMs
-                                maxOf(bgCpu, directBg) + hw.wakelockMs + hw.fgsMs
+                                // 后台活跃时间严格统计实际 CPU 算力与持锁唤醒时间，常驻服务挂载时长独立记录在 fgsDurationMs
+                                maxOf(bgCpu, directBg) + hw.wakelockMs
                             } else {
                                 backgroundMs
                             }
@@ -515,6 +509,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             val realNetBytes = hw?.networkBytes ?: 0L
                             val realWakeMs = hw?.wakelockMs ?: 0L
                             val realGpsMs = hw?.gpsMs ?: 0L
+                            val realFgsMs = hw?.fgsMs ?: 0L
 
                             val (appName, icon) = getAppMetadata(pkgName, pm)
                             parsedAppMap[pkgName] = AppPowerUsageItem(
@@ -535,7 +530,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                                 wakelockTimeMs = realWakeMs,
                                 gpsTimeMs = realGpsMs,
                                 foregroundPowerWatts = fgWatts,
-                                backgroundPowerWatts = bgWatts
+                                backgroundPowerWatts = bgWatts,
+                                fgsDurationMs = realFgsMs
                             )
                         }
                     }
@@ -664,19 +660,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 0f
             }
             val allocatedOffDrain = remainingDrain * offRatio
-            val offHours = screenOffDurationMs / 3600000f
-            val maxPhysicalStandbyDrain = (MAX_STANDBY_POWER_WATTS * 1000f / voltageVolts.coerceAtLeast(3.7f)) * offHours
-            val effectiveOffDrain = allocatedOffDrain.coerceAtMost(maxPhysicalStandbyDrain)
-            if (effectiveOffDrain > 0.05f) {
-                screenOffDrainMah = effectiveOffDrain
+            if (allocatedOffDrain > 0.05f) {
+                screenOffDrainMah = allocatedOffDrain
             }
-        }
-
-        // 统一物理合理性保护：息屏放电量绝不能超过待机状态下的最大物理放电量（防止底层 dumpsys 脏数据或微小时长导致功耗超标）
-        if (screenOffDurationMs > 0L && screenOffDrainMah > 0f) {
-            val offHours = screenOffDurationMs / 3600000f
-            val maxPhysicalMah = (MAX_STANDBY_POWER_WATTS * 1000f / voltageVolts.coerceAtLeast(3.7f)) * offHours
-            screenOffDrainMah = screenOffDrainMah.coerceAtMost(maxPhysicalMah)
         }
 
         // 10. 排序策略：用户安装的常用三方应用（带启动图标或非系统应用）排在最前，系统底层进程排在后方
@@ -944,7 +930,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             val realCpuMs = if (hw != null && hw.getTotalCpuMs() > 0L) hw.getTotalCpuMs() else old.cpuTimeMs
             val baseBg = if (hw != null) {
                 val bgCpu = (hw.getTotalCpuMs() - effectiveFg).coerceAtLeast(0L)
-                maxOf(bgCpu, hw.cpuBackgroundMs) + hw.wakelockMs + hw.fgsMs
+                // 后台活跃时间严格统计实际 CPU 算力与持锁唤醒时间，常驻服务挂载时长独立记录在 fgsDurationMs
+                maxOf(bgCpu, hw.cpuBackgroundMs) + hw.wakelockMs
             } else {
                 effectiveBg
             }
@@ -985,7 +972,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 cpuTimeMs = realCpuMs,
                 networkBytes = netBytes,
                 wakelockTimeMs = hw?.wakelockMs ?: old.wakelockTimeMs,
-                gpsTimeMs = hw?.gpsMs ?: old.gpsTimeMs
+                gpsTimeMs = hw?.gpsMs ?: old.gpsTimeMs,
+                fgsDurationMs = hw?.fgsMs ?: old.fgsDurationMs
             )
         }
 
@@ -1021,7 +1009,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                     val realWake = hw?.wakelockMs ?: 0L
                     val realGps = hw?.gpsMs ?: 0L
                     val bgTime = if (hw != null) {
-                        ((realCpu - safeFgTime).coerceAtLeast(0L) + realWake + hw.fgsMs).coerceAtMost(dischargeMs)
+                        ((realCpu - safeFgTime).coerceAtLeast(0L) + realWake).coerceAtMost(dischargeMs)
                     } else {
                         0L
                     }
@@ -1046,7 +1034,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                         wakelockTimeMs = realWake,
                         gpsTimeMs = realGps,
                         foregroundPowerWatts = baselineWatts,
-                        backgroundPowerWatts = 0f
+                        backgroundPowerWatts = 0f,
+                        fgsDurationMs = hw?.fgsMs ?: 0L
                     )
             }
         }
@@ -1055,17 +1044,16 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     }
 
     /**
-     * 客观解耦应用在前台活跃期间与后台常驻/休眠期间的能量消耗与真实运行时长。
-     * 针对前台使用场景施加物理功耗合理性保护，杜绝因未识别出后台时间导致后台消耗全量误判为前台算力。
-     * 严格依据底层系统权威记录的活跃时长（dumpsys 的 bg、fgs、wakelock 与实际 CPU 计算耗时），绝不虚拟推算或使用差值强行填补后台时间。
+     * 对标 BatteryRecorder 算法解耦应用的真实前台能量与后台工时。
+     * 单应用能耗与功耗严格基于前台物理放电采样，后台不统计虚拟消耗能量，仅保留真实后台运行工时。
      *
-     * @param totalEnergy 应用消耗的总电量（单位：瓦时 Wh）
-     * @param foregroundMs 前台活跃时长（单位：毫秒）
-     * @param backgroundMs 后台活跃时长（单位：毫秒）
-     * @param cpuMs 应用 CPU 计算总耗时（单位：毫秒）
+     * @param totalEnergy 应用程序从系统底层采集到的总放电能量（单位：瓦时 Wh）
+     * @param foregroundMs 应用程序前台活跃运行时长（单位：毫秒）
+     * @param backgroundMs 应用程序后台运行活跃时长（单位：毫秒）
+     * @param cpuMs 应用程序净 CPU 消耗时长（单位：毫秒）
      * @param dischargeMs 本次放电周期总时长（单位：毫秒）
-     * @param isGame 是否为高能耗 3D 游戏
-     * @return 包含前台能量、后台能量与有效后台时长的三元组 [Triple<Float, Float, Long>]
+     * @param isGame 是否为 3D 图形游戏应用
+     * @return 包含解耦后的前台能量（Wh）、后台能量（严格为 0f）与有效后台活跃时长（毫秒）的三元组 [Triple]
      */
     @Suppress("UNUSED_PARAMETER")
     fun decoupleAppEnergyAndTimes(
@@ -1076,76 +1064,26 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         dischargeMs: Long,
         isGame: Boolean = false
     ): Triple<Float, Float, Long> {
-        if (totalEnergy <= 0.0001f) {
-            return Triple(0f, 0f, backgroundMs.coerceIn(0L, dischargeMs))
-        }
-
-        // 纯后台应用（前台时长为 0）：能量 100% 归属于后台能量，前台能量严格为 0f
-        if (foregroundMs <= 0L) {
-            val effectiveBg = if (backgroundMs > 0L) {
-                backgroundMs.coerceAtMost(dischargeMs)
-            } else if (cpuMs > 0L) {
-                cpuMs.coerceAtMost(dischargeMs)
-            } else {
-                0L
-            }
-            return Triple(0f, totalEnergy, effectiveBg)
-        }
-
-        val fgHours = foregroundMs / 3600000.0
-        if (fgHours <= 0.0) {
-            val effectiveBg = if (backgroundMs > 0L) {
-                backgroundMs.coerceAtMost(dischargeMs)
-            } else if (cpuMs > 0L) {
-                cpuMs.coerceAtMost(dischargeMs)
-            } else {
-                0L
-            }
-            return Triple(0f, totalEnergy, effectiveBg)
-        }
-
-        // 前台核心纯算力功耗物理合理上限（不含恒定屏幕面板底座功率）：
-        // 普通日常应用（微信、QQ、浏览器、系统界面等）核心算力功耗通常在 0.4W ~ 1.5W，单 App 物理极限不超过 2.2W；
-        // 3D 游戏由于持续高负载图形渲染，核心算力功耗物理极限可达 4.5W
-        val fgEnergyWh: Float
-        val bgEnergyWh: Float
-
-        if (backgroundMs > 0L) {
-            // 后台已明确记录了运行耗时，按前台与后台算力权重客观分配
-            val bgHours = backgroundMs / 3600000.0
-            val fgWeight = fgHours * 5.0 // 前台算力权重约为后台的 5 倍
-            val bgWeight = bgHours * 1.0
-            val totalWeight = fgWeight + bgWeight
-            if (totalWeight > 0.0) {
-                val ratio = (fgWeight / totalWeight).toFloat()
-                fgEnergyWh = (totalEnergy * ratio).coerceIn(0f, totalEnergy)
-                bgEnergyWh = (totalEnergy - fgEnergyWh).coerceAtLeast(0f)
-            } else {
-                fgEnergyWh = totalEnergy
-                bgEnergyWh = 0f
-            }
+        val effectiveBg = if (backgroundMs > 0L) {
+            backgroundMs.coerceAtMost(dischargeMs)
         } else if (cpuMs > foregroundMs) {
-            // CPU 计算耗时超出前台时长，超出的部分为真实后台算力
-            val totalCpu = cpuMs.toFloat()
-            val fgRatio = (foregroundMs.toFloat() / totalCpu).coerceIn(0.1f, 1.0f)
-            fgEnergyWh = totalEnergy * fgRatio
-            bgEnergyWh = (totalEnergy - fgEnergyWh).coerceAtLeast(0f)
-        } else {
-            // 无任何后台运行记录或后台 CPU 算力：能量 100% 真实归属于前台，绝不凭空臆造后台能耗
-            fgEnergyWh = totalEnergy
-            bgEnergyWh = 0f
-        }
-
-        // 后台活跃时长仅保留系统真实记录的后台时间（dumpsys bg/fgs/service、wakelock）或真实的后台 CPU 算力时间，绝不使用总时长差值伪造
-        val effectiveBgMs = if (backgroundMs > 0L) {
-            backgroundMs
-        } else if (cpuMs > foregroundMs) {
-            (cpuMs - foregroundMs).coerceAtLeast(0L)
+            (cpuMs - foregroundMs).coerceAtMost(dischargeMs)
         } else {
             0L
         }
 
-        return Triple(fgEnergyWh, bgEnergyWh, effectiveBgMs.coerceAtMost(dischargeMs))
+        if (totalEnergy <= 0.0001f) {
+            return Triple(0f, 0f, effectiveBg)
+        }
+
+        // 严格遵循 BatteryRecorder 算法：
+        // 纯后台应用（前台时长为 0）不编造后台能量，能量归 0f，仅统计后台工时；
+        // 前台活跃应用能量全部忠实归属于前台物理放电交互，后台能量严格为 0f。
+        return if (foregroundMs >= 1000L) {
+            Triple(totalEnergy, 0f, effectiveBg)
+        } else {
+            Triple(0f, 0f, effectiveBg)
+        }
     }
 
     /**
@@ -1583,7 +1521,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         private val REGEX_HISTORY_TEMP = Pattern.compile("(?:^|\\s)[+-]?temp=(\\d+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_DISCHARGE_STEP = Pattern.compile("#\\d+:\\s*\\+([\\w\\d]+)\\s+to\\s+(\\d{1,3})", Pattern.CASE_INSENSITIVE)
 
-        /** 息屏待机状态下的绝对最大物理放电功耗上限（单位：W），手机在熄灭屏幕与GPU休眠时功耗绝不应超过该极限 */
+        /** 已废弃：按需求移除人为物理功耗上限，不再进行人工截断 */
+        @Deprecated("已按用户要求移除人为物理功耗上限")
         const val MAX_STANDBY_POWER_WATTS = 3.0f
 
         /** 手机息屏待机状态下的典型底座基础功率（单位：W），客观反映基带待机与系统基础唤醒保活底噪 */

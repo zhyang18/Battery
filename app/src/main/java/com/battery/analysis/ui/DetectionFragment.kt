@@ -111,6 +111,7 @@ class DetectionFragment : Fragment() {
             override fun onPageSelected(position: Int) {
                 super.onPageSelected(position)
                 viewModel.updateActiveTab(position)
+                (activity as? com.battery.analysis.MainActivity)?.setBottomNavigationVisibility(true)
             }
 
             /**

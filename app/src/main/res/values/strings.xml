@@ -294,6 +294,10 @@
     <string name="setting_dark_mode">开启暗黑模式</string>
 
     <string name="settings_section_refresh">数据与刷新</string>
+    <string name="setting_charge_discharge_stats">启用充、放电统计</string>
+    <string name="setting_charge_discharge_stats_desc">开启后在底部展示充、耗电统计页签，并运行后台服务监测充放电数据</string>
+    <string name="toast_charge_discharge_stats_enabled">已开启充、放电统计与后台监测</string>
+    <string name="toast_charge_discharge_stats_disabled">已关闭充、放电统计并停止后台监测</string>
     <string name="setting_auto_refresh">开启实时自动刷新</string>
     <string name="setting_refresh_interval">刷新时间间隔</string>
     <string name="setting_charging_keep_screen_on">充电时保持屏幕常亮</string>

@@ -37,6 +37,9 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
      */
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
+        if (!BatteryMonitorService.isChargeDischargeStatsEnabled(context)) {
+            return
+        }
         when (action) {
             Intent.ACTION_POWER_CONNECTED -> {
                 handlePowerConnected(context)
@@ -212,13 +215,14 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
 
     /**
      * 参考 BatteryRecorder 核心策略：充放电事件结算完成后，尝试重新拉起前台监控服务。
-     * 若服务已配置为启用，无论是否被杀，均尝试重启，确保持续采样不中断。
+     * 若服务已配置为启用且当前未处于活跃运行状态，尝试重启，确保持续采样不中断；
+     * 若服务已在活跃运行中，无需重复调用 startForegroundService，消除时序竞争与 IPC 消耗。
      *
      * @param context 应用程序上下文
      */
     private fun restartServiceIfNeeded(context: Context) {
         try {
-            if (BatteryMonitorService.isServiceEnabled(context)) {
+            if (BatteryMonitorService.isServiceEnabled(context) && !BatteryMonitorService.isServiceActive()) {
                 BatteryMonitorService.start(context)
             }
         } catch (e: Exception) {

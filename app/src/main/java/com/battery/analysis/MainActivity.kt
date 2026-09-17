@@ -138,9 +138,11 @@ class MainActivity : AppCompatActivity() {
             viewModel.loadHistoryRecords(this)
         }
 
-        // 7. 执行充放电断层自愈对齐检测
-        com.battery.analysis.manager.ChargingStatsManager.getInstance(this).checkAndReconcileChargingState()
-        com.battery.analysis.manager.PowerUsageManager.getInstance(this).checkAndReconcileDischargeState()
+        // 7. 若启用了充放电统计，才执行充放电断层自愈对齐检测
+        if (com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(this)) {
+            com.battery.analysis.manager.ChargingStatsManager.getInstance(this).checkAndReconcileChargingState()
+            com.battery.analysis.manager.PowerUsageManager.getInstance(this).checkAndReconcileDischargeState()
+        }
 
         // 8. 检查并按需启动后台电池监控前台服务
         checkAndStartBatteryMonitorService()
@@ -202,39 +204,90 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 初始化顶级 ViewPager2 与底部 NavigationBar 绑定联动。
+     * 支持根据“启用充、放电统计”开关动态配置页签项及默认激活页面。
      */
     private fun setupBottomNavigation() {
-        val pagerAdapter = MainPagerAdapter(this)
+        val isStatsEnabled = com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(this)
+        val pagerAdapter = MainPagerAdapter(this, isStatsEnabled)
         binding.mainViewPager.adapter = pagerAdapter
 
         // 禁用顶级 ViewPager2 手势横滑，避免干扰内部子 Tab 横滑切换
         binding.mainViewPager.isUserInputEnabled = false
         binding.mainViewPager.offscreenPageLimit = 2
 
+        // 动态控制充、耗电统计菜单项在底部导航栏中的显隐
+        val powerMenuItem = binding.bottomNavigation.menu.findItem(R.id.nav_power)
+        powerMenuItem?.isVisible = isStatsEnabled
+
         binding.bottomNavigation.setOnItemSelectedListener { item ->
             setBottomNavigationVisibility(true)
-            when (item.itemId) {
-                R.id.nav_power -> {
-                    binding.mainViewPager.setCurrentItem(0, false)
-                    true
-                }
-                R.id.nav_detection -> {
-                    binding.mainViewPager.setCurrentItem(1, false)
-                    true
-                }
-                R.id.nav_settings -> {
-                    binding.mainViewPager.setCurrentItem(2, false)
-                    true
-                }
-                else -> false
+            val targetPosition = getPositionForNavId(item.itemId)
+            if (targetPosition >= 0) {
+                binding.mainViewPager.setCurrentItem(targetPosition, false)
+                true
+            } else {
+                false
             }
         }
-        // 默认选中第一个“耗电”页签
-        binding.bottomNavigation.selectedItemId = R.id.nav_power
 
-        // 根据初始充放电状态动态适配首个页签的标题与图标
-        val chargingManager = com.battery.analysis.manager.ChargingStatsManager.getInstance(this)
-        updateBottomNavPowerTab(chargingManager.isCharging())
+        // 默认选中：若开启则默认选中“充/耗电”页签，若关闭则默认选中“健康度”页签
+        binding.bottomNavigation.selectedItemId = if (isStatsEnabled) R.id.nav_power else R.id.nav_detection
+
+        // 若开启，根据初始充放电状态动态适配首个页签的标题与图标
+        if (isStatsEnabled) {
+            val chargingManager = com.battery.analysis.manager.ChargingStatsManager.getInstance(this)
+            updateBottomNavPowerTab(chargingManager.isCharging())
+        }
+    }
+
+    /**
+     * 根据底部导航菜单项 ID 获取在当前 ViewPager2 中的索引下标。
+     *
+     * @param navItemId 底部导航菜单项 ID（如 [R.id.nav_power]、[R.id.nav_detection]、[R.id.nav_settings]）
+     * @return 对应的 ViewPager2 索引位置，若未匹配或未包含则返回 -1
+     */
+    private fun getPositionForNavId(navItemId: Int): Int {
+        val targetItemId = when (navItemId) {
+            R.id.nav_power -> MainPagerAdapter.ID_POWER
+            R.id.nav_detection -> MainPagerAdapter.ID_DETECTION
+            R.id.nav_settings -> MainPagerAdapter.ID_SETTINGS
+            else -> -1L
+        }
+        if (targetItemId == -1L) return -1
+        return (binding.mainViewPager.adapter as? MainPagerAdapter)?.getPositionForItemId(targetItemId) ?: -1
+    }
+
+    /**
+     * 响应设置中“启用充、放电统计”开关切换事件，实时刷新导航栏、ViewPager 适配器及后台服务。
+     * 开启时即时显示“充、耗电”页签并拉起后台服务；关闭时即时隐藏页签并彻底停止后台服务。
+     *
+     * @param enabled 是否启用充、放电统计功能（true 为开启，false 为关闭）
+     */
+    fun onChargeDischargeStatsToggled(enabled: Boolean) {
+        val adapter = binding.mainViewPager.adapter as? MainPagerAdapter ?: return
+        val currentSelectedNavId = binding.bottomNavigation.selectedItemId
+
+        adapter.updatePages(enabled)
+        adapter.notifyDataSetChanged()
+
+        val powerMenuItem = binding.bottomNavigation.menu.findItem(R.id.nav_power)
+        powerMenuItem?.isVisible = enabled
+
+        if (enabled) {
+            val chargingManager = com.battery.analysis.manager.ChargingStatsManager.getInstance(this)
+            updateBottomNavPowerTab(chargingManager.isCharging())
+            checkAndStartBatteryMonitorService()
+        } else {
+            com.battery.analysis.service.BatteryMonitorService.stop(this)
+        }
+
+        // 重新同步 ViewPager2 的当前选中位置，确保留在原设置界面，杜绝跳跃
+        val targetPosition = getPositionForNavId(currentSelectedNavId)
+        if (targetPosition >= 0) {
+            binding.mainViewPager.setCurrentItem(targetPosition, false)
+        } else {
+            binding.bottomNavigation.selectedItemId = R.id.nav_detection
+        }
     }
 
     private var isBottomNavVisible: Boolean = true
@@ -344,10 +397,13 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateShizukuStatusState()
-        com.battery.analysis.manager.ChargingStatsManager.getInstance(this).checkAndReconcileChargingState()
-        com.battery.analysis.manager.PowerUsageManager.getInstance(this).checkAndReconcileDischargeState()
-        val isCharging = com.battery.analysis.manager.ChargingStatsManager.getInstance(this).isCharging()
-        updateBottomNavPowerTab(isCharging)
+        val isStatsEnabled = com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(this)
+        if (isStatsEnabled) {
+            com.battery.analysis.manager.ChargingStatsManager.getInstance(this).checkAndReconcileChargingState()
+            com.battery.analysis.manager.PowerUsageManager.getInstance(this).checkAndReconcileDischargeState()
+            val isCharging = com.battery.analysis.manager.ChargingStatsManager.getInstance(this).isCharging()
+            updateBottomNavPowerTab(isCharging)
+        }
     }
 
     /**
@@ -393,11 +449,18 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 切换底部主导航页签至指定菜单项（如切换至检测页或记录页）。
+     * 若在充放电统计关闭状态下尝试导航至充放电页，将安全回退至健康度检测页。
      *
      * @param navItemId 底部导航菜单项 ID，如 [R.id.nav_detection]
      */
     fun navigateToNav(navItemId: Int) {
-        binding.bottomNavigation.selectedItemId = navItemId
+        val isStatsEnabled = com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(this)
+        val targetNavId = if (navItemId == R.id.nav_power && !isStatsEnabled) {
+            R.id.nav_detection
+        } else {
+            navItemId
+        }
+        binding.bottomNavigation.selectedItemId = targetNavId
     }
 
 }

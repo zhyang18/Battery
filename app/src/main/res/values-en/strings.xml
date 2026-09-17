@@ -294,6 +294,10 @@
     <string name="setting_dark_mode">Dark Mode</string>
 
     <string name="settings_section_refresh">Data &amp; Refresh</string>
+    <string name="setting_charge_discharge_stats">Enable Charge/Discharge Stats</string>
+    <string name="setting_charge_discharge_stats_desc">Show charge and power usage tabs and enable background monitoring service</string>
+    <string name="toast_charge_discharge_stats_enabled">Charge/Discharge stats and background monitoring enabled</string>
+    <string name="toast_charge_discharge_stats_disabled">Charge/Discharge stats and background monitoring disabled</string>
     <string name="setting_auto_refresh">Auto Refresh</string>
     <string name="setting_refresh_interval">Refresh Interval</string>
     <string name="setting_power_mode">Power Stats Detection Mode</string>

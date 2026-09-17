@@ -103,6 +103,7 @@ class SettingsFragment : Fragment() {
 
         setupLanguageSettings()
         setupThemeSettings()
+        setupChargeDischargeStatsSettings()
         setupChargingKeepScreenOnSettings()
         setupPowerModeSettings()
         setupShizukuSettings()
@@ -159,6 +160,11 @@ class SettingsFragment : Fragment() {
         (activity as? MainActivity)?.updateShizukuStatusState()
         val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(requireContext())
         updatePowerModeDisplay(powerManager.getSelectedMode())
+
+        val isStatsEnabled = com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(requireContext())
+        if (binding.switchChargeDischargeStats.isChecked != isStatsEnabled) {
+            binding.switchChargeDischargeStats.isChecked = isStatsEnabled
+        }
 
         val chargingPrefs = requireContext().getSharedPreferences("charging_stats_prefs", Context.MODE_PRIVATE)
         binding.switchChargingKeepScreenOn.isChecked = chargingPrefs.getBoolean("pref_charging_keep_screen_on", false)
@@ -407,6 +413,34 @@ class SettingsFragment : Fragment() {
                 prefs.edit().putInt("theme_mode", newMode).apply()
                 AppCompatDelegate.setDefaultNightMode(newMode)
             }
+        }
+    }
+
+    /**
+     * 初始化启用充、放电统计开关设置与联动控制。
+     * 默认关闭，关闭时底部页签栏不显示充、耗电统计页签，且不开启充放电相关服务监测功能；
+     * 打开后即时恢复页签显示并开启充放电相关服务监测。
+     */
+    private fun setupChargeDischargeStatsSettings() {
+        val isEnabled = com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(requireContext())
+        binding.switchChargeDischargeStats.isChecked = isEnabled
+
+        binding.switchChargeDischargeStats.setOnCheckedChangeListener { _, isChecked ->
+            if (com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(requireContext()) != isChecked) {
+                com.battery.analysis.service.BatteryMonitorService.setChargeDischargeStatsEnabled(requireContext(), isChecked)
+                (activity as? MainActivity)?.onChargeDischargeStatsToggled(isChecked)
+                val tip = if (isChecked) {
+                    getString(R.string.toast_charge_discharge_stats_enabled)
+                } else {
+                    getString(R.string.toast_charge_discharge_stats_disabled)
+                }
+                Toast.makeText(requireContext(), tip, Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        binding.layoutChargeDischargeStatsSetting.setOnClickListener {
+            val newChecked = !binding.switchChargeDischargeStats.isChecked
+            binding.switchChargeDischargeStats.isChecked = newChecked
         }
     }
 

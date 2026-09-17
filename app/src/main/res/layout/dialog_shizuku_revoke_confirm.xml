@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_dialog_surface"
+    android:clipToOutline="true"
+    android:gravity="center_horizontal"
+    android:orientation="vertical"
+    android:paddingHorizontal="16dp"
+    android:paddingVertical="18dp">
+
+    <!-- 顶部红色圆形 Shizuku 警示图标 -->
+    <FrameLayout
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:background="@drawable/bg_delete_icon_circle">
+
+        <ImageView
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_gravity="center"
+            android:contentDescription="@string/dialog_shizuku_revoke_title"
+            android:src="@drawable/ic_hashtag"
+            app:tint="#EF4444" />
+    </FrameLayout>
+
+    <!-- 弹窗标题 -->
+    <TextView
+        android:id="@+id/tv_dialog_revoke_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:text="@string/dialog_shizuku_revoke_title"
+        android:textColor="?android:attr/textColorPrimary"
+        android:textSize="17sp"
+        android:textStyle="bold" />
+
+    <!-- 弹窗副标题/影响概述 -->
+    <TextView
+        android:id="@+id/tv_dialog_revoke_desc"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:gravity="center"
+        android:lineSpacingExtra="3dp"
+        android:text="@string/dialog_shizuku_revoke_desc"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="13sp" />
+
+    <!-- 影响详情条目卡片 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:background="@drawable/bg_dialog_card"
+        android:clipToOutline="true"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:lineSpacingExtra="2dp"
+            android:text="@string/dialog_shizuku_revoke_item_kernel"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="12.5sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:lineSpacingExtra="2dp"
+            android:text="@string/dialog_shizuku_revoke_item_dumpsys"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="12.5sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:lineSpacingExtra="2dp"
+            android:text="@string/dialog_shizuku_revoke_item_mode"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="12.5sp" />
+    </LinearLayout>
+
+    <!-- 核心操作按钮行 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:layout_marginTop="18dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/btn_dialog_revoke_cancel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginEnd="6dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_dialog_btn_cancel"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="@string/cancel"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/btn_dialog_revoke_confirm"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="6dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_dialog_btn_delete"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="@string/dialog_shizuku_revoke_btn_confirm"
+            android:textColor="@color/white"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- 辅助选项：前往 Shizuku 管理应用 -->
+    <TextView
+        android:id="@+id/btn_dialog_revoke_open_manager"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_dialog_card"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:text="@string/dialog_shizuku_revoke_btn_manager"
+        android:textColor="@color/nav_item_selected"
+        android:textSize="13sp" />
+
+</LinearLayout>

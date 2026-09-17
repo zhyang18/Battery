@@ -173,9 +173,14 @@
     <string name="shizuku_status_unauthorized">Shizuku: Unauthorized</string>
     <string name="shizuku_service_name">Shizuku Service</string>
     <string name="dialog_shizuku_revoke_title">Revoke Shizuku Authorization</string>
+    <string name="dialog_shizuku_revoke_desc">After revocation, the app will lose ADB-level privileged access, affecting the following features:</string>
+    <string name="dialog_shizuku_revoke_item_kernel">⚡ Kernel Registers: Stop reading true cycle count and physical capacity</string>
+    <string name="dialog_shizuku_revoke_item_dumpsys">📊 Batterystats Log: Stop reading deep high-precision battery ledger</string>
+    <string name="dialog_shizuku_revoke_item_mode">🔄 Power Mode: Power tracking mode will automatically fall back to Standard</string>
     <string name="dialog_shizuku_revoke_message">Are you sure you want to revoke Shizuku authorization?\n\nAfter revocation, the app will no longer be able to read deep Linux kernel fuel gauge registers and authoritative system power records, and power detection will fall back to Standard mode.</string>
     <string name="dialog_shizuku_revoke_btn_confirm">Revoke</string>
     <string name="dialog_shizuku_revoke_btn_open_manager">Open Shizuku</string>
+    <string name="dialog_shizuku_revoke_btn_manager">Manage in Shizuku App</string>
     <string name="toast_shizuku_revoke_success">Shizuku authorization revoked successfully</string>
     <string name="toast_shizuku_revoke_failed">Failed to revoke Shizuku auth: %s</string>
 
@@ -483,7 +488,7 @@
     <string name="settings_screen_off_interval_title">Screen-off Interval</string>
     <string name="settings_screen_off_interval_desc">Standby sampling policy when screen is locked</string>
     <string name="interval_never">No Sampling</string>
-    <string name="interval_smart_eco">Smart Eco (Recommended)</string>
+    <string name="interval_smart_eco">Smart Eco</string>
     <string name="interval_15s">15 seconds</string>
     <string name="interval_30s">30 seconds</string>
     <string name="interval_60s">60 seconds</string>

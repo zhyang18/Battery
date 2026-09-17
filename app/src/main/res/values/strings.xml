@@ -56,8 +56,8 @@
     <string name="power_sort_name">按名称排序</string>
     <string name="power_background_stats_label">后台统计</string>
     <string name="power_background_stats_desc">启用后将统计并展示各应用的后台平均功耗、后台运行时长、后台能量消耗及顶部卡片后台指标</string>
-    <string name="power_mode_shizuku">Shizuku 模式 (高精度推荐)</string>
-    <string name="power_mode_normal">标准模式 (UsageStats)</string>
+    <string name="power_mode_shizuku">Shizuku模式</string>
+    <string name="power_mode_normal">标准模式</string>
     <string name="power_mode_tip_shizuku">已启用 Shizuku 高精度模式</string>
     <string name="power_mode_tip_normal">已切换为普通标准模式</string>
     <string name="toast_keep_screen_on_enabled">已开启屏幕常亮</string>
@@ -173,9 +173,14 @@
     <string name="shizuku_status_unauthorized">Shizuku: 未授权</string>
     <string name="shizuku_service_name">Shizuku 提权服务</string>
     <string name="dialog_shizuku_revoke_title">解除 Shizuku 提权授权</string>
+    <string name="dialog_shizuku_revoke_desc">解除后本应用将撤销 ADB 级提权访问权限，以下功能将受到影响：</string>
+    <string name="dialog_shizuku_revoke_item_kernel">⚡ 内核电量计：停止读取芯片真实循环次数与物理容量</string>
+    <string name="dialog_shizuku_revoke_item_dumpsys">📊 权威功耗账本：停止读取 batterystats 毫米级精准耗电</string>
+    <string name="dialog_shizuku_revoke_item_mode">🔄 耗电检测模式：当前耗电统计将自动回退为标准模式</string>
     <string name="dialog_shizuku_revoke_message">确定要解除 Shizuku 提权授权吗？\n\n解除授权后，本应用将无法穿透读取底层 Linux 内核电量计寄存器与系统权威功耗账本，耗电检测将自动回退为标准模式。</string>
     <string name="dialog_shizuku_revoke_btn_confirm">解除授权</string>
     <string name="dialog_shizuku_revoke_btn_open_manager">打开 Shizuku</string>
+    <string name="dialog_shizuku_revoke_btn_manager">前往 Shizuku 管理应用</string>
     <string name="toast_shizuku_revoke_success">已成功解除 Shizuku 提权授权</string>
     <string name="toast_shizuku_revoke_failed">解除 Shizuku 授权失败: %s</string>
 
@@ -484,7 +489,7 @@
     <string name="settings_screen_off_interval_title">息屏采样间隔</string>
     <string name="settings_screen_off_interval_desc">锁屏休眠时的后台放电采样策略</string>
     <string name="interval_never">不采样</string>
-    <string name="interval_smart_eco">智能省电 (推荐)</string>
+    <string name="interval_smart_eco">智能省电</string>
     <string name="interval_15s">15 秒</string>
     <string name="interval_30s">30 秒</string>
     <string name="interval_60s">60 秒</string>
@@ -511,7 +516,7 @@
     <string name="dialog_lock_recents_tip_daemon">进阶方案：若已授权 Shizuku 或具备 Root，可直接开启顶部的「特权守护进程」，获内核级最高防杀与秒级自愈。</string>
     <string name="dialog_lock_recents_btn_settings">前往应用设置</string>
     <string name="dialog_lock_recents_content">由于部分手机系统（如澎湃/MIUI、ColorOS、OriginOS、鸿蒙等）在清理多任务卡片时会执行强制停止，导致系统广播全部被屏蔽，建议开启以下设置以保证插拔电源能被 100% 检测到：\n\n1. 【多任务锁定】：呼出最近任务列表，下拉或长按本应用卡片，点击“锁定”小锁图标；\n\n2. 【自启动权限】：在手机设置 -> 应用管理 -> 本应用 -> 自启动中，开启“允许自启动”；\n\n3. 【后台无限制】：在应用耗电管理中，选择“无限制”或“允许完全后台行为”；\n\n4. 【常驻通知栏】：开启本页上方的“常驻通知栏监控”，利用前台服务机制抵御系统杀进程。</string>
-    <string name="toast_battery_optimization_granted">已加入电池优化白名单</string>
+    <string name="toast_battery_optimization_granted">已加入</string>
     <string name="toast_battery_optimization_request">请在弹窗中选择“允许”加白</string>
 
     <!-- 特权独立守护进程 (方案二：终极防杀) -->

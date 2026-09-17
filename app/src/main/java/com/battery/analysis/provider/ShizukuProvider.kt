@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
+import com.battery.analysis.manager.ShizukuManager
 import com.battery.analysis.model.BatteryInfo
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
@@ -21,6 +22,9 @@ class ShizukuProvider : BatteryDataProvider {
      * @return 获取到的电池信息对象
      */
     override fun getBatteryInfo(context: Context): BatteryInfo {
+        if (ShizukuManager.isUserDisabled(context)) {
+            return BatteryInfo(source = "Shizuku (已解除授权)")
+        }
         if (!Shizuku.pingBinder()) {
             return BatteryInfo(source = "Shizuku (未激活)")
         }

@@ -13,6 +13,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.battery.analysis.databinding.ActivityMainBinding
+import com.battery.analysis.manager.ShizukuManager
 import com.battery.analysis.receiver.BatteryUnplugReceiver
 import com.battery.analysis.ui.MainPagerAdapter
 import com.battery.analysis.viewmodel.BatteryViewModel
@@ -276,6 +277,11 @@ class MainActivity : AppCompatActivity() {
      * 更新 Shizuku 的连接状态，并同步至 ViewModel。
      */
     fun updateShizukuStatusState() {
+        if (ShizukuManager.isUserDisabled(this)) {
+            val statusText = getString(R.string.shizuku_status_unauthorized)
+            viewModel.updateShizukuStatus(statusText, false)
+            return
+        }
         if (!Shizuku.pingBinder()) {
             val statusText = getString(R.string.shizuku_status_not_running)
             viewModel.updateShizukuStatus(statusText, false)
@@ -363,111 +369,25 @@ class MainActivity : AppCompatActivity() {
      * @return 成功唤起应用返回 true，未安装或唤起失败返回 false
      */
     fun openShizukuApp(): Boolean {
-        return try {
-            val intent = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
-            if (intent != null) {
-                startActivity(intent)
-                true
-            } else {
-                Toast.makeText(this, getString(R.string.toast_shizuku_not_found), Toast.LENGTH_LONG).show()
-                false
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(this, getString(R.string.toast_shizuku_not_found), Toast.LENGTH_LONG).show()
-            false
-        }
+        return ShizukuManager.openShizukuApp(this)
     }
 
     /**
      * 主动发起 Shizuku 授权请求或引导用户启动 Shizuku App。
      */
     fun requestShizukuAuth() {
-        if (Shizuku.pingBinder()) {
-            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                try {
-                    Shizuku.requestPermission(SHIZUKU_REQUEST_CODE)
-                } catch (e: Exception) {
-                    Toast.makeText(this, getString(R.string.toast_request_auth_failed, e.message ?: ""), Toast.LENGTH_SHORT).show()
-                }
-            } else {
-                Toast.makeText(this, getString(R.string.toast_already_authorized), Toast.LENGTH_SHORT).show()
-                updateShizukuStatusState()
-            }
-        } else {
-            Toast.makeText(this, getString(R.string.toast_shizuku_not_connected), Toast.LENGTH_SHORT).show()
-            openShizukuApp()
-            updateShizukuStatusState()
-        }
+        ShizukuManager.requestAuthorization(this, SHIZUKU_REQUEST_CODE)
     }
 
     /**
      * 主动解除当前应用已获得的 Shizuku 提权授权。
-     * 通过 Shizuku 底层 privileged shell 命令调用系统的 pm revoke 撤销权限，
-     * 并反射清理客户端静态缓存与即时更新 ViewModel 状态。
+     * 委托 [ShizukuManager] 立即持久化停用偏好并切回标准模式，在后台尝试执行系统级撤销，
+     * 确保 UI 即时更新，绝不出现卡死或无响应。
      *
      * @param onComplete 解除完成后的回调函数，包含成功状态以及错误信息说明
      */
     fun revokeShizukuAuth(onComplete: ((Boolean, String?) -> Unit)? = null) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                    withContext(Dispatchers.Main) {
-                        updateShizukuStatusState()
-                        onComplete?.invoke(false, getString(R.string.toast_shizuku_not_connected))
-                    }
-                    return@launch
-                }
-
-                // 1. 通过 Shizuku 反射调用 newProcess 执行系统权限撤销命令
-                val newProcessMethod = try {
-                    Shizuku::class.java.getDeclaredMethod(
-                        "newProcess",
-                        Array<String>::class.java,
-                        Array<String>::class.java,
-                        String::class.java
-                    ).apply { isAccessible = true }
-                } catch (e: Exception) {
-                    null
-                }
-
-                val cmd = arrayOf("sh", "-c", "pm revoke $packageName moe.shizuku.manager.permission.API_V23")
-                val process = newProcessMethod?.invoke(null, cmd, null, null) as? Process
-                val exitCode = process?.waitFor()
-
-                // 2. 清理 Shizuku 客户端内部的 permissionGranted 静态缓存
-                try {
-                    val field = Shizuku::class.java.getDeclaredField("permissionGranted")
-                    field.isAccessible = true
-                    field.set(null, false)
-                } catch (_: Throwable) {
-                }
-
-                withContext(Dispatchers.Main) {
-                    // 3. 检查系统权限或 Binder 检查状态
-                    val isRevoked = Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED ||
-                            checkSelfPermission("moe.shizuku.manager.permission.API_V23") != PackageManager.PERMISSION_GRANTED
-
-                    updateShizukuStatusState()
-                    viewModel.refreshShizuku(this@MainActivity)
-
-                    if (isRevoked || exitCode == 0) {
-                        Toast.makeText(this@MainActivity, getString(R.string.toast_shizuku_revoke_success), Toast.LENGTH_SHORT).show()
-                        onComplete?.invoke(true, null)
-                    } else {
-                        val errorMsg = getString(R.string.toast_shizuku_revoke_failed, "ExitCode: $exitCode")
-                        Toast.makeText(this@MainActivity, errorMsg, Toast.LENGTH_SHORT).show()
-                        onComplete?.invoke(false, errorMsg)
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    val errorMsg = getString(R.string.toast_shizuku_revoke_failed, e.message ?: "")
-                    Toast.makeText(this@MainActivity, errorMsg, Toast.LENGTH_SHORT).show()
-                    onComplete?.invoke(false, errorMsg)
-                }
-            }
-        }
+        ShizukuManager.revokeAuthorization(this, lifecycleScope, onComplete)
     }
 
     /**

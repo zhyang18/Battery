@@ -361,13 +361,7 @@ class SettingsFragment : Fragment() {
         }
 
         dialog.show()
-
-        dialog.window?.let { window ->
-            window.setBackgroundDrawableResource(android.R.color.transparent)
-            val width = (resources.displayMetrics.widthPixels * 0.92).toInt()
-            window.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-            window.setGravity(android.view.Gravity.CENTER)
-        }
+        applyDialogWindowStyle(dialog)
     }
 
     /**
@@ -485,27 +479,52 @@ class SettingsFragment : Fragment() {
 
     /**
      * 弹窗提示用户确认是否解除已授权的 Shizuku 提权。
-     * 包含详细的影响说明，并提供直接解除、前往 Shizuku 管理器应用以及取消操作。
+     * 采用统一高颜值卡片化美化布局，详细展示解除提权对内核电量计与 dumpsys 耗电账本的影响，
+     * 并提供确认解除、前往 Shizuku 官方应用管理以及取消操作。
      */
     private fun showRevokeShizukuDialog() {
         val ctx = context ?: return
         val mainActivity = activity as? MainActivity ?: return
 
-        AlertDialog.Builder(ctx)
-            .setTitle(R.string.dialog_shizuku_revoke_title)
-            .setMessage(R.string.dialog_shizuku_revoke_message)
-            .setPositiveButton(R.string.dialog_shizuku_revoke_btn_confirm) { dialog, _ ->
-                dialog.dismiss()
-                mainActivity.revokeShizukuAuth()
-            }
-            .setNeutralButton(R.string.dialog_shizuku_revoke_btn_open_manager) { dialog, _ ->
-                dialog.dismiss()
-                mainActivity.openShizukuApp()
-            }
-            .setNegativeButton(R.string.cancel) { dialog, _ ->
-                dialog.dismiss()
-            }
-            .show()
+        val dialogView = layoutInflater.inflate(R.layout.dialog_shizuku_revoke_confirm, null)
+        val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_revoke_cancel)
+        val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_revoke_confirm)
+        val btnOpenManager = dialogView.findViewById<TextView>(R.id.btn_dialog_revoke_open_manager)
+
+        val dialog = AlertDialog.Builder(ctx)
+            .setView(dialogView)
+            .create()
+
+        btnCancel.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        btnConfirm.setOnClickListener {
+            dialog.dismiss()
+            mainActivity.revokeShizukuAuth()
+        }
+
+        btnOpenManager.setOnClickListener {
+            dialog.dismiss()
+            mainActivity.openShizukuApp()
+        }
+
+        dialog.show()
+        applyDialogWindowStyle(dialog)
+    }
+
+    /**
+     * 为现代化美化弹窗统一应用 Window 样式，包括透明系统背景、92% 屏宽与居中布局。
+     *
+     * @param dialog 待配置样式的 [AlertDialog] 实例
+     */
+    private fun applyDialogWindowStyle(dialog: AlertDialog) {
+        dialog.window?.let { window ->
+            window.setBackgroundDrawableResource(android.R.color.transparent)
+            val width = (resources.displayMetrics.widthPixels * 0.92).toInt()
+            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT)
+            window.setGravity(android.view.Gravity.CENTER)
+        }
     }
 
     /**
@@ -619,13 +638,7 @@ class SettingsFragment : Fragment() {
         }
 
         dialog.show()
-
-        dialog.window?.let { window ->
-            window.setBackgroundDrawableResource(android.R.color.transparent)
-            val width = (resources.displayMetrics.widthPixels * 0.92).toInt()
-            window.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-            window.setGravity(android.view.Gravity.CENTER)
-        }
+        applyDialogWindowStyle(dialog)
     }
 
     /**
@@ -868,12 +881,7 @@ class SettingsFragment : Fragment() {
         }
 
         dialog.show()
-        dialog.window?.let { window ->
-            window.setBackgroundDrawableResource(android.R.color.transparent)
-            val width = (resources.displayMetrics.widthPixels * 0.92).toInt()
-            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT)
-            window.setGravity(android.view.Gravity.CENTER)
-        }
+        applyDialogWindowStyle(dialog)
     }
 
     /**
@@ -1133,12 +1141,7 @@ class SettingsFragment : Fragment() {
         }
 
         dialog.show()
-        dialog.window?.let { window ->
-            window.setBackgroundDrawableResource(android.R.color.transparent)
-            val width = (resources.displayMetrics.widthPixels * 0.92).toInt()
-            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT)
-            window.setGravity(android.view.Gravity.CENTER)
-        }
+        applyDialogWindowStyle(dialog)
     }
 
 

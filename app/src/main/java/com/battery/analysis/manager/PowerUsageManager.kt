@@ -878,16 +878,12 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 检查当前应用是否已被授予 Shizuku 权限。
+     * 检查当前应用是否已被授予 Shizuku 权限（且未被用户主动停用）。
      *
      * @return 若已授权返回 true，否则返回 false
      */
     fun isShizukuAuthorized(): Boolean {
-        return try {
-            Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        } catch (_: Exception) {
-            false
-        }
+        return ShizukuManager.isAuthorized(context)
     }
 
     /**

@@ -95,6 +95,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     private val dp6 = dpToPx(6f)
     private val dp8 = dpToPx(8f)
     private val dp10 = dpToPx(10f)
+    private val dp11 = dpToPx(11f)
     private val dp12 = dpToPx(12f)
     private val dp14 = dpToPx(14f)
     private val dp15 = dpToPx(15f)
@@ -113,10 +114,10 @@ class BatteryTimelineView @JvmOverloads constructor(
     private val sp9_5 = spToPx(9.5f)
     private val sp10_5 = spToPx(10.5f)
 
-    // 画笔体系
+    // 画笔体系（趋势折线改小一号为 dp1）
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = dp1_5
+        strokeWidth = dp1
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
@@ -341,8 +342,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         val maxRow = cachedSlotItems.maxOfOrNull { it.rowIndex } ?: -1
         val maxRowsCount = maxRow + 1
 
-        // 仅当图标纵向叠加层数极多超出基础高度范围时，才动态扩充高度
-        val iconStackHeight = (maxRowsCount * (dp15 + dp1)).toInt()
+        // 仅当图标纵向叠加层数极多超出基础高度范围时，才动态扩充高度（纵向上下间距为 0）
+        val iconStackHeight = (maxRowsCount * dp11).toInt()
         val requiredHeight = dpToPx(80f).toInt() + iconStackHeight
         val desiredHeight = maxOf(defaultBaseH, requiredHeight)
 
@@ -358,7 +359,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 重新计算 App 图标的时间槽平铺与多行纵向堆叠排布（上下间距 1dp）。
+     * 重新计算 App 图标的时间槽平铺与多行纵向堆叠排布（小图标尺寸紧凑为 11dp，纵向上下间距为 0）。
      */
     private fun recalculateLayout() {
         val previousMaxRow = cachedSlotItems.maxOfOrNull { it.rowIndex } ?: -1
@@ -377,7 +378,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         val timeTickTop = h - dp18
         val screenBarBottom = timeTickTop - dp2
         val screenBarTop = screenBarBottom - dp3_5
-        val baseBottomY = screenBarTop - dp3
+        val baseBottomY = screenBarTop - dp2
 
         val laidOut = TimelineLayoutCalculator.calculateSlotItems(
             events = timelineState.appEvents,
@@ -385,9 +386,9 @@ class BatteryTimelineView @JvmOverloads constructor(
             visibleEndTs = visibleEnd,
             canvasWidth = contentWidth,
             baseBottomY = baseBottomY,
-            slotSizePx = dp15,
-            slotGapPx = dp2_5,
-            rowGapPx = dp1,
+            slotSizePx = dp11,
+            slotGapPx = dp2,
+            rowGapPx = 0f,
             maxRows = Int.MAX_VALUE,
             leftMarginPx = contentLeft
         )
@@ -443,9 +444,9 @@ class BatteryTimelineView @JvmOverloads constructor(
         val screenBarBottom = timeTickTop - dp2
         val screenBarTop = screenBarBottom - dp3_5
 
-        // 曲线区域底部预留 10dp 安全间距（mainChartHeight 间距 6dp + bottomPadding 4dp），避免底部空白区过大
+        // 曲线区域顶部紧凑排布，平时不触摸时不占用多余空间；触摸 View 直接悬浮在顶部
         val mainChartHeight = screenBarTop - dp6
-        val topPadding = dp36
+        val topPadding = dp6
         val bottomPadding = dp4
         val availableH = max(1f, mainChartHeight - topPadding - bottomPadding)
 
@@ -552,7 +553,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         for (tick in ticks) {
             val x = contentLeft + tick.xRatio * contentWidth
             // 垂直虚线网格
-            canvas.drawLine(x, dp36, x, mainHeight, gridPaint)
+            canvas.drawLine(x, dp6, x, mainHeight, gridPaint)
             // 刻度小短线
             canvas.drawLine(x, tickTop, x, tickTop + dp3, gridPaint)
             // 时间文本以对应时间点 x 为中心严格居中对齐绘制，并在屏幕边缘做安全防截断
@@ -569,8 +570,8 @@ class BatteryTimelineView @JvmOverloads constructor(
      * @param canvas 绘制画布 [Canvas]
      */
     private fun drawAppEventsLayer(canvas: Canvas) {
-        val cornerRadius = dp3
-        val iconRenderSize = dp15.toInt().coerceAtLeast(1)
+        val cornerRadius = dp1_5
+        val iconRenderSize = dp11.toInt().coerceAtLeast(1)
 
         for (item in cachedSlotItems) {
             val event = item.event
@@ -632,7 +633,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
-        val strokeColor = Color.parseColor("#90CAF9")
+        val strokeColor = Color.parseColor("#B390CAF9")
 
         linePaint.color = strokeColor
         curvePath.reset()
@@ -742,7 +743,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
-        val color = Color.parseColor("#4CAF50")
+        val color = Color.parseColor("#B34CAF50")
         linePaint.color = color
         metricDotPaint.color = color
         metricLabelPaint.color = color
@@ -820,7 +821,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
-        val color = Color.parseColor("#FF7043")
+        val color = Color.parseColor("#B3FF7043")
         linePaint.color = color
         metricDotPaint.color = color
         metricLabelPaint.color = color
@@ -899,7 +900,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
-        val color = Color.parseColor("#FFCA28")
+        val color = Color.parseColor("#B3FFCA28")
         linePaint.color = color
         metricDotPaint.color = color
         metricLabelPaint.color = color
@@ -1055,7 +1056,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制长按垂直游标线并将探查到的时间、电量、功耗、温度、电压与前台应用信息分两行换行固定绘制在图表顶部（无遮挡弹框）。
+     * 绘制长按垂直游标线并将探查到的时间、电量、功耗、温度、电压与前台应用信息直接以半透明悬浮卡片显示在图表顶部内部（不触摸时不占空间）。
      *
      * @param canvas 绘图画布 [Canvas]
      * @param contentLeft 图表左边界 X 坐标
@@ -1075,10 +1076,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         visibleEnd: Long
     ) {
         val clampedX = cursorX.coerceIn(contentLeft, contentRight)
-        // 1. 垂直虚线游标
-        canvas.drawLine(clampedX, dp32, clampedX, mainHeight + dp6, cursorPaint)
 
-        // 2. 查询当前游标时刻对应的数据
+        // 1. 查询当前游标时刻对应的数据
         val curTs = TimelineScaleCalculator.xToTime(clampedX, visibleStart, visibleEnd, contentWidth, contentLeft)
         val curSample = timelineState.batterySamples.minByOrNull { abs(it.timestamp - curTs) }
         val curApp = timelineState.appEvents.find { it.startTime <= curTs && it.endTime >= curTs }
@@ -1094,7 +1093,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         val tempStr = curSample?.let { String.format(Locale.getDefault(), "温度: %.1f℃", it.temperatureC) } ?: ""
         val appStr = curApp?.let { "应用: ${it.appName}" } ?: ""
 
-        // 3. 将信息分两行换行排布：第 1 行为时间、电量、功耗；第 2 行为温度、电压、前台应用
+        // 2. 将信息分两行换行排布：第 1 行为时间、电量、功耗；第 2 行为温度、电压、前台应用
         val line1Items = listOfNotNull(
             timeStr.takeIf { it.isNotEmpty() },
             levelStr.takeIf { it.isNotEmpty() },
@@ -1108,18 +1107,21 @@ class BatteryTimelineView @JvmOverloads constructor(
         val line1Text = line1Items.joinToString("   ")
         val line2Text = line2Items.joinToString("   ")
 
-        // 4. 固定在图表顶部绘制两行背景胶囊与文本
-        val headerTop = dp2
-        val headerBottom = dp32
+        // 3. 触摸显示的 view 直接显示到图表内部的顶部（悬浮浮层覆盖，不触摸时不占空间）
+        val headerTop = dp3
+        val headerBottom = headerTop + dp28
         tooltipRect.set(contentLeft, headerTop, contentRight, headerBottom)
         canvas.drawRoundRect(tooltipRect, dp4, dp4, tooltipBgPaint)
 
-        val line1Y = headerTop + sp9_5 * 1.15f + dp2
-        val line2Y = line1Y + sp9_5 * 1.35f
+        val line1Y = headerTop + sp9_5 * 1.05f + dp2
+        val line2Y = line1Y + sp9_5 * 1.25f
         canvas.drawText(line1Text, contentLeft + dp8, line1Y, tooltipTextPaint)
         if (line2Text.isNotEmpty()) {
             canvas.drawText(line2Text, contentLeft + dp8, line2Y, tooltipTextPaint)
         }
+
+        // 4. 垂直虚线游标从顶部悬浮卡片下方引出延伸至图表底部
+        canvas.drawLine(clampedX, headerBottom, clampedX, mainHeight + dp6, cursorPaint)
     }
 
     /**

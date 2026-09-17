@@ -46,7 +46,7 @@ object TimelineLayoutCalculator {
      * @param baseBottomY 最底行（Row 0）徽章的下边缘 Y 坐标
      * @param slotSizePx 每个 App 徽章方块的尺寸（宽高相等，像素）
      * @param slotGapPx 相邻时间槽之间的水平间距（像素）
-     * @param rowGapPx 上下行之间的垂直间距（像素）
+     * @param rowGapPx 上下行之间的垂直间距（像素，默认为 0f 无缝堆叠）
      * @param maxRows 允许向上堆叠的最大行数（默认不作限制）
      * @param leftMarginPx 左侧起始偏移像素（默认 0f）
      * @return 经过分槽和多行堆叠排布后的徽章渲染单元列表 [List<LaidOutAppSlotItem>]
@@ -59,7 +59,7 @@ object TimelineLayoutCalculator {
         baseBottomY: Float,
         slotSizePx: Float,
         slotGapPx: Float = 3f,
-        rowGapPx: Float = 1f,
+        rowGapPx: Float = 0f,
         maxRows: Int = Int.MAX_VALUE,
         leftMarginPx: Float = 0f
     ): List<LaidOutAppSlotItem> {

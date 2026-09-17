@@ -527,6 +527,7 @@ class BatteryMonitorService : Service() {
 
     /**
      * 计算并格式化当前瞬时电池监控信息文本摘要（格式：功率 | 电压 | 温度）。
+     * 遵循规范：充电状态下功率显示为正数（净放电为负数），放电耗电状态下功率显示为负数。
      *
      * @return 紧凑单行电池监控文本摘要
      */
@@ -539,16 +540,27 @@ class BatteryMonitorService : Service() {
             if (chargingPoint != null) {
                 chargingPoint.powerWatts
             } else {
-                getDischargePowerWatts()?.let { -it } ?: 0f
+                val chgSample = SysfsBatterySampler.sampleHardwareCharging(
+                    context = this,
+                    fallbackVoltageVolts = cachedVoltageVolts,
+                    fallbackTempCelsius = cachedTemperature
+                )
+                chgSample?.powerWatts ?: 0f
             }
         } else {
             cachedDischargePowerWatts ?: getDischargePowerWatts()
         }
 
         val powerStr = if (powerWatts != null && abs(powerWatts) > 0.05f) {
-            if (powerWatts > 0f) {
-                String.format(Locale.getDefault(), "%.1fW", powerWatts)
+            if (isCharging) {
+                // 充电状态：正常充电为正数（如 18.0W），净放电时带负号（如 -2.1W）
+                if (powerWatts > 0f) {
+                    String.format(Locale.getDefault(), "%.1fW", powerWatts)
+                } else {
+                    String.format(Locale.getDefault(), "-%.1fW", abs(powerWatts))
+                }
             } else {
+                // 放电耗电状态：显示为负数（如 -2.5W）
                 String.format(Locale.getDefault(), "-%.1fW", abs(powerWatts))
             }
         } else if (isCharging) {

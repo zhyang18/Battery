@@ -79,13 +79,13 @@ class PowerUsageChartView @JvmOverloads constructor(
     private val iconBgRect = RectF()
     private val screenBarPath = Path()
 
-    // 绘制画笔
+    // 绘制画笔（折线改小一号为 dp1_5，颜色半透明）
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = dp2_2
+        strokeWidth = dp1_5
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
-        color = Color.parseColor("#1E88E5")
+        color = Color.parseColor("#B31E88E5")
     }
 
     // 图标方块胶囊背景画笔（深色微圆角底衬，使方块堆叠整齐美观）
@@ -476,8 +476,8 @@ class PowerUsageChartView @JvmOverloads constructor(
         paddingLeft: Float,
         paddingRight: Float
     ) {
-        val iconSize = dp16
-        val iconMargin = dp1
+        val iconSize = dp12
+        val iconMargin = 0f
 
         // 图标自底向上垂直堆叠的起始基准线（紧贴绿/红状态指示条上方）
         val baseBottomY = gridBottomY + dp2
@@ -524,7 +524,7 @@ class PowerUsageChartView @JvmOverloads constructor(
                     )
                     canvas.drawBitmap(bmp, null, iconDstRect, null)
 
-                    // 上下堆叠间距严格设定为 1dp
+                    // 上下堆叠间距设定为 0dp（无缝紧密堆叠）
                     stackBottomY -= (iconSize + iconMargin)
                     hasDrawnAny = true
                 }

@@ -184,6 +184,12 @@ class PowerUsageManager private constructor(private val context: Context) {
     private var unsavedDischargeSamplesCount = 0
 
     /**
+     * 上一次放电瞬时采样点持久化落盘的时间戳（毫秒）。
+     */
+    @Volatile
+    private var lastDischargeSaveTimeMs = 0L
+
+    /**
      * 游戏应用包名内存缓存，避免高频重复调用 PackageManager 进行 IPC Binder 查询。
      */
     private val gameAppCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
@@ -248,9 +254,11 @@ class PowerUsageManager private constructor(private val context: Context) {
         // 同步记录时序温度点
         recordDischargeTempSample(timestamp, temperature)
 
-        // 极致低功耗设计：日常采样纯内存追加，当积累达到 100 个点时才在后台异步持久化一次
+        // 极致低功耗设计：日常采样纯内存追加，当积累达到 600 个点或超过 10 分钟且有新数据时才在后台异步持久化一次，
+        // 彻底杜绝每百点频繁全量序列化造成的 CPU 占用与 GC 抖动。关键生命周期节点（息屏、插拔、退出）由外部主动 flush
         unsavedDischargeSamplesCount++
-        if (unsavedDischargeSamplesCount >= 100) {
+        val now = System.currentTimeMillis()
+        if (unsavedDischargeSamplesCount >= 600 || (now - lastDischargeSaveTimeMs >= 600_000L && unsavedDischargeSamplesCount >= 60)) {
             unsavedDischargeSamplesCount = 0
             saveDischargeSamplesToPrefsAsync()
         }
@@ -325,31 +333,42 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 将当前放电周期的秒级瞬时采样点序列持久化保存至专属私有文件，避免膨胀主 SharedPreferences。
+     * 采用轻量流式 [StringBuilder] 纯文本格式化输出，彻底消除高频创建数万个 [org.json.JSONObject]
+     * 与哈希表节点带来的巨量堆内存分配与垃圾回收（GC）暂停开销。
      */
     @Synchronized
     private fun saveDischargeSamplesToPrefs() {
         try {
-            val jsonArray = org.json.JSONArray()
-            // 复制列表副本进行持久化，避免锁持有过长
+            lastDischargeSaveTimeMs = System.currentTimeMillis()
             val snapshot = ArrayList(dischargeRealtimeSamples)
-            for (p in snapshot) {
-                val obj = org.json.JSONObject().apply {
-                    put("ts", p.timestamp)
-                    put("elapsed", p.elapsedHours.toDouble())
-                    put("lvl", p.batteryLevel)
-                    put("volt", p.voltageVolts.toDouble())
-                    put("temp", p.temperature.toDouble())
-                    put("pwr", p.powerWatts.toDouble())
-                    put("screenOn", p.isScreenOn)
-                    if (!p.packageName.isNullOrEmpty()) {
-                        put("pkg", p.packageName)
-                    }
-                }
-                jsonArray.put(obj)
+            if (snapshot.isEmpty()) {
+                val targetFile = java.io.File(context.filesDir, "discharge_samples.json")
+                if (targetFile.exists()) targetFile.delete()
+                return
             }
+
+            val sb = java.lang.StringBuilder(snapshot.size * 90)
+            sb.append('[')
+            for (i in snapshot.indices) {
+                val p = snapshot[i]
+                if (i > 0) sb.append(',')
+                sb.append("{\"ts\":").append(p.timestamp)
+                    .append(",\"elapsed\":").append(p.elapsedHours)
+                    .append(",\"lvl\":").append(p.batteryLevel)
+                    .append(",\"volt\":").append(p.voltageVolts)
+                    .append(",\"temp\":").append(p.temperature)
+                    .append(",\"pwr\":").append(p.powerWatts)
+                    .append(",\"screenOn\":").append(p.isScreenOn)
+                if (!p.packageName.isNullOrEmpty()) {
+                    sb.append(",\"pkg\":\"").append(p.packageName.replace("\\", "\\\\").replace("\"", "\\\"")).append("\"")
+                }
+                sb.append('}')
+            }
+            sb.append(']')
+
             val targetFile = java.io.File(context.filesDir, "discharge_samples.json")
             val tempFile = java.io.File(context.filesDir, "discharge_samples.json.tmp")
-            tempFile.writeText(jsonArray.toString(), Charsets.UTF_8)
+            tempFile.writeText(sb.toString(), Charsets.UTF_8)
             if (tempFile.exists()) {
                 if (targetFile.exists()) targetFile.delete()
                 tempFile.renameTo(targetFile)

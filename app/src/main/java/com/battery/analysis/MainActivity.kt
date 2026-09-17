@@ -8,11 +8,17 @@ import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
 import com.battery.analysis.databinding.ActivityMainBinding
 import com.battery.analysis.receiver.BatteryUnplugReceiver
 import com.battery.analysis.ui.MainPagerAdapter
 import com.battery.analysis.viewmodel.BatteryViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 
 /**
@@ -93,6 +99,7 @@ class MainActivity : AppCompatActivity() {
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        setupEdgeToEdgeInsets()
 
         prefs = getSharedPreferences("battery_app_settings", Context.MODE_PRIVATE)
 
@@ -294,6 +301,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 配置全面屏边到边（Edge-to-Edge）沉浸式窗口边距自适应分发。
+     * 针对 Android 15+ (API 35/36) 强制开启的 Edge-to-Edge 机制，动态监听状态栏、手势导航栏及异形刘海切口高度，
+     * 为顶部 ViewPager2 分发状态栏安全内边距，为底部导航栏容器分发手势条安全内边距，杜绝内容重叠。
+     */
+    private fun setupEdgeToEdgeInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, insets ->
+            val statusBarInsets = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+            val navBarInsets = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            val displayCutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
+
+            val topInset = maxOf(statusBarInsets.top, displayCutout.top)
+            val leftInset = maxOf(statusBarInsets.left, displayCutout.left, navBarInsets.left)
+            val rightInset = maxOf(statusBarInsets.right, displayCutout.right, navBarInsets.right)
+            val bottomInset = maxOf(navBarInsets.bottom, displayCutout.bottom)
+
+            binding.mainViewPager.setPadding(leftInset, topInset, rightInset, 0)
+            binding.layoutBottomNavContainer.setPadding(leftInset, 0, rightInset, bottomInset)
+
+            insets
+        }
+    }
+
+    /**
      * 界面变为可见时的生命周期回调。
      */
     override fun onStart() {
@@ -328,6 +358,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 启动 Shizuku 管理器应用，供用户查看或管理已授权应用列表。
+     *
+     * @return 成功唤起应用返回 true，未安装或唤起失败返回 false
+     */
+    fun openShizukuApp(): Boolean {
+        return try {
+            val intent = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+            if (intent != null) {
+                startActivity(intent)
+                true
+            } else {
+                Toast.makeText(this, getString(R.string.toast_shizuku_not_found), Toast.LENGTH_LONG).show()
+                false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, getString(R.string.toast_shizuku_not_found), Toast.LENGTH_LONG).show()
+            false
+        }
+    }
+
+    /**
      * 主动发起 Shizuku 授权请求或引导用户启动 Shizuku App。
      */
     fun requestShizukuAuth() {
@@ -344,17 +396,77 @@ class MainActivity : AppCompatActivity() {
             }
         } else {
             Toast.makeText(this, getString(R.string.toast_shizuku_not_connected), Toast.LENGTH_SHORT).show()
+            openShizukuApp()
+            updateShizukuStatusState()
+        }
+    }
+
+    /**
+     * 主动解除当前应用已获得的 Shizuku 提权授权。
+     * 通过 Shizuku 底层 privileged shell 命令调用系统的 pm revoke 撤销权限，
+     * 并反射清理客户端静态缓存与即时更新 ViewModel 状态。
+     *
+     * @param onComplete 解除完成后的回调函数，包含成功状态以及错误信息说明
+     */
+    fun revokeShizukuAuth(onComplete: ((Boolean, String?) -> Unit)? = null) {
+        lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val intent = packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
-                if (intent != null) {
-                    startActivity(intent)
-                } else {
-                    Toast.makeText(this, getString(R.string.toast_shizuku_not_found), Toast.LENGTH_LONG).show()
+                if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                    withContext(Dispatchers.Main) {
+                        updateShizukuStatusState()
+                        onComplete?.invoke(false, getString(R.string.toast_shizuku_not_connected))
+                    }
+                    return@launch
+                }
+
+                // 1. 通过 Shizuku 反射调用 newProcess 执行系统权限撤销命令
+                val newProcessMethod = try {
+                    Shizuku::class.java.getDeclaredMethod(
+                        "newProcess",
+                        Array<String>::class.java,
+                        Array<String>::class.java,
+                        String::class.java
+                    ).apply { isAccessible = true }
+                } catch (e: Exception) {
+                    null
+                }
+
+                val cmd = arrayOf("sh", "-c", "pm revoke $packageName moe.shizuku.manager.permission.API_V23")
+                val process = newProcessMethod?.invoke(null, cmd, null, null) as? Process
+                val exitCode = process?.waitFor()
+
+                // 2. 清理 Shizuku 客户端内部的 permissionGranted 静态缓存
+                try {
+                    val field = Shizuku::class.java.getDeclaredField("permissionGranted")
+                    field.isAccessible = true
+                    field.set(null, false)
+                } catch (_: Throwable) {
+                }
+
+                withContext(Dispatchers.Main) {
+                    // 3. 检查系统权限或 Binder 检查状态
+                    val isRevoked = Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED ||
+                            checkSelfPermission("moe.shizuku.manager.permission.API_V23") != PackageManager.PERMISSION_GRANTED
+
+                    updateShizukuStatusState()
+                    viewModel.refreshShizuku(this@MainActivity)
+
+                    if (isRevoked || exitCode == 0) {
+                        Toast.makeText(this@MainActivity, getString(R.string.toast_shizuku_revoke_success), Toast.LENGTH_SHORT).show()
+                        onComplete?.invoke(true, null)
+                    } else {
+                        val errorMsg = getString(R.string.toast_shizuku_revoke_failed, "ExitCode: $exitCode")
+                        Toast.makeText(this@MainActivity, errorMsg, Toast.LENGTH_SHORT).show()
+                        onComplete?.invoke(false, errorMsg)
+                    }
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    val errorMsg = getString(R.string.toast_shizuku_revoke_failed, e.message ?: "")
+                    Toast.makeText(this@MainActivity, errorMsg, Toast.LENGTH_SHORT).show()
+                    onComplete?.invoke(false, errorMsg)
+                }
             }
-            updateShizukuStatusState()
         }
     }
 

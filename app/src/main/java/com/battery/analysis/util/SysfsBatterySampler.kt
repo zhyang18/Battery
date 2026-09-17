@@ -416,10 +416,10 @@ object SysfsBatterySampler {
 
         try {
             val method = getNewProcessMethod() ?: return false
-            // 拼接单次探查脚本，一次性找出首个可读的电流与电压节点
-            val curTestCmd = CURRENT_PATHS.joinToString(" ") { "[ -r $it ] && echo CUR:$it && break" }
-            val voltTestCmd = VOLTAGE_PATHS.joinToString(" ") { "[ -r $it ] && echo VOLT:$it && break" }
-            val fullCmd = "$curTestCmd; $voltTestCmd"
+            // 拼接单次探查脚本，通过标准 shell 循环一次性找出首个可读的电流与电压节点（合法 break 退出）
+            val curPathsStr = CURRENT_PATHS.joinToString(" ")
+            val voltPathsStr = VOLTAGE_PATHS.joinToString(" ")
+            val fullCmd = "for f in $curPathsStr; do [ -r \"\$f\" ] && echo \"CUR:\$f\" && break; done; for f in $voltPathsStr; do [ -r \"\$f\" ] && echo \"VOLT:\$f\" && break; done"
             val proc = method.invoke(
                 null,
                 arrayOf("sh", "-c", fullCmd),

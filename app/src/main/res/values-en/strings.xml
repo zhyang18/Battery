@@ -166,11 +166,18 @@
     <string name="shizuku_action_authorize">Authorize</string>
     <string name="shizuku_action_authorized">Authorized</string>
     <string name="shizuku_action_unauthorized">Unauthorized</string>
+    <string name="shizuku_action_revoke">Revoke Auth</string>
     <string name="shizuku_status_checking">Checking...</string>
     <string name="shizuku_status_not_running">Shizuku: Not Running</string>
     <string name="shizuku_status_authorized">Shizuku: Authorized</string>
     <string name="shizuku_status_unauthorized">Shizuku: Unauthorized</string>
     <string name="shizuku_service_name">Shizuku Service</string>
+    <string name="dialog_shizuku_revoke_title">Revoke Shizuku Authorization</string>
+    <string name="dialog_shizuku_revoke_message">Are you sure you want to revoke Shizuku authorization?\n\nAfter revocation, the app will no longer be able to read deep Linux kernel fuel gauge registers and authoritative system power records, and power detection will fall back to Standard mode.</string>
+    <string name="dialog_shizuku_revoke_btn_confirm">Revoke</string>
+    <string name="dialog_shizuku_revoke_btn_open_manager">Open Shizuku</string>
+    <string name="toast_shizuku_revoke_success">Shizuku authorization revoked successfully</string>
+    <string name="toast_shizuku_revoke_failed">Failed to revoke Shizuku auth: %s</string>
 
     <!-- Bugreport Parser -->
     <string name="bugreport_card_title">Bugreport Rapid Analysis</string>

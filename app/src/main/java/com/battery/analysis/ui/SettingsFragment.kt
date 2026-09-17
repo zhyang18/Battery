@@ -163,7 +163,10 @@ class SettingsFragment : Fragment() {
         val chargingPrefs = requireContext().getSharedPreferences("charging_stats_prefs", Context.MODE_PRIVATE)
         binding.switchChargingKeepScreenOn.isChecked = chargingPrefs.getBoolean("pref_charging_keep_screen_on", false)
 
-        binding.switchKeepAliveService.isChecked = com.battery.analysis.service.BatteryMonitorService.isServiceEnabled(requireContext())
+        val isNotificationDisplayEnabled = com.battery.analysis.service.BatteryMonitorService.isNotificationDisplayEnabled(requireContext())
+        if (binding.switchKeepAliveService.isChecked != isNotificationDisplayEnabled) {
+            binding.switchKeepAliveService.isChecked = isNotificationDisplayEnabled
+        }
         binding.switchBootAutoStart.isChecked = com.battery.analysis.service.BatteryMonitorService.isBootAutoStartEnabled(requireContext())
         updateKeepAliveIntervalDisplay()
         updateBatteryOptimizationDisplay()
@@ -444,13 +447,18 @@ class SettingsFragment : Fragment() {
     }
 
     /**
-     * 初始化 Shizuku 权限与状态观察与授权交互。
+     * 初始化 Shizuku 权限与状态观察，并支持申请授权与解除已授权交互。
      */
     private fun setupShizukuSettings() {
         val mainActivity = activity as? MainActivity
 
         binding.layoutShizukuAuth.setOnClickListener {
-            mainActivity?.requestShizukuAuth()
+            val isGranted = viewModel.isShizukuGranted.value
+            if (isGranted) {
+                showRevokeShizukuDialog()
+            } else {
+                mainActivity?.requestShizukuAuth()
+            }
         }
 
         viewLifecycleOwner.lifecycleScope.launch {
@@ -461,18 +469,43 @@ class SettingsFragment : Fragment() {
                     if (isGranted) {
                         binding.tvShizukuStatus.text = getString(R.string.shizuku_status_authorized)
                         binding.tvShizukuStatus.setTextColor(Color.parseColor("#10B981"))
-                        binding.tvShizukuAction.text = getString(R.string.shizuku_action_authorized)
-                        binding.tvShizukuAction.setTextColor(Color.parseColor("#10B981"))
+                        binding.tvShizukuAction.text = getString(R.string.shizuku_action_revoke)
+                        binding.tvShizukuAction.setTextColor(Color.parseColor("#EF4444"))
                     } else {
                         val isNotRunning = status.contains("未运行", ignoreCase = true) || status.contains("Not Running", ignoreCase = true)
                         binding.tvShizukuStatus.text = if (isNotRunning) getString(R.string.shizuku_status_not_running) else getString(R.string.shizuku_status_unauthorized)
                         binding.tvShizukuStatus.setTextColor(if (isNotRunning) Color.parseColor("#EF4444") else Color.parseColor("#F59E0B"))
-                        binding.tvShizukuAction.text = getString(R.string.shizuku_action_authorize)
+                        binding.tvShizukuAction.text = if (isNotRunning) getString(R.string.power_shizuku_btn_open) else getString(R.string.shizuku_action_authorize)
                         binding.tvShizukuAction.setTextColor(ContextCompat.getColor(requireContext(), R.color.nav_item_selected))
                     }
                 }
             }
         }
+    }
+
+    /**
+     * 弹窗提示用户确认是否解除已授权的 Shizuku 提权。
+     * 包含详细的影响说明，并提供直接解除、前往 Shizuku 管理器应用以及取消操作。
+     */
+    private fun showRevokeShizukuDialog() {
+        val ctx = context ?: return
+        val mainActivity = activity as? MainActivity ?: return
+
+        AlertDialog.Builder(ctx)
+            .setTitle(R.string.dialog_shizuku_revoke_title)
+            .setMessage(R.string.dialog_shizuku_revoke_message)
+            .setPositiveButton(R.string.dialog_shizuku_revoke_btn_confirm) { dialog, _ ->
+                dialog.dismiss()
+                mainActivity.revokeShizukuAuth()
+            }
+            .setNeutralButton(R.string.dialog_shizuku_revoke_btn_open_manager) { dialog, _ ->
+                dialog.dismiss()
+                mainActivity.openShizukuApp()
+            }
+            .setNegativeButton(R.string.cancel) { dialog, _ ->
+                dialog.dismiss()
+            }
+            .show()
     }
 
     /**
@@ -645,8 +678,10 @@ class SettingsFragment : Fragment() {
         updateKeepAliveIntervalDisplay()
 
         binding.switchKeepAliveService.setOnCheckedChangeListener { _, isChecked ->
-            com.battery.analysis.service.BatteryMonitorService.setNotificationDisplayEnabled(requireContext(), isChecked)
-            com.battery.analysis.service.BatteryMonitorService.updateNotificationVisibility(requireContext())
+            if (com.battery.analysis.service.BatteryMonitorService.isNotificationDisplayEnabled(requireContext()) != isChecked) {
+                com.battery.analysis.service.BatteryMonitorService.setNotificationDisplayEnabled(requireContext(), isChecked)
+                com.battery.analysis.service.BatteryMonitorService.updateNotificationVisibility(requireContext())
+            }
         }
 
         setupScreenOnIntervalPicker()

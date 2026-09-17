@@ -259,6 +259,9 @@ class BatteryMonitorService : Service() {
         super.onDestroy()
         isServiceActive = false
         try {
+            PowerUsageManager.getInstance(applicationContext).flushDischargeSamplesToDisk()
+        } catch (_: Exception) {}
+        try {
             unregisterReceiver(powerReceiver)
         } catch (_: Exception) {}
         monitorSamplingJob?.cancel()
@@ -606,9 +609,9 @@ class BatteryMonitorService : Service() {
 
     /**
      * 刷新并推送最新的电池状态通知至系统通知栏。
-     * 若用户关闭了常驻通知栏显示，则彻底从系统通知栏移除前台通知（stopForeground + cancel），通知栏完全关闭不显示，绝不在通知栏打扰用户；
-     * 若处于息屏期间且非强制刷新，自动跳过以消除 SystemUI 绘制开销与 CPU 唤醒；
-     * 若当前通知文本内容未变且距离上次刷新不足 30 秒，自动跳过以减少系统跨进程 IPC 与 UI 唤醒开销。
+     * 刷新节奏严格遵从用户在设置页配置的亮屏监控刷新频率，不添加任何私自的人为限频或死区截断；
+     * 若用户关闭了常驻通知栏显示，则彻底从系统通知栏移除前台通知（stopForeground + cancel），通知栏完全关闭不显示；
+     * 若处于息屏期间且非强制刷新，自动跳过以消除熄屏时的无效绘制与 CPU 唤醒。
      *
      * @param force 是否强制触发系统通知栏刷新（如点亮屏幕瞬间或切换开关配置后）
      */
@@ -640,8 +643,8 @@ class BatteryMonitorService : Service() {
 
             val singleLineInfo = computeSingleLineInfo()
             val now = SystemClock.elapsedRealtime()
-            // 若非强制刷新且内容完全未变，且距离上次刷新不足 30 秒，则跳过更新，避免频繁唤醒 SystemUI 和 IPC 通信
-            if (!force && singleLineInfo == lastNotifiedContent && (now - lastNotifiedTime) < 30_000L) {
+            // 若非强制刷新且内容完全未变，则跳过重复构建与推送，消除多余跨进程 IPC
+            if (!force && singleLineInfo == lastNotifiedContent) {
                 return
             }
             lastNotifiedContent = singleLineInfo
@@ -772,7 +775,7 @@ class BatteryMonitorService : Service() {
          * 获取配置的亮屏状态下常驻监控刷新间隔（毫秒）。
          *
          * @param context 应用程序上下文
-         * @return 刷新间隔毫秒数（默认 3000L，-1L 表示不采样）
+         * @return 刷新间隔毫秒数（默认 1000L，-1L 表示不采样）
          */
         fun getScreenOnIntervalMs(context: Context): Long {
             val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)

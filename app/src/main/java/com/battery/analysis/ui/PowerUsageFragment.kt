@@ -232,7 +232,7 @@ class PowerUsageFragment : Fragment() {
         val isCharging = chargingManager.isCharging()
         applySmartChargingMode(isCharging = isCharging, showToast = false)
 
-        // 注册断开电源自动生成耗电快照回调监听，非快照模式下自动更新当前数据
+        // 注册断开电源与连接电源广播事件回调监听，非快照模式下自动更新当前数据
         com.battery.analysis.receiver.BatteryUnplugReceiver.onPowerUsageRecordedListener = { _ ->
             if (!isViewingSnapshot && isResumed) {
                 loadData()
@@ -241,6 +241,11 @@ class PowerUsageFragment : Fragment() {
         com.battery.analysis.receiver.BatteryUnplugReceiver.onPowerConnectedListener = {
             if (isResumed) {
                 onDevicePowerConnected()
+            }
+        }
+        com.battery.analysis.receiver.BatteryUnplugReceiver.onPowerDisconnectedListener = {
+            if (isResumed) {
+                onDevicePowerDisconnected()
             }
         }
     }
@@ -520,6 +525,7 @@ class PowerUsageFragment : Fragment() {
         }
         com.battery.analysis.receiver.BatteryUnplugReceiver.onPowerUsageRecordedListener = null
         com.battery.analysis.receiver.BatteryUnplugReceiver.onPowerConnectedListener = null
+        com.battery.analysis.receiver.BatteryUnplugReceiver.onPowerDisconnectedListener = null
         try {
             Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
             Shizuku.removeBinderReceivedListener(shizukuBinderReceivedListener)

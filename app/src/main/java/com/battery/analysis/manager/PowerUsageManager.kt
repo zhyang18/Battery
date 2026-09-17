@@ -470,6 +470,9 @@ class PowerUsageManager private constructor(private val context: Context) {
             .putLong(PREF_KEY_LAST_UNPLUG_TIME, now)
             .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, unplugLevel.coerceIn(0, 100))
             .putLong("pref_last_archived_unplug_time", 0L)
+            .putLong("last_reset_time", now)
+            .remove(PREF_KEY_UNPLUG_USAGE_SNAPSHOT)
+            .remove(PREF_KEY_UNPLUG_BG_SERVICE_SNAPSHOT)
         if (counterUah > 0) {
             editor.putInt(PREF_KEY_LAST_UNPLUG_CHARGE_COUNTER, counterUah)
         }
@@ -485,6 +488,23 @@ class PowerUsageManager private constructor(private val context: Context) {
         if (isShizukuAuthorized()) {
             shizukuParser.resetBatteryStats()
         }
+    }
+
+    /**
+     * 当外部电源连接（插入充电器）时触发，结算并归档上一个放电周期的耗电账本快照，并清空当前放电周期统计数据。
+     *
+     * @param timestamp 触发连接电源时的时间戳毫秒值，默认取当前系统时间
+     * @return 成功归档的耗电快照记录 [PowerUsageRecord]，若未满足归档条件则返回 null
+     */
+    @Synchronized
+    fun onPowerConnected(timestamp: Long = System.currentTimeMillis()): PowerUsageRecord? {
+        // 1. 归档上一个放电周期的耗电账本快照
+        val record = archiveDischargeSession(timestamp)
+
+        // 2. 彻底重置放电采样点与屏幕/应用使用基准快照，确保充电期间不污染旧放电账本
+        resetPowerStats()
+
+        return record
     }
 
     /**
@@ -563,13 +583,16 @@ class PowerUsageManager private constructor(private val context: Context) {
                             } else {
                                 now - stats.dischargeDurationMs
                             }
-                            prefs.edit()
-                                .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, stats.detectedUnplugLevel)
-                                .putLong(PREF_KEY_LAST_UNPLUG_TIME, detectedTime)
-                                .apply()
-                            saveUnplugUsageSnapshot()
-                            syncedViaShizuku = true
-                            reconciled = true
+                            val shouldAdopt = (lastUnplugTime <= 0L) || (detectedTime > lastUnplugTime && detectedTime <= now)
+                            if (shouldAdopt) {
+                                prefs.edit()
+                                    .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, stats.detectedUnplugLevel)
+                                    .putLong(PREF_KEY_LAST_UNPLUG_TIME, detectedTime)
+                                    .apply()
+                                saveUnplugUsageSnapshot()
+                                syncedViaShizuku = true
+                                reconciled = true
+                            }
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
@@ -598,13 +621,16 @@ class PowerUsageManager private constructor(private val context: Context) {
                             } else {
                                 now - stats.dischargeDurationMs
                             }
-                            prefs.edit()
-                                .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, stats.detectedUnplugLevel)
-                                .putLong(PREF_KEY_LAST_UNPLUG_TIME, detectedTime)
-                                .apply()
-                            saveUnplugUsageSnapshot()
-                            syncedViaShizuku = true
-                            reconciled = true
+                            val shouldAdopt = (lastUnplugTime <= 0L) || (detectedTime > lastUnplugTime && detectedTime <= now)
+                            if (shouldAdopt) {
+                                prefs.edit()
+                                    .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, stats.detectedUnplugLevel)
+                                    .putLong(PREF_KEY_LAST_UNPLUG_TIME, detectedTime)
+                                    .apply()
+                                saveUnplugUsageSnapshot()
+                                syncedViaShizuku = true
+                                reconciled = true
+                            }
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
@@ -1024,17 +1050,22 @@ class PowerUsageManager private constructor(private val context: Context) {
                 var effectiveUnplugLevel = unplugLevel
                 var effectiveUnplugTime = unplugTime
                 if (stats.detectedUnplugLevel != null && stats.detectedUnplugLevel >= batterySnapshot.levelPercent) {
-                    effectiveUnplugLevel = stats.detectedUnplugLevel
-                    if (stats.detectedUnplugTs != null && stats.detectedUnplugTs > 0L) {
-                        effectiveUnplugTime = stats.detectedUnplugTs
+                    val detectedTs = stats.detectedUnplugTs
+                    val shouldAdoptDetected = (effectiveUnplugTime <= 0L) ||
+                            (detectedTs != null && detectedTs > effectiveUnplugTime && detectedTs <= now)
+                    if (shouldAdoptDetected) {
+                        effectiveUnplugLevel = stats.detectedUnplugLevel
+                        if (detectedTs != null && detectedTs > 0L) {
+                            effectiveUnplugTime = detectedTs
+                        }
+                        prefs.edit()
+                            .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, effectiveUnplugLevel)
+                            .putLong(PREF_KEY_LAST_UNPLUG_TIME, effectiveUnplugTime)
+                            .apply()
                     }
-                    prefs.edit()
-                        .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, effectiveUnplugLevel)
-                        .putLong(PREF_KEY_LAST_UNPLUG_TIME, effectiveUnplugTime)
-                        .apply()
                 }
 
-                val durationMs = if (effectiveUnplugTime in 1..now && (now - effectiveUnplugTime) in 1000L..(48 * 3600_000L)) {
+                val durationMs = if (effectiveUnplugTime in 1..now && (now - effectiveUnplugTime) <= (48 * 3600_000L)) {
                     (now - effectiveUnplugTime).coerceAtLeast(1000L)
                 } else {
                     stats.dischargeDurationMs.coerceAtLeast(1000L)
@@ -2609,6 +2640,9 @@ class PowerUsageManager private constructor(private val context: Context) {
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val counterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: 0
         val editor = prefs.edit()
+            .putLong(PREF_KEY_LAST_UNPLUG_TIME, now)
+            .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, curStatus.levelPercent.coerceIn(0, 100))
+            .putLong("pref_last_archived_unplug_time", 0L)
             .putLong("last_reset_time", now)
             .remove(PREF_KEY_UNPLUG_USAGE_SNAPSHOT)
             .remove(PREF_KEY_UNPLUG_BG_SERVICE_SNAPSHOT)
@@ -2616,7 +2650,13 @@ class PowerUsageManager private constructor(private val context: Context) {
             editor.putInt(PREF_KEY_LAST_UNPLUG_CHARGE_COUNTER, counterUah)
         }
         editor.apply()
+
+        lastArchivedUnplugTime = 0L
         saveUnplugUsageSnapshot()
+
+        if (isShizukuAuthorized()) {
+            shizukuParser.resetBatteryStats()
+        }
     }
 
     /**

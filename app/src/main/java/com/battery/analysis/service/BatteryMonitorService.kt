@@ -278,8 +278,8 @@ class BatteryMonitorService : Service() {
                 val currentStatus = powerManager.getCurrentBatteryStatus()
                 val (_, type) = chargingManager.checkCurrentSystemChargingState()
 
-                // 1. 归档上一个放电周期的耗电账本（调用底层原子防重归档方法）
-                powerManager.archiveDischargeSession()
+                // 1. 归档上一个放电周期的耗电账本并清空当前放电周期统计数据
+                powerManager.onPowerConnected()
 
                 // 2. 开启全新充电会话
                 chargingManager.onPowerConnected(currentStatus.levelPercent, type)

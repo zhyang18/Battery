@@ -95,8 +95,8 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
             val powerManager = PowerUsageManager.getInstance(context)
             val chargingManager = ChargingStatsManager.getInstance(context)
 
-            // 1. 归档上一个放电周期的耗电账本快照（若放电持续时间大于 30 秒且未归档过）
-            val powerRecord = powerManager.archiveDischargeSession(timestamp)
+            // 1. 归档上一个放电周期的耗电账本快照，并彻底重置当前放电统计数据
+            val powerRecord = powerManager.onPowerConnected(timestamp)
 
             // 2. 开启全新充电会话
             val currentBattery = powerManager.getCurrentBatteryStatus()
@@ -172,6 +172,11 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
             powerManager.onPowerDisconnected(currentBattery.levelPercent)
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+
+        // 3. 通知前台界面（若当前处于前台活跃状态），确保在后台 IO 写入后刷新 UI
+        mainHandler.post {
+            onPowerDisconnectedListener?.invoke()
         }
     }
 
@@ -270,5 +275,10 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
          * 监听连接电源的回调监听器（供前台界面实时感知并更新）。
          */
         var onPowerConnectedListener: (() -> Unit)? = null
+
+        /**
+         * 监听断开电源完成全新放电周期重置的回调监听器（供前台 PowerUsageFragment 注册安全刷新界面）。
+         */
+        var onPowerDisconnectedListener: (() -> Unit)? = null
     }
 }

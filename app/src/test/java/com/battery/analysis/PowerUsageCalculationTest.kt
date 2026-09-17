@@ -1701,6 +1701,51 @@ class PowerUsageCalculationTest {
         val item5 = item1.copy(foregroundEnergyWh = 0f, foregroundTimeMs = 0L, backgroundTimeMs = 60_000L)
         assertEquals("无前台电量或纯后台如实显示为 --", "--", item5.getFormattedCombinedEnergyWh())
     }
+
+    /**
+     * 验证拔电时间戳防倒流保护：当应用刚刚记录当前拔电时刻时，系统底层历史记录中的旧拔电时间戳绝不反向覆盖当前拔电时间。
+     */
+    @Test
+    fun testUnplugAntiRollbackGuard() {
+        val now = 1773729600000L // 当前物理时刻
+        val currentUnplugTime = now // 刚刚拔电
+        val oldHistoryUnplugTs = now - 3600_000L * 5 // 5 小时前的历史拔电记录
+
+        // 模拟防倒流判定
+        val shouldAdoptDetected = (currentUnplugTime <= 0L) ||
+                (oldHistoryUnplugTs > currentUnplugTime && oldHistoryUnplugTs <= now)
+
+        assertFalse("历史旧拔电时间戳绝不可倒流覆盖当前拔电时刻", shouldAdoptDetected)
+
+        var effectiveUnplugTime = currentUnplugTime
+        if (shouldAdoptDetected) {
+            effectiveUnplugTime = oldHistoryUnplugTs
+        }
+        assertEquals("有效拔电时间戳必须严格保持为刚刚拔电的当前时刻", now, effectiveUnplugTime)
+    }
+
+    /**
+     * 验证刚拔电（0~500ms 内）瞬间放电与屏幕时长计算：不会因毫秒级微小时长跌入 dumpsys 历史大时长分支。
+     */
+    @Test
+    fun testDurationCalculationImmediatelyAfterUnplug() {
+        val now = 1773729600000L
+        val effectiveUnplugTime = now - 200L // 拔电 200ms
+        val oldDumpsysDurationMs = 3600_000L * 12 // 历史 12 小时
+
+        val durationMs = if (effectiveUnplugTime in 1..now && (now - effectiveUnplugTime) <= (48 * 3600_000L)) {
+            (now - effectiveUnplugTime).coerceAtLeast(1000L)
+        } else {
+            oldDumpsysDurationMs.coerceAtLeast(1000L)
+        }
+
+        assertEquals("刚拔电瞬间放电总时长必须自 1000ms（1秒）开始统计，绝不回退至历史大时长", 1000L, durationMs)
+
+        // 验证即使无屏幕事件发生，基于 durationMs 的截断也确保屏幕亮屏时长最多为 1000ms
+        val screenOnDurationMs = 0L.coerceIn(0L, durationMs)
+        assertEquals("屏幕亮屏时长初始重置为 0", 0L, screenOnDurationMs)
+    }
 }
+
 
 

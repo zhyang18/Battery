@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Process
+import android.os.SystemClock
 import com.battery.analysis.db.HistoryDbHelper
 import com.battery.analysis.db.PowerUsageDbHelper
 import com.battery.analysis.model.AppPowerUsageItem
@@ -323,7 +324,7 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 将当前放电周期的秒级瞬时采样点序列持久化保存至 SharedPreferences。
+     * 将当前放电周期的秒级瞬时采样点序列持久化保存至专属私有文件，避免膨胀主 SharedPreferences。
      */
     @Synchronized
     private fun saveDischargeSamplesToPrefs() {
@@ -346,17 +347,41 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
                 jsonArray.put(obj)
             }
-            prefs.edit().putString(PREF_KEY_REALTIME_SAMPLES_JSON, jsonArray.toString()).apply()
+            val targetFile = java.io.File(context.filesDir, "discharge_samples.json")
+            val tempFile = java.io.File(context.filesDir, "discharge_samples.json.tmp")
+            tempFile.writeText(jsonArray.toString(), Charsets.UTF_8)
+            if (tempFile.exists()) {
+                if (targetFile.exists()) targetFile.delete()
+                tempFile.renameTo(targetFile)
+            }
+            // 若旧 SharedPreferences 中仍残留旧超大键值，予以清理瘦身
+            if (prefs.contains(PREF_KEY_REALTIME_SAMPLES_JSON)) {
+                prefs.edit().remove(PREF_KEY_REALTIME_SAMPLES_JSON).apply()
+            }
         } catch (_: Exception) {}
     }
 
     /**
-     * 从 SharedPreferences 恢复加载已保存的秒级瞬时放电采样点序列。
+     * 从专属私有文件（及兼容旧 SharedPreferences）恢复加载已保存的秒级瞬时放电采样点序列。
      */
     @Synchronized
     private fun loadDischargeSamplesFromPrefs() {
-        val jsonStr = prefs.getString(PREF_KEY_REALTIME_SAMPLES_JSON, null) ?: return
         try {
+            val targetFile = java.io.File(context.filesDir, "discharge_samples.json")
+            val jsonStr = if (targetFile.exists() && targetFile.canRead()) {
+                targetFile.readText(Charsets.UTF_8)
+            } else {
+                val legacyStr = prefs.getString(PREF_KEY_REALTIME_SAMPLES_JSON, null)
+                if (legacyStr != null) {
+                    // 平滑迁移至私有文件并清理旧 Preference
+                    try {
+                        targetFile.writeText(legacyStr, Charsets.UTF_8)
+                        prefs.edit().remove(PREF_KEY_REALTIME_SAMPLES_JSON).apply()
+                    } catch (_: Exception) {}
+                }
+                legacyStr
+            } ?: return
+
             val jsonArray = org.json.JSONArray(jsonStr)
             dischargeRealtimeSamples.clear()
             for (i in 0 until jsonArray.length()) {
@@ -912,6 +937,11 @@ class PowerUsageManager private constructor(private val context: Context) {
         )
     }
 
+    @Volatile
+    private var cachedEffectiveCapacity: Float? = null
+    @Volatile
+    private var lastCapacityCachedTime: Long = 0L
+
     /**
      * 获取设备当前最精准的基准电池容量（优先实际满充容量 FCC，其次设计容量）。
      *
@@ -920,34 +950,47 @@ class PowerUsageManager private constructor(private val context: Context) {
      * 2. 历史数据库中最新记录的出厂设计容量 [HistoryRecord.designCapacity]；
      * 3. 系统底层 PowerProfile 反射读取的电池额定容量；
      * 4. 若均无法获取则如实返回 0f（不伪造保底数据）。
+     * 内部具备 60 秒轻量内存缓存与单例复用，消除高频统计计算中的重复数据库 I/O 开销与连接泄漏。
      *
      * @return 设备基准电池容量（单位：mAh）
      */
     fun getEffectiveDeviceCapacityMah(): Float {
+        val now = SystemClock.elapsedRealtime()
+        val cached = cachedEffectiveCapacity
+        if (cached != null && (now - lastCapacityCachedTime) < 60_000L) {
+            return cached
+        }
+
+        var capacity = 0f
         // 1. 优先从历史快照记录中获取经过算法融合或 Shizuku/Bugreport 提取到的真实满充容量与设计容量
         try {
-            val dbHelper = HistoryDbHelper(context)
+            val dbHelper = HistoryDbHelper.getInstance(context)
             val latestRecord = dbHelper.getLatestRecord()
             val fcc = latestRecord?.fullChargeCapacity
             if (fcc != null && fcc > 0f) {
-                return fcc
-            }
-            val design = latestRecord?.designCapacity
-            if (design != null && design > 0f) {
-                return design
+                capacity = fcc
+            } else {
+                val design = latestRecord?.designCapacity
+                if (design != null && design > 0f) {
+                    capacity = design
+                }
             }
         } catch (e: Exception) {
             // 数据库读取容错
         }
 
         // 2. 尝试从系统 PowerProfile 反射获取出厂设计容量
-        val powerProfileCap = NormalApiProvider.getDesignCapacity(context)
-        if (powerProfileCap != null && powerProfileCap > 0f) {
-            return powerProfileCap
+        if (capacity <= 0f) {
+            val powerProfileCap = NormalApiProvider.getDesignCapacity(context)
+            if (powerProfileCap != null && powerProfileCap > 0f) {
+                capacity = powerProfileCap
+            }
         }
 
         // 3. 若均无法获取则如实返回 0f（不伪造保底数据）
-        return 0f
+        cachedEffectiveCapacity = capacity
+        lastCapacityCachedTime = now
+        return capacity
     }
 
     /**
@@ -2908,6 +2951,13 @@ class PowerUsageManager private constructor(private val context: Context) {
         val pm = context.packageManager
         val appEvents = mutableListOf<AppTimelineEvent>()
 
+        // 预先批量一次性查询时间轴全区间内的双通道网络流量，过滤掉无流量 UID 的高频跨进程 IPC
+        val totalNetMap = if (appIntervals.isNotEmpty() && startTs < endTs) {
+            networkStatsHelper.getAllUidsNetworkBytes(startTs, endTs)
+        } else {
+            emptyMap()
+        }
+
         for (interval in appIntervals) {
             val pkg = interval.packageName
             val item = appMap[pkg]
@@ -2942,7 +2992,12 @@ class PowerUsageManager private constructor(private val context: Context) {
                 item?.cpuTimeMs ?: 0L
             }
 
-            val appNetBytes = networkStatsHelper.getUidNetworkBytes(uid, interval.startTs, interval.endTs)
+            // 若全周期内该 UID 零流量，则子时间片直接为 0L，跳过跨进程查询
+            val appNetBytes = if (totalNetMap.isNotEmpty() && (totalNetMap[uid] ?: 0L) <= 0L) {
+                0L
+            } else {
+                networkStatsHelper.getUidNetworkBytes(uid, interval.startTs, interval.endTs)
+            }
             val appWakeMs = item?.wakelockTimeMs ?: 0L
             val appGpsMs = item?.gpsTimeMs ?: 0L
 

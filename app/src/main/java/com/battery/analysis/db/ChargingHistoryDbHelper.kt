@@ -266,16 +266,10 @@ class ChargingHistoryDbHelper private constructor(context: Context) :
 
     /**
      * 查询所有已持久化的充电历史记录，按时间倒序（最新在前）排列。
-     * 查询前自动执行轻量去重自愈检测，保障列表呈现纯净无冗余。
      *
      * @return 充电历史记录列表
      */
     fun getAllRecords(): List<ChargingHistoryRecord> {
-        // 轻量去重自愈
-        try {
-            deduplicateRecords()
-        } catch (_: Exception) {}
-
         val list = mutableListOf<ChargingHistoryRecord>()
         val db = readableDatabase
         val cursor = db.query(

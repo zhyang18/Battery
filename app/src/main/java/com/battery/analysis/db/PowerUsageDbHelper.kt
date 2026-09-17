@@ -236,16 +236,10 @@ class PowerUsageDbHelper private constructor(context: Context) :
 
     /**
      * 查询所有已持久化的耗电历史记录，按时间从近到远倒序排列。
-     * 查询前自动执行轻量去重自愈检测，保障列表呈现纯净无冗余。
      *
      * @return 耗电历史快照记录列表
      */
     fun getAllRecords(): List<PowerUsageRecord> {
-        // 轻量去重自愈
-        try {
-            deduplicateRecords()
-        } catch (_: Exception) {}
-
         val list = mutableListOf<PowerUsageRecord>()
         val db = readableDatabase
         val cursor = db.query(

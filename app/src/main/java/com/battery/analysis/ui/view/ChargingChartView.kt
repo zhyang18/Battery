@@ -218,6 +218,38 @@ class ChargingChartView @JvmOverloads constructor(
     private val gridPath = Path()
     private val headerRect = RectF()
 
+    // 成员对象复用池，彻底消除 onDraw 中高频循环 new PointF 引发的 GC 内存抖动与功耗卡顿
+    private val powerPointPool = mutableListOf<PointF>()
+    private val levelPointPool = mutableListOf<PointF>()
+    private val tempPointPool = mutableListOf<PointF>()
+
+    // 绘制空态提示画笔复用
+    private val emptyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp11
+        color = Color.parseColor("#757575")
+        textAlign = Paint.Align.CENTER
+    }
+
+    // 亮灭屏指示条外轮廓 Path 复用
+    private val screenBarPath = Path()
+
+    /**
+     * 从预分配对象池中复用或扩容获取 PointF 坐标对象，避免高频创建对象。
+     *
+     * @param pool 目标对象池
+     * @param index 数据点下标索引
+     * @param x 横坐标数值
+     * @param y 纵坐标数值
+     * @return 赋予新坐标的 PointF 实例
+     */
+    private fun obtainPointF(pool: MutableList<PointF>, index: Int, x: Float, y: Float): PointF {
+        return if (index < pool.size) {
+            pool[index].apply { set(x, y) }
+        } else {
+            PointF(x, y).also { pool.add(it) }
+        }
+    }
+
     // 手势交互状态
     private var isTouching = false
     private var touchX = 0f
@@ -309,11 +341,6 @@ class ChargingChartView @JvmOverloads constructor(
 
         if (dataPoints.isEmpty()) {
             val emptyText = "正在连接并采集充电数据..."
-            val emptyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                textSize = sp11
-                color = Color.parseColor("#757575")
-                textAlign = Paint.Align.CENTER
-            }
             canvas.drawText(emptyText, w / 2f, chartTop + chartHeight / 2f, emptyPaint)
             return
         }
@@ -358,7 +385,7 @@ class ChargingChartView @JvmOverloads constructor(
         }
         val zeroPowerY = chartTop + chartHeight * (1f - zeroPowerNorm)
 
-        // 4. 计算各曲线在屏幕上的防重叠纵向分层映射坐标点
+        // 4. 计算各曲线在屏幕上的防重叠纵向分层映射坐标点（完全复用对象池，零堆内存分配）
         powerPoints.clear()
         levelPoints.clear()
         tempPoints.clear()
@@ -374,12 +401,12 @@ class ChargingChartView @JvmOverloads constructor(
             // 电量曲线：映射至顶部区间 (0.05 ~ 0.45)，防止与中间温度和底部功率重叠
             val levelNorm = (p.batteryLevel / 100f).coerceIn(0f, 1f) * 0.40f + 0.55f
             val levelY = chartTop + chartHeight * (1f - levelNorm)
-            levelPoints.add(PointF(x, levelY))
+            levelPoints.add(obtainPointF(levelPointPool, i, x, levelY))
 
             // 温度曲线：映射至中层区间 (0.35 ~ 0.65)
             val tempNorm = (((p.temperature - 20f) / (maxT - 20f)).coerceIn(0f, 1f) * 0.30f + 0.35f)
             val tempY = chartTop + chartHeight * (1f - tempNorm)
-            tempPoints.add(PointF(x, tempY))
+            tempPoints.add(obtainPointF(tempPointPool, i, x, tempY))
 
             // 功率曲线：充电(>=0W)向上延展至功率上限；放电(<0W)向下延展，耗电越大越往下走
             val powerNorm = if (p.powerWatts >= 0f) {
@@ -390,7 +417,7 @@ class ChargingChartView @JvmOverloads constructor(
                 zeroPowerNorm - ratio * (zeroPowerNorm - powerBandBottom)
             }
             val powerY = chartTop + chartHeight * (1f - powerNorm)
-            powerPoints.add(PointF(x, powerY))
+            powerPoints.add(obtainPointF(powerPointPool, i, x, powerY))
         }
 
         // 当存在放电数据时，绘制 0W 辅助基准虚线与标识
@@ -488,20 +515,19 @@ class ChargingChartView @JvmOverloads constructor(
 
         val n = dataPoints.size
         // 1. 裁剪整个长条底线的外轮廓圆角矩形，保证两端圆润而内部各状态区间无缝连接
-        val barPath = Path().apply {
-            addRoundRect(
-                chartLeft,
-                barTop,
-                chartLeft + chartWidth,
-                barBottom,
-                cornerRadius,
-                cornerRadius,
-                Path.Direction.CW
-            )
-        }
+        screenBarPath.reset()
+        screenBarPath.addRoundRect(
+            chartLeft,
+            barTop,
+            chartLeft + chartWidth,
+            barBottom,
+            cornerRadius,
+            cornerRadius,
+            Path.Direction.CW
+        )
 
         canvas.save()
-        canvas.clipPath(barPath)
+        canvas.clipPath(screenBarPath)
 
         // 2. 将相邻相同状态的采样点合并为一个连续完整色块，彻底消除逐点画圆角带来的分段与黑缝隙
         var curStatus = dataPoints[0].isScreenOn

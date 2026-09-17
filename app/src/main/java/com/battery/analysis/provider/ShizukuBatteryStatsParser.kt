@@ -958,6 +958,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             emptyMap()
         }
 
+        // 批量一次性查询全量应用在本次放电周期内的双通道网络流量，避免逐个应用高频 IPC 查询
+        val allUidsNetMap = networkStatsHelper.getAllUidsNetworkBytes(startTime, endTime)
+
         // 1. 对 dumpsys 原本提取的应用进行前台时长、后台活跃时长与硬件开销的精准补全
         val existingKeys = existingMap.keys.toList()
         for (pkg in existingKeys) {
@@ -968,15 +971,15 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             var effectiveFg = old.foregroundTimeMs
             var effectiveBg = old.backgroundTimeMs
 
-            // 若 dumpsys 详情中没有携带前台活跃时间，从 UsageEvents 精准补齐
-            if (effectiveFg <= 0L) {
-                val realFg = preciseTimes[pkg] ?: 0L
-                if (realFg > 0L) {
-                    effectiveFg = realFg.coerceAtMost(dischargeMs)
-                }
+            // 优先依据系统级精确 UsageEvents 计算的前台活跃时长矫正
+            val preciseFg = preciseTimes[pkg]
+            if (preciseFg != null && preciseFg > 0L) {
+                effectiveFg = preciseFg.coerceAtMost(dischargeMs)
+            } else {
+                effectiveFg = effectiveFg.coerceAtMost(dischargeMs)
             }
 
-            val realCpuMs = if (hw != null && hw.getTotalCpuMs() > 0L) hw.getTotalCpuMs() else old.cpuTimeMs
+            val realCpuMs = hw?.getTotalCpuMs() ?: old.cpuTimeMs
             val baseBg = if (hw != null) {
                 val bgCpu = (hw.getTotalCpuMs() - effectiveFg).coerceAtLeast(0L)
                 // 后台活跃时间严格统计实际 CPU 算力与持锁唤醒时间，常驻服务挂载时长独立记录在 fgsDurationMs
@@ -1007,7 +1010,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
             var netBytes = if (hw != null && hw.networkBytes > 0L) hw.networkBytes else old.networkBytes
             if (netBytes <= 0L && uid > 0) {
-                netBytes = networkStatsHelper.getUidNetworkBytes(uid, startTime, endTime)
+                netBytes = allUidsNetMap[uid] ?: 0L
             }
 
             existingMap[pkg] = old.copy(
@@ -1047,23 +1050,23 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             val safeFgTime = fgTime.coerceAtMost(dischargeMs)
             if (safeFgTime >= 1000L && isUserInstalledApp(pkgName) && !existingMap.containsKey(pkgName)) {
                 val (appName, icon) = getAppMetadata(pkgName, pm)
-                    val uid = try { pm.getApplicationInfo(pkgName, 0).uid } catch (_: Exception) { -1 }
-                    val hw = if (uid > 0) hwStatsMap[uid] else null
+                val uid = try { pm.getApplicationInfo(pkgName, 0).uid } catch (_: Exception) { -1 }
+                val hw = if (uid > 0) hwStatsMap[uid] else null
 
-                    var netBytes = hw?.networkBytes ?: 0L
-                    if (netBytes <= 0L && uid > 0) {
-                        netBytes = networkStatsHelper.getUidNetworkBytes(uid, startTime, endTime)
-                    }
-                    val realCpu = hw?.getTotalCpuMs() ?: 0L
-                    val realWake = hw?.wakelockMs ?: 0L
-                    val realGps = hw?.gpsMs ?: 0L
-                    val bgTime = if (hw != null) {
-                        ((realCpu - safeFgTime).coerceAtLeast(0L) + realWake).coerceAtMost(dischargeMs)
-                    } else {
-                        0L
-                    }
+                var netBytes = hw?.networkBytes ?: 0L
+                if (netBytes <= 0L && uid > 0) {
+                    netBytes = allUidsNetMap[uid] ?: 0L
+                }
+                val realCpu = hw?.getTotalCpuMs() ?: 0L
+                val realWake = hw?.wakelockMs ?: 0L
+                val realGps = hw?.gpsMs ?: 0L
+                val bgTime = if (hw != null) {
+                    ((realCpu - safeFgTime).coerceAtLeast(0L) + realWake).coerceAtMost(dischargeMs)
+                } else {
+                    0L
+                }
 
-                    val fgEnergy = (baselineWatts * (safeFgTime / 3600000f)).coerceAtLeast(0f)
+                val fgEnergy = (baselineWatts * (safeFgTime / 3600000f)).coerceAtLeast(0f)
 
                     existingMap[pkgName] = AppPowerUsageItem(
                         packageName = pkgName,

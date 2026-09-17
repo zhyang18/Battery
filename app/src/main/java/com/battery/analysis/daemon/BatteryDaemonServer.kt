@@ -332,12 +332,39 @@ class BatteryDaemonServer {
         }
 
         /**
+         * 缓存上次检测到的宿主进程 PID，避免每 3 秒全盘扫描 /proc。
+         */
+        private var lastKnownPid: Int = -1
+
+        /**
          * 遍历 Linux /proc 文件系统检测目标应用包名是否当前正在运行。
+         *
+         * 优先复用上次已知 PID 进行快速探针检测，若失效再执行全量目录遍历，显著降低后台定时扫描的系统 I/O 和 CPU 开销。
          *
          * @param targetPackage 目标应用包名
          * @return 若应用进程正在运行返回 true，否则返回 false
          */
         private fun isPackageRunning(targetPackage: String): Boolean {
+            // 1. 优先使用缓存的 PID 进行快速探针检测
+            val cachedPid = lastKnownPid
+            if (cachedPid > 0) {
+                val cmdlineFile = File("/proc/$cachedPid/cmdline")
+                if (cmdlineFile.exists() && cmdlineFile.canRead()) {
+                    try {
+                        val cmd = cmdlineFile.readBytes()
+                        if (cmd.isNotEmpty()) {
+                            val cmdStr = String(cmd).replace("\u0000", " ").trim()
+                            if (cmdStr == targetPackage || cmdStr.startsWith("$targetPackage:")) {
+                                return true
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+                // 缓存的 PID 已失效
+                lastKnownPid = -1
+            }
+
+            // 2. 缓存失效时全量遍历 /proc 查找
             return try {
                 val procDir = File("/proc")
                 val files = procDir.listFiles() ?: return false
@@ -353,6 +380,10 @@ class BatteryDaemonServer {
                                 // cmdline 中参数以 null 字符 (\0) 分隔
                                 val cmdStr = String(cmd).replace("\u0000", " ").trim()
                                 if (cmdStr == targetPackage || cmdStr.startsWith("$targetPackage:")) {
+                                    val foundPid = name.toIntOrNull()
+                                    if (foundPid != null && foundPid > 0) {
+                                        lastKnownPid = foundPid
+                                    }
                                     return true
                                 }
                             }

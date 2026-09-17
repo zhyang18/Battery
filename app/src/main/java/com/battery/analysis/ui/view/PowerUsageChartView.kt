@@ -73,10 +73,11 @@ class PowerUsageChartView @JvmOverloads constructor(
     private val timeFormatterHourMin = SimpleDateFormat("HH:mm", Locale.getDefault())
     private val timeFormatterMonthDay = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
 
-    // 图标打点位图缓存
-    private val iconBitmapCache = mutableMapOf<Drawable, Bitmap>()
+    // 图标打点位图 LRU 缓存（上限 80 个，防止位图无节制占用内存）
+    private val iconBitmapCache = androidx.collection.LruCache<Drawable, Bitmap>(80)
     private val iconDstRect = RectF()
     private val iconBgRect = RectF()
+    private val screenBarPath = Path()
 
     // 绘制画笔
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -179,7 +180,7 @@ class PowerUsageChartView @JvmOverloads constructor(
         val targetSize = dp18.toInt().coerceAtLeast(32)
         for (pt in dataPoints) {
             for (icon in pt.activeAppIcons) {
-                if (!iconBitmapCache.containsKey(icon)) {
+                if (iconBitmapCache.get(icon) == null) {
                     val bmp = try {
                         if (icon is BitmapDrawable && icon.bitmap != null) {
                             Bitmap.createScaledBitmap(icon.bitmap, targetSize, targetSize, true)
@@ -190,7 +191,7 @@ class PowerUsageChartView @JvmOverloads constructor(
                         null
                     }
                     if (bmp != null) {
-                        iconBitmapCache[icon] = bmp
+                        iconBitmapCache.put(icon, bmp)
                     }
                 }
             }
@@ -321,20 +322,19 @@ class PowerUsageChartView @JvmOverloads constructor(
 
         val n = coords.size
         // 1. 裁剪整个长条底线的外轮廓圆角矩形，保证两端圆润而内部各状态区间无缝连接
-        val barPath = Path().apply {
-            addRoundRect(
-                chartLeft,
-                barTop,
-                chartLeft + chartWidth,
-                barBottom,
-                cornerRadius,
-                cornerRadius,
-                Path.Direction.CW
-            )
-        }
+        screenBarPath.reset()
+        screenBarPath.addRoundRect(
+            chartLeft,
+            barTop,
+            chartLeft + chartWidth,
+            barBottom,
+            cornerRadius,
+            cornerRadius,
+            Path.Direction.CW
+        )
 
         canvas.save()
-        canvas.clipPath(barPath)
+        canvas.clipPath(screenBarPath)
 
         // 2. 将相邻相同状态的采样点合并为一个连续完整色块，彻底消除逐点画圆角带来的分段与黑缝隙
         var curStatus = dataPoints[0].isScreenOn
@@ -501,7 +501,7 @@ class PowerUsageChartView @JvmOverloads constructor(
                 var hasDrawnAny = false
 
                 for (icon in pt.activeAppIcons) {
-                    val bmp = iconBitmapCache[icon]
+                    val bmp = iconBitmapCache.get(icon)
                     // 若应用图标位图无法获取或已被回收，直接跳过并不预留空层，彻底杜绝空白断层
                     if (bmp == null || bmp.isRecycled) continue
 

@@ -76,6 +76,14 @@ class BatteryMonitorService : Service() {
     @Volatile
     private var cachedSingleLineInfo: String = "⚡ 电池监控持续运行中"
 
+    // 内存缓存通知栏上一次推送的内容与时间戳，避免无变化时频繁唤醒 SystemUI 和进行 IPC 通信
+    @Volatile
+    private var lastNotifiedContent: String? = null
+    @Volatile
+    private var lastNotifiedTime: Long = 0L
+    @Volatile
+    private var isForegroundNotificationRemoved: Boolean = false
+
     /**
      * 内部动态广播接收器，用于在前台服务存活期间毫秒级捕获充放电广播、电池状态变动及屏幕亮灭事件。
      */
@@ -91,9 +99,11 @@ class BatteryMonitorService : Service() {
             val appContext = context?.applicationContext ?: applicationContext
             when (action) {
                 Intent.ACTION_POWER_CONNECTED -> {
+                    cachedIsCharging = true
                     handlePowerConnected(appContext)
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> {
+                    cachedIsCharging = false
                     handlePowerDisconnected(appContext)
                 }
                 Intent.ACTION_SCREEN_ON -> {
@@ -108,8 +118,7 @@ class BatteryMonitorService : Service() {
 
                     // 2. 检查息屏待机策略：若为智能省电模式（<=0L），彻底停止轮询协程，完全释放 CPU 休眠
                     val screenOffInterval = getScreenOffIntervalMs(appContext)
-                    val chargingManager = ChargingStatsManager.getInstance(appContext)
-                    if (!chargingManager.isCharging() && screenOffInterval <= 0L) {
+                    if (!cachedIsCharging && screenOffInterval <= 0L) {
                         monitorSamplingJob?.cancel()
                         monitorSamplingJob = null
                     }
@@ -120,16 +129,18 @@ class BatteryMonitorService : Service() {
                     val voltRaw = intent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1)
                     val tempRaw = intent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1)
                     val statusRaw = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+                    val pluggedRaw = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
                     if (level > 0) cachedLevelPercent = level
                     if (voltRaw > 0) cachedVoltageVolts = com.battery.analysis.util.BatteryUnitNormalizer.normalizeVoltageVolts(voltRaw.toLong())
                     if (tempRaw > 0) cachedTemperature = tempRaw / 10f
-                    cachedIsCharging = (statusRaw == BatteryManager.BATTERY_STATUS_CHARGING || statusRaw == BatteryManager.BATTERY_STATUS_FULL)
+                    cachedIsCharging = (statusRaw == BatteryManager.BATTERY_STATUS_CHARGING ||
+                            statusRaw == BatteryManager.BATTERY_STATUS_FULL ||
+                            pluggedRaw > 0)
 
                     // 极致省电：仅亮屏时刷新通知，息屏直接跳过
                     updateNotification(force = false)
 
-                    val chargingManager = ChargingStatsManager.getInstance(appContext)
-                    if (!chargingManager.isCharging()) {
+                    if (!cachedIsCharging) {
                         val powerManager = PowerUsageManager.getInstance(appContext)
                         val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
                         val isInteractive = pm?.isInteractive ?: true
@@ -169,6 +180,10 @@ class BatteryMonitorService : Service() {
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
 
+        // 初始初始化充电状态，后续完全由动态广播事件就地维护，避免后续轮询循环中重复跨进程注册 Receiver
+        val (initCharging, _) = ChargingStatsManager.getInstance(this).checkCurrentSystemChargingState()
+        cachedIsCharging = initCharging
+
         val initialNotification = buildNotification(CHANNEL_ID)
         startForeground(NOTIFICATION_ID, initialNotification)
         if (!isNotificationDisplayEnabled(this)) {
@@ -179,6 +194,7 @@ class BatteryMonitorService : Service() {
                 @Suppress("DEPRECATION")
                 stopForeground(true)
             }
+            isForegroundNotificationRemoved = true
         }
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_POWER_CONNECTED)
@@ -322,7 +338,7 @@ class BatteryMonitorService : Service() {
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
 
             while (isActive) {
-                val isCharging = chargingManager.isCharging()
+                val isCharging = cachedIsCharging
                 val isInteractive = pm?.isInteractive ?: true
                 val screenOnInterval = getScreenOnIntervalMs(applicationContext)
                 val screenOffInterval = getScreenOffIntervalMs(applicationContext)
@@ -510,25 +526,13 @@ class BatteryMonitorService : Service() {
     }
 
     /**
-     * 构建或刷新系统前台通知栏对象。
-     * 采用自定义 [RemoteViews] 紧凑单行布局，彻底去除系统默认模板的小标题与多余换行，
-     * 统一居中呈现单行实时监控数据：功率 | 电压 | 温度。
+     * 计算并格式化当前瞬时电池监控信息文本摘要（格式：功率 | 电压 | 温度）。
      *
-     * @param channelId 目标通知渠道 ID（默认为 [CHANNEL_ID]）
-     * @return 配置完毕的单行紧凑前台系统通知 [Notification]
+     * @return 紧凑单行电池监控文本摘要
      */
-    private fun buildNotification(channelId: String = CHANNEL_ID): Notification {
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
-        )
-
+    private fun computeSingleLineInfo(): String {
+        val isCharging = cachedIsCharging
         val chargingManager = ChargingStatsManager.getInstance(this)
-        val isCharging = chargingManager.isCharging()
 
         val powerWatts = if (isCharging) {
             val chargingPoint = chargingManager.getSamplePoints().lastOrNull()
@@ -557,6 +561,29 @@ class BatteryMonitorService : Service() {
         val tempStr = String.format(Locale.getDefault(), "%.1f℃", cachedTemperature)
         val singleLineInfo = "$powerStr | $voltStr | $tempStr"
         cachedSingleLineInfo = singleLineInfo
+        return singleLineInfo
+    }
+
+    /**
+     * 构建或刷新系统前台通知栏对象。
+     * 采用自定义 [RemoteViews] 紧凑单行布局，彻底去除系统默认模板的小标题与多余换行，
+     * 统一居中呈现单行实时监控数据：功率 | 电压 | 温度。
+     *
+     * @param channelId 目标通知渠道 ID（默认为 [CHANNEL_ID]）
+     * @param infoText 预先计算好的单行文本内容，若为 null 则实时计算
+     * @return 配置完毕的单行紧凑前台系统通知 [Notification]
+     */
+    private fun buildNotification(channelId: String = CHANNEL_ID, infoText: String? = null): Notification {
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+        )
+
+        val singleLineInfo = infoText ?: computeSingleLineInfo()
 
         val remoteViews = RemoteViews(packageName, R.layout.layout_notification_battery_single_line).apply {
             setTextViewText(R.id.notification_text, singleLineInfo)
@@ -579,7 +606,8 @@ class BatteryMonitorService : Service() {
     /**
      * 刷新并推送最新的电池状态通知至系统通知栏。
      * 若用户关闭了常驻通知栏显示，则彻底从系统通知栏移除前台通知（stopForeground + cancel），通知栏完全关闭不显示，绝不在通知栏打扰用户；
-     * 若处于息屏期间且非强制刷新，自动跳过以消除 SystemUI 绘制开销与 CPU 唤醒。
+     * 若处于息屏期间且非强制刷新，自动跳过以消除 SystemUI 绘制开销与 CPU 唤醒；
+     * 若当前通知文本内容未变且距离上次刷新不足 30 秒，自动跳过以减少系统跨进程 IPC 与 UI 唤醒开销。
      *
      * @param force 是否强制触发系统通知栏刷新（如点亮屏幕瞬间或切换开关配置后）
      */
@@ -587,23 +615,38 @@ class BatteryMonitorService : Service() {
         try {
             val isDisplayEnabled = isNotificationDisplayEnabled(this)
             if (!isDisplayEnabled) {
-                // 用户关闭了常驻通知栏显示：从系统通知栏彻底移除通知，彻底关闭通知栏显示，绝不在通知栏打扰用户
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                } else {
-                    @Suppress("DEPRECATION")
-                    stopForeground(true)
+                // 用户关闭了常驻通知栏显示：从系统通知栏彻底移除通知，若已移除则不重复调用 IPC
+                if (!isForegroundNotificationRemoved) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        stopForeground(true)
+                    }
+                    notificationManager.cancel(NOTIFICATION_ID)
+                    isForegroundNotificationRemoved = true
+                    lastNotifiedContent = null
                 }
-                notificationManager.cancel(NOTIFICATION_ID)
                 return
             }
+            isForegroundNotificationRemoved = false
 
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
             val isInteractive = pm?.isInteractive ?: true
             if (!isInteractive && !force) {
                 return
             }
-            val notification = buildNotification(CHANNEL_ID)
+
+            val singleLineInfo = computeSingleLineInfo()
+            val now = SystemClock.elapsedRealtime()
+            // 若非强制刷新且内容完全未变，且距离上次刷新不足 30 秒，则跳过更新，避免频繁唤醒 SystemUI 和 IPC 通信
+            if (!force && singleLineInfo == lastNotifiedContent && (now - lastNotifiedTime) < 30_000L) {
+                return
+            }
+            lastNotifiedContent = singleLineInfo
+            lastNotifiedTime = now
+
+            val notification = buildNotification(CHANNEL_ID, singleLineInfo)
             startForeground(NOTIFICATION_ID, notification)
             notificationManager.notify(NOTIFICATION_ID, notification)
         } catch (_: Exception) {}

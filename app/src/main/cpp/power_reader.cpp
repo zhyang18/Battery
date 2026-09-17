@@ -20,9 +20,10 @@ typedef struct {
     FILE *status_fp;
     FILE *temp_fp;
     int initialized;
+    int init_attempted;
 } FileCache;
 
-static FileCache g_cache = {NULL, NULL, NULL, NULL, NULL, 0};
+static FileCache g_cache = {NULL, NULL, NULL, NULL, NULL, 0, 0};
 
 /**
  * 候选路径列表，覆盖主流高通、联发科及各 OEM 厂商的电源节点命名。
@@ -120,13 +121,15 @@ static int read_int(FILE *fp) {
 
 /**
  * 初始化底层节点文件描述符缓存。
+ * 具备一次性探测保护：若此前已执行过初始化尝试，则直接返回上次结果，杜绝在 SELinux 限制环境下每次读取重复 fopen。
  *
  * @return 初始化结果，1 表示成功打开关键节点，0 表示打开失败
  */
 static int init_file_cache() {
-    if (g_cache.initialized) {
-        return 1;
+    if (g_cache.init_attempted) {
+        return g_cache.initialized;
     }
+    g_cache.init_attempted = 1;
 
     g_cache.voltage_fp = open_first_available(VOLTAGE_CANDIDATES);
     g_cache.current_fp = open_first_available(CURRENT_CANDIDATES);
@@ -141,7 +144,7 @@ static int init_file_cache() {
         return 1;
     }
 
-    LOGE("init_file_cache: 无法直接打开电流或电压节点，可能受 SELinux 限制");
+    LOGE("init_file_cache: 无法直接打开电流或电压节点，可能受 SELinux 限制（已置位避免重试）");
     return 0;
 }
 

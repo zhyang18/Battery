@@ -62,6 +62,45 @@ object SysfsBatterySampler {
     /** Shizuku 可用性缓存有效期：5 秒 */
     private const val SHIZUKU_CACHE_MS = 5_000L
 
+    /** 直接读取系统底层文件通道在全部候选路径均无权限时的重试熔断间隔（30 秒），避免高频重复抛出异常 */
+    private const val DIRECT_FILES_RETRY_INTERVAL_MS = 30_000L
+
+    /** 下一次允许重新执行底层文件全量扫描的时间戳（毫秒） */
+    @Volatile
+    private var directFilesUnreadableUntil: Long = 0L
+
+    /** 静态缓存的 Shizuku.newProcess 反射 Method 引用，消除每秒反射查找开销 */
+    @Volatile
+    private var cachedNewProcessMethod: java.lang.reflect.Method? = null
+
+    /** 是否已尝试查找并初始化 newProcess 反射 Method 引用 */
+    @Volatile
+    private var hasCheckedNewProcessMethod: Boolean = false
+
+    /**
+     * 获取或初始化已缓存的 Shizuku.newProcess 反射 Method 对象。
+     *
+     * @return 成功解析出的 Method 实例，若反射失败则返回 null
+     */
+    private fun getNewProcessMethod(): java.lang.reflect.Method? {
+        if (hasCheckedNewProcessMethod) return cachedNewProcessMethod
+        return synchronized(this) {
+            if (hasCheckedNewProcessMethod) return cachedNewProcessMethod
+            try {
+                cachedNewProcessMethod = Shizuku::class.java.getDeclaredMethod(
+                    "newProcess",
+                    Array<String>::class.java,
+                    Array<String>::class.java,
+                    String::class.java
+                ).apply { isAccessible = true }
+            } catch (_: Throwable) {
+                cachedNewProcessMethod = null
+            }
+            hasCheckedNewProcessMethod = true
+            cachedNewProcessMethod
+        }
+    }
+
     /** 所有已知的电流节点候选路径（按常见设备优先级排序） */
     private val CURRENT_PATHS = listOf(
         "/sys/class/power_supply/battery/current_now",
@@ -382,13 +421,22 @@ object SysfsBatterySampler {
             cachedCurrentPath = null
         }
 
-        // ── 3. 全量候选路径直接文件读取（不调用 exists()） ──
-        for (path in CURRENT_PATHS) {
-            val result = tryReadCurrentFile(path)
-            if (result != null) {
-                Log.d(TAG, "电流节点直接读取成功：$path")
-                cachedCurrentPath = path
-                return result
+        // ── 3. 全量候选路径直接文件读取（不调用 exists()，熔断期间跳过以防抛出大量异常） ──
+        val now = System.currentTimeMillis()
+        val canScanDirectFiles = now >= directFilesUnreadableUntil
+        if (canScanDirectFiles) {
+            var anyFound = false
+            for (path in CURRENT_PATHS) {
+                val result = tryReadCurrentFile(path)
+                if (result != null) {
+                    Log.d(TAG, "电流节点直接读取成功：$path")
+                    cachedCurrentPath = path
+                    anyFound = true
+                    return result
+                }
+            }
+            if (!anyFound) {
+                directFilesUnreadableUntil = now + DIRECT_FILES_RETRY_INTERVAL_MS
             }
         }
 
@@ -438,12 +486,21 @@ object SysfsBatterySampler {
         }
 
         // ── 3. 全量候选路径扫描 ──
-        for (path in VOLTAGE_PATHS) {
-            val result = tryReadVoltageFile(path)
-            if (result != null) {
-                Log.d(TAG, "电压节点直接读取成功：$path")
-                cachedVoltagePath = path
-                return result
+        val now = System.currentTimeMillis()
+        val canScanDirectFiles = now >= directFilesUnreadableUntil
+        if (canScanDirectFiles) {
+            var anyFound = false
+            for (path in VOLTAGE_PATHS) {
+                val result = tryReadVoltageFile(path)
+                if (result != null) {
+                    Log.d(TAG, "电压节点直接读取成功：$path")
+                    cachedVoltagePath = path
+                    anyFound = true
+                    return result
+                }
+            }
+            if (!anyFound) {
+                directFilesUnreadableUntil = now + DIRECT_FILES_RETRY_INTERVAL_MS
             }
         }
 
@@ -493,11 +550,14 @@ object SysfsBatterySampler {
         }
 
         // ── 3. 全量候选路径扫描 ──
-        for (path in TEMP_PATHS) {
-            val result = tryReadTempFile(path)
-            if (result != null) {
-                cachedTempPath = path
-                return result
+        val now = System.currentTimeMillis()
+        if (now >= directFilesUnreadableUntil) {
+            for (path in TEMP_PATHS) {
+                val result = tryReadTempFile(path)
+                if (result != null) {
+                    cachedTempPath = path
+                    return result
+                }
             }
         }
 
@@ -686,13 +746,7 @@ object SysfsBatterySampler {
      */
     private fun readViaShizuku(path: String): String? {
         return try {
-            // Shizuku 13.x 中 newProcess 是 package-private，需要反射访问
-            val method = Shizuku::class.java.getDeclaredMethod(
-                "newProcess",
-                Array<String>::class.java,
-                Array<String>::class.java,
-                String::class.java
-            ).apply { isAccessible = true }
+            val method = getNewProcessMethod() ?: return null
             val proc = method.invoke(null, arrayOf("cat", path), null, null) as? Process
                 ?: return null
             val text = proc.inputStream.bufferedReader().use { it.readText().trim() }
@@ -726,12 +780,7 @@ object SysfsBatterySampler {
         val statusPath = cachedStatusPath ?: STATUS_PATHS.firstOrNull()
 
         return try {
-            val method = Shizuku::class.java.getDeclaredMethod(
-                "newProcess",
-                Array<String>::class.java,
-                Array<String>::class.java,
-                String::class.java
-            ).apply { isAccessible = true }
+            val method = getNewProcessMethod() ?: return null
             val cmd = if (statusPath != null) {
                 "cat $curPath $voltPath $tempPath $statusPath 2>/dev/null"
             } else {

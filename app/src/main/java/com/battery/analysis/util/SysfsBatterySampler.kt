@@ -1,6 +1,8 @@
 package com.battery.analysis.util
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.BatteryManager
 import android.util.Log
@@ -61,6 +63,17 @@ object SysfsBatterySampler {
 
     /** Shizuku 可用性缓存有效期：5 秒 */
     private const val SHIZUKU_CACHE_MS = 5_000L
+
+    /** Shizuku 进程 fork 采样最小冷却间隔（3 秒），彻底杜绝秒级循环高频 fork 进程唤醒 CPU */
+    private const val SHIZUKU_SAMPLE_COOLDOWN_MS = 3_000L
+
+    /** 上次执行 Shizuku 进程 fork 采样的时间戳（毫秒） */
+    @Volatile
+    private var lastShizukuSampleTime: Long = 0L
+
+    /** Shizuku 采样结果缓存，在冷却期内复用以降低系统能耗 */
+    @Volatile
+    private var cachedShizukuSample: HardwareSample? = null
 
     /** 直接读取系统底层文件通道在全部候选路径均无权限时的重试熔断间隔（30 秒），避免高频重复抛出异常 */
     private const val DIRECT_FILES_RETRY_INTERVAL_MS = 30_000L
@@ -244,13 +257,34 @@ object SysfsBatterySampler {
      * @param fallbackTempCelsius 广播提供的备用温度（摄氏度 ℃）
      * @return 包含电流、电压、功率与温度的硬件采样实体，若无法获取则返回 null
      */
+    /**
+     * 从 Linux 底层节点或 Android Health HAL 直接采样当前瞬时硬件物理指标（通用方法，支持充电与放电场景）。
+     *
+     * 优化能效阶梯策略（极致低功耗设计，对标 BatteryRecorder）：
+     * 1. 优先尝试 JNI 原生缓存直读（微秒级，0 IPC，0 fork）；
+     * 2. 尝试 App 内部直接文件流读取（若权限允许，0 IPC，0 fork）；
+     * 3. 优先通过 Android Health HAL 原生硬件寄存器直读（BatteryManager.BATTERY_PROPERTY_CURRENT_NOW，微秒级，0 进程 fork）；
+     * 4. 仅在上述通道均无法获取时，尝试 Shizuku Shell 批量通道（带 3000ms 冷却保护，彻底杜绝秒级高频 fork 进程）；
+     * 5. 若均无法获取则如实返回 null。
+     *
+     * 充电场景下：
+     * 若硬件底层识别为净放电（例如 `status` 节点为 Discharging / Not charging，或电流上报为负值），
+     * 保持真实的物理方向，返回负向功率（如 -12.3W）与负向电流，供图表在 0W 基准线下方绘制，
+     * 杜绝将重载/弱充时的放电尖峰错误统计为正向充电峰值功率。
+     *
+     * @param context 应用程序上下文
+     * @param isCharging 是否处于充电连接状态
+     * @param fallbackVoltageVolts 广播提供的备用电压（伏特 V）
+     * @param fallbackTempCelsius 广播提供的备用温度（摄氏度 ℃）
+     * @return 包含电流、电压、功率与温度的硬件采样实体，若无法获取则返回 null
+     */
     fun sampleHardwareBattery(
         context: Context,
         isCharging: Boolean,
         fallbackVoltageVolts: Float? = null,
         fallbackTempCelsius: Float? = null
     ): HardwareSample? {
-        // 1. 优先尝试 JNI 原生缓存直读（微秒级）
+        // 1. 优先尝试 JNI 原生缓存直读（微秒级，0 IPC，0 fork）
         if (jniLoaded) {
             try {
                 if (!jniInitialized) {
@@ -270,7 +304,7 @@ object SysfsBatterySampler {
                     val signedPower = if (isCharging) {
                         if (isNetDischarging) -pWatts else pWatts
                     } else {
-                        pWatts.coerceAtLeast(0f)
+                        pWatts
                     }
                     val signedCur = if (isCharging) {
                         if (isNetDischarging) -curMa else curMa
@@ -287,15 +321,48 @@ object SysfsBatterySampler {
             } catch (_: Throwable) {}
         }
 
-        // 2. 尝试通过 Shizuku 单次进程批量读取全部节点（避免多次 fork 进程耗时）
-        if (isShizukuAvailable()) {
+        // 2. 尝试 App 内部直接文件读取（若有权限直接读取 sysfs 节点，0 IPC，0 fork）
+        val directCur = cachedCurrentPath?.let { tryReadCurrentFile(it) }
+        val directVolt = cachedVoltagePath?.let { tryReadVoltageFile(it) }
+        if (directCur != null && directVolt != null && directCur > 0f && directVolt > 0f) {
+            val directTemp = cachedTempPath?.let { tryReadTempFile(it) } ?: fallbackTempCelsius
+            val pWatts = (directCur * directVolt) / 1000f
+            val isDischargingStatus = cachedStatusPath?.let { tryReadStatusFile(it) }?.let {
+                it.startsWith("D", ignoreCase = true) || it.startsWith("N", ignoreCase = true)
+            } ?: false
+            val signedPower = if (isCharging) {
+                if (isDischargingStatus) -pWatts else pWatts
+            } else {
+                pWatts
+            }
+            val signedCur = if (isCharging) {
+                if (isDischargingStatus) -directCur else directCur
+            } else {
+                directCur
+            }
+            return HardwareSample(
+                currentMa = signedCur,
+                voltageVolts = directVolt,
+                powerWatts = Math.round(signedPower * 1000f) / 1000f,
+                temperatureCelsius = directTemp
+            )
+        }
+
+        // 3. 优先通过 Android Health HAL 原生硬件寄存器直读（微秒级，0 进程 fork，对标 BatteryRecorder 极致低能耗）
+        val bmSample = readViaBatteryManager(context, isCharging, fallbackVoltageVolts, fallbackTempCelsius)
+        if (bmSample != null && Math.abs(bmSample.currentMa) > 0f) {
+            return bmSample
+        }
+
+        // 4. Shizuku Shell 批量通道（仅在路径已探明时执行单次快速并发读取，受 3000ms 冷却限频保护）
+        if (isShizukuAvailable() && cachedCurrentPath != null && cachedVoltagePath != null) {
             val batchSample = readHardwareBatchViaShizuku(fallbackVoltageVolts, fallbackTempCelsius, isCharging)
             if (batchSample != null && Math.abs(batchSample.currentMa) > 0f) {
                 return batchSample
             }
         }
 
-        // 3. 回退单独节点读取（直接文件流 / 缓存节点）
+        // 5. 自适应探测与逐通道回退：初次启动或缓存未命中时，全量扫描各候选节点并自动缓存有效路径
         val sysfsCurrent = readSysfsCurrentMa()
         val sysfsVoltage = readSysfsVoltageVolts()
         val sysfsTemp = readSysfsTemperature()
@@ -304,14 +371,14 @@ object SysfsBatterySampler {
         val finalVoltage = sysfsVoltage ?: fallbackVoltageVolts ?: 0f
         val finalTemp = sysfsTemp ?: fallbackTempCelsius
 
-        if (sysfsCurrent != null && Math.abs(sysfsCurrent) > 0f) {
+        if (sysfsCurrent != null && Math.abs(sysfsCurrent) > 0f && finalVoltage > 0f) {
             val pWatts = (Math.abs(sysfsCurrent) * finalVoltage) / 1000f
             val isDischargingStatus = sysfsStatus != null && (sysfsStatus.startsWith("D", ignoreCase = true) || sysfsStatus.startsWith("N", ignoreCase = true))
             val isNetDischarging = isDischargingStatus || (sysfsCurrent < 0f)
             val signedPower = if (isCharging) {
                 if (isNetDischarging) -pWatts else pWatts
             } else {
-                pWatts.coerceAtLeast(0f)
+                pWatts
             }
             val signedCur = if (isCharging) {
                 if (isNetDischarging) -Math.abs(sysfsCurrent) else Math.abs(sysfsCurrent)
@@ -326,34 +393,72 @@ object SysfsBatterySampler {
             )
         }
 
-        // ===== 4. 终极回退：BatteryManager API（Android Framework 软件滤波兜底） =====
+        return null
+    }
+
+    /**
+     * 通过 Android Framework 原生 BatteryManager 与底层 Health HAL 硬件寄存器直读瞬时指标。
+     *
+     * 该通道直连底层芯片库仑计硬件寄存器，耗时仅微秒级且无任何进程 fork 开销，
+     * 具备极高能效比，且忠实反映底层硬件真实物理数据。
+     *
+     * @param context 应用程序上下文
+     * @param isCharging 是否处于充电连接状态
+     * @param fallbackVoltageVolts 备用电压（伏特 V）
+     * @param fallbackTempCelsius 备用温度（摄氏度 ℃）
+     * @return 包含瞬时电流、电压、功率与温度的采样结果，若无法获取则返回 null
+     */
+    private fun readViaBatteryManager(
+        context: Context,
+        isCharging: Boolean,
+        fallbackVoltageVolts: Float?,
+        fallbackTempCelsius: Float?
+    ): HardwareSample? {
         return try {
             val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
                 ?: return null
             val rawCur = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
-            if (rawCur != 0 && rawCur != Int.MIN_VALUE) {
-                val curMa = BatteryUnitNormalizer.normalizeCurrentMa(rawCur.toLong(), isCharging = isCharging)
-                if (curMa > 0f && finalVoltage > 0f) {
-                    val pWatts = BatteryUnitNormalizer.calculatePowerWatts(finalVoltage, curMa, isCharging = isCharging)
-                    val isNetDischarging = rawCur < 0
-                    val signedPower = if (isCharging) {
-                        if (isNetDischarging) -pWatts else pWatts
-                    } else {
-                        pWatts.coerceAtLeast(0f)
-                    }
-                    val signedCur = if (isCharging) {
-                        if (isNetDischarging) -curMa else curMa
-                    } else {
-                        curMa
-                    }
-                    HardwareSample(
-                        currentMa = signedCur,
-                        voltageVolts = finalVoltage,
-                        powerWatts = Math.round(signedPower * 1000f) / 1000f,
-                        temperatureCelsius = finalTemp
-                    )
-                } else null
-            } else null
+            if (rawCur == 0 || rawCur == Int.MIN_VALUE) {
+                return null
+            }
+            val finalVoltage = fallbackVoltageVolts ?: run {
+                val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+                val stickyIntent = context.registerReceiver(null, filter)
+                val rawMv = stickyIntent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
+                if (rawMv > 0) BatteryUnitNormalizer.normalizeVoltageVolts(rawMv.toLong()) else null
+            } ?: cachedVoltagePath?.let { tryReadVoltageFile(it) } ?: return null
+
+            if (finalVoltage <= 0f) return null
+
+            val curMa = BatteryUnitNormalizer.normalizeCurrentMa(rawCur.toLong(), isCharging = isCharging)
+            if (curMa <= 0f) return null
+
+            val finalTemp = fallbackTempCelsius ?: run {
+                val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+                val stickyIntent = context.registerReceiver(null, filter)
+                val rawTemp = stickyIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+                if (rawTemp > 0) rawTemp / 10f else null
+            } ?: cachedTempPath?.let { tryReadTempFile(it) }
+
+            val pWatts = (curMa * finalVoltage) / 1000f
+            val isNetDischarging = rawCur < 0
+            val signedPower = if (isCharging) {
+                if (isNetDischarging) -pWatts else pWatts
+            } else {
+                pWatts
+            }
+            val signedCur = if (isCharging) {
+                if (isNetDischarging) -curMa else curMa
+            } else {
+                curMa
+            }
+
+            HardwareSample(
+                currentMa = signedCur,
+                voltageVolts = finalVoltage,
+                powerWatts = Math.round(signedPower * 1000f) / 1000f,
+                temperatureCelsius = finalTemp
+            )
         } catch (_: Throwable) {
             null
         }
@@ -763,29 +868,35 @@ object SysfsBatterySampler {
 
     /**
      * 通过 Shizuku 单次进程并发读取电流、电压、温度与状态节点，极大降低系统 fork 进程开销并提升采样准度。
+     * 内部增加 3000ms 冷却限频机制，在冷却期内复用有效物理采样结果，杜绝高频唤醒 CPU 大小核。
      *
-     * @param fallbackVoltage 兜底电压
-     * @param fallbackTemp 兜底温度
+     * @param fallbackVoltage 广播或备用电压（伏特 V）
+     * @param fallbackTemp 广播或备用温度（摄氏度 ℃）
      * @param isCharging 是否处于充电连接状态
-     * @return 硬件采样结果，失败返回 null
+     * @return 硬件采样物理实体，若读取失败则返回 null
      */
     fun readHardwareBatchViaShizuku(
         fallbackVoltage: Float?,
         fallbackTemp: Float?,
         isCharging: Boolean = false
     ): HardwareSample? {
-        val curPath = cachedCurrentPath ?: CURRENT_PATHS.firstOrNull() ?: return null
-        val voltPath = cachedVoltagePath ?: VOLTAGE_PATHS.firstOrNull() ?: return null
-        val tempPath = cachedTempPath ?: TEMP_PATHS.firstOrNull() ?: return null
-        val statusPath = cachedStatusPath ?: STATUS_PATHS.firstOrNull()
+        val now = System.currentTimeMillis()
+        if (now - lastShizukuSampleTime < SHIZUKU_SAMPLE_COOLDOWN_MS && cachedShizukuSample != null) {
+            return cachedShizukuSample
+        }
+
+        val curPath = cachedCurrentPath ?: return null
+        val voltPath = cachedVoltagePath ?: return null
+        val tempPath = cachedTempPath
+        val statusPath = cachedStatusPath
+
+        val pathList = mutableListOf(curPath, voltPath)
+        val tempIndex = if (tempPath != null) { pathList.add(tempPath); pathList.size - 1 } else -1
+        val statusIndex = if (statusPath != null) { pathList.add(statusPath); pathList.size - 1 } else -1
 
         return try {
             val method = getNewProcessMethod() ?: return null
-            val cmd = if (statusPath != null) {
-                "cat $curPath $voltPath $tempPath $statusPath 2>/dev/null"
-            } else {
-                "cat $curPath $voltPath $tempPath 2>/dev/null"
-            }
+            val cmd = "cat ${pathList.joinToString(" ")} 2>/dev/null"
             val proc = method.invoke(
                 null,
                 arrayOf("sh", "-c", cmd),
@@ -798,8 +909,8 @@ object SysfsBatterySampler {
             if (lines.size >= 2) {
                 val rawCur = lines[0].trim().toLongOrNull() ?: return null
                 val rawVolt = lines[1].trim().toLongOrNull() ?: return null
-                val rawTemp = if (lines.size >= 3) lines[2].trim().toFloatOrNull() else null
-                val rawStatus = if (lines.size >= 4) lines[3].trim() else null
+                val rawTemp = if (tempIndex in lines.indices) lines[tempIndex].trim().toFloatOrNull() else null
+                val rawStatus = if (statusIndex in lines.indices) lines[statusIndex].trim() else null
 
                 val curMa = normalizeCurrentToMa(Math.abs(rawCur))
                 val voltV = normalizeVoltageToVolts(rawVolt)
@@ -821,7 +932,7 @@ object SysfsBatterySampler {
                     val signedPower = if (isCharging) {
                         if (isNetDischarging) -pWatts else pWatts
                     } else {
-                        pWatts.coerceAtLeast(0f)
+                        pWatts
                     }
                     val signedCur = if (isCharging) {
                         if (isNetDischarging) -curMa else curMa
@@ -829,15 +940,19 @@ object SysfsBatterySampler {
                         curMa
                     }
 
-                    HardwareSample(
+                    val sample = HardwareSample(
                         currentMa = signedCur,
                         voltageVolts = voltV,
                         powerWatts = Math.round(signedPower * 1000f) / 1000f,
                         temperatureCelsius = tempC
                     )
+                    lastShizukuSampleTime = now
+                    cachedShizukuSample = sample
+                    sample
                 } else null
             } else null
         } catch (_: Throwable) {
+            lastShizukuSampleTime = now
             null
         }
     }

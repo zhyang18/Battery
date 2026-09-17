@@ -1415,6 +1415,68 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
+     * 基于内存中后台常驻服务累积的最新物理放电采样点，轻量级刷新各前台应用的时间切片微积分、持续时长与瞬时指标。
+     *
+     * 该方法完全不调用底层的 dumpsys batterystats 进程，无任何特权 fork 开销，
+     * 仅基于内存中的时序物理采样点（[dischargeRealtimeSamples]）重新计算各应用的真实微积分平均功耗与能量，
+     * 为前台 UI 提供极致低功耗的秒级动态刷新支持。
+     *
+     * @param basePackage 界面当前呈现的基础完整耗电数据包
+     * @return 包含最新切片微积分应用列表与瞬时指标的更新数据包，若无新采样数据则返回 null
+     */
+    fun refreshRealtimeDischargePackage(basePackage: FullPowerDataPackage): FullPowerDataPackage? {
+        val now = System.currentTimeMillis()
+        val allSamples = getDischargeRealtimeSamples()
+        if (allSamples.isEmpty()) return null
+
+        val unplugTime = getLastUnplugTime()
+        val durationMs = if (unplugTime in 1..now && (now - unplugTime) in 1000L..(48 * 3600_000L)) {
+            (now - unplugTime).coerceAtLeast(1000L)
+        } else {
+            60_000L
+        }
+        val startTs = now - durationMs
+        val recentSamples = allSamples.filter { it.timestamp in (startTs - 60_000L)..now }
+        if (recentSamples.isEmpty()) return null
+
+        val currentBattery = getCurrentBatteryStatus()
+        val (intTotalEnergyWh, intTotalPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = null)
+        val (_, intOnPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = true)
+        val (_, intOffPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = false)
+
+        val updatedAppList = calculateAppPowerAndTempWithTimeSlices(
+            appItems = basePackage.appList,
+            appIntervals = emptyList(),
+            historyTempPoints = emptyList(),
+            realtimeSamples = recentSamples,
+            screenOnWatts = if (intOnPowerWatts > 0.05f) intOnPowerWatts else basePackage.overviewStats.screenOnPowerWatts,
+            defaultTempCelsius = currentBattery.temperature
+        )
+
+        val newAvgWatts = if (intTotalPowerWatts > 0.05f) intTotalPowerWatts else basePackage.overviewStats.avgPowerWatts
+        val newScreenOnWatts = if (intOnPowerWatts > 0.05f) intOnPowerWatts else basePackage.overviewStats.screenOnPowerWatts
+        val newScreenOffWatts = if (intOffPowerWatts > 0.05f) intOffPowerWatts else basePackage.overviewStats.screenOffPowerWatts
+
+        val updatedOverview = basePackage.overviewStats.copy(
+            avgPowerWatts = newAvgWatts,
+            screenOnPowerWatts = newScreenOnWatts,
+            screenOffPowerWatts = newScreenOffWatts
+        )
+
+        val updatedSnapshot = basePackage.batterySnapshot.copy(
+            voltageVolts = currentBattery.voltageVolts,
+            temperature = currentBattery.temperature,
+            levelPercent = currentBattery.levelPercent
+        )
+
+        return basePackage.copy(
+            batterySnapshot = updatedSnapshot,
+            overviewStats = updatedOverview,
+            appList = updatedAppList
+        )
+    }
+
+    /**
      * 判断指定包名是否为用户应用（三方应用、可更新系统应用、有桌面启动入口或属于桌面启动器）。
      *
      * @param packageName 目标包名

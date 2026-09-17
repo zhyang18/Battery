@@ -9,21 +9,15 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.view.WindowCompat
-import androidx.lifecycle.lifecycleScope
 import com.battery.analysis.databinding.ActivityMainBinding
 import com.battery.analysis.receiver.BatteryUnplugReceiver
 import com.battery.analysis.ui.MainPagerAdapter
 import com.battery.analysis.viewmodel.BatteryViewModel
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
 
 /**
  * 电池检测应用主界面 Activity。
- * 承载底部三大顶级页签（耗电、健康度、设置）导航容器，负责数据轮询调度、主题管理与 Shizuku 监听。
+ * 承载底部三大顶级页签（耗电、检测、设置）导航容器，负责主题管理、前台广播与 Shizuku 授权监听。
  */
 class MainActivity : AppCompatActivity() {
 
@@ -34,9 +28,6 @@ class MainActivity : AppCompatActivity() {
 
     private val SHIZUKU_REQUEST_CODE = 1001
 
-    private var autoRefreshJob: Job? = null
-    private var isAutoRefreshEnabled: Boolean = false
-    private var refreshIntervalMs: Long = 2000L
     private var lastBackPressedTime: Long = 0L
 
     /**
@@ -110,9 +101,6 @@ class MainActivity : AppCompatActivity() {
 
         val savedThemeMode = prefs.getInt("theme_mode", AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
         AppCompatDelegate.setDefaultNightMode(savedThemeMode)
-
-        isAutoRefreshEnabled = prefs.getBoolean("auto_refresh_enabled", false)
-        refreshIntervalMs = prefs.getLong("refresh_interval_ms", 2000L)
 
         // 1. 初始化顶级 ViewPager2 与底部 NavigationBar 联动
         setupBottomNavigation()
@@ -188,10 +176,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 彻底退出应用：停止后台轮询、解绑所有监听、销毁 Activity 栈并安全终止当前应用进程，释放所有资源。
+     * 彻底退出应用：解绑所有监听、销毁 Activity 栈并安全终止当前应用进程，释放所有资源。
      */
     private fun exitAppAndKillProcess() {
-        stopAutoRefresh()
         try {
             Shizuku.removeRequestPermissionResultListener(requestPermissionResultListener)
             Shizuku.removeBinderReceivedListener(binderReceivedListener)
@@ -312,9 +299,6 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         updateShizukuStatusState()
-        if (isAutoRefreshEnabled) {
-            startAutoRefresh()
-        }
     }
 
     /**
@@ -330,19 +314,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 界面退到后台时的生命周期回调。
-     */
-    override fun onStop() {
-        super.onStop()
-        stopAutoRefresh()
-    }
-
-    /**
-     * 活动销毁生命周期回调，注销动态广播接收器、Shizuku 监听器与自动刷新协程。
+     * 活动销毁生命周期回调，注销动态广播接收器与 Shizuku 监听器。
      */
     override fun onDestroy() {
         super.onDestroy()
-        stopAutoRefresh()
         try {
             unregisterReceiver(batteryUnplugReceiver)
         } catch (_: Exception) {}
@@ -350,32 +325,6 @@ class MainActivity : AppCompatActivity() {
         Shizuku.removeRequestPermissionResultListener(requestPermissionResultListener)
         Shizuku.removeBinderReceivedListener(binderReceivedListener)
         Shizuku.removeBinderDeadListener(binderDeadListener)
-    }
-
-    /**
-     * 设置是否开启实时自动刷新。
-     *
-     * @param enabled 是否开启实时自动刷新
-     */
-    fun setAutoRefreshEnabled(enabled: Boolean) {
-        isAutoRefreshEnabled = enabled
-        if (enabled) {
-            startAutoRefresh()
-        } else {
-            stopAutoRefresh()
-        }
-    }
-
-    /**
-     * 更新实时刷新时间间隔。
-     *
-     * @param intervalMs 刷新时间间隔（毫秒）
-     */
-    fun updateRefreshInterval(intervalMs: Long) {
-        refreshIntervalMs = intervalMs
-        if (isAutoRefreshEnabled) {
-            startAutoRefresh()
-        }
     }
 
     /**
@@ -418,41 +367,4 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNavigation.selectedItemId = navItemId
     }
 
-    /**
-     * 根据当前用户正处于的顶级页面及子 Tab，精准且独立地刷新对应的数据源。
-     */
-    private fun refreshCurrentActiveTab() {
-        if (viewModel.isViewingHistorySnapshot.value) {
-            return
-        }
-        if (binding.mainViewPager.currentItem == 1) {
-            when (viewModel.activeTabPosition.value) {
-                0 -> viewModel.refreshNormalApi(this)
-                1 -> viewModel.refreshShizuku(this)
-            }
-        }
-    }
-
-    /**
-     * 启动实时自动刷新的后台协程，按当前活跃 Tab 独立轮询刷新。
-     */
-    private fun startAutoRefresh() {
-        autoRefreshJob?.cancel()
-        autoRefreshJob = lifecycleScope.launch(Dispatchers.IO) {
-            while (isActive) {
-                kotlinx.coroutines.withContext(Dispatchers.Main) {
-                    refreshCurrentActiveTab()
-                }
-                delay(refreshIntervalMs)
-            }
-        }
-    }
-
-    /**
-     * 停止实时自动刷新协程。
-     */
-    private fun stopAutoRefresh() {
-        autoRefreshJob?.cancel()
-        autoRefreshJob = null
-    }
 }

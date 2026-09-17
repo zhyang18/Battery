@@ -291,6 +291,20 @@ class ChargingChartView @JvmOverloads constructor(
     }
 
     /**
+     * 向现有采样数据集末尾批量追加新采样点并执行单次高效重绘，消除逐点高频重绘开销。
+     *
+     * @param newPoints 待追加的新采样数据点列表
+     */
+    fun appendPoints(newPoints: List<ChargingSamplePoint>) {
+        if (newPoints.isEmpty()) return
+        dataPoints.addAll(newPoints)
+        while (dataPoints.size > 1500) {
+            dataPoints.removeAt(0)
+        }
+        invalidate()
+    }
+
+    /**
      * 清空图表内所有走势数据并恢复空态。
      */
     fun clearData() {

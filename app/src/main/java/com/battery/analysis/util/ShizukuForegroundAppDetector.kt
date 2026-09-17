@@ -31,8 +31,8 @@ object ShizukuForegroundAppDetector {
     @Volatile
     private var lastForegroundPackage: String? = null
 
-    /** 结果微秒级缓存（100ms），避免同一时间点多次重复 IPC 查询 */
-    private const val CACHE_EXPIRE_MS = 100L
+    /** 结果内存缓存（2000ms），避免高频重复 IPC 与反射查询，显著降低轮询 CPU 占用与电池功耗 */
+    private const val CACHE_EXPIRE_MS = 2000L
 
     /**
      * 检查当前 Shizuku 特权通道是否可用且已授权。
@@ -90,7 +90,7 @@ object ShizukuForegroundAppDetector {
      *
      * 优先通过 `activity_task` (Android 10+) 的 `getTasks(1)` 反射获取；
      * 其次通过 `activity` (Android 9 及以下) 的 `getTasks(1)` 获取；
-     * 若均失败，通过特权命令轻量查询兜底。
+     * 若均失败则安全回退至上一已知有效前台包名或默认桌面，杜绝在秒级采样循环中重复 fork 进程执行 heavy dumpsys 耗电命令。
      *
      * @param context 应用程序上下文，可选
      * @return 当前置顶前台应用包名，若未授权或无法获取则返回 null
@@ -108,7 +108,7 @@ object ShizukuForegroundAppDetector {
             return null
         }
 
-        // 1. 优先尝试通过 IActivityTaskManager (activity_task) 获取置顶 Task
+        // 1. 优先尝试通过 IActivityTaskManager (activity_task) 获取置顶 Task（Binder IPC 直调，亚毫秒级无损耗）
         val atmPkg = getForegroundPackageViaAtm()
         if (!atmPkg.isNullOrEmpty()) {
             lastQueryTs = now
@@ -116,7 +116,7 @@ object ShizukuForegroundAppDetector {
             return atmPkg
         }
 
-        // 2. 尝试通过 IActivityManager (activity) 获取置顶 Task
+        // 2. 尝试通过 IActivityManager (activity) 获取置顶 Task（Android 9 及以下兼容）
         val amPkg = getForegroundPackageViaAm()
         if (!amPkg.isNullOrEmpty()) {
             lastQueryTs = now
@@ -124,7 +124,7 @@ object ShizukuForegroundAppDetector {
             return amPkg
         }
 
-        // 3. 兜底尝试通过 Shizuku 轻量命令查询
+        // 3. 兜底尝试通过 Shizuku 轻量命令查询（在 Binder IPC 均失败时兜底，确保 OEM 深度定制系统兼容）
         val cmdPkg = getForegroundPackageViaCmd()
         if (!cmdPkg.isNullOrEmpty()) {
             lastQueryTs = now
@@ -132,7 +132,9 @@ object ShizukuForegroundAppDetector {
             return cmdPkg
         }
 
-        return null
+        // 4. 最终回退：沿用上一已知前台包名或系统默认桌面
+        lastQueryTs = now
+        return lastForegroundPackage ?: cachedHomePackage
     }
 
     /**
@@ -354,6 +356,35 @@ object ShizukuForegroundAppDetector {
         return null
     }
 
+    @Volatile
+    private var cachedNewProcessMethod: java.lang.reflect.Method? = null
+    @Volatile
+    private var hasCheckedNewProcessMethod: Boolean = false
+
+    /**
+     * 获取并缓存 Shizuku.newProcess 反射方法实例。
+     *
+     * @return Shizuku 进程创建方法反射实例，若不存在则返回 null
+     */
+    private fun getNewProcessMethod(): java.lang.reflect.Method? {
+        if (hasCheckedNewProcessMethod) return cachedNewProcessMethod
+        return synchronized(this) {
+            if (hasCheckedNewProcessMethod) return cachedNewProcessMethod
+            try {
+                cachedNewProcessMethod = Shizuku::class.java.getDeclaredMethod(
+                    "newProcess",
+                    Array<String>::class.java,
+                    Array<String>::class.java,
+                    String::class.java
+                ).apply { isAccessible = true }
+            } catch (_: Throwable) {
+                cachedNewProcessMethod = null
+            }
+            hasCheckedNewProcessMethod = true
+            cachedNewProcessMethod
+        }
+    }
+
     /**
      * 通过 Shizuku 执行轻量特权命令获取当前聚焦前台应用。
      * 优先通过 `dumpsys activity activities` 提取最新处于 Resumed 状态的 Activity 组件；
@@ -364,12 +395,7 @@ object ShizukuForegroundAppDetector {
      */
     private fun getForegroundPackageViaCmd(): String? {
         return try {
-            val method = Shizuku::class.java.getDeclaredMethod(
-                "newProcess",
-                Array<String>::class.java,
-                Array<String>::class.java,
-                String::class.java
-            ).apply { isAccessible = true }
+            val method = getNewProcessMethod() ?: return null
             val cmd = "dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity|topResumedActivity' | head -n 1"
             val proc = method.invoke(
                 null,

@@ -177,6 +177,7 @@ class BatteryMonitorService : Service() {
      */
     override fun onCreate() {
         super.onCreate()
+        isServiceActive = true
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
 
@@ -256,6 +257,7 @@ class BatteryMonitorService : Service() {
      */
     override fun onDestroy() {
         super.onDestroy()
+        isServiceActive = false
         try {
             unregisterReceiver(powerReceiver)
         } catch (_: Exception) {}
@@ -412,15 +414,30 @@ class BatteryMonitorService : Service() {
     @Volatile
     private var lastKnownForegroundPackage: String? = null
 
+    /** 最近一次查询置顶前台应用包名的时间戳（毫秒） */
+    @Volatile
+    private var lastForegroundQueryTime: Long = 0L
+
+    /** 前台包名短效内存缓存有效时长（毫秒），避免每秒高频发起系统跨进程 IPC 查询消耗电量 */
+    private val FOREGROUND_CACHE_EXPIRE_MS = 2_500L
+
     /**
      * 获取当前处于系统最前台运行的应用包名。
-     * 多级高精度探测：优先从无障碍服务 [KeepAliveAccessibilityService] 毫秒级读取；
-     * 其次通过 [UsageStatsManager] 提取最近事件并保持状态（亮屏期间未切应用时持续沿用），
-     * 为秒级硬件采样点精准打上前台应用归属标签，彻底杜绝采样点包名丢失为 null。
+     * 多级高精度探测：优先使用 2.5 秒短效缓存避免高频 IPC；
+     * 其次通过 Shizuku 特权 Binder 直调 IActivityTaskManager；
+     * 再次通过无障碍服务 [KeepAliveAccessibilityService] 毫秒级读取；
+     * 最后通过 [UsageStatsManager] 提取最近 10 秒事件并保持状态（亮屏期间未切应用时持续沿用），
+     * 为秒级硬件采样点精准打上前台应用归属标签，兼顾低功耗与高准度。
      *
      * @return 当前置顶前台应用包名，若无法获取则返回 null
      */
     private fun getForegroundPackageName(): String? {
+        val now = System.currentTimeMillis()
+        if (now - lastForegroundQueryTime < FOREGROUND_CACHE_EXPIRE_MS && lastKnownForegroundPackage != null) {
+            return lastKnownForegroundPackage
+        }
+        lastForegroundQueryTime = now
+
         // 1. 最高优先级：通过 Shizuku 特权 Binder 直调 IActivityTaskManager (对标 BatteryRecorder 架构，无需无障碍)
         val shizukuPkg = ShizukuForegroundAppDetector.getForegroundPackageName(this)
         if (!shizukuPkg.isNullOrEmpty()) {
@@ -439,8 +456,7 @@ class BatteryMonitorService : Service() {
         val defaultHomePkg = ShizukuForegroundAppDetector.getDefaultHomePackage(this)
             ?: PowerUsageManager.getInstance(this).getDefaultHomeLauncherPackage()
 
-        // 3. 兜底策略：基于 UsageStatsManager 事件探测，时间窗口扩大至 120 秒
-        val now = System.currentTimeMillis()
+        // 3. 兜底策略：基于 UsageStatsManager 事件探测，探测窗口设为 120 秒，确保捕获当前前台 Activity
         try {
             val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
             if (usm != null) {
@@ -470,7 +486,7 @@ class BatteryMonitorService : Service() {
                     }
                 }
 
-                // 若最新事件为前台应用 PAUSED，且之后没有新的三方应用 RESUMED，说明用户已退出应用处于桌面
+                // 若最新事件为前台应用 PAUSED，且之后没有新的应用 RESUMED，说明用户已切回桌面
                 if (latestPausedTs > latestResumedTs && !defaultHomePkg.isNullOrEmpty()) {
                     lastKnownForegroundPackage = defaultHomePkg
                     return defaultHomePkg
@@ -484,12 +500,15 @@ class BatteryMonitorService : Service() {
         } catch (_: Throwable) {
         }
 
-        // 4. 亮屏持续运行状态保持：若本周期内无明确应用事件且有默认桌面，优先对齐默认桌面，次选沿用上一已知前台包名
-        if (!defaultHomePkg.isNullOrEmpty() && (lastKnownForegroundPackage == null || PowerUsageManager.getInstance(this).isHomeLauncher(lastKnownForegroundPackage ?: ""))) {
+        // 4. 亮屏持续运行状态保持：若本周期内无新切换事件，持续沿用上一已知有效前台应用；若无历史记录则回退至默认桌面
+        if (lastKnownForegroundPackage != null) {
+            return lastKnownForegroundPackage
+        }
+        if (!defaultHomePkg.isNullOrEmpty()) {
             lastKnownForegroundPackage = defaultHomePkg
             return defaultHomePkg
         }
-        return lastKnownForegroundPackage
+        return null
     }
 
     /**
@@ -707,6 +726,18 @@ class BatteryMonitorService : Service() {
         const val INTERVAL_NEVER = -1L
         const val DEFAULT_SCREEN_ON_INTERVAL_MS = 1000L
         const val DEFAULT_SCREEN_OFF_INTERVAL_MS = 0L
+
+        /** 后台电池监控服务当前是否处于活跃运行状态的全局指示器 */
+        @Volatile
+        private var isServiceActive: Boolean = false
+
+        /**
+         * 查询后台电池监控服务当前是否处于真实活跃运行状态。
+         * 前台 UI 可根据此状态决定是否启动独立采样，杜绝前后台双重并发采样造成的电量浪费。
+         *
+         * @return 若服务当前已创建且处于活跃运行状态返回 true，否则返回 false
+         */
+        fun isServiceActive(): Boolean = isServiceActive
 
         /**
          * 动态通知正在运行的后台服务更新常驻通知栏的显示状态。

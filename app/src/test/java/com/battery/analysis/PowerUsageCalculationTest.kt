@@ -1400,7 +1400,7 @@ class PowerUsageCalculationTest {
         )
 
         assertEquals("混合应用功耗严格对齐前台物理功耗 1.50W", "1.50W", mixedApp.getFormattedCombinedAvgWatts())
-        assertEquals("混合应用能量严格对齐前台物理能耗 0.25Wh", "0.25Wh", mixedApp.getFormattedCombinedEnergyWh())
+        assertEquals("混合应用能量严格对齐前台物理能耗 0.250Wh", "0.250Wh", mixedApp.getFormattedCombinedEnergyWh())
         assertEquals("混合应用工时展示组合工时", "10m | 后台 20m", mixedApp.getFormattedCombinedDuration())
         assertEquals("混合应用总电量严格等于前台电量", 0.25f, mixedApp.energyWh, 0.0001f)
 
@@ -1663,6 +1663,43 @@ class PowerUsageCalculationTest {
         val launcherInterval = intervals.find { it.packageName == defaultHome }
         assertTrue("荣耀桌面应存在独立的活跃区间", launcherInterval != null)
         assertEquals("荣耀桌面活跃时长应为 29 秒", 29_000L, launcherInterval!!.endTs - launcherInterval.startTs)
+    }
+
+    /**
+     * 验证统计 App 列表中能量展示精确到小数点后 3 位（如 "0.250Wh"、"<0.001Wh"、"--"）的规范格式。
+     */
+    @Test
+    fun testAppPowerUsageItemEnergyPrecisionThreeDecimals() {
+        // 1. 验证常规能量精确显示三位小数
+        val item1 = AppPowerUsageItem(
+            packageName = "com.example.app1",
+            appName = "应用1",
+            icon = null,
+            foregroundTimeMs = 60_000L,
+            avgPowerWatts = 1.0f,
+            avgTemperature = 36.0f,
+            maxTemperature = 37.0f,
+            lastUsedTimeMs = 1000L,
+            foregroundEnergyWh = 0.25f
+        )
+        assertEquals("0.25Wh 应精确格式化为 0.250Wh", "0.250Wh", item1.getFormattedCombinedEnergyWh())
+        assertEquals("纯前台能量也应精确格式化为 0.250Wh", "0.250Wh", item1.getFormattedForegroundEnergyWh())
+        assertEquals("总能量也应精确格式化为 0.250Wh", "0.250Wh", item1.getFormattedEnergyWh())
+
+        // 2. 验证小数值如 0.005Wh、0.001Wh 及四舍五入
+        val item2 = item1.copy(foregroundEnergyWh = 0.005f)
+        assertEquals("0.005Wh 保持 0.005Wh", "0.005Wh", item2.getFormattedCombinedEnergyWh())
+
+        val item3 = item1.copy(foregroundEnergyWh = 0.0008f)
+        assertEquals("0.0008Wh 四舍五入为 0.001Wh", "0.001Wh", item3.getFormattedCombinedEnergyWh())
+
+        // 3. 验证低于 0.0005Wh 但大于 0.00001Wh 的微小量显示为 <0.001Wh
+        val item4 = item1.copy(foregroundEnergyWh = 0.0003f)
+        assertEquals("低于0.0005Wh的微小电量应显示为 <0.001Wh", "<0.001Wh", item4.getFormattedCombinedEnergyWh())
+
+        // 4. 验证零能耗或纯后台如实显示为 --
+        val item5 = item1.copy(foregroundEnergyWh = 0f, foregroundTimeMs = 0L, backgroundTimeMs = 60_000L)
+        assertEquals("无前台电量或纯后台如实显示为 --", "--", item5.getFormattedCombinedEnergyWh())
     }
 }
 

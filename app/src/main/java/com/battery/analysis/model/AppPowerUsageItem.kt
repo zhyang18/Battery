@@ -87,23 +87,24 @@ data class AppPowerUsageItem(
     }
 
     /**
-     * 格式化单项能量数值为易读字符串（如 "0.12Wh" 或 "<0.01Wh"）。
+     * 格式化单项瓦时能量数值为易读字符串，精确到小数点后三位（如 "0.250Wh" 或 "<0.001Wh"）。
+     * 若数值大于等于 0.0005Wh 则保留三位小数格式化；若数值介于 0.00001Wh 与 0.0005Wh 之间则显示为 "<0.001Wh"；若无有效能量消耗则如实显示 "--"。
      *
-     * @param wh 瓦时数值
-     * @return 格式化后的能量文本
+     * @param wh 待格式化的瓦时能量数值（单位：Wh）
+     * @return 格式化后的精确能量文本
      */
     private fun formatSingleEnergyWh(wh: Float): String {
-        return if (wh >= 0.005f) {
-            String.format(java.util.Locale.getDefault(), "%.2fWh", wh)
-        } else if (wh > 0.0001f) {
-            "<0.01Wh"
+        return if (wh >= 0.0005f) {
+            String.format(java.util.Locale.getDefault(), "%.3fWh", wh)
+        } else if (wh > 0.00001f) {
+            "<0.001Wh"
         } else {
             "--"
         }
     }
 
     /**
-     * 获取格式化后的总电量消耗文本（如 "0.12Wh" 或 "<0.01Wh"）。
+     * 获取格式化后的总电量消耗文本（如 "0.250Wh" 或 "<0.001Wh"）。
      *
      * @return 格式化后的总电量消耗文本
      */
@@ -115,7 +116,7 @@ data class AppPowerUsageItem(
     /**
      * 获取前后台模式下的能量消耗展示文本。
      * 严格遵循 BatteryRecorder 算法：功耗与能量仅统计前台真实物理放电；
-     * 若应用在前台运行则展示真实前台能量，纯后台运行应用如实显示为 "--"，杜绝虚假发配后台电量。
+     * 若应用在前台运行则展示真实前台能量（精确到小数点后三位），纯后台运行应用如实显示为 "--"，杜绝虚假发配后台电量。
      *
      * @return 格式化后的能量展示文本
      */

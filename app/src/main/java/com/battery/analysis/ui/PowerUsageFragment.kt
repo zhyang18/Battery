@@ -88,6 +88,12 @@ class PowerUsageFragment : Fragment() {
     // 当前界面呈现的完整耗电数据包缓存
     private var lastRenderedPackage: FullPowerDataPackage? = null
 
+    /** 充电图表上一次渲染的数据点数量缓存，用于增量对比追加以消除全量重绘 */
+    private var lastRenderedPointsCount: Int = -1
+
+    /** 充电图表上一次渲染的会话开始时间戳缓存 */
+    private var lastRenderedSessionStart: Long = -1L
+
     // 记录 AppBarLayout 垂直偏移量，供 SwipeRefreshLayout 下拉判断使用
     private var lastAppBarVerticalOffset: Int = 0
 
@@ -484,6 +490,7 @@ class PowerUsageFragment : Fragment() {
             }
             if (!isViewingSnapshot && !isCharging && currentDisplayTab == 0) {
                 loadData()
+                startDischargePolling()
             }
             updateShizukuBannerState()
             checkNormalPermissionBanner()
@@ -491,20 +498,22 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 界面退到后台或暂停时的生命周期回调，暂停高频充电采样协程以节约系统资源，并恢复屏幕休眠。
+     * 界面退到后台或暂停时的生命周期回调，暂停高频充电采样协程与放电轻量刷新协程以节约系统资源，并恢复屏幕休眠。
      */
     override fun onPause() {
         super.onPause()
         stopChargingPolling()
+        stopDischargePolling()
         activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     /**
-     * 界面销毁生命周期回调，停止采样轮询、恢复屏幕休眠、注销动态广播及 Shizuku 监听并释放 ViewBinding。
+     * 界面销毁生命周期回调，停止采样与刷新轮询、恢复屏幕休眠、注销动态广播及 Shizuku 监听并释放 ViewBinding。
      */
     override fun onDestroyView() {
         super.onDestroyView()
         stopChargingPolling()
+        stopDischargePolling()
         activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         try {
             requireContext().unregisterReceiver(powerStateReceiver)
@@ -915,6 +924,7 @@ class PowerUsageFragment : Fragment() {
             binding.appbarPower.requestLayout()
             binding.coordinatorPower.requestLayout()
 
+            stopDischargePolling()
             renderChargingData()
             startChargingPolling()
 
@@ -948,6 +958,7 @@ class PowerUsageFragment : Fragment() {
             binding.coordinatorPower.requestLayout()
 
             loadData()
+            startDischargePolling()
 
             if (showToast) {
                 Toast.makeText(requireContext(), getString(R.string.toast_auto_switch_discharging), Toast.LENGTH_SHORT).show()
@@ -991,13 +1002,21 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 启动充电数据高频实时采样协程（默认 1.5 秒更新一次），向走势图追加新点并驱动界面实时刷新。
+     * 启动充电数据高频实时监控与 UI 渲染协程（默认 1.5 秒更新一次）。
+     * 消除前后台双重并发采样：若后台常驻监控服务 [BatteryMonitorService] 正在运行，
+     * 前台不再执行底层的 [ChargingStatsManager.sampleCurrentPoint] 硬件采样，
+     * 而是直接复用后台服务生成的采样点，彻底消除并发硬件采样与能耗翻倍。
      */
     private fun startChargingPolling() {
         chargingPollingJob?.cancel()
         chargingPollingJob = viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             while (isActive) {
-                val samplePoint = chargingManager.sampleCurrentPoint()
+                val serviceAlive = com.battery.analysis.service.BatteryMonitorService.isServiceActive()
+                val samplePoint = if (serviceAlive) {
+                    chargingManager.getSamplePoints().lastOrNull()
+                } else {
+                    chargingManager.sampleCurrentPoint()
+                }
                 val summary = chargingManager.getCurrentSummary()
                 val points = chargingManager.getSamplePoints()
 
@@ -1019,8 +1038,99 @@ class PowerUsageFragment : Fragment() {
         chargingPollingJob = null
     }
 
+    /** 放电数据前台轻量实时刷新协程（默认 2 秒一次） */
+    private var dischargePollingJob: Job? = null
+
+    /**
+     * 启动放电数据前台轻量实时刷新协程（默认 2 秒一次）。
+     * 在不重新执行高耗能 dumpsys batterystats 的前提下，
+     * 直接复用后台常驻服务在内存中累积的最新物理放电采样点，
+     * 实时重新计算各应用的前台切片时长、微积分平均功耗与能量，
+     * 驱动应用列表与顶部核心瞬时指标动态跳动，实现极致流畅与极致低功耗。
+     */
+    private fun startDischargePolling() {
+        dischargePollingJob?.cancel()
+        dischargePollingJob = viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                delay(2000L)
+                if (!isActive) break
+
+                val currentPkg = lastRenderedPackage
+                if (currentPkg != null && currentDisplayTab == 0 && !isViewingSnapshot) {
+                    val updatedPkg = powerManager.refreshRealtimeDischargePackage(currentPkg)
+                    if (updatedPkg != null) {
+                        withContext(Dispatchers.Main) {
+                            if (_binding != null && currentDisplayTab == 0 && !isViewingSnapshot) {
+                                renderDischargeRealtimeIncremental(updatedPkg)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 停止正在运行的放电数据前台轻量实时刷新协程。
+     */
+    private fun stopDischargePolling() {
+        dischargePollingJob?.cancel()
+        dischargePollingJob = null
+    }
+
+    /**
+     * 将轻量级放电更新数据包增量渲染至界面，更新各应用列表的切片 AVG 功耗与顶部核心瞬时指标。
+     *
+     * @param fullPackage 包含最新切片微积分应用列表与瞬时指标的完整数据包
+     */
+    private fun renderDischargeRealtimeIncremental(fullPackage: com.battery.analysis.manager.FullPowerDataPackage) {
+        lastRenderedPackage = fullPackage
+        val snapshot = fullPackage.batterySnapshot
+        val overview = fullPackage.overviewStats
+
+        // 1. 刷新顶部核心瞬时指标卡片
+        binding.tvTemperature.text = String.format(Locale.getDefault(), getString(R.string.power_temp_format), snapshot.temperature)
+        binding.tvVoltage.text = String.format(Locale.getDefault(), getString(R.string.power_volt_format), snapshot.voltageVolts)
+
+        val onPowerStr = if (overview.screenOnPowerWatts >= 0.05f) {
+            String.format(Locale.getDefault(), "%.2fW", overview.screenOnPowerWatts)
+        } else {
+            "--"
+        }
+        val avgPowerStr = if (overview.avgPowerWatts >= 0.05f) {
+            String.format(Locale.getDefault(), "%.2fW", overview.avgPowerWatts)
+        } else {
+            "--"
+        }
+        val offPowerStr = if (overview.screenOffPowerWatts >= 0.05f) {
+            String.format(Locale.getDefault(), "%.2fW", overview.screenOffPowerWatts)
+        } else {
+            "--"
+        }
+        val bgPowerStr = if (overview.backgroundPowerWatts >= 0.05f) {
+            String.format(Locale.getDefault(), "%.2fW", overview.backgroundPowerWatts)
+        } else {
+            "--"
+        }
+
+        binding.tvPowerScreenOn.text = onPowerStr
+        binding.tvPowerAvg.text = avgPowerStr
+        binding.tvPowerScreenOff.text = offPowerStr
+        binding.tvPowerBackground.text = bgPowerStr
+
+        // 同步刷新折叠吸顶 mini 指标卡片数据
+        binding.tvMiniPowerScreenOn.text = onPowerStr
+        binding.tvMiniPowerAvg.text = avgPowerStr
+        binding.tvMiniPowerScreenOff.text = offPowerStr
+        binding.tvMiniPowerBackground.text = bgPowerStr
+
+        // 2. 刷新应用列表（DiffUtil 会自动平滑更新 AVG 和 Duration 变动的条目）
+        adapter.submitList(fullPackage.appList)
+    }
+
     /**
      * 将当前或最新的充电统计数据包渲染更新至充电专属界面各卡片与三合一图表中。
+     * 采用增量追加模式更新折线图，杜绝每 1.5 秒对 1500 个点执行全量重排与贝塞尔曲线重算。
      *
      * @param summary 充电会话汇总数据实体，若为空则由管理器内存获取
      * @param points 采样点历史列表，若为空则由管理器内存获取
@@ -1043,8 +1153,17 @@ class PowerUsageFragment : Fragment() {
             currentMa = if (liveSnapshot.voltageVolts > 0.5f && summary.maxPowerWatts > 0f) (summary.maxPowerWatts * 1000f / liveSnapshot.voltageVolts) else 0f
         )
 
-        // 1. 更新三合一走势折线图 (功率: 绿, 电量: 蓝, 温度: 红)
-        chargingView.chargingChartView.setData(points)
+        // 1. 增量更新三合一走势折线图 (功率: 绿, 电量: 蓝, 温度: 红)，消除每 1.5 秒全量重绘 1500 点
+        val isNewSession = summary.startTimestamp != lastRenderedSessionStart
+        if (isNewSession || points.size < lastRenderedPointsCount || lastRenderedPointsCount == -1) {
+            chargingView.chargingChartView.setData(points)
+            lastRenderedPointsCount = points.size
+            lastRenderedSessionStart = summary.startTimestamp
+        } else if (points.size > lastRenderedPointsCount) {
+            val newPoints = points.subList(lastRenderedPointsCount, points.size)
+            chargingView.chargingChartView.appendPoints(newPoints)
+            lastRenderedPointsCount = points.size
+        }
 
         // 2. 填充整合版大卡片：环形进度条与中心大字
         chargingView.circleProgressLevel.setProgress(currentPoint.batteryLevel)
@@ -1696,6 +1815,7 @@ class PowerUsageFragment : Fragment() {
      * @param record 选中的耗电历史快照对象
      */
     private fun loadSnapshotRecord(record: com.battery.analysis.model.PowerUsageRecord) {
+        stopDischargePolling()
         isViewingSnapshot = true
         currentLoadedSnapshotTime = record.recordTime
 
@@ -1721,6 +1841,9 @@ class PowerUsageFragment : Fragment() {
         currentLoadedSnapshotTime = null
         binding.layoutPowerSnapshotBanner.visibility = View.GONE
         loadData()
+        if (!chargingManager.isCharging() && currentDisplayTab == 0) {
+            startDischargePolling()
+        }
         Toast.makeText(requireContext(), getString(R.string.toast_restored_realtime), Toast.LENGTH_SHORT).show()
     }
 

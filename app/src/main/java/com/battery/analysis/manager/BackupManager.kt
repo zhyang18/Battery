@@ -66,7 +66,7 @@ class BackupManager private constructor() {
             settingsJson.put("auto_refresh_enabled", prefs.getBoolean("auto_refresh_enabled", false))
         }
         if (prefs.contains("refresh_interval_ms")) {
-            settingsJson.put("refresh_interval_ms", prefs.getLong("refresh_interval_ms", 2000L))
+            settingsJson.put("refresh_interval_ms", prefs.getLong("refresh_interval_ms", 30000L))
         }
         rootJson.put("settings", settingsJson)
 

@@ -40,7 +40,7 @@
     <string name="power_value_format_with_energy">%1$s (%2$s)</string>
     <string name="power_wh_format">%.1fWh</string>
     <string name="power_param_energy">Remaining Energy</string>
-    <string name="power_tooltip_energy">Remaining Energy: %s</string>
+    <string name="power_tooltip_energy">Remaining Energy: %1$s, Total Energy: %2$s</string>
     <string name="power_temp_format">%.1f℃</string>
     <string name="power_volt_format">%.3fV</string>
     <string name="power_status_unplugged">Not charging</string>

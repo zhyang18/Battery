@@ -155,4 +155,34 @@ class BatteryEnergyCalculatorTest {
         )
         assertEquals(150.0f, resultWh, 0.01f)
     }
+
+    /**
+     * 测试电池总能量的标称换算准确性（基于有效容量与标称电压）。
+     */
+    @Test
+    fun testCalculateTotalEnergyWhNormal() {
+        // 5000 mAh, 默认标称电压 3.85V -> 5000 * 3.85 / 1000 = 19.25 Wh
+        val totalEnergy = BatteryEnergyCalculator.calculateTotalEnergyWh(5000f)
+        org.junit.Assert.assertNotNull(totalEnergy)
+        assertEquals(19.25f, totalEnergy!!, 0.01f)
+
+        // 自定义标称电压 3.87V, 6000 mAh -> 6000 * 3.87 / 1000 = 23.22 Wh
+        val totalEnergyCustomVolt = BatteryEnergyCalculator.calculateTotalEnergyWh(6000f, 3.87f)
+        org.junit.Assert.assertNotNull(totalEnergyCustomVolt)
+        assertEquals(23.22f, totalEnergyCustomVolt!!, 0.01f)
+    }
+
+    /**
+     * 测试电池基准容量无效或缺失时如实返回 null，严禁假数据。
+     */
+    @Test
+    fun testCalculateTotalEnergyWhInvalidCapacity() {
+        // 容量为 0 时返回 null
+        val zeroResult = BatteryEnergyCalculator.calculateTotalEnergyWh(0f)
+        org.junit.Assert.assertNull(zeroResult)
+
+        // 负数容量返回 null
+        val negativeResult = BatteryEnergyCalculator.calculateTotalEnergyWh(-100f)
+        org.junit.Assert.assertNull(negativeResult)
+    }
 }

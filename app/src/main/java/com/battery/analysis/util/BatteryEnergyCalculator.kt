@@ -68,5 +68,26 @@ object BatteryEnergyCalculator {
         val remainingMah = effectiveCapacityMah * (safePercent / 100f)
         return (remainingMah * safeNominalVoltage) / 1000f
     }
+
+    /**
+     * 计算设备电池总能量（单位：瓦时 Wh）。
+     * 基于设备有效基准容量（满充真实容量 FCC 或出厂设计容量）与电池标称电压折算：(基准容量 * V_nominal) / 1000。
+     * 若基准容量缺失或非正数，如实返回 null，忠实反映系统真实状态（严禁伪造假数据）。
+     *
+     * @param effectiveCapacityMah 设备有效基准容量（单位：mAh）
+     * @param nominalVoltageVolts 电池标称工作电压（单位：V，默认 3.85V）
+     * @return 计算得到的电池总能量（单位：Wh），若容量缺失或无效则返回 null
+     */
+    fun calculateTotalEnergyWh(
+        effectiveCapacityMah: Float,
+        nominalVoltageVolts: Float = DEFAULT_NOMINAL_VOLTAGE_VOLTS
+    ): Float? {
+        if (effectiveCapacityMah <= 0f) {
+            return null
+        }
+        val safeNominalVoltage = if (nominalVoltageVolts > 0f) nominalVoltageVolts else DEFAULT_NOMINAL_VOLTAGE_VOLTS
+        val totalWh = (effectiveCapacityMah * safeNominalVoltage) / 1000f
+        return if (totalWh > 0f) totalWh else null
+    }
 }
 

@@ -114,8 +114,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="14dp"
                     android:layout_marginEnd="14dp"
-                    android:layout_marginTop="4dp"
-                    android:layout_marginBottom="6dp"
+                    android:layout_marginTop="5dp"
                     android:visibility="gone"
                     app:cardBackgroundColor="#14888888"
                     app:cardCornerRadius="14dp"
@@ -504,8 +503,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="14dp"
                     android:layout_marginEnd="14dp"
-                    android:layout_marginTop="4dp"
-                    android:layout_marginBottom="4dp"
+                    android:layout_marginTop="5dp"
                     android:alpha="0"
                     android:visibility="gone"
                     app:cardBackgroundColor="#14888888"
@@ -684,7 +682,7 @@
             android:fillViewport="true"
             android:paddingStart="14dp"
             android:paddingEnd="14dp"
-            android:paddingBottom="10dp">
+            android:paddingBottom="5dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -696,7 +694,7 @@
                     android:id="@+id/layout_first_time_setup"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="5dp"
                     android:orientation="vertical"
                     android:visibility="gone"
                     tools:visibility="visible">
@@ -869,8 +867,8 @@
                         android:id="@+id/layout_power_snapshot_banner"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:layout_marginBottom="4dp"
+                        android:layout_marginTop="5dp"
+                        android:layout_marginBottom="0dp"
                         android:background="@drawable/bg_dialog_card"
                         android:gravity="center_vertical"
                         android:orientation="horizontal"
@@ -909,7 +907,7 @@
                         android:id="@+id/card_shizuku_guide"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
+                        android:layout_marginTop="5dp"
                         android:visibility="gone"
                         app:cardBackgroundColor="#14888888"
                         app:cardCornerRadius="14dp"
@@ -970,7 +968,7 @@
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
+                        android:layout_marginTop="5dp"
                         app:cardBackgroundColor="#14888888"
                         app:cardCornerRadius="14dp"
                         app:cardElevation="0dp"
@@ -1110,7 +1108,7 @@
                     <com.google.android.material.card.MaterialCardView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
+                        android:layout_marginTop="5dp"
                         app:cardBackgroundColor="#14888888"
                         app:cardCornerRadius="14dp"
                         app:cardElevation="0dp"

@@ -927,13 +927,18 @@ class PowerUsageManager private constructor(private val context: Context) {
             nominalVoltageVolts = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS,
             effectiveCapacityMah = effectiveCapacity
         )
+        val totalEnergyWh = BatteryEnergyCalculator.calculateTotalEnergyWh(
+            effectiveCapacityMah = effectiveCapacity,
+            nominalVoltageVolts = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
+        )
 
         return BatteryStatusSnapshot(
             levelPercent = percent,
             voltageVolts = voltageVolts,
             temperature = tempCelsius,
             energyWh = energyWh,
-            isCharging = isCharging
+            isCharging = isCharging,
+            totalEnergyWh = totalEnergyWh
         )
     }
 
@@ -3099,13 +3104,15 @@ class PowerUsageManager private constructor(private val context: Context) {
  * @property temperature 温度
  * @property energyWh 能量
  * @property isCharging 充电状态
+ * @property totalEnergyWh 电池总能量（单位：Wh，若无法获取真实基准容量则为 null）
  */
 data class BatteryStatusSnapshot(
     val levelPercent: Int,
     val voltageVolts: Float,
     val temperature: Float,
     val energyWh: Float,
-    val isCharging: Boolean
+    val isCharging: Boolean,
+    val totalEnergyWh: Float? = null
 )
 
 /**

@@ -151,8 +151,32 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     private val metricLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = sp8_5
-        textAlign = Paint.Align.CENTER
+        textAlign = Paint.Align.LEFT
     }
+
+    private val metricLabelHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp8_5
+        textAlign = Paint.Align.LEFT
+        style = Paint.Style.STROKE
+        strokeWidth = dp2
+        strokeJoin = Paint.Join.ROUND
+        color = Color.parseColor("#CC121820")
+    }
+
+    /**
+     * 曲线关键节点小数字标签数据载体。
+     *
+     * @property x 物理绘制横坐标（像素）
+     * @property y 物理绘制纵坐标（像素）
+     * @property text 格式化数值显示文本
+     * @property isPriority 是否为高优先级关键极值（整条曲线最峰、最谷为 true，享有绝对优先绘制权）
+     */
+    private data class CurveMarker(
+        val x: Float,
+        val y: Float,
+        val text: String,
+        val isPriority: Boolean = false
+    )
 
     private val screenOnBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
@@ -669,19 +693,34 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         canvas.drawPath(curvePath, linePaint)
 
-        // 收集代表性候选标注节点（起点、全局波峰、全局波谷以及时间片段内的典型极值点）
-        val candidateSamples = mutableListOf<BatterySample>()
-        candidateSamples.add(firstSample)
+        // 提取整条功耗曲线全局绝对最峰（Max）与全局绝对最谷（Min），设定最高优先级
+        val maxSample = downsampled.maxByOrNull { abs(it.powerMw) }
+        val minSample = downsampled.minByOrNull { abs(it.powerMw) }
 
-        var maxSample = firstSample
-        var minSample = firstSample
-        for (s in downsampled) {
-            val pw = abs(s.powerMw)
-            if (pw > abs(maxSample.powerMw)) maxSample = s
-            if (pw < abs(minSample.powerMw)) minSample = s
+        val curveMarkers = mutableListOf<CurveMarker>()
+
+        // 辅助映射方法：将 BatterySample 转换为 CurveMarker
+        fun toMarker(s: BatterySample, isPriority: Boolean): CurveMarker {
+            val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
+            val pW = (abs(s.powerMw) / 1000.0).toFloat().coerceIn(0f, maxScaleW.toFloat())
+            val y = topPadding + (1f - (pW / maxScaleW).toFloat()) * availableH
+            val label = formatPowerWatts(pW)
+            return CurveMarker(x, y, label, isPriority)
         }
-        if (!candidateSamples.contains(maxSample)) candidateSamples.add(maxSample)
-        if (!candidateSamples.contains(minSample)) candidateSamples.add(minSample)
+
+        // 1. 添加高优先级最峰与最谷节点（若 max 与 min 相同则仅添加一个，确保 100% 呈现）
+        if (maxSample != null) {
+            curveMarkers.add(toMarker(maxSample, isPriority = true))
+        }
+        if (minSample != null && minSample != maxSample) {
+            curveMarkers.add(toMarker(minSample, isPriority = true))
+        }
+
+        // 2. 收集次要参考节点（起点与 5 个时间桶内的代表性特征峰）
+        val secondarySamples = mutableListOf<BatterySample>()
+        if (firstSample != maxSample && firstSample != minSample) {
+            secondarySamples.add(firstSample)
+        }
 
         // 将时间跨度分为 5 个桶，在各桶内采集代表性峰值点，确保曲线各区域分布均匀
         val bucketCount = 5
@@ -693,27 +732,23 @@ class BatteryTimelineView @JvmOverloads constructor(
             val bucketSamples = downsampled.filter { it.timestamp in bStart..bEnd }
             if (bucketSamples.isNotEmpty()) {
                 val peakInBucket = bucketSamples.maxByOrNull { abs(it.powerMw) }
-                if (peakInBucket != null && !candidateSamples.contains(peakInBucket)) {
-                    candidateSamples.add(peakInBucket)
+                if (peakInBucket != null && peakInBucket != maxSample && peakInBucket != minSample && !secondarySamples.contains(peakInBucket)) {
+                    secondarySamples.add(peakInBucket)
                 }
             }
         }
 
-        // 计算屏幕物理坐标与格式化功耗标签
-        candidateSamples.sortBy { it.timestamp }
-        val pointMarkers = mutableListOf<Triple<Float, Float, String>>()
-        for (s in candidateSamples) {
-            val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
-            val pW = (abs(s.powerMw) / 1000.0).toFloat().coerceIn(0f, maxScaleW.toFloat())
-            val y = topPadding + (1f - (pW / maxScaleW).toFloat()) * availableH
-            val label = formatPowerWatts(pW)
-            pointMarkers.add(Triple(x, y, label))
+        // 次要节点按时间序列加入列表
+        secondarySamples.sortBy { it.timestamp }
+        for (s in secondarySamples) {
+            curveMarkers.add(toMarker(s, isPriority = false))
         }
 
-        // 绘制关键节点小圆点与功耗数值文本（应用 32dp 安全间距防重叠避让算法）
+        // 绘制关键节点圆点与功耗数值文本（智能方位判断与极值保障）
         metricDotPaint.color = strokeColor
         metricLabelPaint.color = strokeColor
-        drawNonOverlappingMarkers(canvas, pointMarkers, metricLabelPaint, metricDotPaint, contentLeft, contentRight, -dp4, dp32)
+        val bottomBound = topPadding + availableH
+        drawSmartMarkers(canvas, curveMarkers, metricLabelPaint, metricLabelHaloPaint, metricDotPaint, contentLeft, contentRight, topPadding, bottomBound)
     }
 
     /**
@@ -790,8 +825,10 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         canvas.drawPath(curvePath, linePaint)
 
-        // 绘制关键节点圆点与电量百分比文字标签（应用防重叠安全间距避让）
-        drawNonOverlappingMarkers(canvas, pointMarkers, metricLabelPaint, metricDotPaint, contentLeft, contentRight, -dp4, dp20)
+        // 绘制关键节点圆点与电量百分比文字标签（应用智能方位判断与防重叠避让）
+        val batteryMarkers = pointMarkers.map { CurveMarker(it.first, it.second, it.third, isPriority = false) }
+        val batteryBottomBound = topPadding + availableH
+        drawSmartMarkers(canvas, batteryMarkers, metricLabelPaint, metricLabelHaloPaint, metricDotPaint, contentLeft, contentRight, topPadding, batteryBottomBound)
     }
 
     /**
@@ -869,8 +906,10 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         canvas.drawPath(curvePath, linePaint)
 
-        // 绘制关键节点圆点与温度文字标签（应用防重叠安全间距避让）
-        drawNonOverlappingMarkers(canvas, pointMarkers, metricLabelPaint, metricDotPaint, contentLeft, contentRight, dp10, dp24)
+        // 绘制关键节点圆点与温度文字标签（应用智能方位判断与防重叠避让）
+        val tempMarkers = pointMarkers.map { CurveMarker(it.first, it.second, it.third, isPriority = false) }
+        val tempBottomBound = topPadding + availableH
+        drawSmartMarkers(canvas, tempMarkers, metricLabelPaint, metricLabelHaloPaint, metricDotPaint, contentLeft, contentRight, topPadding, tempBottomBound)
     }
 
     /**
@@ -949,53 +988,181 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         canvas.drawPath(curvePath, linePaint)
 
-        // 绘制关键节点圆点与电压文字标签（应用防重叠安全间距避让）
-        drawNonOverlappingMarkers(canvas, pointMarkers, metricLabelPaint, metricDotPaint, contentLeft, contentRight, -dp4, dp28)
+        // 绘制关键节点圆点与电压文字标签（应用智能方位判断与防重叠避让）
+        val voltMarkers = pointMarkers.map { CurveMarker(it.first, it.second, it.third, isPriority = false) }
+        val voltBottomBound = topPadding + availableH
+        drawSmartMarkers(canvas, voltMarkers, metricLabelPaint, metricLabelHaloPaint, metricDotPaint, contentLeft, contentRight, topPadding, voltBottomBound)
     }
 
     /**
-     * 绘制曲线关键节点圆点与数值文字标签，并应用横向安全间距防重叠避让算法。
-     * 确保相邻文字标签之间具有充足的横向间距，彻底消除文字左右重叠。
+     * 计算指定排版方位下的文本外接矩形区域。
+     *
+     * @param marker 待绘制的数值标注节点 [CurveMarker]
+     * @param textWidth 文本测量物理宽度（像素）
+     * @param textHeight 文本测量物理高度（像素）
+     * @param orientation 排版目标方位：0 表示左侧（Left），1 表示上方（Top），2 表示右侧（Right）
+     * @param contentLeft 图表内容区域左边界 X 坐标（像素）
+     * @param contentRight 图表内容区域右边界 X 坐标（像素）
+     * @param topBound 图表内容区域上边界 Y 坐标（像素）
+     * @param bottomBound 图表内容区域下边界 Y 坐标（像素）
+     * @return 对应排版方位下的文本外接矩形 [RectF]
+     */
+    private fun calculateMarkerTextRect(
+        marker: CurveMarker,
+        textWidth: Float,
+        textHeight: Float,
+        orientation: Int,
+        contentLeft: Float,
+        contentRight: Float,
+        topBound: Float,
+        bottomBound: Float
+    ): RectF {
+        val dotRadius = dp2_5
+        val spacing = dp3
+        return when (orientation) {
+            0 -> { // 左侧 (Left)：优先显示在点左侧偏上
+                val right = marker.x - dotRadius - spacing
+                val left = right - textWidth
+                val top = (marker.y - textHeight / 2f - dp1).coerceIn(topBound, bottomBound - textHeight)
+                RectF(left, top, right, top + textHeight)
+            }
+            1 -> { // 上方 (Top)：居中显示在点上方
+                val bottom = marker.y - dotRadius - spacing
+                val top = bottom - textHeight
+                val left = (marker.x - textWidth / 2f).coerceIn(contentLeft, contentRight - textWidth)
+                RectF(left, top, left + textWidth, bottom)
+            }
+            else -> { // 右侧 (Right)：显示在点右侧偏上
+                val left = marker.x + dotRadius + spacing
+                val right = (left + textWidth).coerceAtMost(contentRight)
+                val correctedLeft = (right - textWidth).coerceAtLeast(contentLeft)
+                val top = (marker.y - textHeight / 2f - dp1).coerceIn(topBound, bottomBound - textHeight)
+                RectF(correctedLeft, top, correctedLeft + textWidth, top + textHeight)
+            }
+        }
+    }
+
+    /**
+     * 智能探测候选节点的最佳排版方位。
+     * 按照“左侧 -> 上方 -> 右侧”优先级进行智能试探：若左侧显示不下则探测上方，若上方显示不下（如峰值顶格）则探测右侧。
+     *
+     * @param marker 待绘制的数值标注节点 [CurveMarker]
+     * @param textWidth 文本物理宽度（像素）
+     * @param textHeight 文本物理高度（像素）
+     * @param contentLeft 图表内容区域左边界 X 坐标（像素）
+     * @param contentRight 图表内容区域右边界 X 坐标（像素）
+     * @param topBound 图表内容区域上边界 Y 坐标（像素）
+     * @param bottomBound 图表内容区域下边界 Y 坐标（像素）
+     * @param occupiedRects 已被其他标签占用的带安全间距的屏幕矩形列表
+     * @param checkCollision 是否强制要求不与已占用矩形相交碰撞
+     * @return 智能计算出的最佳排版矩形 [RectF]，若所有方位均发生遮挡且强制检查碰撞则返回 null
+     */
+    private fun determineBestMarkerRect(
+        marker: CurveMarker,
+        textWidth: Float,
+        textHeight: Float,
+        contentLeft: Float,
+        contentRight: Float,
+        topBound: Float,
+        bottomBound: Float,
+        occupiedRects: List<RectF>,
+        checkCollision: Boolean
+    ): RectF? {
+        val orientations = listOf(0, 1, 2)
+        for (ori in orientations) {
+            val rect = calculateMarkerTextRect(marker, textWidth, textHeight, ori, contentLeft, contentRight, topBound, bottomBound)
+            // 1. 视窗边界检查：确保文字完整落在可视区域内，绝不发生边缘截断
+            val inBounds = when (ori) {
+                0 -> rect.left >= contentLeft && rect.top >= topBound && rect.bottom <= bottomBound
+                1 -> rect.top >= topBound && rect.bottom <= bottomBound && rect.left >= contentLeft && rect.right <= contentRight
+                else -> rect.right <= contentRight && rect.top >= topBound && rect.bottom <= bottomBound
+            }
+            if (!inBounds) continue
+
+            // 2. 防视觉叠压碰撞检查
+            if (checkCollision) {
+                val collision = occupiedRects.any { occupied ->
+                    RectF.intersects(rect, occupied)
+                }
+                if (collision) continue
+            }
+
+            return rect
+        }
+        return null
+    }
+
+    /**
+     * 智能计算并绘制曲线关键节点圆点与小数字标签。
+     * 针对曲线最峰（最高点）、最谷（最低点）赋予绝对优先权确保 100% 呈现，
+     * 并针对每个节点智能判断放置方位：优先居左，若左侧空间不足则智能切换至上方或右侧，彻底杜绝边界截断与标签重叠。
      *
      * @param canvas 绘制目标画布 [Canvas]
-     * @param candidates 候选节点列表（X坐标, Y坐标, 标签文本）
-     * @param paint 文本画笔 [Paint]
-     * @param dotPaint 圆点画笔 [Paint]
+     * @param markers 候选标注节点列表 [CurveMarker]
+     * @param paint 文本主色填充画笔 [Paint]
+     * @param haloPaint 文本微暗描边光晕画笔 [Paint]
+     * @param dotPaint 节点小圆点画笔 [Paint]
      * @param contentLeft 内容区左边缘 X 坐标
      * @param contentRight 内容区右边缘 X 坐标
-     * @param yOffset 文本相对于 Y 坐标的纵向偏移像素（向上为负，向下为正）
-     * @param minSpacingPx 相邻标签之间的最小安全横向像素间距
+     * @param topBound 内容区上边缘 Y 坐标
+     * @param bottomBound 内容区下边缘 Y 坐标
      */
-    private fun drawNonOverlappingMarkers(
+    private fun drawSmartMarkers(
         canvas: Canvas,
-        candidates: List<Triple<Float, Float, String>>,
+        markers: List<CurveMarker>,
         paint: Paint,
+        haloPaint: Paint,
         dotPaint: Paint,
         contentLeft: Float,
         contentRight: Float,
-        yOffset: Float,
-        minSpacingPx: Float = dp32
+        topBound: Float,
+        bottomBound: Float
     ) {
-        if (candidates.isEmpty()) return
+        if (markers.isEmpty()) return
 
-        var lastDrawnRight = -Float.MAX_VALUE
-        for (i in candidates.indices) {
-            val (x, y, text) = candidates[i]
-            val textWidth = paint.measureText(text)
-            val halfW = textWidth / 2f
-            val textLeft = (x - halfW).coerceIn(contentLeft, contentRight - textWidth)
-            val textRight = textLeft + textWidth
+        paint.textAlign = Paint.Align.LEFT
+        haloPaint.textAlign = Paint.Align.LEFT
 
-            // 判断是否与上一个已绘制的标签发生横向重叠（保留起点和具有足够安全间距的关键拐点）
-            val isFirst = (i == 0)
-            val hasEnoughSpace = (textLeft - lastDrawnRight) >= minSpacingPx
+        val fontMetrics = paint.fontMetrics
+        val textHeight = fontMetrics.descent - fontMetrics.ascent
+        val dotRadius = dp2_5
+        val occupiedRects = mutableListOf<RectF>()
 
-            if (isFirst || hasEnoughSpace) {
-                // 绘制节点小圆点
-                canvas.drawCircle(x, y, dp2_5, dotPaint)
-                // 绘制文本
-                canvas.drawText(text, textLeft, y + yOffset, paint)
-                lastDrawnRight = textRight
+        // 1. 第一阶段：最峰（Max）与最谷（Min）绝对高优先级绘制（绝不被过滤丢弃）
+        val priorityMarkers = markers.filter { it.isPriority }
+        for (m in priorityMarkers) {
+            val textWidth = paint.measureText(m.text)
+            var bestRect = determineBestMarkerRect(m, textWidth, textHeight, contentLeft, contentRight, topBound, bottomBound, occupiedRects, checkCollision = true)
+            if (bestRect == null) {
+                bestRect = determineBestMarkerRect(m, textWidth, textHeight, contentLeft, contentRight, topBound, bottomBound, occupiedRects, checkCollision = false)
+                    ?: calculateMarkerTextRect(m, textWidth, textHeight, 1, contentLeft, contentRight, topBound, bottomBound)
+            }
+
+            // 绘制圆点
+            canvas.drawCircle(m.x, m.y, dotRadius, dotPaint)
+
+            // 双层清晰绘制：微暗描边光晕 + 主题前景色
+            val baseline = bestRect.top - fontMetrics.ascent
+            canvas.drawText(m.text, bestRect.left, baseline, haloPaint)
+            canvas.drawText(m.text, bestRect.left, baseline, paint)
+
+            // 占位矩形附加安全缓冲呼吸空间（左右 4dp，上下 2dp）
+            occupiedRects.add(RectF(bestRect.left - dp4, bestRect.top - dp2, bestRect.right + dp4, bestRect.bottom + dp2))
+        }
+
+        // 2. 第二阶段：次要参考节点在无碰撞冲突的前提下补充绘制
+        val secondaryMarkers = markers.filter { !it.isPriority }
+        for (m in secondaryMarkers) {
+            val textWidth = paint.measureText(m.text)
+            val bestRect = determineBestMarkerRect(m, textWidth, textHeight, contentLeft, contentRight, topBound, bottomBound, occupiedRects, checkCollision = true)
+            if (bestRect != null) {
+                canvas.drawCircle(m.x, m.y, dotRadius, dotPaint)
+
+                val baseline = bestRect.top - fontMetrics.ascent
+                canvas.drawText(m.text, bestRect.left, baseline, haloPaint)
+                canvas.drawText(m.text, bestRect.left, baseline, paint)
+
+                occupiedRects.add(RectF(bestRect.left - dp4, bestRect.top - dp2, bestRect.right + dp4, bestRect.bottom + dp2))
             }
         }
     }

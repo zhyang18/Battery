@@ -1293,7 +1293,10 @@ class PowerUsageFragment : Fragment() {
 
         val energyText = String.format(Locale.getDefault(), getString(R.string.power_wh_format), snapshot.energyWh)
         binding.tvEnergyWh.text = energyText
-        val energyTooltip = getString(R.string.power_tooltip_energy, energyText)
+        val totalEnergyText = snapshot.totalEnergyWh?.takeIf { it > 0f }?.let {
+            String.format(Locale.getDefault(), getString(R.string.power_wh_format), it)
+        } ?: "--"
+        val energyTooltip = getString(R.string.power_tooltip_energy, energyText, totalEnergyText)
         binding.llEnergyContainer.contentDescription = energyTooltip
         binding.llEnergyContainer.setOnClickListener {
             Toast.makeText(requireContext(), energyTooltip, Toast.LENGTH_SHORT).show()

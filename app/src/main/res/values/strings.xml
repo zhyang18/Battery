@@ -40,7 +40,7 @@
     <string name="power_value_format_with_energy">%1$s (%2$s)</string>
     <string name="power_wh_format">%.1fWh</string>
     <string name="power_param_energy">当前剩余能量</string>
-    <string name="power_tooltip_energy">当前剩余能量：%s</string>
+    <string name="power_tooltip_energy">当前能量：%1$s，总能量：%2$s</string>
     <string name="power_temp_format">%.1f℃</string>
     <string name="power_volt_format">%.3fV</string>
     <string name="power_status_unplugged">未充电</string>

@@ -73,12 +73,17 @@ data class PowerUsageRecord(
     fun toFullPowerPackage(context: Context): FullPowerDataPackage {
         val pm = context.packageManager
 
+        val batteryTotalEnergyWh = com.battery.analysis.util.BatteryEnergyCalculator.calculateTotalEnergyWh(
+            effectiveCapacityMah = com.battery.analysis.manager.PowerUsageManager.getInstance(context).getEffectiveDeviceCapacityMah(),
+            nominalVoltageVolts = com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
+        )
         val snapshot = BatteryStatusSnapshot(
             levelPercent = levelPercent,
             voltageVolts = voltageVolts,
             temperature = temperature,
             energyWh = energyWh,
-            isCharging = isCharging
+            isCharging = isCharging,
+            totalEnergyWh = batteryTotalEnergyWh
         )
 
         val overview = PowerOverviewStats(

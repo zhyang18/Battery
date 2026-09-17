@@ -17,3 +17,11 @@ target_link_libraries(
     battery_sampler
     ${log-lib}
 )
+
+# 支持 16 KB 页面大小对齐（满足 Android 15+ 及 Google Play 要求）
+target_link_options(
+    battery_sampler
+    PRIVATE
+    "-Wl,-z,max-page-size=16384"
+    "-Wl,-z,common-page-size=16384"
+)

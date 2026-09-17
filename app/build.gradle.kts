@@ -7,12 +7,12 @@ plugins {
 
 android {
     namespace = "com.battery.analysis"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.battery.analysis"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 32
         versionName = "1.9.5"
 

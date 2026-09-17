@@ -82,6 +82,13 @@ object SysfsBatterySampler {
     @Volatile
     private var directFilesUnreadableUntil: Long = 0L
 
+    /** Shizuku 路径探查失败后的熔断重试冷却间隔（60 秒），杜绝高频重复 fork 探测进程 */
+    private const val SHIZUKU_PROBE_RETRY_INTERVAL_MS = 60_000L
+
+    /** 下一次允许重新执行 Shizuku 节点路径扫描的时间戳（毫秒） */
+    @Volatile
+    private var shizukuProbeUnreadableUntil: Long = 0L
+
     /** 静态缓存的 Shizuku.newProcess 反射 Method 引用，消除每秒反射查找开销 */
     @Volatile
     private var cachedNewProcessMethod: java.lang.reflect.Method? = null
@@ -278,6 +285,27 @@ object SysfsBatterySampler {
      * @param fallbackTempCelsius 广播提供的备用温度（摄氏度 ℃）
      * @return 包含电流、电压、功率与温度的硬件采样实体，若无法获取则返回 null
      */
+    /**
+     * 从 Linux 底层节点或 Android Health HAL 直接采样当前瞬时硬件物理指标（通用方法，支持充电与放电场景）。
+     *
+     * 优化能效阶梯策略（极致低功耗设计，深度对标 BatteryRecorder）：
+     * 1. 优先尝试 JNI 原生缓存直读（微秒级，0 IPC，0 fork）；
+     * 2. 尝试 App 内部直接文件流读取（若权限允许，0 IPC，0 fork）；
+     * 3. 优先通过 Android Health HAL 原生硬件寄存器直读（BatteryManager.BATTERY_PROPERTY_CURRENT_NOW，微秒级，0 进程 fork）；
+     * 4. 仅在前序低开销通道均无法获取时，尝试 Shizuku Shell 受控批量通道（带 3000ms 冷却保护与 60 秒路径探测熔断，彻底杜绝循环 fork 进程）；
+     * 5. 若均无法获取则如实返回 null，绝不捏造假数据或保底脏数据。
+     *
+     * 充电场景下：
+     * 若硬件底层识别为净放电（例如 `status` 节点为 Discharging / Not charging，或电流上报为负值），
+     * 保持真实的物理方向，返回负向功率（如 -12.3W）与负向电流，供图表在 0W 基准线下方绘制，
+     * 杜绝将重载/弱充时的放电尖峰错误统计为正向充电峰值功率。
+     *
+     * @param context 应用程序上下文
+     * @param isCharging 是否处于充电连接状态
+     * @param fallbackVoltageVolts 广播提供的备用电压（伏特 V）
+     * @param fallbackTempCelsius 广播提供的备用温度（摄氏度 ℃）
+     * @return 包含电流、电压、功率与温度的硬件采样实体，若无法获取则返回 null
+     */
     fun sampleHardwareBattery(
         context: Context,
         isCharging: Boolean,
@@ -354,52 +382,77 @@ object SysfsBatterySampler {
             return bmSample
         }
 
-        // 4. Shizuku Shell 批量通道（仅在路径已探明时执行单次快速并发读取，受 3000ms 冷却限频保护）
-        if (isShizukuAvailable() && cachedCurrentPath != null && cachedVoltagePath != null) {
-            val batchSample = readHardwareBatchViaShizuku(fallbackVoltageVolts, fallbackTempCelsius, isCharging)
-            if (batchSample != null && Math.abs(batchSample.currentMa) > 0f) {
-                return batchSample
+        // 4. Shizuku 受控批量通道（仅在前序低开销通道均无法获取且 Shizuku 授权时使用）
+        // 彻底杜绝每个采样周期逐路径循环 fork 进程，受 3000ms 采样冷却与 60 秒探查熔断双重保护
+        if (isShizukuAvailable()) {
+            if (cachedCurrentPath == null || cachedVoltagePath == null) {
+                probeShizukuPathsOnce()
             }
-        }
-
-        // 5. 自适应探测与逐通道回退：初次启动或缓存未命中时，全量扫描各候选节点并自动缓存有效路径
-        val sysfsCurrent = readSysfsCurrentMa()
-        val sysfsVoltage = readSysfsVoltageVolts()
-        val sysfsTemp = readSysfsTemperature()
-        val sysfsStatus = readSysfsStatus()
-
-        val finalVoltage = sysfsVoltage ?: fallbackVoltageVolts ?: 0f
-        val finalTemp = sysfsTemp ?: fallbackTempCelsius
-
-        if (sysfsCurrent != null && Math.abs(sysfsCurrent) > 0f && finalVoltage > 0f) {
-            val pWatts = (Math.abs(sysfsCurrent) * finalVoltage) / 1000f
-            val isDischargingStatus = sysfsStatus != null && (sysfsStatus.startsWith("D", ignoreCase = true) || sysfsStatus.startsWith("N", ignoreCase = true))
-            val isNetDischarging = isDischargingStatus || (sysfsCurrent < 0f)
-            val signedPower = if (isCharging) {
-                if (isNetDischarging) -pWatts else pWatts
-            } else {
-                pWatts
+            if (cachedCurrentPath != null && cachedVoltagePath != null) {
+                val batchSample = readHardwareBatchViaShizuku(fallbackVoltageVolts, fallbackTempCelsius, isCharging)
+                if (batchSample != null && Math.abs(batchSample.currentMa) > 0f) {
+                    return batchSample
+                }
             }
-            val signedCur = if (isCharging) {
-                if (isNetDischarging) -Math.abs(sysfsCurrent) else Math.abs(sysfsCurrent)
-            } else {
-                Math.abs(sysfsCurrent)
-            }
-            return HardwareSample(
-                currentMa = signedCur,
-                voltageVolts = finalVoltage,
-                powerWatts = Math.round(signedPower * 1000f) / 1000f,
-                temperatureCelsius = finalTemp
-            )
         }
 
         return null
     }
 
     /**
+     * 针对未探明的 sysfs 节点执行一次性受控探测，杜绝在每个采样循环重复循环 fork 进程。
+     * 探测具备 60 秒熔断冷却机制，一旦未命中，60 秒内禁止再次尝试探测。
+     *
+     * @return 若成功探明电流与电压节点返回 true，否则返回 false
+     */
+    private fun probeShizukuPathsOnce(): Boolean {
+        val now = System.currentTimeMillis()
+        if (now < shizukuProbeUnreadableUntil) {
+            return false
+        }
+        if (!isShizukuAvailable()) {
+            return false
+        }
+
+        try {
+            val method = getNewProcessMethod() ?: return false
+            // 拼接单次探查脚本，一次性找出首个可读的电流与电压节点
+            val curTestCmd = CURRENT_PATHS.joinToString(" ") { "[ -r $it ] && echo CUR:$it && break" }
+            val voltTestCmd = VOLTAGE_PATHS.joinToString(" ") { "[ -r $it ] && echo VOLT:$it && break" }
+            val fullCmd = "$curTestCmd; $voltTestCmd"
+            val proc = method.invoke(
+                null,
+                arrayOf("sh", "-c", fullCmd),
+                null,
+                null
+            ) as? Process ?: return false
+
+            val lines = proc.inputStream.bufferedReader().use { it.readLines() }
+            proc.waitFor()
+
+            for (line in lines) {
+                val trimmed = line.trim()
+                if (trimmed.startsWith("CUR:")) {
+                    cachedCurrentPath = trimmed.removePrefix("CUR:")
+                } else if (trimmed.startsWith("VOLT:")) {
+                    cachedVoltagePath = trimmed.removePrefix("VOLT:")
+                }
+            }
+        } catch (_: Throwable) {
+        }
+
+        if (cachedCurrentPath == null || cachedVoltagePath == null) {
+            shizukuProbeUnreadableUntil = now + SHIZUKU_PROBE_RETRY_INTERVAL_MS
+            return false
+        }
+        return true
+    }
+
+    /**
      * 通过 Android Framework 原生 BatteryManager 与底层 Health HAL 硬件寄存器直读瞬时指标。
      *
      * 该通道直连底层芯片库仑计硬件寄存器，耗时仅微秒级且无任何进程 fork 开销，
+     * 优先复用广播已缓存的电压与温度，消除重复跨进程注册 Receiver 的 Binder IPC，
      * 具备极高能效比，且忠实反映底层硬件真实物理数据。
      *
      * @param context 应用程序上下文
@@ -421,24 +474,35 @@ object SysfsBatterySampler {
             if (rawCur == 0 || rawCur == Int.MIN_VALUE) {
                 return null
             }
-            val finalVoltage = fallbackVoltageVolts ?: run {
-                val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-                val stickyIntent = context.registerReceiver(null, filter)
-                val rawMv = stickyIntent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
-                if (rawMv > 0) BatteryUnitNormalizer.normalizeVoltageVolts(rawMv.toLong()) else null
-            } ?: cachedVoltagePath?.let { tryReadVoltageFile(it) } ?: return null
 
+            var resolvedVoltage: Float? = if (fallbackVoltageVolts != null && fallbackVoltageVolts > 0f) fallbackVoltageVolts else null
+            var resolvedTemp: Float? = fallbackTempCelsius
+
+            // 仅在关键电压缺失时，单次注册一次系统广播获取当前最新参数，杜绝多次重复跨进程注册
+            if (resolvedVoltage == null || resolvedTemp == null) {
+                try {
+                    val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+                    val stickyIntent = context.registerReceiver(null, filter)
+                    if (stickyIntent != null) {
+                        if (resolvedVoltage == null) {
+                            val rawMv = stickyIntent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1)
+                            if (rawMv > 0) resolvedVoltage = BatteryUnitNormalizer.normalizeVoltageVolts(rawMv.toLong())
+                        }
+                        if (resolvedTemp == null) {
+                            val rawTemp = stickyIntent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1)
+                            if (rawTemp > 0) resolvedTemp = rawTemp / 10f
+                        }
+                    }
+                } catch (_: Throwable) {}
+            }
+
+            val finalVoltage = resolvedVoltage ?: cachedVoltagePath?.let { tryReadVoltageFile(it) } ?: return null
             if (finalVoltage <= 0f) return null
 
             val curMa = BatteryUnitNormalizer.normalizeCurrentMa(rawCur.toLong(), isCharging = isCharging)
             if (curMa <= 0f) return null
 
-            val finalTemp = fallbackTempCelsius ?: run {
-                val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-                val stickyIntent = context.registerReceiver(null, filter)
-                val rawTemp = stickyIntent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
-                if (rawTemp > 0) rawTemp / 10f else null
-            } ?: cachedTempPath?.let { tryReadTempFile(it) }
+            val finalTemp = resolvedTemp ?: cachedTempPath?.let { tryReadTempFile(it) }
 
             val pWatts = (curMa * finalVoltage) / 1000f
             val isNetDischarging = rawCur < 0
@@ -530,32 +594,23 @@ object SysfsBatterySampler {
         val now = System.currentTimeMillis()
         val canScanDirectFiles = now >= directFilesUnreadableUntil
         if (canScanDirectFiles) {
-            var anyFound = false
             for (path in CURRENT_PATHS) {
                 val result = tryReadCurrentFile(path)
                 if (result != null) {
                     Log.d(TAG, "电流节点直接读取成功：$path")
                     cachedCurrentPath = path
-                    anyFound = true
                     return result
                 }
             }
-            if (!anyFound) {
-                directFilesUnreadableUntil = now + DIRECT_FILES_RETRY_INTERVAL_MS
-            }
+            directFilesUnreadableUntil = now + DIRECT_FILES_RETRY_INTERVAL_MS
         }
 
-        // ── 4. Shizuku Shell 通道（Shell UID 可绕过普通 App SELinux 限制） ──
-        if (isShizukuAvailable()) {
-            val candidates = if (cachedCurrentPath != null) listOf(cachedCurrentPath!!) else CURRENT_PATHS
-            for (path in candidates) {
-                val text = readViaShizuku(path) ?: continue
-                val raw = text.toLongOrNull() ?: continue
-                if (raw != 0L) {
-                    Log.d(TAG, "电流节点 Shizuku 读取成功：$path")
-                    cachedCurrentPath = path
-                    return normalizeCurrentToMa(Math.abs(raw))
-                }
+        // ── 4. Shizuku Shell 通道（仅在路径已探明时读取，禁止遍历 candidates 频繁 fork 进程） ──
+        if (isShizukuAvailable() && cachedCurrentPath != null) {
+            val text = readViaShizuku(cachedCurrentPath!!)
+            val raw = text?.toLongOrNull()
+            if (raw != null && raw != 0L) {
+                return normalizeCurrentToMa(Math.abs(raw))
             }
         }
 
@@ -594,32 +649,23 @@ object SysfsBatterySampler {
         val now = System.currentTimeMillis()
         val canScanDirectFiles = now >= directFilesUnreadableUntil
         if (canScanDirectFiles) {
-            var anyFound = false
             for (path in VOLTAGE_PATHS) {
                 val result = tryReadVoltageFile(path)
                 if (result != null) {
                     Log.d(TAG, "电压节点直接读取成功：$path")
                     cachedVoltagePath = path
-                    anyFound = true
                     return result
                 }
             }
-            if (!anyFound) {
-                directFilesUnreadableUntil = now + DIRECT_FILES_RETRY_INTERVAL_MS
-            }
+            directFilesUnreadableUntil = now + DIRECT_FILES_RETRY_INTERVAL_MS
         }
 
-        // ── 4. Shizuku Shell 通道 ──
-        if (isShizukuAvailable()) {
-            val candidates = if (cachedVoltagePath != null) listOf(cachedVoltagePath!!) else VOLTAGE_PATHS
-            for (path in candidates) {
-                val text = readViaShizuku(path) ?: continue
-                val raw = text.toLongOrNull() ?: continue
-                if (raw > 0L) {
-                    Log.d(TAG, "电压节点 Shizuku 读取成功：$path")
-                    cachedVoltagePath = path
-                    return normalizeVoltageToVolts(raw)
-                }
+        // ── 4. Shizuku Shell 通道（仅在路径已探明时读取，禁止遍历 candidates 频繁 fork 进程） ──
+        if (isShizukuAvailable() && cachedVoltagePath != null) {
+            val text = readViaShizuku(cachedVoltagePath!!)
+            val raw = text?.toLongOrNull()
+            if (raw != null && raw > 0L) {
+                return normalizeVoltageToVolts(raw)
             }
         }
 
@@ -712,15 +758,11 @@ object SysfsBatterySampler {
             }
         }
 
-        // ── 4. Shizuku 通道 ──
-        if (isShizukuAvailable()) {
-            val candidates = if (cachedStatusPath != null) listOf(cachedStatusPath!!) else STATUS_PATHS
-            for (path in candidates) {
-                val text = readViaShizuku(path) ?: continue
-                if (text.isNotEmpty()) {
-                    cachedStatusPath = path
-                    return text
-                }
+        // ── 4. Shizuku 通道（仅在路径已探明时读取） ──
+        if (isShizukuAvailable() && cachedStatusPath != null) {
+            val text = readViaShizuku(cachedStatusPath!!)
+            if (!text.isNullOrEmpty()) {
+                return text
             }
         }
 

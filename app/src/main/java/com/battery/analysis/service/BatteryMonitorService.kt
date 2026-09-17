@@ -418,16 +418,17 @@ class BatteryMonitorService : Service() {
     @Volatile
     private var lastForegroundQueryTime: Long = 0L
 
-    /** 前台包名短效内存缓存有效时长（毫秒），避免每秒高频发起系统跨进程 IPC 查询消耗电量 */
-    private val FOREGROUND_CACHE_EXPIRE_MS = 2_500L
+    /** 前台包名短效内存缓存有效时长（毫秒），延长至 8 秒避免高频发起系统跨进程 IPC 查询消耗电量 */
+    private val FOREGROUND_CACHE_EXPIRE_MS = 8_000L
 
     /**
      * 获取当前处于系统最前台运行的应用包名。
-     * 多级高精度探测：优先使用 2.5 秒短效缓存避免高频 IPC；
-     * 其次通过 Shizuku 特权 Binder 直调 IActivityTaskManager；
-     * 再次通过无障碍服务 [KeepAliveAccessibilityService] 毫秒级读取；
-     * 最后通过 [UsageStatsManager] 提取最近 10 秒事件并保持状态（亮屏期间未切应用时持续沿用），
-     * 为秒级硬件采样点精准打上前台应用归属标签，兼顾低功耗与高准度。
+     * 多级低功耗高精度探测：
+     * 1. 优先使用 8 秒短效内存缓存，杜绝高频重复触发系统跨进程 IPC 与 CPU 唤醒；
+     * 2. 其次通过 Shizuku 特权 Binder 直调 IActivityTaskManager（对标 BatteryRecorder 架构，无需无障碍）；
+     * 3. 再次通过无障碍服务 [KeepAliveAccessibilityService] 事件驱动毫秒级读取（0 轮询开销）；
+     * 4. 兜底策略：基于 [UsageStatsManager] 提取最近 10 秒增量事件并保持状态（若无新事件发生直接沿用上一有效应用），
+     *    彻底废除过去 120 秒全量事件大遍历，兼顾极低整机能耗与前台归属准度。
      *
      * @return 当前置顶前台应用包名，若无法获取则返回 null
      */
@@ -445,7 +446,7 @@ class BatteryMonitorService : Service() {
             return shizukuPkg
         }
 
-        // 2. 次优先级：采用无障碍服务毫秒级捕获的置顶应用（若用户开启了无障碍）
+        // 2. 次优先级：采用无障碍服务事件驱动捕获的置顶应用（若用户开启了无障碍，纯事件驱动，0 轮询开销）
         val accessibilityPkg = KeepAliveAccessibilityService.currentForegroundPackage
         if (!accessibilityPkg.isNullOrEmpty()) {
             lastKnownForegroundPackage = accessibilityPkg
@@ -456,20 +457,24 @@ class BatteryMonitorService : Service() {
         val defaultHomePkg = ShizukuForegroundAppDetector.getDefaultHomePackage(this)
             ?: PowerUsageManager.getInstance(this).getDefaultHomeLauncherPackage()
 
-        // 3. 兜底策略：基于 UsageStatsManager 事件探测，探测窗口设为 120 秒，确保捕获当前前台 Activity
+        // 3. 兜底策略：基于 UsageStatsManager 增量事件探测
+        // 若此前已存在有效前台包名，仅查询最近 10 秒增量事件；仅在首次冷启动无缓存时查询最近 30 秒窗口，杜绝 120 秒全量大遍历
         try {
             val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
             if (usm != null) {
-                val events = usm.queryEvents(now - 120_000L, now)
+                val windowMs = if (lastKnownForegroundPackage != null) 10_000L else 30_000L
+                val events = usm.queryEvents(now - windowMs, now)
                 val event = UsageEvents.Event()
                 var latestResumedPkg: String? = null
                 var latestResumedTs = 0L
                 var latestPausedTs = 0L
+                var hasAnyEvent = false
 
                 while (events.hasNextEvent()) {
                     events.getNextEvent(event)
                     val pkg = event.packageName
                     if (pkg.isNullOrEmpty() || pkg.startsWith("com.android.systemui")) continue
+                    hasAnyEvent = true
 
                     when (event.eventType) {
                         UsageEvents.Event.ACTIVITY_RESUMED -> {
@@ -484,6 +489,11 @@ class BatteryMonitorService : Service() {
                             }
                         }
                     }
+                }
+
+                // 若增量窗口内未发生任何应用切换生命周期事件，直接沿用上一已知有效应用，0 额外开销
+                if (!hasAnyEvent && lastKnownForegroundPackage != null) {
+                    return lastKnownForegroundPackage
                 }
 
                 // 若最新事件为前台应用 PAUSED，且之后没有新的应用 RESUMED，说明用户已切回桌面
@@ -511,38 +521,7 @@ class BatteryMonitorService : Service() {
         return null
     }
 
-    /**
-     * 获取设备当前实时的瞬时放电功耗（单位：瓦特 W）。
-     * 优先采用硬件直读采样器 [SysfsBatterySampler] 直接读取内核 sysfs 节点，
-     * 若受权限限制或返回无效，则安全回退至读取底层硬件库仑计电流寄存器并结合缓存电压推算。
-     *
-     * @return 瞬时放电功耗数值（绝对值，单位：W），若不可用则返回 null
-     */
-    private fun getDischargePowerWatts(): Float? {
-        val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
-            context = this,
-            fallbackVoltageVolts = cachedVoltageVolts,
-            fallbackTempCelsius = cachedTemperature
-        )
-        if (hwSample != null && hwSample.powerWatts > 0f) {
-            return hwSample.powerWatts
-        }
 
-        return try {
-            val batteryManager = getSystemService(Context.BATTERY_SERVICE) as? BatteryManager ?: return null
-            val rawCurrent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
-            if (rawCurrent == 0 || rawCurrent == Int.MIN_VALUE) return null
-            val curMa = com.battery.analysis.util.BatteryUnitNormalizer.normalizeCurrentMa(rawCurrent.toLong(), isCharging = false)
-            val voltage: Float = cachedVoltageVolts
-            if (voltage > 0f && curMa > 0f) {
-                com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(voltage, curMa, isCharging = false)
-            } else {
-                null
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
 
     /**
      * 计算并格式化当前瞬时电池监控信息文本摘要（格式：功率 | 电压 | 温度）。
@@ -556,18 +535,9 @@ class BatteryMonitorService : Service() {
 
         val powerWatts = if (isCharging) {
             val chargingPoint = chargingManager.getSamplePoints().lastOrNull()
-            if (chargingPoint != null) {
-                chargingPoint.powerWatts
-            } else {
-                val chgSample = SysfsBatterySampler.sampleHardwareCharging(
-                    context = this,
-                    fallbackVoltageVolts = cachedVoltageVolts,
-                    fallbackTempCelsius = cachedTemperature
-                )
-                chgSample?.powerWatts ?: 0f
-            }
+            chargingPoint?.powerWatts
         } else {
-            cachedDischargePowerWatts ?: getDischargePowerWatts()
+            cachedDischargePowerWatts
         }
 
         val powerStr = if (powerWatts != null && abs(powerWatts) > 0.05f) {

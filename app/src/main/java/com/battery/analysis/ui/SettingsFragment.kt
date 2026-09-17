@@ -239,6 +239,8 @@ class SettingsFragment : Fragment() {
                         Toast.LENGTH_SHORT
                     ).show()
                 } else {
+                    com.battery.analysis.manager.ShizukuManager.setUserDisabled(requireContext(), false)
+                    (activity as? MainActivity)?.updateShizukuStatusState()
                     selectMode(com.battery.analysis.manager.PowerUsageManager.MODE_SHIZUKU)
                 }
             }

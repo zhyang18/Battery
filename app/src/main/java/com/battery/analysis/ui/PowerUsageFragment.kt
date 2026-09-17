@@ -29,6 +29,7 @@ import com.battery.analysis.databinding.FragmentPowerUsageBinding
 import com.battery.analysis.manager.ChargingStatsManager
 import com.battery.analysis.manager.FullPowerDataPackage
 import com.battery.analysis.manager.PowerUsageManager
+import com.battery.analysis.manager.ShizukuManager
 import com.battery.analysis.model.ChargingSamplePoint
 import com.battery.analysis.model.ChargingSessionSummary
 import com.battery.analysis.ui.view.ChargingChartView
@@ -125,11 +126,17 @@ class PowerUsageFragment : Fragment() {
     private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
         if (requestCode == SHIZUKU_POWER_REQUEST_CODE) {
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                // 用户授权成功，立即解除主动停用标记并设定工作模式为 Shizuku 模式
+                ShizukuManager.setUserDisabled(requireContext(), false)
+                currentMode = PowerUsageManager.MODE_SHIZUKU
+                powerManager.setSelectedMode(PowerUsageManager.MODE_SHIZUKU)
+                (activity as? MainActivity)?.updateShizukuStatusState()
                 Toast.makeText(requireContext(), getString(R.string.toast_shizuku_success), Toast.LENGTH_SHORT).show()
                 if (isWaitingForShizukuAuthFromSetup || !powerManager.isPowerModeConfigured()) {
                     isWaitingForShizukuAuthFromSetup = false
                     completeSetupAndEnterMain(PowerUsageManager.MODE_SHIZUKU)
                 } else {
+                    updateShizukuBannerState()
                     loadData()
                 }
             } else {
@@ -758,10 +765,29 @@ class PowerUsageFragment : Fragment() {
 
     /**
      * 发起 Shizuku 权限请求。
+     * 当用户主动点击授权时清除主动停用标记；若底层服务已赋予权限则立即同步状态并生效，否则拉起授权对话框。
      */
     private fun requestShizukuPermission() {
         try {
+            // 用户主动请求授权，立即解除主动停用偏好
+            ShizukuManager.setUserDisabled(requireContext(), false)
+
             if (Shizuku.pingBinder()) {
+                if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                    // 若 Shizuku 底层已授权，直接使模式生效并刷新界面，引导卡片立即消失
+                    currentMode = PowerUsageManager.MODE_SHIZUKU
+                    powerManager.setSelectedMode(PowerUsageManager.MODE_SHIZUKU)
+                    (activity as? MainActivity)?.updateShizukuStatusState()
+                    Toast.makeText(requireContext(), getString(R.string.toast_shizuku_success), Toast.LENGTH_SHORT).show()
+                    if (isWaitingForShizukuAuthFromSetup || !powerManager.isPowerModeConfigured()) {
+                        isWaitingForShizukuAuthFromSetup = false
+                        completeSetupAndEnterMain(PowerUsageManager.MODE_SHIZUKU)
+                    } else {
+                        updateShizukuBannerState()
+                        loadData()
+                    }
+                    return
+                }
                 Shizuku.requestPermission(SHIZUKU_POWER_REQUEST_CODE)
             } else {
                 Toast.makeText(requireContext(), getString(R.string.toast_shizuku_not_connected), Toast.LENGTH_SHORT).show()

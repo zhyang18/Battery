@@ -49,6 +49,7 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == SHIZUKU_REQUEST_CODE) {
             val isGranted = (grantResult == PackageManager.PERMISSION_GRANTED)
             if (isGranted) {
+                ShizukuManager.setUserDisabled(this, false)
                 Toast.makeText(this, getString(R.string.toast_shizuku_success), Toast.LENGTH_SHORT).show()
                 val statusText = getString(R.string.shizuku_status_authorized)
                 viewModel.updateShizukuStatus(statusText, true)

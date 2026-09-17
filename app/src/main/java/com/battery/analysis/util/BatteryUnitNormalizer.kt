@@ -17,16 +17,16 @@ object BatteryUnitNormalizer {
      * 将底层系统广播或传感器上报的原始电压数值规范化为标准毫伏（mV）。
      *
      * @param rawVolt 原始电压值（可能为 mV、0.1mV、uV 或 V）
-     * @return 规范化后的毫伏电压（mV），若输入异常则返回默认基准 4000.0f
+     * @return 规范化后的毫伏电压（mV），若输入异常则返回 0f
      */
     fun normalizeVoltageMv(rawVolt: Long): Float {
-        if (rawVolt <= 0) return 4000f
+        if (rawVolt <= 0) return 0f
         val mv = when {
             rawVolt in 2500..9999 -> rawVolt.toFloat() // 规范毫伏 mV（单电芯 3.0~4.5V，双电芯串联 6.0~9.0V）
             rawVolt in 10000..99999 -> rawVolt / 10f // 0.1 毫伏（部分高通/联发科机型，如 41500 -> 4150.0 mV）
             rawVolt >= 100000 -> rawVolt / 1000f // 微伏 uV（如 4150000 -> 4150.0 mV）
             rawVolt in 1..24 -> rawVolt * 1000f // 伏特 V（如 4 -> 4000.0 mV）
-            else -> 4000f
+            else -> rawVolt.toFloat()
         }
         return mv.coerceAtLeast(0f)
     }

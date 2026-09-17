@@ -66,10 +66,10 @@ class ChargingHistoryRecordTest {
     }
 
     /**
-     * 测试历史老数据（无采样点 JSON）进入详情页时能够智能自愈生成平滑折线点集。
+     * 测试历史老数据（无采样点 JSON）如实返回空列表，不伪造假采样点。
      */
     @Test
-    fun testLegacyRecordPointsSelfHealing() {
+    fun testLegacyRecordPointsNoSynthesizedPoints() {
         val legacyRecord = ChargingHistoryRecord(
             id = 1700000060000L,
             recordTime = "2026-09-09 22:30:00",
@@ -88,11 +88,7 @@ class ChargingHistoryRecordTest {
         )
 
         val points = legacyRecord.getSamplePoints()
-        // 自愈生成点数应足够绘制平滑曲线（>= 2）
-        assertTrue(points.size >= 2)
-        assertEquals(20, points.first().batteryLevel)
-        assertEquals(60, points.last().batteryLevel)
-        assertTrue(points.any { it.powerWatts > 0f })
+        assertTrue(points.isEmpty())
     }
 
     /**

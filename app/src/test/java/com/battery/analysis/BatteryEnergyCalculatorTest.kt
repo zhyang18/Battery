@@ -67,22 +67,21 @@ class BatteryEnergyCalculatorTest {
     }
 
     /**
-     * 测试硬件电荷计数器返回严重偏离实际电量的脏数据时，自动降级至基准容量算法。
+     * 测试硬件电荷计数器直接忠实换算，不设人为离群值强行拦截。
      */
     @Test
-    fun testHardwareChargeCounterOutlierFallback() {
-        // 异常情况：当前电量 80%，但计数器错误上报 50uAh（极低值）
-        val corruptedChargeUah = 50
+    fun testHardwareChargeCounterDirectCalculation() {
+        val chargeUah = 50
         val resultWh = BatteryEnergyCalculator.calculateRemainingEnergyWh(
             hardwareEnergyNwh = null,
-            hardwareChargeCounterUah = corruptedChargeUah,
+            hardwareChargeCounterUah = chargeUah,
             batteryPercent = 80,
             nominalVoltageVolts = 3.85f,
             effectiveCapacityMah = 5000f
         )
-        // 降级为 5000 * 0.8 * 3.85 / 1000 = 15.4 Wh（消除原先 4.1V 瞬时电压带来的虚高）
-        val expected = (5000f * 0.8f * 3.85f) / 1000f
-        assertEquals(expected, resultWh, 0.01f)
+        // 忠实采用 50mAh * 3.85V / 1000 = 0.1925 Wh
+        val expected = (50f * 3.85f) / 1000f
+        assertEquals(expected, resultWh, 0.001f)
     }
 
     /**

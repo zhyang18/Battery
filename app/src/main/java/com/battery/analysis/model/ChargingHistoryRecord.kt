@@ -130,11 +130,10 @@ data class ChargingHistoryRecord(
     }
 
     /**
-     * 反序列化解析充电过程采样点列表。
-     * 若历史数据中未持久化采样点（如早期版本生成的旧记录），则根据起止时间、电量、功率与温度等已知指标
-     * 智能平滑补齐采样点集合，确保三合一折线走势图能够完整优雅呈现。
+     * 获取充电采样的真实物理点列表。
+     * 若未持久化采样点数据，则返回真实空列表，严禁伪造生成模拟曲线。
      *
-     * @return 采样物理点集合 [List]
+     * @return 采样物理点真实集合 [List]
      */
     fun getSamplePoints(): List<ChargingSamplePoint> {
         val result = mutableListOf<ChargingSamplePoint>()
@@ -148,8 +147,8 @@ data class ChargingHistoryRecord(
                             timestamp = obj.optLong("ts", 0L),
                             powerWatts = obj.optDouble("pw", 0.0).toFloat(),
                             batteryLevel = obj.optInt("lv", 0),
-                            temperature = obj.optDouble("tp", 25.0).toFloat(),
-                            voltageVolts = obj.optDouble("vt", 3.85).toFloat(),
+                            temperature = obj.optDouble("tp", 0.0).toFloat(),
+                            voltageVolts = obj.optDouble("vt", 0.0).toFloat(),
                             currentMa = obj.optDouble("cm", 0.0).toFloat(),
                             isScreenOn = obj.optBoolean("so", true)
                         )
@@ -159,63 +158,6 @@ data class ChargingHistoryRecord(
                 e.printStackTrace()
             }
         }
-
-        if (result.size >= 2) {
-            return result
-        }
-
-        // 自愈合成平滑折线点集（针对未存采样点的历史老数据）
-        val startTs = if (startTimestamp > 0L) startTimestamp else (endTimestamp - durationMs).coerceAtLeast(0L)
-        val endTs = if (endTimestamp > 0L) endTimestamp else (startTs + durationMs.coerceAtLeast(60000L))
-        val totalMs = (endTs - startTs).coerceAtLeast(60000L)
-        val pointCount = 10
-
-        val peakPower = if (maxPowerWatts > 0.05f) maxPowerWatts else (avgPowerWatts * 1.25f).coerceAtLeast(10f)
-        val avgPower = if (avgPowerWatts > 0.05f) avgPowerWatts else 15f
-        val peakTemp = if (maxTemperature > 20f) maxTemperature else 36f
-        val baseTemp = (peakTemp - 4.5f).coerceAtLeast(26f)
-
-        for (i in 0 until pointCount) {
-            val progress = i / (pointCount - 1).toFloat()
-            val ts = startTs + (totalMs * progress).toLong()
-            val level = (startLevel + (endLevel - startLevel) * progress).toInt().coerceIn(0, 100)
-
-            // 模拟快充前期功率爬升、中期均值、末期涓流缓降曲线
-            val power = when {
-                progress < 0.2f -> avgPower + (peakPower - avgPower) * (progress / 0.2f)
-                progress < 0.7f -> peakPower - (peakPower - avgPower) * ((progress - 0.2f) / 0.5f) * 0.4f
-                else -> avgPower * (1.0f - (progress - 0.7f) / 0.3f * 0.6f)
-            }.coerceAtLeast(1.5f)
-
-            // 温度随充电进行平缓上升至峰值后小幅回落
-            val temp = if (progress < 0.8f) {
-                baseTemp + (peakTemp - baseTemp) * (progress / 0.8f)
-            } else {
-                peakTemp - 1.0f * ((progress - 0.8f) / 0.2f)
-            }
-
-            val volt = 3.85f + 0.5f * progress
-            val currMa = if (volt > 0.1f) (power * 1000f / volt) else 0f
-            val isScreenOnSynthetic = if (screenOffDurationMs > 0L) {
-                // 若记录有息屏时长，模拟在中间段息屏
-                (progress < 0.1f || progress > 0.9f)
-            } else {
-                true
-            }
-
-            result.add(
-                ChargingSamplePoint(
-                    timestamp = ts,
-                    powerWatts = power,
-                    batteryLevel = level,
-                    temperature = temp,
-                    voltageVolts = volt,
-                    currentMa = currMa,
-                    isScreenOn = isScreenOnSynthetic
-                )
-            )
-        }
-
         return result
     }
 

@@ -31,19 +31,7 @@ class BatteryDataFusion {
         var fusedCycleCount: Int? = if (shizukuCycle > normalCycle) shizukuCycle else normalCycle
         if (fusedCycleCount == 0) fusedCycleCount = null
 
-        // 2. 可信度判断 (Trustworthiness Judgment)
-        if (fusedFullChargeCapacity != null && fusedDesignCapacity != null) {
-            if (fusedFullChargeCapacity > fusedDesignCapacity * 1.5f || fusedFullChargeCapacity < fusedDesignCapacity * 0.1f) {
-                fusedFullChargeCapacity = normalInfo.fullChargeCapacity
-            }
-        }
-
-        // 判断当前电量是否超出正常范围
-        if (fusedCurrentCapacity != null && fusedFullChargeCapacity != null) {
-            if (fusedCurrentCapacity > fusedFullChargeCapacity * 1.1f) {
-                fusedCurrentCapacity = normalInfo.currentCapacity
-            }
-        }
+        // 2. 数据融合聚合（优先底层精准数据，缺失时由普通 API 补齐，不施加人为物理限制截断）
 
         // 3. 计算电池健康度 (Battery Health)
         var health: Float? = null

@@ -9,9 +9,6 @@ object BatteryEnergyCalculator {
     // 纳瓦时转瓦时系数 (1 Wh = 10^9 nWh)
     private const val NWH_TO_WH_FACTOR = 1_000_000_000f
 
-    // 默认兜底基准容量（mAh）
-    const val DEFAULT_FALLBACK_CAPACITY_MAH = 5000f
-
     // 默认锂电池标称工作电压（单位：V，标准锂离子/锂聚合物电池标称中位放电电压为 3.85V）
     const val DEFAULT_NOMINAL_VOLTAGE_VOLTS = 3.85f
 
@@ -20,7 +17,7 @@ object BatteryEnergyCalculator {
      *
      * 计算优先级策略：
      * 1. 硬件原生能量计数器 [hardwareEnergyNwh]：若硬件支持且数值为正数，直接转为 Wh；
-     * 2. 硬件实时电荷计数器 [hardwareChargeCounterUah]：获取当前硬件实时剩余毫安时（mAh），进行合理性校验后基于电池标称电压折算：(mAh * V_nominal) / 1000；
+     * 2. 硬件实时电荷计数器 [hardwareChargeCounterUah]：获取当前硬件实时剩余毫安时（mAh），基于电池标称电压折算：(mAh * V_nominal) / 1000；
      * 3. 基准容量与百分比推算降级：以当前设备基准容量（优先满充真实容量 FCC，其次设计容量）结合百分比与电池标称电压推算：(基准容量 * 百分比 * V_nominal) / 1000。
      *
      * @param hardwareEnergyNwh 硬件层读取的纳瓦时能量计数器（BATTERY_PROPERTY_ENERGY_COUNTER），若不支持可传入 null
@@ -37,10 +34,8 @@ object BatteryEnergyCalculator {
         nominalVoltageVolts: Float = DEFAULT_NOMINAL_VOLTAGE_VOLTS,
         effectiveCapacityMah: Float
     ): Float {
-        // 安全保护：标称电压异常或非正数时兜底采用行业标准标称电压 3.85V
-        val safeNominalVoltage = if (nominalVoltageVolts > 0.5f) nominalVoltageVolts else DEFAULT_NOMINAL_VOLTAGE_VOLTS
+        val safeNominalVoltage = if (nominalVoltageVolts > 0f) nominalVoltageVolts else DEFAULT_NOMINAL_VOLTAGE_VOLTS
         val safePercent = batteryPercent.coerceIn(0, 100)
-        val safeCapacity = if (effectiveCapacityMah > 0f) effectiveCapacityMah else DEFAULT_FALLBACK_CAPACITY_MAH
 
         // 策略 1：硬件能量计数器直读 (nWh -> Wh)，忠实遵循硬件上报
         if (hardwareEnergyNwh != null && hardwareEnergyNwh > 0L) {
@@ -58,16 +53,7 @@ object BatteryEnergyCalculator {
                 hardwareChargeCounterUah / 1000f
             }
 
-            // 校验当前读取的剩余电量是否在物理可信区间内，防止个别 HAL 返回常数满电或异常数值
-            val expectedMah = safeCapacity * (safePercent / 100f)
-            val isValidReading = if (expectedMah > 0f) {
-                // 允许与理论电量存在合理容差（适应电池老化、动态估算波动），且为有效正数
-                currentMah in (expectedMah * 0.4f)..(expectedMah * 1.6f + 100f) && currentMah > 0f
-            } else {
-                currentMah >= 0f
-            }
-
-            if (isValidReading) {
+            if (currentMah > 0f) {
                 val wh = (currentMah * safeNominalVoltage) / 1000f
                 if (wh > 0f) {
                     return wh
@@ -76,7 +62,11 @@ object BatteryEnergyCalculator {
         }
 
         // 策略 3：标准基准容量与电量百分比结合标称电压计算
-        val remainingMah = safeCapacity * (safePercent / 100f)
+        if (effectiveCapacityMah <= 0f) {
+            return 0f
+        }
+        val remainingMah = effectiveCapacityMah * (safePercent / 100f)
         return (remainingMah * safeNominalVoltage) / 1000f
     }
 }
+

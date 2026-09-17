@@ -311,7 +311,7 @@ data class PowerUsageRecord(
                 totalMs += it * 1000L
             }
         } catch (_: Exception) {}
-        return if (totalMs > 0L) totalMs else 2760000L // 默认 46m 兜底
+        return totalMs
     }
 
 

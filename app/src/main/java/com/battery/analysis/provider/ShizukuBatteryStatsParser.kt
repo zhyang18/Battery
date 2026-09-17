@@ -411,8 +411,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                     val tempMatcher = REGEX_HISTORY_TEMP.matcher(trimmed)
                     if (tempMatcher.find()) {
                         val rawT = tempMatcher.group(1)?.toFloatOrNull()
-                        if (rawT != null && rawT in 0f..800f) {
-                            val tVal = (Math.round(rawT) / 10f).coerceIn(0f, 70f)
+                        if (rawT != null) {
+                            val tVal = Math.round(rawT) / 10f
                             historyTempList.add(tVal)
                             historyTempPoints.add(Pair(currentHistoryTs, tVal))
                         }
@@ -554,13 +554,13 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
         // 计算放电周期内的真实电池温度统计指标（平均温度与最高温度）
         val cycleAvgTemp = if (effectiveTempList.isNotEmpty()) {
-            ((Math.round(effectiveTempList.average() * 10.0) / 10.0).toFloat()).coerceIn(0f, 70f)
+            ((Math.round(effectiveTempList.average() * 10.0) / 10.0).toFloat())
         } else {
-            (Math.round(tempCelsius * 10f) / 10f).coerceIn(0f, 70f)
+            (Math.round(tempCelsius * 10f) / 10f)
         }
         val cycleMaxTemp = if (effectiveTempList.isNotEmpty()) {
             val maxRecorded = effectiveTempList.maxOrNull() ?: tempCelsius
-            (Math.round(maxRecorded * 10f) / 10f).coerceAtLeast(cycleAvgTemp).coerceIn(0f, 70f)
+            (Math.round(maxRecorded * 10f) / 10f).coerceAtLeast(cycleAvgTemp)
         } else {
             cycleAvgTemp
         }
@@ -641,19 +641,22 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             }
         }
 
-        // 8. 总放电量累加：若 dumpsys 未直接给出整机 computedDrainMah，或由于 dumpsys 刷新滞后导致其值小于已运行子应用及屏幕的实际能耗总和，
-        // 则依宏观物理能量守恒定律强制对齐下限（整机总放电量必不小于各子应用实耗之和），彻底杜绝微小底噪杂讯导致整体小于部分的物理悖论
+        // 8. 总放电量：忠实保留 dumpsys 提供的原始 computedDrainMah，若 dumpsys 未提供（<= 0f）则取应用及屏幕实耗之和
         val totalAppWh = validatedList.sumOf { it.energyWh.toDouble() }.toFloat()
-        val appMah = (totalAppWh * 1000f) / voltageVolts.coerceAtLeast(3.7f)
-        val minPhysicalDrainMah = appMah + screenDrainMah
-        if (validatedList.isNotEmpty() && (computedDrainMah <= 0f || computedDrainMah < minPhysicalDrainMah * 0.9f)) {
-            computedDrainMah = maxOf(computedDrainMah, minPhysicalDrainMah)
+        val appMah = if (voltageVolts > 0f) (totalAppWh * 1000f) / voltageVolts else 0f
+        val sumAppScreenMah = appMah + screenDrainMah
+        if (computedDrainMah <= 0f && validatedList.isNotEmpty()) {
+            computedDrainMah = sumAppScreenMah
         }
 
         // 9. 若底层未直接给出息屏放电量，但已有明确的息屏时长（>=30秒）以及整机总放电量，
         // 则整机总放电量扣除前台亮屏应用与屏幕显示所消耗电量后的结余放电量按时间占比分摊作为息屏待机放电量
         if (screenOffDrainMah <= 0f && screenOffDurationMs >= 30000L && computedDrainMah > 0f) {
-            val totalFgDrain = validatedList.sumOf { (it.energyWh * 1000f / voltageVolts.coerceAtLeast(3.7f)).toDouble() }.toFloat()
+            val totalFgDrain = if (voltageVolts > 0f) {
+                validatedList.sumOf { (it.energyWh * 1000f / voltageVolts).toDouble() }.toFloat()
+            } else {
+                0f
+            }
             val remainingDrain = (computedDrainMah - totalFgDrain - screenDrainMah).coerceAtLeast(0f)
             val offRatio = if (dischargeDurationMs > 0L) {
                 (screenOffDurationMs.toFloat() / dischargeDurationMs).coerceIn(0f, 1f)

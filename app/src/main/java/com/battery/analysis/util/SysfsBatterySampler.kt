@@ -208,7 +208,7 @@ object SysfsBatterySampler {
     fun sampleHardwareBattery(
         context: Context,
         isCharging: Boolean,
-        fallbackVoltageVolts: Float = 3.85f,
+        fallbackVoltageVolts: Float? = null,
         fallbackTempCelsius: Float? = null
     ): HardwareSample? {
         // 1. 优先尝试 JNI 原生缓存直读（微秒级）
@@ -224,7 +224,7 @@ object SysfsBatterySampler {
                 if (rawCur != 0L && rawVolt > 0L) {
                     val curMa = normalizeCurrentToMa(Math.abs(rawCur))
                     val voltV = normalizeVoltageToVolts(rawVolt)
-                    val tempC = if (rawTemp > 0) (if (rawTemp >= 100) rawTemp / 10f else rawTemp.toFloat()) else fallbackTempCelsius
+                    val tempC = if (rawTemp != 0) (if (rawTemp >= 100 || rawTemp <= -100) rawTemp / 10f else rawTemp.toFloat()) else fallbackTempCelsius
                     val pWatts = (curMa * voltV) / 1000f
                     val isDischargingStatus = rawStatus == 'D'.code || rawStatus == 'd'.code || rawStatus == 'N'.code || rawStatus == 'n'.code
                     val isNetDischarging = isDischargingStatus || (rawCur < 0L)
@@ -262,11 +262,7 @@ object SysfsBatterySampler {
         val sysfsTemp = readSysfsTemperature()
         val sysfsStatus = readSysfsStatus()
 
-        val finalVoltage = if (sysfsVoltage != null && sysfsVoltage in 2.5f..15.0f) {
-            sysfsVoltage
-        } else {
-            fallbackVoltageVolts
-        }
+        val finalVoltage = sysfsVoltage ?: fallbackVoltageVolts ?: 0f
         val finalTemp = sysfsTemp ?: fallbackTempCelsius
 
         if (sysfsCurrent != null && Math.abs(sysfsCurrent) > 0f) {
@@ -334,7 +330,7 @@ object SysfsBatterySampler {
      */
     fun sampleHardwareDischarge(
         context: Context,
-        fallbackVoltageVolts: Float = 3.85f,
+        fallbackVoltageVolts: Float? = null,
         fallbackTempCelsius: Float? = null
     ): HardwareSample? {
         return sampleHardwareBattery(context, isCharging = false, fallbackVoltageVolts, fallbackTempCelsius)
@@ -350,7 +346,7 @@ object SysfsBatterySampler {
      */
     fun sampleHardwareCharging(
         context: Context,
-        fallbackVoltageVolts: Float = 3.85f,
+        fallbackVoltageVolts: Float? = null,
         fallbackTempCelsius: Float? = null
     ): HardwareSample? {
         return sampleHardwareBattery(context, isCharging = true, fallbackVoltageVolts, fallbackTempCelsius)
@@ -720,7 +716,7 @@ object SysfsBatterySampler {
      * @return 硬件采样结果，失败返回 null
      */
     fun readHardwareBatchViaShizuku(
-        fallbackVoltage: Float,
+        fallbackVoltage: Float?,
         fallbackTemp: Float?,
         isCharging: Boolean = false
     ): HardwareSample? {
@@ -758,13 +754,13 @@ object SysfsBatterySampler {
 
                 val curMa = normalizeCurrentToMa(Math.abs(rawCur))
                 val voltV = normalizeVoltageToVolts(rawVolt)
-                val tempC = if (rawTemp != null && rawTemp > 0f) {
-                    if (rawTemp >= 100f) rawTemp / 10f else rawTemp
+                val tempC = if (rawTemp != null && rawTemp != 0f) {
+                    if (rawTemp >= 100f || rawTemp <= -100f) rawTemp / 10f else rawTemp
                 } else {
                     fallbackTemp
                 }
 
-                if (curMa > 0f && voltV in 2.5f..15.0f) {
+                if (curMa > 0f && voltV > 0f) {
                     cachedCurrentPath = curPath
                     cachedVoltagePath = voltPath
                     if (rawTemp != null) cachedTempPath = tempPath

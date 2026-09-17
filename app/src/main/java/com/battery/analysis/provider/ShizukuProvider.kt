@@ -86,12 +86,12 @@ class ShizukuProvider : BatteryDataProvider {
             currentNow = if (isCharging) absCur else -absCur
         }
 
-        // 如果底层未直接解析到电压或电压超出正常范围(2.5V-9.5V)，尝试从系统粘性广播读取当前电压
-        if (voltage == null || voltage < 2500f || voltage > 9500f) {
+        // 如果底层未直接解析到电压，尝试从系统粘性广播读取当前电压
+        if (voltage == null || voltage <= 0f) {
             try {
                 val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
                 val rawVolt = intent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
-                if (rawVolt in 2500..9500) {
+                if (rawVolt > 0) {
                     voltage = rawVolt.toFloat()
                 }
             } catch (e: Exception) {
@@ -229,7 +229,7 @@ class ShizukuProvider : BatteryDataProvider {
             }
             if (trimLine.contains("POWER_SUPPLY_TEMP=")) {
                 val rawTemp = trimLine.substringAfter("=").toFloatOrNull()
-                if (rawTemp != null && rawTemp > 0) {
+                if (rawTemp != null) {
                     temperature = rawTemp / 10f
                 }
             }
@@ -397,7 +397,7 @@ class ShizukuProvider : BatteryDataProvider {
         val matchTemp = REGEX_TEMP.find(batteryOutput)
         if (matchTemp != null) {
             val rawTemp = matchTemp.groupValues[1].toFloatOrNull()
-            if (rawTemp != null && rawTemp > 0) {
+            if (rawTemp != null) {
                 temperature = rawTemp / 10.0f
             }
         }

@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.Gravity
+import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 
@@ -45,13 +46,15 @@ class MetricSelectorView @JvmOverloads constructor(
     private var listener: OnMetricsChangedListener? = null
 
     private val metricItems = listOf(
-        Pair(TimelineMetric.POWER, "功耗"),
         Pair(TimelineMetric.BATTERY, "电量"),
+        Pair(TimelineMetric.POWER, "功耗"),
         Pair(TimelineMetric.TEMPERATURE, "温度"),
         Pair(TimelineMetric.VOLTAGE, "电压"),
         Pair(TimelineMetric.APP, "应用")
     )
 
+    private val itemLayouts = mutableListOf<LinearLayout>()
+    private val dotViews = mutableListOf<View>()
     private val textViews = mutableListOf<TextView>()
 
     init {
@@ -96,35 +99,55 @@ class MetricSelectorView @JvmOverloads constructor(
 
     /**
      * 初始化 5 个指标选项标签视图。
+     * 前置圆角点与充电趋势图规范严格对齐（9dp x 9dp，圆角 2.5dp，间距 5dp）。
      */
     private fun initViews() {
         removeAllViews()
+        itemLayouts.clear()
+        dotViews.clear()
         textViews.clear()
 
-        val dp1 = dpToPx(1f)
         val dp4 = dpToPx(4f)
+        val dp5 = dpToPx(5f)
+        val dp9 = dpToPx(9f)
 
         for (item in metricItems) {
             val (metric, title) = item
-            val tv = TextView(context).apply {
-                text = "● $title"
-                textSize = 12f
-                isSingleLine = true
-                maxLines = 1
-                includeFontPadding = false
-                setPadding(dp1, dp4, dp1, dp4)
+            val itemContainer = LinearLayout(context).apply {
+                orientation = HORIZONTAL
                 gravity = Gravity.CENTER
                 isClickable = true
                 isFocusable = true
-                layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply {
-                    setMargins(0, 0, 0, 0)
-                }
+                setPadding(0, dp4, 0, dp4)
+                layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
                 setOnClickListener {
                     toggleMetric(metric, notify = true)
                 }
             }
+
+            val dotView = View(context).apply {
+                layoutParams = LayoutParams(dp9, dp9)
+            }
+
+            val tv = TextView(context).apply {
+                text = title
+                textSize = 12f
+                isSingleLine = true
+                maxLines = 1
+                includeFontPadding = false
+                gravity = Gravity.CENTER
+                layoutParams = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                    marginStart = dp5
+                }
+            }
+
+            itemContainer.addView(dotView)
+            itemContainer.addView(tv)
+
+            itemLayouts.add(itemContainer)
+            dotViews.add(dotView)
             textViews.add(tv)
-            addView(tv)
+            addView(itemContainer)
         }
         updateSelectionVisuals()
     }
@@ -184,29 +207,40 @@ class MetricSelectorView @JvmOverloads constructor(
     }
 
     /**
-     * 更新各选项标签的选中/反选视觉状态（选中色彩与置灰半透明）。
+     * 更新各选项标签的选中/反选视觉状态（圆角点色彩、选中高亮与置灰半透明）。
      */
     private fun updateSelectionVisuals() {
+        val dp2_5 = dpToPx(2.5f).toFloat()
         for ((index, item) in metricItems.withIndex()) {
             val (metric, _) = item
+            val itemContainer = itemLayouts.getOrNull(index) ?: continue
+            val dotView = dotViews.getOrNull(index) ?: continue
             val tv = textViews.getOrNull(index) ?: continue
             val isSelected = selectedMetrics.contains(metric)
 
+            val activeColor = when (metric) {
+                TimelineMetric.BATTERY -> Color.parseColor("#4CAF50") // 鲜绿电量
+                TimelineMetric.POWER -> Color.parseColor("#90CAF9") // 淡蓝功耗
+                TimelineMetric.TEMPERATURE -> Color.parseColor("#FF8A65") // 珊瑚橙温度
+                TimelineMetric.VOLTAGE -> Color.parseColor("#FFD54F") // 金黄电压
+                TimelineMetric.APP -> Color.parseColor("#E0F7FA") // 浅青应用
+            }
+
+            val dotDrawable = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                cornerRadius = dp2_5
+                setColor(activeColor)
+            }
+            dotView.background = dotDrawable
+
             if (isSelected) {
-                val activeColor = when (metric) {
-                    TimelineMetric.POWER -> Color.parseColor("#90CAF9") // 淡蓝功耗
-                    TimelineMetric.BATTERY -> Color.parseColor("#4CAF50") // 鲜绿电量
-                    TimelineMetric.TEMPERATURE -> Color.parseColor("#FF8A65") // 珊瑚橙温度
-                    TimelineMetric.VOLTAGE -> Color.parseColor("#FFD54F") // 金黄电压
-                    TimelineMetric.APP -> Color.parseColor("#E0F7FA") // 浅青应用
-                }
+                itemContainer.alpha = 1.0f
                 tv.setTextColor(activeColor)
                 tv.setTypeface(null, Typeface.BOLD)
-                tv.alpha = 1.0f
             } else {
+                itemContainer.alpha = 0.45f
                 tv.setTextColor(Color.parseColor("#757575"))
                 tv.setTypeface(null, Typeface.NORMAL)
-                tv.alpha = 0.45f
             }
         }
     }

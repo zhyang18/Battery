@@ -182,9 +182,9 @@ class HealthTrendChartView @JvmOverloads constructor(
             if (pt.health > maxVal) maxVal = pt.health
         }
 
-        // 留出适度安全区间
-        minY = max(0f, (minVal - 3f).coerceAtMost(90f))
-        maxY = min(100f, (maxVal + 2f).coerceAtLeast(100f))
+        // 留出适度安全区间，忠实反映健康度，不设人为上限截断（支持超过 100%）
+        minY = max(0f, minVal - 3f)
+        maxY = max(100f, maxVal + 2f)
 
         if (maxY - minY < 5f) {
             minY = max(0f, maxY - 10f)

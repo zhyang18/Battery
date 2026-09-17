@@ -100,24 +100,15 @@ class ChargingStatsManager private constructor(private val context: Context) {
         val (nowCharging, currentChargeType) = checkCurrentSystemChargingState()
         val provider = NormalApiProvider()
         val info = provider.getBatteryInfo(context)
-        val currentLevel = info.level ?: 50
+        val currentLevel = info.level ?: 0
         val now = System.currentTimeMillis()
         var reconciled = false
 
         // 场景 1：持久化显示还在充电中，但实际已经拔掉充电器
         if (currentSummary.isCharging && !nowCharging) {
-            val duration = (now - currentSummary.startTimestamp).coerceAtLeast(1000L)
+            val duration = (now - currentSummary.startTimestamp).coerceAtLeast(0L)
             val levelGain = (currentLevel - currentSummary.startLevel).coerceAtLeast(0)
-            val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 5000f
-            val effectiveCapMah = if (designCapMah in 500f..30000f) designCapMah else 5000f
-            val fallbackEnergyWh = (levelGain / 100.0f) * effectiveCapMah * 3.85f / 1000.0f
-            val finalChargedEnergyWh = if (currentSummary.chargedEnergyWh > 0.005f) {
-                currentSummary.chargedEnergyWh
-            } else if (levelGain > 0) {
-                fallbackEnergyWh
-            } else {
-                0f
-            }
+            val finalChargedEnergyWh = currentSummary.chargedEnergyWh
 
             val durationHours = duration / 3600000.0f
             val finalAvgPower = if (durationHours > 0.001f && finalChargedEnergyWh > 0f) {
@@ -174,59 +165,18 @@ class ChargingStatsManager private constructor(private val context: Context) {
             onPowerConnected(currentLevel, currentChargeType)
             reconciled = true
         } else if (!currentSummary.isCharging && !nowCharging) {
-            // 场景 3：均未充电，但离线期间电量跳增（说明在 App 被杀期间充过电）
-            val lastRecordedLevel = currentSummary.currentLevel
-            if (lastRecordedLevel in 1..99 && currentLevel > lastRecordedLevel + 2) {
-                val levelGain = currentLevel - lastRecordedLevel
-                val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 5000f
-                val effectiveCapMah = if (designCapMah in 500f..30000f) designCapMah else 5000f
-                val offlineEnergyWh = (levelGain / 100.0f) * effectiveCapMah * 3.85f / 1000.0f
-                val recordTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(now))
-                val intervalMs = (now - currentSummary.endTimestamp).coerceIn(60000L, 7200000L)
-                val calcAvgWatts = if (intervalMs > 0L) {
-                    (offlineEnergyWh / (intervalMs / 3600000.0f)).coerceIn(5.0f, 65.0f)
-                } else {
-                    15.0f
-                }
-
-                try {
-                    val record = ChargingHistoryRecord(
-                        id = now,
-                        recordTime = recordTime,
-                        startTimestamp = currentSummary.endTimestamp.coerceAtLeast(now - 3600000L),
-                        endTimestamp = now,
-                        durationMs = intervalMs,
-                        startLevel = lastRecordedLevel,
-                        endLevel = currentLevel,
-                        levelGain = levelGain,
-                        chargedEnergyWh = offlineEnergyWh,
-                        avgPowerWatts = calcAvgWatts,
-                        maxPowerWatts = 18.0f,
-                        maxTemperature = info.temperature ?: 30f,
-                        chargeType = "离线补齐充电",
-                        screenOffDurationMs = 0L,
-                        screenOffLevelGain = levelGain,
-                        screenOffEnergyWh = offlineEnergyWh
-                    )
-                    ChargingHistoryDbHelper.getInstance(context).insertRecord(record)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-
+            // 场景 3：均未充电，仅同步当前真实电量，严禁伪造离线充电记录
+            if (currentSummary.currentLevel != currentLevel && currentLevel > 0) {
                 currentSummary = currentSummary.copy(
-                    endTimestamp = now,
-                    currentLevel = currentLevel,
-                    startLevel = lastRecordedLevel,
-                    isCharging = false,
-                    chargedEnergyWh = offlineEnergyWh
+                    currentLevel = currentLevel
                 )
                 saveChargingSessionToPrefs()
-                reconciled = true
             }
         }
 
         return reconciled
     }
+
 
     /**
      * 实时检测系统当前是否处于充电状态及充电接口类型。
@@ -276,8 +226,8 @@ class ChargingStatsManager private constructor(private val context: Context) {
 
         val provider = NormalApiProvider()
         val info = provider.getBatteryInfo(context)
-        val fallbackTemp = info.temperature ?: 25f
-        val fallbackVolt = (info.voltage ?: 4000f) / 1000f
+        val fallbackTemp = info.temperature
+        val fallbackVolt = info.voltage?.let { it / 1000f }
 
         // 优先采用 BatteryRecorder JNI / sysfs 硬件直读通道获取无滤波瞬时快充物理指标
         val hwSample = com.battery.analysis.util.SysfsBatterySampler.sampleHardwareCharging(
@@ -286,9 +236,9 @@ class ChargingStatsManager private constructor(private val context: Context) {
             fallbackTempCelsius = fallbackTemp
         )
 
-        val currentVolt = hwSample?.voltageVolts ?: fallbackVolt
+        val currentVolt = hwSample?.voltageVolts ?: (fallbackVolt ?: 0f)
         val currentMa = hwSample?.currentMa ?: (info.currentNow ?: 0f)
-        val currentTemp = hwSample?.temperatureCelsius ?: fallbackTemp
+        val currentTemp = hwSample?.temperatureCelsius ?: (fallbackTemp ?: 0f)
         val rawPower = hwSample?.powerWatts ?: (info.powerWatts ?: com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(currentVolt, currentMa, isCharging = true))
         val currentPower = rawPower
 
@@ -350,9 +300,9 @@ class ChargingStatsManager private constructor(private val context: Context) {
         val provider = NormalApiProvider()
         val info = provider.getBatteryInfo(context)
 
-        val level = info.level ?: 50
-        val fallbackTemp = info.temperature ?: 25f
-        val fallbackVolt = (info.voltage ?: 4000f) / 1000f
+        val level = info.level ?: 0
+        val fallbackTemp = info.temperature
+        val fallbackVolt = info.voltage?.let { it / 1000f }
 
         // 优先通过 BatteryRecorder JNI / sysfs 硬件直读通道获取真实瞬时快充物理指标
         val hwSample = com.battery.analysis.util.SysfsBatterySampler.sampleHardwareCharging(
@@ -361,9 +311,9 @@ class ChargingStatsManager private constructor(private val context: Context) {
             fallbackTempCelsius = fallbackTemp
         )
 
-        val volt = hwSample?.voltageVolts ?: fallbackVolt
+        val volt = hwSample?.voltageVolts ?: (fallbackVolt ?: 0f)
         val curMa = hwSample?.currentMa ?: (info.currentNow ?: 0f)
-        val temp = hwSample?.temperatureCelsius ?: fallbackTemp
+        val temp = hwSample?.temperatureCelsius ?: (fallbackTemp ?: 0f)
         val rawPower = hwSample?.powerWatts ?: (info.powerWatts ?: com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(volt, curMa, charging))
         val power = rawPower
 
@@ -389,10 +339,11 @@ class ChargingStatsManager private constructor(private val context: Context) {
                 val dtHours = dtMs / 3600000.0
                 val powerEnergy = (avgSlicePower * dtHours).toFloat()
 
-                val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 5000f
-                val effectiveCapMah = if (designCapMah in 500f..30000f) designCapMah else 5000f
+                val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 0f
                 val deltaLevel = (level - lastSampleLevel).coerceAtLeast(0)
-                val levelEnergy = (deltaLevel / 100.0f) * effectiveCapMah * volt / 1000.0f
+                val levelEnergy = if (designCapMah > 0f && volt > 0f) {
+                    (deltaLevel / 100.0f) * designCapMah * volt / 1000.0f
+                } else 0f
 
                 // 若物理功率微积分有效优先采用；若硬件传感器受限读数为0且电量有净增，则使用电量增量物理守恒兜底
                 deltaEnergyWh = if (powerEnergy > 0.00001f) {
@@ -498,12 +449,15 @@ class ChargingStatsManager private constructor(private val context: Context) {
         // 1. 采用时序微元持续累加充入能量 Wh，保证单调递增，绝不因前端或内存抽稀而丢失已累计能量
         val accumulatedEnergyWh = (currentSummary.chargedEnergyWh + deltaEnergyWh).coerceAtLeast(0f)
 
-        // 2. 基于电量增量与有效电池容量进行物理守恒下限核算，杜绝硬件读数断流导致能量被严重低估
+        // 2. 基于电量增量与有效电池容量进行物理核算
         val levelGain = (latestPoint.batteryLevel - currentSummary.startLevel).coerceAtLeast(0)
         val durationHours = ((latestPoint.timestamp - currentSummary.startTimestamp).coerceAtLeast(0L)) / 3600000.0f
-        val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 5000f
-        val effectiveCapMah = if (designCapMah in 500f..30000f) designCapMah else 5000f
-        val levelGainEnergyWh = (levelGain / 100.0f) * effectiveCapMah * (latestPoint.voltageVolts.coerceIn(3.0f, 4.5f)) / 1000.0f
+        val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 0f
+        val levelGainEnergyWh = if (designCapMah > 0f && latestPoint.voltageVolts > 0f) {
+            (levelGain / 100.0f) * designCapMah * latestPoint.voltageVolts / 1000.0f
+        } else {
+            0f
+        }
 
         val finalChargedWh = if (accumulatedEnergyWh > 0.005f) {
             accumulatedEnergyWh
@@ -565,16 +519,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
         val duration = currentSummary.getDurationMs()
         val levelGain = currentSummary.getLevelGain()
 
-        val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 5000f
-        val effectiveCapMah = if (designCapMah in 500f..30000f) designCapMah else 5000f
-        val fallbackEnergyWh = (levelGain / 100.0f) * effectiveCapMah * 3.85f / 1000.0f
-        val finalEnergy = if (currentSummary.chargedEnergyWh > 0.005f) {
-            currentSummary.chargedEnergyWh
-        } else if (levelGain > 0) {
-            fallbackEnergyWh
-        } else {
-            0f
-        }
+        val finalEnergy = currentSummary.chargedEnergyWh
 
         val durationHours = duration / 3600000.0f
         val finalAvgPower = if (durationHours > 0.001f && finalEnergy > 0f) {

@@ -40,7 +40,7 @@ class NormalApiProvider : BatteryDataProvider {
         // 1. 获取当前电量百分比
         val levelFromProp = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
         val levelFromIntent = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
-        val level = if (levelFromProp in 1..100) levelFromProp else if (levelFromIntent in 1..100) levelFromIntent else null
+        val level = if (levelFromProp in 0..100) levelFromProp else if (levelFromIntent in 0..100) levelFromIntent else null
 
         // 2. 获取电池状态 (充电中/放电中/已充满等)
         val rawStatus = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
@@ -66,7 +66,7 @@ class NormalApiProvider : BatteryDataProvider {
 
         // 4. 获取电池温度（单位转换为 ℃）
         val tempRaw = batteryStatus?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
-        val temperature = if (tempRaw > 0) tempRaw / 10.0f else null
+        val temperature = if (tempRaw != -1) tempRaw / 10.0f else null
 
         // 5. 获取电池电压（单位：mV）
         val voltRaw = batteryStatus?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1

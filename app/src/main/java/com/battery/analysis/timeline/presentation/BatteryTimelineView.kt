@@ -367,8 +367,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        val contentLeft = dp32
-        val contentRight = w - dp6
+        val contentLeft = dp14
+        val contentRight = w - dp14
         val contentWidth = max(0f, contentRight - contentLeft)
 
         val visibleStart = timelineState.visibleStartTimestamp
@@ -413,7 +413,7 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     /**
      * 核心 Canvas 绘制流程：
-     * 1. 左侧绘制功耗 Y 轴数值刻度（0W, 10W, 20W, 30W...）及横向基准虚线；
+     * 1. 绘制横向基准虚线网格；
      * 2. 多选曲线自适应锚点绘制（功耗、电量阶梯折线及百分比点标、温度阶梯折线及数值点标、电压阶梯折线及数值点标）；
      * 3. App 活动分槽平铺图标（从下往上纵向堆叠，允许与曲线区域产生视觉交叠）；
      * 4. 底部时间轴屏幕状态实线条与秒级精确时间刻度文字。
@@ -433,8 +433,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         if (visibleStart <= 0L) visibleStart = now - 1800_000L
         if (visibleEnd <= visibleStart) visibleEnd = visibleStart + 1800_000L
 
-        val contentLeft = dp32
-        val contentRight = w - dp6
+        val contentLeft = dp14
+        val contentRight = w - dp14
         val contentWidth = max(0f, contentRight - contentLeft)
 
         // 底部向上严格锚定布局：
@@ -467,8 +467,8 @@ class BatteryTimelineView @JvmOverloads constructor(
             else -> kotlin.math.ceil(maxRawPowerW / 10.0) * 10.0
         }
 
-        // 1. 绘制左侧 Y 轴功耗数值刻度与横向基准网格虚线
-        drawYAxisAndGrid(canvas, contentLeft, contentRight, topPadding, availableH, maxScaleW)
+        // 1. 绘制横向基准网格虚线（已去除 Y 轴死板数值刻度文本）
+        drawYAxisAndGrid(canvas, contentLeft, contentRight, topPadding, availableH)
 
         // 2. 绘制垂直时间网格虚线与底部时间刻度文字（以时间点为中心严格居中对齐）
         drawTimeGridAndTicks(canvas, contentLeft, contentWidth, mainChartHeight, screenBarBottom, timeTextY, visibleStart, visibleEnd)
@@ -503,29 +503,24 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制图表左侧功耗 Y 轴数值刻度（如 30W, 20W, 10W, 0W）与横向网格虚线。
+     * 绘制图表横向基准参考网格虚线（已按用户需求去除 Y 轴显示的 0w, 6w, 13w 等死板刻度文本）。
      *
      * @param canvas 绘图画布 [Canvas]
      * @param contentLeft 图表左边界 X 坐标
      * @param contentRight 图表右边界 X 坐标
      * @param topPadding 顶部安全间距
      * @param availableH 有效高度
-     * @param maxScaleW 最大功耗刻度值
      */
     private fun drawYAxisAndGrid(
         canvas: Canvas,
         contentLeft: Float,
         contentRight: Float,
         topPadding: Float,
-        availableH: Float,
-        maxScaleW: Double
+        availableH: Float
     ) {
         val steps = listOf(1.0, 0.6667, 0.3333, 0.0)
         for (stepRatio in steps) {
-            val v = maxScaleW * stepRatio
             val y = topPadding + (1f - stepRatio.toFloat()) * availableH
-            val label = "${v.toInt()} W"
-            canvas.drawText(label, contentLeft - dp4, y + sp9_5 * 0.35f, yAxisTextPaint)
             canvas.drawLine(contentLeft, y, contentRight, y, gridPaint)
         }
     }
@@ -596,7 +591,21 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制功耗波动平滑曲线（采用三次贝塞尔平滑算法，始终自左侧 contentLeft 开始并横跨全宽）。
+     * 格式化瞬时功耗数值，待机微弱功耗（< 1.0W）保留两位小数，日常功耗（>= 1.0W）保留一位小数。
+     *
+     * @param pWatts 瞬时功耗数值（W）
+     * @return 格式化后的功耗描述文本
+     */
+    private fun formatPowerWatts(pWatts: Float): String {
+        return if (pWatts < 1.0f) {
+            String.format(Locale.getDefault(), "%.2fW", pWatts)
+        } else {
+            String.format(Locale.getDefault(), "%.1fW", pWatts)
+        }
+    }
+
+    /**
+     * 绘制功耗波动平滑曲线（三次贝塞尔算法），并在关键节点（起点、波峰高负载、波谷低功耗待机）适当增加数值标注与圆点展示。
      *
      * @param canvas 目标绘制画布 [Canvas]
      * @param contentLeft 内容区左边缘 X 坐标
@@ -658,6 +667,52 @@ class BatteryTimelineView @JvmOverloads constructor(
         }
 
         canvas.drawPath(curvePath, linePaint)
+
+        // 收集代表性候选标注节点（起点、全局波峰、全局波谷以及时间片段内的典型极值点）
+        val candidateSamples = mutableListOf<BatterySample>()
+        candidateSamples.add(firstSample)
+
+        var maxSample = firstSample
+        var minSample = firstSample
+        for (s in downsampled) {
+            val pw = abs(s.powerMw)
+            if (pw > abs(maxSample.powerMw)) maxSample = s
+            if (pw < abs(minSample.powerMw)) minSample = s
+        }
+        if (!candidateSamples.contains(maxSample)) candidateSamples.add(maxSample)
+        if (!candidateSamples.contains(minSample)) candidateSamples.add(minSample)
+
+        // 将时间跨度分为 5 个桶，在各桶内采集代表性峰值点，确保曲线各区域分布均匀
+        val bucketCount = 5
+        val timeSpan = (visibleEnd - visibleStart).coerceAtLeast(1L)
+        val bucketDuration = timeSpan / bucketCount
+        for (b in 0 until bucketCount) {
+            val bStart = visibleStart + b * bucketDuration
+            val bEnd = bStart + bucketDuration
+            val bucketSamples = downsampled.filter { it.timestamp in bStart..bEnd }
+            if (bucketSamples.isNotEmpty()) {
+                val peakInBucket = bucketSamples.maxByOrNull { abs(it.powerMw) }
+                if (peakInBucket != null && !candidateSamples.contains(peakInBucket)) {
+                    candidateSamples.add(peakInBucket)
+                }
+            }
+        }
+
+        // 计算屏幕物理坐标与格式化功耗标签
+        candidateSamples.sortBy { it.timestamp }
+        val pointMarkers = mutableListOf<Triple<Float, Float, String>>()
+        for (s in candidateSamples) {
+            val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
+            val pW = (abs(s.powerMw) / 1000.0).toFloat().coerceIn(0f, maxScaleW.toFloat())
+            val y = topPadding + (1f - (pW / maxScaleW).toFloat()) * availableH
+            val label = formatPowerWatts(pW)
+            pointMarkers.add(Triple(x, y, label))
+        }
+
+        // 绘制关键节点小圆点与功耗数值文本（应用 32dp 安全间距防重叠避让算法）
+        metricDotPaint.color = strokeColor
+        metricLabelPaint.color = strokeColor
+        drawNonOverlappingMarkers(canvas, pointMarkers, metricLabelPaint, metricDotPaint, contentLeft, contentRight, -dp4, dp32)
     }
 
     /**

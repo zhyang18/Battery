@@ -1093,12 +1093,15 @@ class PowerUsageFragment : Fragment() {
         chargingView.tvMetricCurrent.text = String.format(Locale.getDefault(), "%.0fmA", currentPoint.currentMa)
         chargingView.tvMetricVoltage.text = String.format(Locale.getDefault(), "%.3fv", currentPoint.voltageVolts)
 
-        // 行 5：电池容量与标称等效能量（采用锂电池行业标准标称工作电压 3.85V，如 8000mAh (≈30.8Wh)）
+        // 行 5：电池容量与标称等效能量
         val capacityMah = NormalApiProvider.getDesignCapacity(requireContext())
-        val safeCap = if (capacityMah != null && capacityMah > 100f) capacityMah else 5000f
-        val nominalVoltage = com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
-        val nominalWh = (safeCap * nominalVoltage) / 1000f
-        chargingView.tvMetricCapacityEnergy.text = "${safeCap.toInt()}mAh (≈${String.format(Locale.getDefault(), "%.1f", nominalWh)}Wh)"
+        if (capacityMah != null && capacityMah > 0f) {
+            val nominalVoltage = com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
+            val nominalWh = (capacityMah * nominalVoltage) / 1000f
+            chargingView.tvMetricCapacityEnergy.text = "${capacityMah.toInt()}mAh (≈${String.format(Locale.getDefault(), "%.1f", nominalWh)}Wh)"
+        } else {
+            chargingView.tvMetricCapacityEnergy.text = "--"
+        }
 
         // 6. 填充下方条形底栏卡片：左侧日期与时间范围换行，右侧亮屏与息屏指标上下严格对齐
         chargingView.tvChargingDate.text = formatChargingDate(summary.startTimestamp)

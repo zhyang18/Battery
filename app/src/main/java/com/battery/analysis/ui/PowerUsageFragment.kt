@@ -490,7 +490,6 @@ class PowerUsageFragment : Fragment() {
             }
             if (!isViewingSnapshot && !isCharging && currentDisplayTab == 0) {
                 loadData()
-                startDischargePolling()
             }
             updateShizukuBannerState()
             checkNormalPermissionBanner()
@@ -958,7 +957,6 @@ class PowerUsageFragment : Fragment() {
             binding.coordinatorPower.requestLayout()
 
             loadData()
-            startDischargePolling()
 
             if (showToast) {
                 Toast.makeText(requireContext(), getString(R.string.toast_auto_switch_discharging), Toast.LENGTH_SHORT).show()
@@ -1042,32 +1040,13 @@ class PowerUsageFragment : Fragment() {
     private var dischargePollingJob: Job? = null
 
     /**
-     * 启动放电数据前台轻量实时刷新协程（默认 2 秒一次）。
-     * 在不重新执行高耗能 dumpsys batterystats 的前提下，
-     * 直接复用后台常驻服务在内存中累积的最新物理放电采样点，
-     * 实时重新计算各应用的前台切片时长、微积分平均功耗与能量，
-     * 驱动应用列表与顶部核心瞬时指标动态跳动，实现极致流畅与极致低功耗。
+     * 取消放电数据前台自动刷新协程。
+     * 耗电统计页面已移除前台定时自动刷新轮询，避免频繁自动刷新打扰用户浏览应用列表与统计指标；
+     * 用户可通过顶部下拉手动刷新实时数据，或在重新进入界面时单次加载。
      */
     private fun startDischargePolling() {
         dischargePollingJob?.cancel()
-        dischargePollingJob = viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-            while (isActive) {
-                delay(2000L)
-                if (!isActive) break
-
-                val currentPkg = lastRenderedPackage
-                if (currentPkg != null && currentDisplayTab == 0 && !isViewingSnapshot) {
-                    val updatedPkg = powerManager.refreshRealtimeDischargePackage(currentPkg)
-                    if (updatedPkg != null) {
-                        withContext(Dispatchers.Main) {
-                            if (_binding != null && currentDisplayTab == 0 && !isViewingSnapshot) {
-                                renderDischargeRealtimeIncremental(updatedPkg)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        dischargePollingJob = null
     }
 
     /**
@@ -1841,9 +1820,6 @@ class PowerUsageFragment : Fragment() {
         currentLoadedSnapshotTime = null
         binding.layoutPowerSnapshotBanner.visibility = View.GONE
         loadData()
-        if (!chargingManager.isCharging() && currentDisplayTab == 0) {
-            startDischargePolling()
-        }
         Toast.makeText(requireContext(), getString(R.string.toast_restored_realtime), Toast.LENGTH_SHORT).show()
     }
 

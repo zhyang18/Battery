@@ -157,12 +157,24 @@ class BatteryMonitorService : Service() {
                         // 若配置为不采样（INTERVAL_NEVER 即 -1L），则不记录采样点
                         val screenOffInterval = getScreenOffIntervalMs(appContext)
                         if (!isInteractive && screenOffInterval == 0L) {
+                            val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
+                                context = this@BatteryMonitorService,
+                                fallbackVoltageVolts = cachedVoltageVolts,
+                                fallbackTempCelsius = cachedTemperature
+                            )
+                            val pWatts = hwSample?.powerWatts ?: (cachedDischargePowerWatts ?: 0f)
+                            val curVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
+                            val curTemp = hwSample?.temperatureCelsius ?: cachedTemperature
+                            if (hwSample?.voltageVolts != null) cachedVoltageVolts = curVolt
+                            if (hwSample?.temperatureCelsius != null) cachedTemperature = curTemp
+                            if (hwSample?.powerWatts != null) cachedDischargePowerWatts = pWatts
+
                             powerManager.recordDischargeRealtimeSample(
                                 timestamp = System.currentTimeMillis(),
                                 batteryLevel = cachedLevelPercent,
-                                voltageVolts = cachedVoltageVolts,
-                                temperature = cachedTemperature,
-                                powerWatts = 0f,
+                                voltageVolts = curVolt,
+                                temperature = curTemp,
+                                powerWatts = pWatts,
                                 isScreenOn = false
                             )
                         }
@@ -207,13 +219,19 @@ class BatteryMonitorService : Service() {
         createNotificationChannel()
 
         // 1. 无条件第一步调用 startForeground 履行系统前台服务契约，杜绝任何提早退出导致的超时崩溃
-        val channelId = if (isNotificationDisplayEnabled(this)) CHANNEL_ID else CHANNEL_ID_SILENT
+        val isDisplayEnabled = isNotificationDisplayEnabled(this)
+        val channelId = if (isDisplayEnabled) CHANNEL_ID else CHANNEL_ID_SILENT
         val initialNotification = buildNotification(channelId)
         safeStartForeground(initialNotification)
+        if (!isDisplayEnabled) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            notificationManager.cancel(NOTIFICATION_ID)
+        }
 
         // 2. 履约后检查业务守卫：若未开启充放电统计或无需运行，安全退出
         if (!shouldServiceRun(this)) {
             stopForeground(STOP_FOREGROUND_REMOVE)
+            notificationManager.cancel(NOTIFICATION_ID)
             stopSelf()
             return
         }
@@ -250,19 +268,27 @@ class BatteryMonitorService : Service() {
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 1. 任何通过 startForegroundService 的调用或唤醒，第一步强制调用 startForeground 续期前台状态
-        val channelId = if (isNotificationDisplayEnabled(this)) CHANNEL_ID else CHANNEL_ID_SILENT
+        val isDisplayEnabled = isNotificationDisplayEnabled(this)
+        val channelId = if (isDisplayEnabled) CHANNEL_ID else CHANNEL_ID_SILENT
         val notification = buildNotification(channelId)
         safeStartForeground(notification)
+        if (!isDisplayEnabled) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            notificationManager.cancel(NOTIFICATION_ID)
+        }
 
         // 2. 检查业务守卫：若未开启充放电统计或无需运行，安全退出
         if (!shouldServiceRun(this)) {
             stopForeground(STOP_FOREGROUND_REMOVE)
+            notificationManager.cancel(NOTIFICATION_ID)
             stopSelf()
             return START_NOT_STICKY
         }
 
         scheduleHeartbeatAlarm(this)
-        updateNotification(force = true)
+        if (isDisplayEnabled) {
+            updateNotification(force = true)
+        }
         return START_STICKY
     }
 
@@ -646,15 +672,19 @@ class BatteryMonitorService : Service() {
 
     /**
      * 刷新并推送最新的电池状态通知至系统通知栏。
-     * 遵循前台服务规范，若用户关闭通知栏常驻显示，则切换至静默渠道 [CHANNEL_ID_SILENT]（IMPORTANCE_MIN），
-     * 保证始终持有合法 Notification 并维持前台服务优先级，绝不调用破坏前台约定的 stopForeground。
+     * 若用户关闭通知栏常驻显示，则立即调用 stopForeground 移除通知并取消系统通知栏展示；
+     * 若用户开启通知栏常驻显示，则挂载合法前台 Notification 并维持前台服务优先级。
      *
      * @param force 是否强制触发系统通知栏刷新（如点亮屏幕瞬间或切换开关配置后）
      */
     fun updateNotification(force: Boolean = false) {
         try {
             val isDisplayEnabled = isNotificationDisplayEnabled(this)
-            val channelId = if (isDisplayEnabled) CHANNEL_ID else CHANNEL_ID_SILENT
+            if (!isDisplayEnabled) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                notificationManager.cancel(NOTIFICATION_ID)
+                return
+            }
 
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
             val isInteractive = pm?.isInteractive ?: true
@@ -671,7 +701,7 @@ class BatteryMonitorService : Service() {
             lastNotifiedContent = singleLineInfo
             lastNotifiedTime = now
 
-            val notification = buildNotification(channelId, singleLineInfo)
+            val notification = buildNotification(CHANNEL_ID, singleLineInfo)
             safeStartForeground(notification)
             notificationManager.notify(NOTIFICATION_ID, notification)
         } catch (_: Exception) {}

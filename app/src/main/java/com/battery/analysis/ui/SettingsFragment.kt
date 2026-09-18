@@ -193,7 +193,7 @@ class SettingsFragment : Fragment() {
 
             val popupView = layoutInflater.inflate(R.layout.popup_power_mode_picker, null)
             val density = resources.displayMetrics.density
-            val popupWidth = (230 * density).toInt()
+            val popupWidth = (130 * density).toInt()
 
             val popupWindow = android.widget.PopupWindow(
                 popupView,

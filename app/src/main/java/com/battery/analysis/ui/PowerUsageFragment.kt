@@ -1369,6 +1369,7 @@ class PowerUsageFragment : Fragment() {
 
     /**
      * 异步加载电池状态、放电曲线与应用使用场景数据（按当前活跃模式读取真实数据）。
+     * 在后台 IO 协程中异步完成数据提取与时间轴状态构建，彻底消除主线程阻塞与下拉刷新卡顿。
      */
     fun loadData() {
         binding.swipeRefreshLayout.isRefreshing = true
@@ -1380,11 +1381,12 @@ class PowerUsageFragment : Fragment() {
                 powerManager.grantUsageStatsPermissionViaShizuku()
             }
             val fullPackage = powerManager.loadPowerData(currentMode)
+            val timelineState = powerManager.buildTimelineState(fullPackage)
 
             withContext(Dispatchers.Main) {
                 if (_binding == null) return@withContext
                 checkNormalPermissionBanner()
-                renderFullPowerData(fullPackage)
+                renderFullPowerData(fullPackage, timelineState)
                 binding.swipeRefreshLayout.isRefreshing = false
             }
         }
@@ -1410,15 +1412,20 @@ class PowerUsageFragment : Fragment() {
      * 将解析出的完整耗电数据包渲染更新至界面各展示卡片与应用列表中。
      *
      * @param fullPackage 包含电池快照、核心指标、应用列表及走势点的完整数据包
+     * @param prebuiltTimelineState 在后台异步线程预先构建的功耗时间轴状态对象，若为 null 则在当前线程回退构建
      */
-    private fun renderFullPowerData(fullPackage: com.battery.analysis.manager.FullPowerDataPackage) {
+    private fun renderFullPowerData(
+        fullPackage: com.battery.analysis.manager.FullPowerDataPackage,
+        prebuiltTimelineState: com.battery.analysis.timeline.presentation.BatteryTimelineState? = null
+    ) {
         lastRenderedPackage = fullPackage
         val snapshot = fullPackage.batterySnapshot
         val overview = fullPackage.overviewStats
 
-        // 构建并绑定功耗时间轴最新状态（多选模式）
+        // 构建并绑定功耗时间轴最新状态（多选模式，优先复用后台异步预构建的 timelineState 避免主线程卡顿）
         val selectedMetrics = binding.metricSelectorView.getSelectedMetrics()
-        val timelineState = powerManager.buildTimelineState(fullPackage).copy(selectedMetrics = selectedMetrics)
+        val baseState = prebuiltTimelineState ?: powerManager.buildTimelineState(fullPackage)
+        val timelineState = baseState.copy(selectedMetrics = selectedMetrics)
         binding.batteryTimelineView.setState(timelineState)
 
         val energyText = String.format(Locale.getDefault(), getString(R.string.power_wh_format), snapshot.energyWh)
@@ -1835,9 +1842,10 @@ class PowerUsageFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             val fullPackage = record.toFullPowerPackage(requireContext())
+            val timelineState = powerManager.buildTimelineState(fullPackage)
             withContext(Dispatchers.Main) {
                 if (_binding != null) {
-                    renderFullPowerData(fullPackage)
+                    renderFullPowerData(fullPackage, timelineState)
                     Toast.makeText(requireContext(), getString(R.string.power_history_loaded_toast), Toast.LENGTH_SHORT).show()
                 }
             }

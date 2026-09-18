@@ -32,6 +32,9 @@ import com.battery.analysis.timeline.presentation.BatteryTimelineState
 import com.battery.analysis.timeline.presentation.TimelineMetric
 import com.battery.analysis.util.BatteryEnergyCalculator
 import com.battery.analysis.util.NetworkStatsHelper
+import android.os.PowerManager
+import com.battery.analysis.service.KeepAliveAccessibilityService
+import com.battery.analysis.util.ShizukuForegroundAppDetector
 import rikka.shizuku.Shizuku
 import java.util.Calendar
 import kotlin.math.abs
@@ -2162,14 +2165,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                             if (activeEnd > activeStart) {
                                 appIntervals.add(AppActivityInterval(pkg, activeStart, activeEnd))
                             }
-                            // 切出当前应用后，若屏幕依然点亮，后续活跃时间自动归属于系统桌面 Launcher
-                            if (screenOnStart != null && !defaultHome.isNullOrEmpty()) {
-                                currentForegroundPkg = defaultHome
-                                currentForegroundStartTs = ts
-                            } else {
-                                currentForegroundPkg = null
-                                currentForegroundStartTs = 0L
-                            }
+                            // 暂存应用切换断点，保留暂停时间戳，不盲目判定为系统桌面，杜绝应用内部切换 Activity 导致时序断流
+                            currentForegroundPkg = null
+                            currentForegroundStartTs = ts
                         }
                     }
                     UsageEvents.Event.SCREEN_INTERACTIVE -> {
@@ -2201,11 +2199,40 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
 
             // 处理在 endTime 时刻未结束的应用与屏幕常亮事件
-            if (currentForegroundPkg != null) {
-                val activeStart = maxOf(currentForegroundStartTs, startTime)
+            var finalFgPkg = currentForegroundPkg
+            var finalFgStartTs = currentForegroundStartTs
+
+            val now = System.currentTimeMillis()
+            val isNearCurrentTime = abs(endTime - now) <= 120_000L
+            val isInteractive = (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isInteractive == true
+
+            // 若查询终点接近当前真实时刻且屏幕亮屏，校准当前系统的真实前台置顶应用（消除系统 UsageStats 缓冲区异步写入延迟）
+            if (isNearCurrentTime && (screenOnStart != null || isInteractive)) {
+                val realPkg = ShizukuForegroundAppDetector.getForegroundPackageName(context)
+                    ?: KeepAliveAccessibilityService.currentForegroundPackage
+                    ?: context.packageName
+
+                if (!realPkg.isNullOrEmpty() && realPkg != defaultHome) {
+                    if (finalFgPkg == realPkg) {
+                        // 延续当前前台应用
+                    } else {
+                        if (finalFgPkg != null && finalFgStartTs > 0L && finalFgStartTs < endTime) {
+                            val activeStart = maxOf(finalFgStartTs, startTime)
+                            if (endTime > activeStart) {
+                                appIntervals.add(AppActivityInterval(finalFgPkg, activeStart, endTime))
+                            }
+                        }
+                        finalFgPkg = realPkg
+                        finalFgStartTs = if (finalFgStartTs > 0L) finalFgStartTs else (screenOnStart ?: startTime)
+                    }
+                }
+            }
+
+            if (finalFgPkg != null) {
+                val activeStart = maxOf(finalFgStartTs, startTime)
                 val activeEnd = endTime
                 if (activeEnd > activeStart) {
-                    appIntervals.add(AppActivityInterval(currentForegroundPkg, activeStart, activeEnd))
+                    appIntervals.add(AppActivityInterval(finalFgPkg, activeStart, activeEnd))
                 }
             }
             if (screenOnStart != null && endTime > screenOnStart) {
@@ -3209,6 +3236,72 @@ class PowerUsageManager private constructor(private val context: Context) {
                     source = if (fullPackage.isShizukuRealData) EnergySource.BATTERY_STATS else EnergySource.ESTIMATED
                 )
             )
+        }
+
+        // 5. 实时监控状态闭合校准：确保最新时刻（endTs / now）若处于亮屏状态，前台应用事件与 endTs 完全闭合对齐
+        if (!isHistoryRecord && endTs >= now - 120_000L && screenEvents.any { it.isScreenOn && it.endTime >= endTs - 10_000L }) {
+            val lastAppEvent = appEvents.maxByOrNull { it.endTime }
+            if (lastAppEvent != null && lastAppEvent.endTime < endTs && lastAppEvent.endTime >= endTs - 60_000L) {
+                // 若末尾最后一个事件与当前时间接近，直接闭合其 endTime 到 endTs
+                val idx = appEvents.indexOf(lastAppEvent)
+                if (idx >= 0) {
+                    appEvents[idx] = lastAppEvent.copy(
+                        endTime = endTs,
+                        durationMs = max(0L, endTs - lastAppEvent.startTime)
+                    )
+                }
+            } else if (lastAppEvent == null || lastAppEvent.endTime < endTs - 10_000L) {
+                // 若时序末尾缺失前台事件，查询系统当前置顶应用进行对齐闭合
+                val currentPkg = ShizukuForegroundAppDetector.getForegroundPackageName(context)
+                    ?: KeepAliveAccessibilityService.currentForegroundPackage
+                    ?: context.packageName
+
+                val defaultHome = getDefaultHomeLauncherPackage()
+                if (!currentPkg.isNullOrEmpty() && currentPkg != defaultHome) {
+                    val fallbackStart = maxOf(lastAppEvent?.endTime ?: startTs, endTs - 60_000L, startTs)
+                    if (endTs > fallbackStart) {
+                        val item = appMap[currentPkg]
+                        val appName = item?.appName ?: try {
+                            val ai = pm.getApplicationInfo(currentPkg, 0)
+                            pm.getApplicationLabel(ai).toString()
+                        } catch (_: Exception) {
+                            currentPkg
+                        }
+                        val icon = item?.icon ?: try {
+                            val ai = pm.getApplicationInfo(currentPkg, 0)
+                            pm.getApplicationIcon(ai)
+                        } catch (_: Exception) {
+                            null
+                        }
+                        val uid = try {
+                            pm.getApplicationInfo(currentPkg, 0).uid
+                        } catch (_: Exception) {
+                            10000
+                        }
+                        appEvents.add(
+                            AppTimelineEvent(
+                                packageName = currentPkg,
+                                uid = uid,
+                                appName = appName,
+                                icon = icon,
+                                startTime = fallbackStart,
+                                endTime = endTs,
+                                durationMs = endTs - fallbackStart,
+                                screenOn = true,
+                                energyMwh = null,
+                                averagePowerMw = fullPackage.overviewStats.avgPowerWatts * 1000.0,
+                                peakPowerMw = fullPackage.overviewStats.avgPowerWatts * 1000.0,
+                                cpuTimeMs = 0L,
+                                networkBytes = 0L,
+                                wakelockTimeMs = 0L,
+                                gpsTimeMs = 0L,
+                                confidence = ConfidenceLevel.HIGH,
+                                source = EnergySource.BATTERY_STATS
+                            )
+                        )
+                    }
+                }
+            }
         }
 
         return BatteryTimelineState(

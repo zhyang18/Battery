@@ -434,7 +434,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         val contentWidth = max(0f, contentRight - contentLeft)
 
         val visibleStart = timelineState.visibleStartTimestamp
-        val visibleEnd = max(timelineState.visibleEndTimestamp, visibleStart + 60_000L)
+        val visibleEnd = if (timelineState.visibleEndTimestamp > visibleStart) timelineState.visibleEndTimestamp else (visibleStart + 60_000L)
 
         val timeTickTop = h - dp18
         val screenBarBottom = timeTickTop - dp2
@@ -448,7 +448,7 @@ class BatteryTimelineView @JvmOverloads constructor(
             canvasWidth = contentWidth,
             baseBottomY = baseBottomY,
             slotSizePx = dp11,
-            slotGapPx = dp2,
+            slotGapPx = 0f,
             rowGapPx = 0f,
             maxRows = Int.MAX_VALUE,
             leftMarginPx = contentLeft

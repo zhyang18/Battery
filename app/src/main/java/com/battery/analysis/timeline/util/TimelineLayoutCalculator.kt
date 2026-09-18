@@ -65,12 +65,23 @@ object TimelineLayoutCalculator {
     ): List<LaidOutAppSlotItem> {
         if (events.isEmpty() || canvasWidth <= 0f || visibleEndTs <= visibleStartTs) return emptyList()
 
-        val targetStep = slotSizePx + slotGapPx
+        val isZeroGap = slotGapPx <= 0f
+        val targetStep = if (isZeroGap) slotSizePx else (slotSizePx + slotGapPx)
         if (targetStep <= 0f) return emptyList()
 
-        // 水平全铺满计算时间槽数量与步长：确保 Slot 0 严格对齐左侧 contentLeft，最末 Slot 严格对齐右侧 contentRight
-        val numSlots = max(1, kotlin.math.round((canvasWidth - slotSizePx) / targetStep).toInt() + 1)
-        val actualStepX = if (numSlots > 1) (canvasWidth - slotSizePx) / (numSlots - 1) else 0f
+        // 水平全铺满计算时间槽数量与步长：当 slotGapPx <= 0f 时采用严格 0dp 无缝紧贴排列；否则两端铺满对齐
+        val numSlots = if (isZeroGap) {
+            max(1, (canvasWidth / slotSizePx).toInt())
+        } else {
+            max(1, kotlin.math.round((canvasWidth - slotSizePx) / targetStep).toInt() + 1)
+        }
+        val actualStepX = if (isZeroGap) {
+            slotSizePx
+        } else if (numSlots > 1) {
+            (canvasWidth - slotSizePx) / (numSlots - 1)
+        } else {
+            0f
+        }
 
         val totalTimeSpan = visibleEndTs - visibleStartTs
         val result = mutableListOf<LaidOutAppSlotItem>()

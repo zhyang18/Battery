@@ -219,12 +219,18 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     private val tooltipBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.parseColor("#EE1F2937")
+        color = Color.parseColor("#12888888")
+    }
+
+    private val tooltipBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp1
+        color = Color.parseColor("#1F888888")
     }
 
     private val tooltipTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = sp10_5
-        color = Color.parseColor("#F3F4F6")
+        textSize = sp9_5
+        color = Color.parseColor("#E0E0E0")
     }
 
     // 绘制复用 Path 与 Rect
@@ -1347,11 +1353,13 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制长按垂直游标线并将探查到的时间、电量、功耗、温度、电压与前台应用信息直接以半透明悬浮卡片显示在图表顶部内部（不触摸时不占空间）。
+     * 绘制手势长按或触控滑动时的垂直虚线游标，以及顶部单行读数指示看板（与充电趋势图触摸看板样式保持一致）。
+     * 单行紧凑展示当前时刻指标，中间以 " | " 分隔，去除指标名称标签。
+     * 格式形如：10:10:02 :  60% | -1.35W | 38.5℃ | 3.941V | 电池统计
      *
-     * @param canvas 绘图画布 [Canvas]
-     * @param contentLeft 图表左边界 X 坐标
-     * @param contentRight 图表右边界 X 坐标
+     * @param canvas 绘制画布
+     * @param contentLeft 图表内容左边界
+     * @param contentRight 图表内容右边界
      * @param contentWidth 图表内容有效宽度
      * @param mainHeight 曲线区域高度
      * @param visibleStart 视窗起始时间戳
@@ -1374,42 +1382,34 @@ class BatteryTimelineView @JvmOverloads constructor(
         val curApp = timelineState.appEvents.find { it.startTime <= curTs && it.endTime >= curTs }
 
         val timeStr = timeFormatterTooltip.format(Date(curTs))
+        val levelStr = curSample?.let { "${it.batteryLevel}%" }
         val powerStr = curSample?.let {
             val pWatts = it.getPowerWatts()
             val signedPower = if (pWatts > 0) -pWatts else pWatts
-            String.format(Locale.getDefault(), "功耗: %.2fW", signedPower)
-        } ?: ""
-        val levelStr = curSample?.let { "电量: ${it.batteryLevel}%" } ?: ""
-        val voltStr = curSample?.let { String.format(Locale.getDefault(), "电压: %.3fV", it.getVoltageVolts()) } ?: ""
-        val tempStr = curSample?.let { String.format(Locale.getDefault(), "温度: %.1f℃", it.temperatureC) } ?: ""
-        val appStr = curApp?.let { "应用: ${it.appName}" } ?: ""
+            String.format(Locale.getDefault(), "%.2fW", signedPower)
+        }
+        val tempStr = curSample?.let { String.format(Locale.getDefault(), "%.1f℃", it.temperatureC) }
+        val voltStr = curSample?.let { String.format(Locale.getDefault(), "%.3fV", it.getVoltageVolts()) }
+        val appStr = curApp?.appName?.takeIf { it.isNotBlank() }
 
-        // 2. 将信息分两行换行排布：第 1 行为时间、电量、功耗；第 2 行为温度、电压、前台应用
-        val line1Items = listOfNotNull(
-            timeStr.takeIf { it.isNotEmpty() },
-            levelStr.takeIf { it.isNotEmpty() },
-            powerStr.takeIf { it.isNotEmpty() }
-        )
-        val line2Items = listOfNotNull(
-            tempStr.takeIf { it.isNotEmpty() },
-            voltStr.takeIf { it.isNotEmpty() },
-            appStr.takeIf { it.isNotEmpty() }
-        )
-        val line1Text = line1Items.joinToString("   ")
-        val line2Text = line2Items.joinToString("   ")
+        // 2. 将数据合并为单行展示，中间以 " | " 间隔，去除指标名称
+        val metricsList = listOfNotNull(levelStr, powerStr, tempStr, voltStr, appStr)
+        val fullText = if (metricsList.isNotEmpty()) {
+            "$timeStr :  ${metricsList.joinToString(" | ")}"
+        } else {
+            timeStr
+        }
 
-        // 3. 触摸显示的 view 直接显示到图表内部的顶部（悬浮浮层覆盖，不触摸时不占空间）
-        val headerTop = dp3
-        val headerBottom = headerTop + dp28
+        // 3. 触摸显示的 view 修改为充电趋势图触摸显示 view 样式：顶部单行轻微圆角背景与描边卡片
+        val headerTop = dp2
+        val headerBottom = dp24
         tooltipRect.set(contentLeft, headerTop, contentRight, headerBottom)
         canvas.drawRoundRect(tooltipRect, dp4, dp4, tooltipBgPaint)
+        canvas.drawRoundRect(tooltipRect, dp4, dp4, tooltipBorderPaint)
 
-        val line1Y = headerTop + sp9_5 * 1.05f + dp2
-        val line2Y = line1Y + sp9_5 * 1.25f
-        canvas.drawText(line1Text, contentLeft + dp8, line1Y, tooltipTextPaint)
-        if (line2Text.isNotEmpty()) {
-            canvas.drawText(line2Text, contentLeft + dp8, line2Y, tooltipTextPaint)
-        }
+        // 单行文字垂直居中排布
+        val textY = headerTop + (headerBottom - headerTop) / 2f - (tooltipTextPaint.descent() + tooltipTextPaint.ascent()) / 2f
+        canvas.drawText(fullText, contentLeft + dp8, textY, tooltipTextPaint)
 
         // 4. 垂直虚线游标从顶部悬浮卡片下方引出延伸至图表底部
         canvas.drawLine(clampedX, headerBottom, clampedX, mainHeight + dp6, cursorPaint)

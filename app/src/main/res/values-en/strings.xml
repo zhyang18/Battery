@@ -498,6 +498,12 @@
     <string name="interval_60s">60 seconds</string>
     <string name="interval_120s">2 minutes</string>
     <string name="interval_300s">5 minutes</string>
+    <string name="interval_custom">Custom</string>
+    <string name="dialog_custom_screen_on_interval_title">Custom Screen-on Interval</string>
+    <string name="dialog_custom_screen_off_interval_title">Custom Screen-off Interval</string>
+    <string name="dialog_custom_interval_hint">Enter seconds (e.g. 1.5)</string>
+    <string name="dialog_custom_interval_desc">In seconds, supports up to 1 decimal place</string>
+    <string name="dialog_custom_interval_invalid">Please enter a valid number of seconds greater than 0</string>
     <string name="settings_boot_start_title">Auto-start on Boot</string>
     <string name="settings_boot_start_desc">Automatically resume monitor upon device reboot</string>
     <string name="settings_battery_optimization_title">Ignore Battery Optimization</string>

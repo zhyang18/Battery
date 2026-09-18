@@ -461,6 +461,7 @@ class SettingsFragment : Fragment() {
 
     /**
      * 根据当前选定的毫秒数获取本地化刷新间隔文案。
+     * 支持预设秒数及精确到小数点后 1 位的自定义秒数。
      *
      * @param intervalMs 刷新时间间隔毫秒数
      * @return 本地化文案
@@ -468,11 +469,17 @@ class SettingsFragment : Fragment() {
     private fun getIntervalDisplay(intervalMs: Long): String {
         return when (intervalMs) {
             1000L -> getString(R.string.interval_1s)
-            2000L -> getString(R.string.interval_2s)
             3000L -> getString(R.string.interval_3s)
             5000L -> getString(R.string.interval_5s)
             10000L -> getString(R.string.interval_10s)
-            else -> "${intervalMs / 1000}s"
+            30000L -> getString(R.string.interval_30s)
+            else -> {
+                if (intervalMs % 1000L == 0L) {
+                    "${intervalMs / 1000L} 秒"
+                } else {
+                    String.format(Locale.getDefault(), "%.1f 秒", intervalMs / 1000.0)
+                }
+            }
         }
     }
 
@@ -947,12 +954,7 @@ class SettingsFragment : Fragment() {
         binding.tvCurrentScreenOffInterval.text = when (offInterval) {
             com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER -> getString(R.string.interval_never)
             0L -> getString(R.string.interval_smart_eco)
-            15000L -> getString(R.string.interval_15s)
-            30000L -> getString(R.string.interval_30s)
-            60000L -> getString(R.string.interval_60s)
-            120000L -> getString(R.string.interval_120s)
-            300000L -> getString(R.string.interval_300s)
-            else -> "${offInterval / 1000}s"
+            else -> getIntervalDisplay(offInterval)
         }
 
         // 常驻通知栏显示不影响亮屏和息屏采样间隔，保持始终可用
@@ -964,12 +966,12 @@ class SettingsFragment : Fragment() {
 
     /**
      * 初始化亮屏监控刷新间隔选择气泡菜单。
-     * 支持在不采样(-1L)与高频刷新间自由切换。
+     * 支持在不采样(-1L)、1秒、3秒、5秒、10秒、30秒及自定义间自由切换。
      */
     private fun setupScreenOnIntervalPicker() {
         val intervalValues = listOf(
             com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER,
-            1000L, 2000L, 3000L, 5000L, 10000L
+            1000L, 3000L, 5000L, 10000L, 30000L
         )
         binding.layoutScreenOnInterval.setOnClickListener {
             val currentVal = com.battery.analysis.service.BatteryMonitorService.getScreenOnIntervalMs(requireContext())
@@ -991,21 +993,29 @@ class SettingsFragment : Fragment() {
             val optionViews = listOf(
                 popupView.findViewById<TextView>(R.id.tv_opt_never),
                 popupView.findViewById<TextView>(R.id.tv_opt_1s),
-                popupView.findViewById<TextView>(R.id.tv_opt_2s),
                 popupView.findViewById<TextView>(R.id.tv_opt_3s),
                 popupView.findViewById<TextView>(R.id.tv_opt_5s),
-                popupView.findViewById<TextView>(R.id.tv_opt_10s)
+                popupView.findViewById<TextView>(R.id.tv_opt_10s),
+                popupView.findViewById<TextView>(R.id.tv_opt_30s)
             )
+            val tvCustom = popupView.findViewById<TextView>(R.id.tv_opt_custom)
 
             optionViews[0].text = getString(R.string.interval_never)
             optionViews[1].text = getString(R.string.interval_1s)
-            optionViews[2].text = getString(R.string.interval_2s)
-            optionViews[3].text = getString(R.string.interval_3s)
-            optionViews[4].text = getString(R.string.interval_5s)
-            optionViews[5].text = getString(R.string.interval_10s)
+            optionViews[2].text = getString(R.string.interval_3s)
+            optionViews[3].text = getString(R.string.interval_5s)
+            optionViews[4].text = getString(R.string.interval_10s)
+            optionViews[5].text = getString(R.string.interval_30s)
 
             val normalColor = ContextCompat.getColor(requireContext(), R.color.popup_item_text)
             val activeColor = Color.parseColor("#2196F3")
+
+            val isCustomActive = currentVal !in intervalValues
+            tvCustom.setTextColor(if (isCustomActive) activeColor else normalColor)
+            tvCustom.setOnClickListener {
+                popupWindow.dismiss()
+                showCustomIntervalDialog(isScreenOn = true)
+            }
 
             optionViews.forEachIndexed { index, textView ->
                 val intervalVal = intervalValues[index]
@@ -1029,18 +1039,18 @@ class SettingsFragment : Fragment() {
 
     /**
      * 初始化息屏待机采样间隔选择气泡菜单。
-     * 支持在不采样(-1L)、智能省电(0L)与定时轮询间自由切换。
+     * 支持在不采样(-1L)、智能省电(0L)、1秒、3秒、5秒、10秒、30秒及自定义间自由切换。
      */
     private fun setupScreenOffIntervalPicker() {
         val intervalValues = listOf(
             com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER,
-            0L, 15000L, 30000L, 60000L, 120000L, 300000L
+            0L, 1000L, 3000L, 5000L, 10000L, 30000L
         )
         binding.layoutScreenOffInterval.setOnClickListener {
             val currentVal = com.battery.analysis.service.BatteryMonitorService.getScreenOffIntervalMs(requireContext())
             val popupView = layoutInflater.inflate(R.layout.popup_screen_off_interval_picker, null)
             val density = resources.displayMetrics.density
-            val popupWidth = (200 * density).toInt()
+            val popupWidth = (180 * density).toInt()
 
             val popupWindow = android.widget.PopupWindow(
                 popupView,
@@ -1056,23 +1066,31 @@ class SettingsFragment : Fragment() {
             val optionViews = listOf(
                 popupView.findViewById<TextView>(R.id.tv_opt_never),
                 popupView.findViewById<TextView>(R.id.tv_opt_smart_eco),
-                popupView.findViewById<TextView>(R.id.tv_opt_15s),
-                popupView.findViewById<TextView>(R.id.tv_opt_30s),
-                popupView.findViewById<TextView>(R.id.tv_opt_60s),
-                popupView.findViewById<TextView>(R.id.tv_opt_120s),
-                popupView.findViewById<TextView>(R.id.tv_opt_300s)
+                popupView.findViewById<TextView>(R.id.tv_opt_1s),
+                popupView.findViewById<TextView>(R.id.tv_opt_3s),
+                popupView.findViewById<TextView>(R.id.tv_opt_5s),
+                popupView.findViewById<TextView>(R.id.tv_opt_10s),
+                popupView.findViewById<TextView>(R.id.tv_opt_30s)
             )
+            val tvCustom = popupView.findViewById<TextView>(R.id.tv_opt_custom)
 
             optionViews[0].text = getString(R.string.interval_never)
             optionViews[1].text = getString(R.string.interval_smart_eco)
-            optionViews[2].text = getString(R.string.interval_15s)
-            optionViews[3].text = getString(R.string.interval_30s)
-            optionViews[4].text = getString(R.string.interval_60s)
-            optionViews[5].text = getString(R.string.interval_120s)
-            optionViews[6].text = getString(R.string.interval_300s)
+            optionViews[2].text = getString(R.string.interval_1s)
+            optionViews[3].text = getString(R.string.interval_3s)
+            optionViews[4].text = getString(R.string.interval_5s)
+            optionViews[5].text = getString(R.string.interval_10s)
+            optionViews[6].text = getString(R.string.interval_30s)
 
             val normalColor = ContextCompat.getColor(requireContext(), R.color.popup_item_text)
             val activeColor = Color.parseColor("#2196F3")
+
+            val isCustomActive = currentVal !in intervalValues
+            tvCustom.setTextColor(if (isCustomActive) activeColor else normalColor)
+            tvCustom.setOnClickListener {
+                popupWindow.dismiss()
+                showCustomIntervalDialog(isScreenOn = false)
+            }
 
             optionViews.forEachIndexed { index, textView ->
                 val intervalVal = intervalValues[index]
@@ -1092,6 +1110,76 @@ class SettingsFragment : Fragment() {
                 android.view.Gravity.END
             )
         }
+    }
+
+    /**
+     * 弹出自定义刷新或采样间隔设置对话框，支持精确到小数点后 1 位，以秒为单位。
+     *
+     * @param isScreenOn 是否针对亮屏监控刷新间隔配置（true: 亮屏, false: 息屏）
+     */
+    private fun showCustomIntervalDialog(isScreenOn: Boolean) {
+        val ctx = requireContext()
+        val currentValMs = if (isScreenOn) {
+            com.battery.analysis.service.BatteryMonitorService.getScreenOnIntervalMs(ctx)
+        } else {
+            com.battery.analysis.service.BatteryMonitorService.getScreenOffIntervalMs(ctx)
+        }
+
+        val dialogView = layoutInflater.inflate(R.layout.dialog_custom_interval, null)
+        val tvTitle = dialogView.findViewById<TextView>(R.id.tv_dialog_interval_title)
+        val etSeconds = dialogView.findViewById<android.widget.EditText>(R.id.et_interval_seconds)
+        val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_interval_cancel)
+        val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_interval_confirm)
+
+        tvTitle.text = if (isScreenOn) {
+            getString(R.string.dialog_custom_screen_on_interval_title)
+        } else {
+            getString(R.string.dialog_custom_screen_off_interval_title)
+        }
+
+        if (currentValMs > 0L) {
+            val secDouble = currentValMs / 1000.0
+            val initText = if (currentValMs % 1000L == 0L) {
+                "${currentValMs / 1000L}"
+            } else {
+                String.format(Locale.getDefault(), "%.1f", secDouble)
+            }
+            etSeconds.setText(initText)
+            etSeconds.setSelection(initText.length)
+        }
+
+        val dialog = AlertDialog.Builder(ctx)
+            .setView(dialogView)
+            .create()
+
+        btnCancel.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        btnConfirm.setOnClickListener {
+            val inputStr = etSeconds.text?.toString()?.trim() ?: ""
+            val seconds = inputStr.toDoubleOrNull()
+            if (seconds == null || seconds <= 0.0) {
+                Toast.makeText(ctx, getString(R.string.dialog_custom_interval_invalid), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            val roundedSeconds = Math.round(seconds * 10.0) / 10.0
+            val targetMs = Math.round(roundedSeconds * 1000.0)
+
+            if (isScreenOn) {
+                com.battery.analysis.service.BatteryMonitorService.setScreenOnIntervalMs(ctx, targetMs)
+            } else {
+                com.battery.analysis.service.BatteryMonitorService.setScreenOffIntervalMs(ctx, targetMs)
+            }
+
+            updateKeepAliveIntervalDisplay()
+            (activity as? MainActivity)?.checkAndStartBatteryMonitorService()
+            dialog.dismiss()
+        }
+
+        dialog.show()
+        applyDialogWindowStyle(dialog)
     }
 
     /**

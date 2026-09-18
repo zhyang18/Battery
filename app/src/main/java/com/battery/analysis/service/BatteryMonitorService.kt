@@ -465,12 +465,12 @@ class BatteryMonitorService : Service() {
                 updateNotification(force = false)
 
                 val targetInterval = if (isInteractive) {
-                    if (screenOnInterval == INTERVAL_NEVER) 5000L else screenOnInterval.coerceAtLeast(1000L)
+                    if (screenOnInterval == INTERVAL_NEVER) 5000L else screenOnInterval
                 } else {
-                    if (isCharging) 15000L else screenOffInterval.coerceAtLeast(15000L)
+                    if (isCharging) 15000L else screenOffInterval
                 }
                 val costMs = SystemClock.elapsedRealtime() - loopStartRealtime
-                val sleepInterval = (targetInterval - costMs).coerceAtLeast(100L)
+                val sleepInterval = (targetInterval - costMs).coerceAtLeast(0L)
                 delay(sleepInterval)
             }
         }

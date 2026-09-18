@@ -34,18 +34,6 @@
         android:textSize="14sp"
         android:textStyle="bold" />
 
-    <!-- 2 秒 -->
-    <TextView
-        android:id="@+id/tv_opt_2s"
-        android:layout_width="match_parent"
-        android:layout_height="38dp"
-        android:background="@drawable/bg_dropdown_item_ripple"
-        android:gravity="center"
-        android:text="@string/interval_2s"
-        android:textColor="@color/popup_item_text"
-        android:textSize="14sp"
-        android:textStyle="bold" />
-
     <!-- 3 秒 -->
     <TextView
         android:id="@+id/tv_opt_3s"
@@ -78,6 +66,30 @@
         android:background="@drawable/bg_dropdown_item_ripple"
         android:gravity="center"
         android:text="@string/interval_10s"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- 30 秒 -->
+    <TextView
+        android:id="@+id/tv_opt_30s"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:gravity="center"
+        android:text="@string/interval_30s"
+        android:textColor="@color/popup_item_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <!-- 自定义 -->
+    <TextView
+        android:id="@+id/tv_opt_custom"
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:background="@drawable/bg_dropdown_item_ripple"
+        android:gravity="center"
+        android:text="@string/interval_custom"
         android:textColor="@color/popup_item_text"
         android:textSize="14sp"
         android:textStyle="bold" />

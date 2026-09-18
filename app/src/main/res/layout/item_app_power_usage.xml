@@ -8,8 +8,8 @@
     android:background="?android:attr/selectableItemBackground"
     android:clickable="true"
     android:focusable="true"
-    android:paddingStart="6dp"
-    android:paddingEnd="6dp"
+    android:paddingStart="5dp"
+    android:paddingEnd="5dp"
     android:paddingTop="5dp"
     android:paddingBottom="5dp">
 
@@ -68,7 +68,7 @@
             tools:text="AVG: 0.67W, 36.0℃" />
     </LinearLayout>
 
-    <!-- 右侧三行：上方前后台时长，中间前后台消耗能量，下方 MAX 最高温度 -->
+    <!-- 右侧两行：上方前后台时长，下方前后台消耗能量与 MAX 最高运行温度 -->
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
@@ -85,26 +85,17 @@
             android:maxLines="1"
             tools:text="6h7m | 1h20m" />
 
-        <!-- 移动到时间下方的 前台能量 | 后台能量 -->
+        <!-- 移动到时间下方的 消耗能量 | MAX 最高运行温度 -->
         <TextView
             android:id="@+id/tv_app_energy"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginTop="3.5dp"
             android:textColor="?android:attr/textColorPrimary"
             android:textSize="12sp"
             android:maxLines="1"
             android:ellipsize="end"
-            tools:text="0.250Wh | 0.080Wh" />
-
-        <!-- 移动到能量下方的 MAX 最高运行温度 -->
-        <TextView
-            android:id="@+id/tv_max_temp"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="?android:attr/textColorPrimary"
-            android:textSize="12sp"
-            android:maxLines="1"
-            tools:text="MAX: 39.0℃" />
+            tools:text="0.250Wh | MAX: 39.0℃" />
     </LinearLayout>
 
 </LinearLayout>

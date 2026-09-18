@@ -13,7 +13,7 @@
         android:layout_height="56dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingHorizontal="16dp">
+        android:paddingHorizontal="10dp">
 
         <ImageView
             android:id="@+id/btn_back"
@@ -23,7 +23,10 @@
             android:clickable="true"
             android:contentDescription="@string/cancel"
             android:focusable="true"
-            android:padding="8dp"
+            android:paddingTop="8dp"
+            android:paddingStart="0dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="8dp"
             android:src="@drawable/ic_arrow_back"
             app:tint="?android:attr/textColorPrimary" />
 
@@ -49,6 +52,25 @@
             android:padding="8dp"
             android:src="@drawable/ic_delete"
             app:tint="?android:attr/textColorPrimary" />
+
+        <!-- 删除按钮右侧全选选择框，支持点击全选与长按反选 -->
+        <LinearLayout
+            android:id="@+id/layout_select_all"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:gravity="center_vertical"
+            android:paddingStart="4dp"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <CheckBox
+                android:id="@+id/cb_select_all"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=""
+                android:textSize="14sp"
+                android:textColor="?android:attr/textColorPrimary" />
+        </LinearLayout>
     </LinearLayout>
 
     <View
@@ -59,7 +81,8 @@
     <!-- 列表内容区域 -->
     <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
         <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
             android:id="@+id/swipe_refresh"
@@ -71,8 +94,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:clipToPadding="false"
-                android:paddingTop="8dp"
-                android:paddingBottom="24dp"
+                android:paddingTop="3dp"
+                android:paddingBottom="10dp"
                 tools:listitem="@layout/item_power_history_record" />
         </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
@@ -95,6 +118,7 @@
                 app:tint="?android:attr/textColorSecondary" />
 
             <TextView
+                android:id="@+id/tv_empty_title"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="16dp"
@@ -104,6 +128,7 @@
                 android:textStyle="bold" />
 
             <TextView
+                android:id="@+id/tv_empty_desc"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
@@ -115,4 +140,83 @@
 
     </FrameLayout>
 
+    <!-- 页面下方条件查询栏（以≥1H、≥3H、≥5H、≥8H时长筛选） -->
+    <LinearLayout
+        android:id="@+id/layout_filter_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#1A888888" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="10dp">
+
+            <TextView
+                android:id="@+id/btn_filter_dur_1h"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_filter_capsule_normal"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:text="≥1H"
+                android:textColor="#9CA3AF"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/btn_filter_dur_3h"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_marginHorizontal="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_filter_capsule_normal"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:text="≥3H"
+                android:textColor="#9CA3AF"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/btn_filter_dur_5h"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_marginHorizontal="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_filter_capsule_normal"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:text="≥5H"
+                android:textColor="#9CA3AF"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/btn_filter_dur_8h"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_filter_capsule_normal"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:text="≥8H"
+                android:textColor="#9CA3AF"
+                android:textSize="14sp" />
+        </LinearLayout>
+    </LinearLayout>
+
 </LinearLayout>
+

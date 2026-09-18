@@ -1032,20 +1032,26 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 启动充电数据高频实时监控与 UI 渲染协程（默认 1.5 秒更新一次）。
-     * 消除前后台双重并发采样：若后台常驻监控服务 [BatteryMonitorService] 正在运行，
-     * 前台不再执行底层的 [ChargingStatsManager.sampleCurrentPoint] 硬件采样，
-     * 而是直接复用后台服务生成的采样点，彻底消除并发硬件采样与能耗翻倍。
+     * 启动充电数据前台实时监控与 UI 渲染协程。
+     * 严格遵循亮屏监控刷新间隔配置调度更新：
+     * 1. 消除前后台双重并发采样：若后台常驻监控服务 [BatteryMonitorService] 正在运行，直接复用后台服务生成的采样点；
+     * 2. 若后台服务未运行，仅在配置允许亮屏采样时执行 [ChargingStatsManager.sampleCurrentPoint]；若配置为不采样(-1L)，则不产生硬件采样；
+     * 3. 轮询延时严格对齐用户配置的亮屏刷新间隔（若为不采样则保持 2000L 界面刷新）。
      */
     private fun startChargingPolling() {
         chargingPollingJob?.cancel()
         chargingPollingJob = viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             while (isActive) {
                 val serviceAlive = com.battery.analysis.service.BatteryMonitorService.isServiceActive()
+                val onInterval = com.battery.analysis.service.BatteryMonitorService.getScreenOnIntervalMs(requireContext())
+                val shouldSample = onInterval != com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER
+
                 val samplePoint = if (serviceAlive) {
                     chargingManager.getSamplePoints().lastOrNull()
-                } else {
+                } else if (shouldSample) {
                     chargingManager.sampleCurrentPoint()
+                } else {
+                    chargingManager.getSamplePoints().lastOrNull()
                 }
                 val summary = chargingManager.getCurrentSummary()
                 val points = chargingManager.getSamplePoints()
@@ -1055,7 +1061,12 @@ class PowerUsageFragment : Fragment() {
                         renderChargingData(summary, points, samplePoint)
                     }
                 }
-                delay(1500L)
+                val pollInterval = if (onInterval == com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER) {
+                    2000L
+                } else {
+                    onInterval
+                }
+                delay(pollInterval)
             }
         }
     }

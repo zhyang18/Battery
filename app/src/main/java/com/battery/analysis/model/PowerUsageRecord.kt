@@ -294,6 +294,15 @@ data class PowerUsageRecord(
     }
 
     /**
+     * 获取本次放电记录的总持续时长（单位：毫秒）。
+     *
+     * @return 转换后的持续时长毫秒数
+     */
+    fun getDurationMs(): Long {
+        return parseDurationToMillis(totalDurationText)
+    }
+
+    /**
      * 将时长文本解析还原为毫秒数。
      *
      * @param durationText 时长字符串（如 "1h20m" 或 "46m"）
@@ -318,6 +327,7 @@ data class PowerUsageRecord(
         } catch (_: Exception) {}
         return totalMs
     }
+
 
 
     companion object {

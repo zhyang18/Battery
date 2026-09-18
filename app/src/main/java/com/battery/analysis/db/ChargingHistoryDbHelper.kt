@@ -321,6 +321,29 @@ class ChargingHistoryDbHelper private constructor(context: Context) :
     }
 
     /**
+     * 根据主键 ID 集合批量删除指定的充电历史记录。
+     *
+     * @param ids 待批量删除的记录主键 ID 集合
+     * @return 实际成功删除的记录总行数
+     */
+    fun deleteRecords(ids: Collection<Long>): Int {
+        if (ids.isEmpty()) return 0
+        val db = writableDatabase
+        var deletedCount = 0
+        db.beginTransaction()
+        try {
+            for (id in ids) {
+                deletedCount += db.delete(TABLE_NAME, "$COL_ID = ?", arrayOf(id.toString()))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return deletedCount
+    }
+
+
+    /**
      * 清空数据库中所有的充电历史记录。
      *
      * @return 受影响的删除行数

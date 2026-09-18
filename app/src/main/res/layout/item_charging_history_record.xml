@@ -4,69 +4,97 @@
     android:id="@+id/card_charging_history_item"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginHorizontal="12dp"
-    android:layout_marginVertical="5dp"
+    android:layout_marginHorizontal="10dp"
+    android:layout_marginVertical="2dp"
     android:background="@drawable/bg_setting_card_item"
     android:clickable="true"
     android:clipToOutline="true"
     android:focusable="true"
     android:orientation="vertical"
-    android:paddingHorizontal="16dp"
-    android:paddingVertical="14dp">
+    android:paddingHorizontal="10dp"
+    android:paddingVertical="10dp">
 
-    <!-- 第一行：左侧起止时间范围（含结束时间），右侧功率数值 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/tv_history_time"
+        <!-- 左侧原有两行信息 -->
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:textColor="?android:attr/textColorPrimary"
-            android:textSize="14.5sp"
-            android:textStyle="bold"
-            tools:text="2026/09/07 11:28 ~ 11:53" />
+            android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/tv_history_power_value"
-            android:layout_width="wrap_content"
+            <!-- 第一行：左侧起止时间范围（含结束时间），右侧功率数值 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/tv_history_time"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="14.5sp"
+                    android:textStyle="bold"
+                    tools:text="2026/09/07 11:28 ~ 11:53" />
+
+                <TextView
+                    android:id="@+id/tv_history_power_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="18.5sp"
+                    android:textStyle="bold"
+                    tools:text="18.50 W" />
+            </LinearLayout>
+
+            <!-- 第二行：左侧时长与电量区间变化，右侧功率说明标签 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/tv_history_sub_info"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12.5sp"
+                    tools:text="25m · 20%~85%(+65%)" />
+
+                <TextView
+                    android:id="@+id/tv_history_power_label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="11.5sp"
+                    tools:text="平均充电功率" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 右侧多选删除选择框（默认隐藏，进入删除模式后显示） -->
+        <CheckBox
+            android:id="@+id/cb_select_item"
+            android:layout_width="30dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
-            android:textColor="?android:attr/textColorPrimary"
-            android:textSize="18.5sp"
-            android:textStyle="bold"
-            tools:text="18.50 W" />
+            android:layout_marginStart="5dp"
+            android:layout_marginEnd="0dp"
+            android:clickable="false"
+            android:focusable="false"
+            android:visibility="gone"
+            tools:visibility="visible" />
     </LinearLayout>
 
-    <!-- 第二行：左侧时长与电量区间变化，右侧功率说明标签 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-
-        <TextView
-            android:id="@+id/tv_history_sub_info"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="12.5sp"
-            tools:text="25m · 20%~85%(+65%)" />
-
-        <TextView
-            android:id="@+id/tv_history_power_label"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="11.5sp"
-            tools:text="平均充电功率" />
-    </LinearLayout>
 
 </LinearLayout>

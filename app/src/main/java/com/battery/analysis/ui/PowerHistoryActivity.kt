@@ -1,8 +1,13 @@
 package com.battery.analysis.ui
 
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Bundle
 import android.view.View
+import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -20,14 +25,25 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 耗电历史记录列表展示 Activity。
- * 遵循设计图样式渲染双行双列卡片，提供下拉刷新、全量清空与长按单条删除，支持点击任意条目跳转至耗电快照详情 Activity。
+ * 耗电/放电历史记录列表展示 Activity。
+ * 遵循设计图样式渲染双行双列卡片，提供下拉刷新、条件胶囊筛选（≥1H、≥3H、≥5H、≥8H），
+ * 支持右上角进入多选批量删除模式（全选、反选、多选与删除确认弹窗）以及点击条目跳转至耗电快照详情。
  */
 class PowerHistoryActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityPowerHistoryBinding
     private lateinit var adapter: PowerHistoryAdapter
     private lateinit var dbHelper: PowerUsageDbHelper
+
+    /**
+     * 当前从数据库全量加载的耗电快照内存快照列表。
+     */
+    private var allRecordList: List<PowerUsageRecord> = emptyList()
+
+    /**
+     * 当前选中的放电持续时长筛选阈值（毫秒数，如 1H, 3H, 5H, 8H），若为 null 则表示展示全部。
+     */
+    private var selectedDurationFilterMs: Long? = null
 
     private val detailLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == PowerHistoryDetailActivity.RESULT_LOAD_TO_MAIN) {
@@ -37,7 +53,7 @@ class PowerHistoryActivity : AppCompatActivity() {
     }
 
     /**
-     * 活动初始化生命周期回调，配置沉浸式状态栏、初始化 RecyclerView 与事件监听器。
+     * 活动初始化生命周期回调，配置沉浸式状态栏、初始化 RecyclerView、事件监听器与系统返回拦截。
      *
      * @param savedInstanceState 状态恢复 Bundle
      */
@@ -53,6 +69,8 @@ class PowerHistoryActivity : AppCompatActivity() {
 
         setupRecyclerView()
         setupListeners()
+        setupFilterChips()
+        setupBackPressedHandler()
     }
 
     /**
@@ -86,7 +104,7 @@ class PowerHistoryActivity : AppCompatActivity() {
     }
 
     /**
-     * 初始化 RecyclerView 列表控件与数据适配器。
+     * 初始化 RecyclerView 列表控件与数据适配器，绑定条目点击、长按删除及选中状态变化回调。
      */
     private fun setupRecyclerView() {
         adapter = PowerHistoryAdapter(
@@ -98,25 +116,211 @@ class PowerHistoryActivity : AppCompatActivity() {
             }
         )
 
+        adapter.onSelectionChanged = { selectedCount, totalCount ->
+            updateSelectionUI(selectedCount, totalCount)
+        }
+
         binding.rvPowerHistory.layoutManager = LinearLayoutManager(this)
         binding.rvPowerHistory.adapter = adapter
     }
 
     /**
-     * 设置导航返回、全量清空与下拉刷新交互监听器。
+     * 设置导航返回、批量删除操作、全选选择框及下拉刷新交互监听器。
      */
     private fun setupListeners() {
+        // 1. 顶部返回按钮：处于多选模式时优先退出多选，否则结束当前 Activity
         binding.btnBack.setOnClickListener {
-            finish()
+            if (adapter.isSelectionMode) {
+                exitSelectionMode()
+            } else {
+                finish()
+            }
         }
 
+        // 2. 顶部删除图标按钮：未进入多选模式则开启多选，已在多选模式则触发批量删除确认弹窗
         binding.btnClearAll.setOnClickListener {
-            showClearAllDialog()
+            if (!adapter.isSelectionMode) {
+                if (allRecordList.isEmpty()) {
+                    Toast.makeText(this, "暂无记录可删除", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                enterSelectionMode()
+            } else {
+                val selectedIds = adapter.getSelectedIdSet()
+                if (selectedIds.isEmpty()) {
+                    Toast.makeText(this, "请先选择要删除的记录", Toast.LENGTH_SHORT).show()
+                } else {
+                    showBatchDeleteConfirmDialog(selectedIds)
+                }
+            }
         }
 
+        // 3. 全选选择框点击事件：当前全部选中时取消全选，否则全选当前可见列表
+        val selectAllClickListener = View.OnClickListener {
+            val visibleIds = adapter.currentList.map { it.id }
+            if (adapter.isAllSelected(visibleIds)) {
+                adapter.deselectAll()
+            } else {
+                adapter.selectAll(visibleIds)
+            }
+        }
+        binding.cbSelectAll.setOnClickListener(selectAllClickListener)
+        binding.layoutSelectAll.setOnClickListener(selectAllClickListener)
+
+        // 4. 全选选择框长按事件：执行反选操作
+        val selectAllLongClickListener = View.OnLongClickListener {
+            val visibleIds = adapter.currentList.map { it.id }
+            if (visibleIds.isNotEmpty()) {
+                adapter.invertSelection(visibleIds)
+                Toast.makeText(this, "已反选", Toast.LENGTH_SHORT).show()
+            }
+            true
+        }
+        binding.cbSelectAll.setOnLongClickListener(selectAllLongClickListener)
+        binding.layoutSelectAll.setOnLongClickListener(selectAllLongClickListener)
+
+        // 5. 下拉刷新
         binding.swipeRefresh.setColorSchemeResources(R.color.nav_item_selected)
         binding.swipeRefresh.setOnRefreshListener {
             loadHistoryList()
+        }
+    }
+
+    /**
+     * 配置系统返回按键回调，当处于多选删除模式时优先退出多选模式。
+     */
+    private fun setupBackPressedHandler() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (adapter.isSelectionMode) {
+                    exitSelectionMode()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+    }
+
+    /**
+     * 初始化页面下方条件查询胶囊（≥1H、≥3H、≥5H、≥8H）的点击监听。
+     */
+    private fun setupFilterChips() {
+        val chips = listOf(
+            Pair(binding.btnFilterDur1h, 1 * 3600 * 1000L),
+            Pair(binding.btnFilterDur3h, 3 * 3600 * 1000L),
+            Pair(binding.btnFilterDur5h, 5 * 3600 * 1000L),
+            Pair(binding.btnFilterDur8h, 8 * 3600 * 1000L)
+        )
+
+        for ((view, thresholdMs) in chips) {
+            view.setOnClickListener {
+                if (selectedDurationFilterMs == thresholdMs) {
+                    selectedDurationFilterMs = null
+                } else {
+                    selectedDurationFilterMs = thresholdMs
+                }
+                updateFilterChipsUI()
+                applyFilterAndSubmit()
+            }
+        }
+        updateFilterChipsUI()
+    }
+
+    /**
+     * 刷新底部条件查询胶囊的高亮与选中视觉状态。
+     */
+    private fun updateFilterChipsUI() {
+        val chips = listOf(
+            Pair(binding.btnFilterDur1h, 1 * 3600 * 1000L),
+            Pair(binding.btnFilterDur3h, 3 * 3600 * 1000L),
+            Pair(binding.btnFilterDur5h, 5 * 3600 * 1000L),
+            Pair(binding.btnFilterDur8h, 8 * 3600 * 1000L)
+        )
+
+        val highlightColor = Color.parseColor("#8AB4F8")
+        val normalColor = Color.parseColor("#9CA3AF")
+
+        for ((view, thresholdMs) in chips) {
+            if (selectedDurationFilterMs == thresholdMs) {
+                view.setBackgroundResource(R.drawable.bg_filter_capsule_selected)
+                view.setTextColor(highlightColor)
+                view.setTypeface(null, Typeface.BOLD)
+            } else {
+                view.setBackgroundResource(R.drawable.bg_filter_capsule_normal)
+                view.setTextColor(normalColor)
+                view.setTypeface(null, Typeface.NORMAL)
+            }
+        }
+    }
+
+    /**
+     * 根据当前的筛选条件对全量数据进行过滤，并刷新 RecyclerView 与空状态展示。
+     */
+    private fun applyFilterAndSubmit() {
+        val filterMs = selectedDurationFilterMs
+        val filteredList = if (filterMs == null) {
+            allRecordList
+        } else {
+            allRecordList.filter { it.getDurationMs() >= filterMs }
+        }
+
+        if (filteredList.isEmpty()) {
+            binding.rvPowerHistory.visibility = View.GONE
+            binding.layoutEmptyHistory.visibility = View.VISIBLE
+            if (allRecordList.isEmpty()) {
+                binding.tvEmptyTitle.text = getString(R.string.power_history_empty_title)
+                binding.tvEmptyDesc.text = getString(R.string.power_history_empty_desc)
+            } else {
+                val hours = (filterMs ?: 0L) / 3600000L
+                binding.tvEmptyTitle.text = "未找到符合条件的放电记录"
+                binding.tvEmptyDesc.text = "暂无放电持续时长 ≥${hours}H 的记录"
+            }
+        } else {
+            binding.rvPowerHistory.visibility = View.VISIBLE
+            binding.layoutEmptyHistory.visibility = View.GONE
+        }
+
+        adapter.submitList(filteredList) {
+            if (adapter.isSelectionMode) {
+                val visibleIds = filteredList.map { it.id }
+                binding.cbSelectAll.isChecked = adapter.isAllSelected(visibleIds)
+            }
+        }
+    }
+
+    /**
+     * 进入多选删除模式，显示全选框并更新标题提示。
+     */
+    private fun enterSelectionMode() {
+        adapter.setSelectionMode(true)
+        binding.layoutSelectAll.visibility = View.VISIBLE
+        updateSelectionUI(adapter.selectedIds.size, adapter.currentList.size)
+    }
+
+    /**
+     * 退出多选删除模式，清空选中集并隐藏全选框。
+     */
+    private fun exitSelectionMode() {
+        adapter.setSelectionMode(false)
+        binding.layoutSelectAll.visibility = View.GONE
+        binding.cbSelectAll.isChecked = false
+        binding.tvTitle.text = getString(R.string.power_history_title)
+    }
+
+    /**
+     * 响应选择状态变化，实时更新顶部标题与全选复选框选中状态。
+     *
+     * @param selectedCount 当前选中的记录条数
+     * @param totalCount 当前展示的总记录条数
+     */
+    private fun updateSelectionUI(selectedCount: Int, totalCount: Int) {
+        if (adapter.isSelectionMode) {
+            binding.tvTitle.text = if (selectedCount > 0) "已选 ${selectedCount} 项" else "选择记录"
+            val visibleIds = adapter.currentList.map { it.id }
+            binding.cbSelectAll.isChecked = adapter.isAllSelected(visibleIds)
+        } else {
+            binding.tvTitle.text = getString(R.string.power_history_title)
         }
     }
 
@@ -129,14 +333,8 @@ class PowerHistoryActivity : AppCompatActivity() {
             val list = dbHelper.getAllRecords()
             withContext(Dispatchers.Main) {
                 binding.swipeRefresh.isRefreshing = false
-                if (list.isEmpty()) {
-                    binding.rvPowerHistory.visibility = View.GONE
-                    binding.layoutEmptyHistory.visibility = View.VISIBLE
-                } else {
-                    binding.rvPowerHistory.visibility = View.VISIBLE
-                    binding.layoutEmptyHistory.visibility = View.GONE
-                    adapter.submitList(list)
-                }
+                allRecordList = list
+                applyFilterAndSubmit()
             }
         }
     }
@@ -174,13 +372,13 @@ class PowerHistoryActivity : AppCompatActivity() {
      */
     private fun showDeleteRecordDialog(record: PowerUsageRecord) {
         val dialogView = layoutInflater.inflate(R.layout.dialog_custom_delete_confirm, null)
-        val tvTitle = dialogView.findViewById<android.widget.TextView>(R.id.tv_dialog_delete_title)
-        val tvDesc = dialogView.findViewById<android.widget.TextView>(R.id.tv_dialog_delete_desc)
-        val tvPreviewCat = dialogView.findViewById<android.widget.TextView>(R.id.tv_preview_cat)
-        val tvPreviewTime = dialogView.findViewById<android.widget.TextView>(R.id.tv_preview_time)
-        val tvPreviewSummary = dialogView.findViewById<android.widget.TextView>(R.id.tv_preview_summary)
-        val btnCancel = dialogView.findViewById<android.widget.TextView>(R.id.btn_dialog_delete_cancel)
-        val btnConfirm = dialogView.findViewById<android.widget.TextView>(R.id.btn_dialog_delete_confirm)
+        val tvTitle = dialogView.findViewById<TextView>(R.id.tv_dialog_delete_title)
+        val tvDesc = dialogView.findViewById<TextView>(R.id.tv_dialog_delete_desc)
+        val tvPreviewCat = dialogView.findViewById<TextView>(R.id.tv_preview_cat)
+        val tvPreviewTime = dialogView.findViewById<TextView>(R.id.tv_preview_time)
+        val tvPreviewSummary = dialogView.findViewById<TextView>(R.id.tv_preview_summary)
+        val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
+        val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
 
         tvTitle.text = "确认删除此耗电快照？"
         tvDesc.text = "删除后该条放电快照记录将从本地永久移除，无法找回。"
@@ -208,18 +406,20 @@ class PowerHistoryActivity : AppCompatActivity() {
     }
 
     /**
-     * 弹出清空全部耗电历史快照的高颜值确认对话框。
+     * 弹出批量删除所选耗电历史快照的高颜值确认对话框。
+     *
+     * @param selectedIds 待批量删除的记录主键 ID 集合
      */
-    private fun showClearAllDialog() {
+    private fun showBatchDeleteConfirmDialog(selectedIds: Set<Long>) {
         val dialogView = layoutInflater.inflate(R.layout.dialog_custom_delete_confirm, null)
-        val tvTitle = dialogView.findViewById<android.widget.TextView>(R.id.tv_dialog_delete_title)
-        val tvDesc = dialogView.findViewById<android.widget.TextView>(R.id.tv_dialog_delete_desc)
+        val tvTitle = dialogView.findViewById<TextView>(R.id.tv_dialog_delete_title)
+        val tvDesc = dialogView.findViewById<TextView>(R.id.tv_dialog_delete_desc)
         val layoutPreview = dialogView.findViewById<View>(R.id.layout_delete_item_preview)
-        val btnCancel = dialogView.findViewById<android.widget.TextView>(R.id.btn_dialog_delete_cancel)
-        val btnConfirm = dialogView.findViewById<android.widget.TextView>(R.id.btn_dialog_delete_confirm)
+        val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
+        val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
 
-        tvTitle.text = getString(R.string.power_history_clear_title)
-        tvDesc.text = getString(R.string.power_history_clear_message)
+        tvTitle.text = "确认删除选中的 ${selectedIds.size} 条记录？"
+        tvDesc.text = "删除后所选的放电快照记录将从本地永久移除，无法找回。"
         layoutPreview.visibility = View.GONE
 
         val dialog = AlertDialog.Builder(this)
@@ -229,10 +429,12 @@ class PowerHistoryActivity : AppCompatActivity() {
         btnCancel.setOnClickListener { dialog.dismiss() }
         btnConfirm.setOnClickListener {
             lifecycleScope.launch(Dispatchers.IO) {
-                dbHelper.clearAll()
+                dbHelper.deleteRecords(selectedIds)
                 withContext(Dispatchers.Main) {
+                    exitSelectionMode()
                     loadHistoryList()
                     dialog.dismiss()
+                    Toast.makeText(this@PowerHistoryActivity, "已删除 ${selectedIds.size} 条记录", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -241,3 +443,4 @@ class PowerHistoryActivity : AppCompatActivity() {
         applyDialogWindowStyle(dialog)
     }
 }
+

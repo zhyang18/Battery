@@ -116,9 +116,9 @@ class BatteryMonitorService : Service() {
                     // 1. 将内存采样点异步刷盘固化，防止异常退出导致轨迹丢失
                     PowerUsageManager.getInstance(appContext).flushDischargeSamplesToDisk()
 
-                    // 2. 检查息屏待机策略：若为智能省电模式（<=0L），彻底停止轮询协程，完全释放 CPU 休眠
+                    // 2. 检查息屏待机策略：若为智能省电模式（<=0L），无论是充电还是放电，彻底停止轮询协程，完全释放 CPU 休眠
                     val screenOffInterval = getScreenOffIntervalMs(appContext)
-                    if (!cachedIsCharging && screenOffInterval <= 0L) {
+                    if (screenOffInterval <= 0L) {
                         monitorSamplingJob?.cancel()
                         monitorSamplingJob = null
                     }
@@ -140,10 +140,17 @@ class BatteryMonitorService : Service() {
                     // 极致省电：仅亮屏时刷新通知，息屏直接跳过
                     updateNotification(force = false)
 
-                    if (!cachedIsCharging) {
+                    val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    val isInteractive = pm?.isInteractive ?: true
+                    val screenOffInterval = getScreenOffIntervalMs(appContext)
+
+                    if (cachedIsCharging) {
+                        // 充电状态下：若处于息屏且配置为智能省电(0L)，借由系统电池状态广播被动记录采样点，零主动能耗
+                        if (!isInteractive && screenOffInterval == 0L) {
+                            ChargingStatsManager.getInstance(appContext).sampleCurrentPoint()
+                        }
+                    } else {
                         val powerManager = PowerUsageManager.getInstance(appContext)
-                        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
-                        val isInteractive = pm?.isInteractive ?: true
 
                         // 同步记录放电温度点
                         if (tempRaw > 0) {
@@ -155,7 +162,6 @@ class BatteryMonitorService : Service() {
 
                         // 智能省电模式（零唤醒）：息屏期间借由系统硬件状态变化广播的时机被动记录一个瞬时点，不持有 WakeLock，零主动功耗
                         // 若配置为不采样（INTERVAL_NEVER 即 -1L），则不记录采样点
-                        val screenOffInterval = getScreenOffIntervalMs(appContext)
                         if (!isInteractive && screenOffInterval == 0L) {
                             val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
                                 context = this@BatteryMonitorService,
@@ -411,28 +417,28 @@ class BatteryMonitorService : Service() {
                 val screenOnInterval = getScreenOnIntervalMs(applicationContext)
                 val screenOffInterval = getScreenOffIntervalMs(applicationContext)
 
-                // 若亮屏与息屏均配置为不采样且非充电中，直接终止轮询协程
-                if (!isCharging && screenOnInterval == INTERVAL_NEVER && screenOffInterval == INTERVAL_NEVER) {
+                // 若亮屏与息屏均配置为不采样，直接终止轮询协程
+                if (screenOnInterval == INTERVAL_NEVER && screenOffInterval == INTERVAL_NEVER) {
                     break
                 }
 
-                // 智能省电零唤醒优化：息屏且非充电状态下若配置为 0L 或不采样(-1L)，直接结束轮询，释放 CPU Deep Sleep
-                if (!isInteractive && !isCharging && screenOffInterval <= 0L) {
+                // 智能省电零唤醒优化或不采样：息屏状态下若配置为 0L 或不采样(-1L)，直接结束轮询，释放 CPU Deep Sleep
+                if (!isInteractive && screenOffInterval <= 0L) {
                     break
                 }
 
                 val loopStartRealtime = SystemClock.elapsedRealtime()
 
-                if (isCharging) {
-                    chargingManager.sampleCurrentPoint()
+                val shouldSample = if (isInteractive) {
+                    screenOnInterval != INTERVAL_NEVER
                 } else {
-                    val shouldSample = if (isInteractive) {
-                        screenOnInterval != INTERVAL_NEVER
-                    } else {
-                        screenOffInterval > 0L
-                    }
+                    screenOffInterval > 0L
+                }
 
-                    if (shouldSample) {
+                if (shouldSample) {
+                    if (isCharging) {
+                        chargingManager.sampleCurrentPoint()
+                    } else {
                         val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
                             context = this@BatteryMonitorService,
                             fallbackVoltageVolts = cachedVoltageVolts,
@@ -467,7 +473,7 @@ class BatteryMonitorService : Service() {
                 val targetInterval = if (isInteractive) {
                     if (screenOnInterval == INTERVAL_NEVER) 5000L else screenOnInterval
                 } else {
-                    if (isCharging) 15000L else screenOffInterval
+                    if (screenOffInterval <= 0L) 5000L else screenOffInterval
                 }
                 val costMs = SystemClock.elapsedRealtime() - loopStartRealtime
                 val sleepInterval = (targetInterval - costMs).coerceAtLeast(0L)

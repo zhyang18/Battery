@@ -1112,7 +1112,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val durationStr = "$screenOnStr / $totalDurationStr"
 
                 val effectiveCapacity = getEffectiveDeviceCapacityMah()
-                val safeVoltage = if (batterySnapshot.voltageVolts > 1.0f) batterySnapshot.voltageVolts else 3.85f
+                // 能量计算统一遵循工业标准与标称工作电压（标压 3.85V），杜绝端电压瞬时压降与回弹波动对累计能耗产生干扰
+                val nominalVoltageVolts = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
                 val dischargeHours = durationMs / 3600000f
                 val screenOnHours = screenOnMs / 3600000f
                 val screenOffHours = screenOffMs / 3600000f
@@ -1161,7 +1162,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                         item.energyWh.toDouble()
                     }
                 }.toFloat()
-                val appEnergyMah = if (currentPeriodAppEnergyWh > 0f) (currentPeriodAppEnergyWh * 1000f / safeVoltage) else 0f
+                val appEnergyMah = if (currentPeriodAppEnergyWh > 0f) (currentPeriodAppEnergyWh * 1000f / nominalVoltageVolts) else 0f
                 val minPhysicalMah = appEnergyMah + stats.screenDrainMah
 
                 // 真实放电量计算
@@ -1182,7 +1183,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                     minPhysicalMah > 0f -> minPhysicalMah
                     else -> 0f
                 }
-                var realTotalEnergyWh = (realDischargedMah * safeVoltage) / 1000f
+                var realTotalEnergyWh = (realDischargedMah * nominalVoltageVolts) / 1000f
 
                 // 物理瞬时采样计算平均功耗：
                 // 优先采用后台服务在当前放电周期内连续实测的物理采样点（dischargeRealtimeSamples）真实均值
@@ -1231,7 +1232,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 } else {
                     // 既有亮屏又有息屏：优先使用系统底层独立的息屏放电量
                     if (stats.screenOffDrainMah > 0f) {
-                        val rawOffWatts = (stats.screenOffDrainMah * safeVoltage) / (1000f * screenOffHours)
+                        val rawOffWatts = (stats.screenOffDrainMah * nominalVoltageVolts) / (1000f * screenOffHours)
                         screenOffWatts = rawOffWatts.coerceAtLeast(0f)
                     } else {
                         // 底层无独立息屏统计通道时，结合纯后台应用实耗能耗客观推导
@@ -2299,9 +2300,10 @@ class PowerUsageManager private constructor(private val context: Context) {
         val delta = (actualStartLevel - targetLevel).coerceAtLeast(0)
         val totalDischargeHours = duration / 3600000f
         val effectiveDeviceCapacity = getEffectiveDeviceCapacityMah()
-        val defaultAvgWatts = if (totalDischargeHours > 0f && delta > 0 && currentVoltageVolts > 0f) {
+        val nominalVoltageVolts = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
+        val defaultAvgWatts = if (totalDischargeHours > 0f && delta > 0) {
             val rawMah = effectiveDeviceCapacity * (delta / 100f)
-            (rawMah * currentVoltageVolts) / (1000f * totalDischargeHours)
+            (rawMah * nominalVoltageVolts) / (1000f * totalDischargeHours)
         } else {
             0f
         }
@@ -2716,8 +2718,8 @@ class PowerUsageManager private constructor(private val context: Context) {
         val dischargeHours = totalMs / 3600000f
         val screenOnHours = screenOnMs / 3600000f
         val screenOffHours = screenOffMs / 3600000f
-        val currentVoltage = getCurrentBatteryStatus().voltageVolts
-        val safeVoltage = if (currentVoltage > 0f) currentVoltage else 0f
+        // 能量计算统一遵循工业标准与标称工作电压（标压 3.85V），杜绝端电压瞬时压降与回弹波动对累计能耗产生干扰
+        val nominalVoltageVolts = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
 
         // 基于真实电量变化独立计算整机总能耗，不依赖 App 能耗列表
         // （普通模式 App 能耗由此处整机功耗反向分配，不可循环依赖）
@@ -2740,7 +2742,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 item.energyWh.toDouble()
             }
         }.toFloat()
-        val minPhysicalMah = if (currentPeriodAppEnergyWh > 0f && safeVoltage > 0f) (currentPeriodAppEnergyWh * 1000f / safeVoltage) else 0f
+        val minPhysicalMah = if (currentPeriodAppEnergyWh > 0f) (currentPeriodAppEnergyWh * 1000f / nominalVoltageVolts) else 0f
 
         val smoothedDropMah = if (dropPercent > 0) {
             effectiveCapacity * (dropPercent / 100f)
@@ -2761,7 +2763,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             minPhysicalMah > 0f -> minPhysicalMah
             else -> 0f
         }
-        var realTotalEnergyWh = (realDischargedMah * safeVoltage) / 1000f
+        var realTotalEnergyWh = (realDischargedMah * nominalVoltageVolts) / 1000f
 
         // 物理瞬时采样与短时平滑修正：
         // 优先采用后台服务在当前放电周期内连续实测的物理采样点真实均值
@@ -2877,9 +2879,9 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
         }
 
-        // 剩余续航时间科学推算（基于剩余电量可用能量及各工况功耗真实推算）
+        // 剩余续航时间科学推算（基于剩余电量可用能量及各工况功耗真实推算，能量按标压折算）
         val remainingTotalHours = if (avgPower >= 0.05f) {
-            ((effectiveCapacity * (currentLevel / 100f) * safeVoltage) / 1000f) / avgPower
+            ((effectiveCapacity * (currentLevel / 100f) * nominalVoltageVolts) / 1000f) / avgPower
         } else {
             0f
         }

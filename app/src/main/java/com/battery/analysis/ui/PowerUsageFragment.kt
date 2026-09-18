@@ -1404,18 +1404,18 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 格式化瓦时能量为人类可读字符串（如 "0.52Wh"、"1.85Wh"、"0.00Wh"）。
+     * 格式化瓦时能量为人类可读字符串，精确到小数点后三位（如 "2.710Wh"、"3.460Wh"、"0.000Wh" 或 "<0.001Wh"）。
      *
      * @param wh 待格式化的瓦时能量数值
-     * @return 格式化后的能量展示文本
+     * @return 格式化后的三位小数能量展示文本
      */
     private fun formatOverviewEnergy(wh: Float): String {
         return if (wh <= 0f) {
-            "0.00Wh"
-        } else if (wh < 0.01f) {
-            "<0.01Wh"
+            "0.000Wh"
+        } else if (wh < 0.001f) {
+            "<0.001Wh"
         } else {
-            String.format(Locale.getDefault(), "%.2fWh", wh)
+            String.format(Locale.getDefault(), "%.3fWh", wh)
         }
     }
 

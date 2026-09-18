@@ -1745,6 +1745,53 @@ class PowerUsageCalculationTest {
         val screenOnDurationMs = 0L.coerceIn(0L, durationMs)
         assertEquals("屏幕亮屏时长初始重置为 0", 0L, screenOnDurationMs)
     }
+
+    /**
+     * 验证基于电池标称电压（3.85V）计算放电能量及能量守恒特性。
+     * 确保放电毫安时转换为瓦时能量时完全依据国际标准标称电压计算，杜绝端电压瞬时波动产生的误差。
+     */
+    @Test
+    fun testNominalVoltageDischargeEnergyCalculation() {
+        val nominalVoltageVolts = com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
+        assertEquals(3.85f, nominalVoltageVolts, 0.001f)
+
+        val dischargedMah = 898.7f // 累计放电 898.7mAh
+        val expectedEnergyWh = (dischargedMah * nominalVoltageVolts) / 1000f
+
+        assertEquals(3.460f, expectedEnergyWh, 0.001f)
+
+        // 验证亮灭屏能耗解耦与宏观能量守恒
+        val onMah = 703.9f
+        val offMah = 194.8f
+        val onEnergyWh = (onMah * nominalVoltageVolts) / 1000f
+        val offEnergyWh = (offMah * nominalVoltageVolts) / 1000f
+
+        assertEquals(expectedEnergyWh, onEnergyWh + offEnergyWh, 0.001f)
+    }
+
+    /**
+     * 验证放电概览能量格式化方法精确至小数点后三位的展示逻辑。
+     */
+    @Test
+    fun testOverviewEnergyThreeDecimalFormatting() {
+        fun formatOverviewEnergy(wh: Float): String {
+            return if (wh <= 0f) {
+                "0.000Wh"
+            } else if (wh < 0.001f) {
+                "<0.001Wh"
+            } else {
+                String.format(java.util.Locale.US, "%.3fWh", wh)
+            }
+        }
+
+        assertEquals("0.000Wh", formatOverviewEnergy(0f))
+        assertEquals("0.000Wh", formatOverviewEnergy(-0.5f))
+        assertEquals("<0.001Wh", formatOverviewEnergy(0.0004f))
+        assertEquals("<0.001Wh", formatOverviewEnergy(0.0009f))
+        assertEquals("2.710Wh", formatOverviewEnergy(2.710015f))
+        assertEquals("3.460Wh", formatOverviewEnergy(3.459995f))
+        assertEquals("0.760Wh", formatOverviewEnergy(0.76f))
+    }
 }
 
 

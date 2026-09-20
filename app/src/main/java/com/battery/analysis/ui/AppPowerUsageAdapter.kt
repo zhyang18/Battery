@@ -1,5 +1,6 @@
 package com.battery.analysis.ui
 
+import androidx.recyclerview.widget.DiffUtil
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
@@ -13,6 +14,9 @@ import java.util.Locale
 /**
  * 应用使用场景与功耗列表适配器。
  * 负责展示应用图标、运行状态、平均功耗、温度指标及前台时长，并支持按耗电、功耗及时间动态排序切换。
+ *
+ * 优化：使用 [DiffUtil] 替代 notifyDataSetChanged 全量刷新，
+ * 仅对真正变化的条目执行增量更新，消除无意义的全量重绘开销。
  */
 class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolder>() {
 
@@ -43,8 +47,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
     fun setShowBackgroundStats(show: Boolean) {
         if (showBackgroundStats != show) {
             showBackgroundStats = show
-            applyFilterAndSort()
-            notifyDataSetChanged()
+            applyFilterAndSortWithDiff()
         }
     }
 
@@ -140,26 +143,24 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
     override fun getItemCount(): Int = displayItems.size
 
     /**
-     * 提交并更新应用功耗列表原始数据源，并根据当前过滤规则与排序方式刷新展示列表。
+     * 提交并更新应用功耗列表原始数据源，并根据当前过滤规则与排序方式以差量方式刷新展示列表。
      *
      * @param newItems 新的应用功耗列表
      */
     fun submitList(newItems: List<AppPowerUsageItem>) {
         allItems.clear()
         allItems.addAll(newItems)
-        applyFilterAndSort()
-        notifyDataSetChanged()
+        applyFilterAndSortWithDiff()
     }
 
     /**
-     * 切换排序模式并重新排序刷新列表。
+     * 切换排序模式并以差量方式重新排序刷新列表。
      *
      * @param mode 0-按时长降序，1-按功耗降序，2-按消耗电量(Wh)降序，3-按名称升序
      */
     fun setSortMode(mode: Int) {
         sortMode = mode
-        applyFilterAndSort()
-        notifyDataSetChanged()
+        applyFilterAndSortWithDiff()
     }
 
     /**
@@ -186,4 +187,63 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
             3 -> displayItems.sortBy { it.appName }
         }
     }
+
+    /**
+     * 应用过滤与排序后，使用 [DiffUtil] 计算新旧列表差异，并以增量方式通知 RecyclerView 更新。
+     * 相比 notifyDataSetChanged，仅对实际变化的条目执行插入、删除与变更动画，消除全量重绘开销。
+     */
+    private fun applyFilterAndSortWithDiff() {
+        val oldList = displayItems.toList()
+        applyFilterAndSort()
+        val newList = displayItems.toList()
+
+        val diffResult = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
+            /**
+             * 返回旧列表大小。
+             *
+             * @return 旧列表条目数
+             */
+            override fun getOldListSize(): Int = oldList.size
+
+            /**
+             * 返回新列表大小。
+             *
+             * @return 新列表条目数
+             */
+            override fun getNewListSize(): Int = newList.size
+
+            /**
+             * 判断两个位置的条目是否代表同一对象（以包名为唯一标识）。
+             *
+             * @param oldItemPosition 旧列表中的位置
+             * @param newItemPosition 新列表中的位置
+             * @return 是否为同一应用条目
+             */
+            override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                return oldList[oldItemPosition].packageName == newList[newItemPosition].packageName
+            }
+
+            /**
+             * 判断两个条目的内容是否完全相同（用于决定是否触发 onBindViewHolder 刷新）。
+             *
+             * @param oldItemPosition 旧列表中的位置
+             * @param newItemPosition 新列表中的位置
+             * @return 内容是否相同（包括功耗、时长、温度等关键字段）
+             */
+            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
+                val old = oldList[oldItemPosition]
+                val new = newList[newItemPosition]
+                return old.packageName == new.packageName
+                        && old.avgPowerWatts == new.avgPowerWatts
+                        && old.energyWh == new.energyWh
+                        && old.foregroundTimeMs == new.foregroundTimeMs
+                        && old.backgroundTimeMs == new.backgroundTimeMs
+                        && old.avgTemperature == new.avgTemperature
+                        && old.maxTemperature == new.maxTemperature
+            }
+        })
+        diffResult.dispatchUpdatesTo(this)
+    }
 }
+
+

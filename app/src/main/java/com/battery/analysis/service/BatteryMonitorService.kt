@@ -91,6 +91,18 @@ class BatteryMonitorService : Service() {
     private var isForegroundNotificationRemoved: Boolean = false
 
     /**
+     * 缓存的通知 PendingIntent，在 onCreate 时初始化一次并复用，
+     * 避免每次 buildNotification 都触发 Binder IPC（PendingIntent.getActivity）。
+     */
+    private var cachedNotificationPendingIntent: PendingIntent? = null
+
+    /**
+     * 缓存的通知栏 RemoteViews 实例，只在文本内容变化时更新 setTextViewText，
+     * 避免每次刷新通知都重建对象，减少 GC 压力。
+     */
+    private var cachedRemoteViews: RemoteViews? = null
+
+    /**
      * 内部动态广播接收器，用于在前台服务存活期间毫秒级捕获充放电广播、电池状态变动及屏幕亮灭事件。
      */
     private val powerReceiver = object : BroadcastReceiver() {
@@ -413,6 +425,9 @@ class BatteryMonitorService : Service() {
      * 2. 放电中：根据亮屏/息屏配置间隔周期性采集温度与瞬时放电功耗；
      * 3. 智能省电：息屏且非充电状态下若配置为智能省电（0L），退出轮询协程，完全释放 CPU 休眠；
      * 4. 亮屏/息屏不采样：若对应模式配置为不采样（-1L），则跳过该状态下的放电数据采样。
+     *
+     * 优化：[screenOnInterval] 和 [screenOffInterval] 在协程启动前读取一次，
+     * 循环内不重复读取 SharedPreferences，配置变更时外部会重启本协程以载入新值。
      */
     private fun startMonitorSamplingLoop() {
         monitorSamplingJob?.cancel()
@@ -421,11 +436,14 @@ class BatteryMonitorService : Service() {
             val powerManager = PowerUsageManager.getInstance(applicationContext)
             val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
 
+            // 在协程启动时读取一次采样间隔配置，循环内不重复读取 SharedPreferences。
+            // 配置变更时调用 startMonitorSamplingLoop() 会取消并重建本协程，无需内循环轮询配置。
+            val screenOnInterval = getScreenOnIntervalMs(applicationContext)
+            val screenOffInterval = getScreenOffIntervalMs(applicationContext)
+
             while (isActive) {
                 val isCharging = cachedIsCharging
                 val isInteractive = pm?.isInteractive ?: true
-                val screenOnInterval = getScreenOnIntervalMs(applicationContext)
-                val screenOffInterval = getScreenOffIntervalMs(applicationContext)
 
                 // 若亮屏且配置为不采样(-1L)，直接退出轮询协程，彻底杜绝 5 秒无意义空转
                 if (isInteractive && screenOnInterval == INTERVAL_NEVER) {
@@ -663,25 +681,31 @@ class BatteryMonitorService : Service() {
      * 采用自定义 [RemoteViews] 紧凑单行布局，彻底去除系统默认模板的小标题与多余换行，
      * 统一居中呈现单行实时监控数据：功率 | 电压 | 温度。
      *
+     * 优化：PendingIntent 在 onCreate 时缓存后复用（[cachedNotificationPendingIntent]），
+     * RemoteViews 首次创建后持续复用（[cachedRemoteViews]），每次只调用 setTextViewText
+     * 更新文本内容，避免高频通知刷新产生重复 Binder IPC 与对象分配。
+     *
      * @param channelId 目标通知渠道 ID（默认为 [CHANNEL_ID]）
      * @param infoText 预先计算好的单行文本内容，若为 null 则实时计算
      * @return 配置完毕的单行紧凑前台系统通知 [Notification]
      */
     private fun buildNotification(channelId: String = CHANNEL_ID, infoText: String? = null): Notification {
-        val pendingIntent = PendingIntent.getActivity(
+        // 复用已缓存的 PendingIntent，若尚未初始化则创建并缓存（仅在 onCreate / 首次调用时发生一次 Binder IPC）
+        val pendingIntent = cachedNotificationPendingIntent ?: PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
             },
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
-        )
+        ).also { cachedNotificationPendingIntent = it }
 
         val singleLineInfo = infoText ?: computeSingleLineInfo()
 
-        val remoteViews = RemoteViews(packageName, R.layout.layout_notification_battery_single_line).apply {
-            setTextViewText(R.id.notification_text, singleLineInfo)
-        }
+        // 复用已缓存的 RemoteViews 实例，仅更新文本，避免每次通知刷新都重建对象触发 GC
+        val remoteViews = cachedRemoteViews ?: RemoteViews(packageName, R.layout.layout_notification_battery_single_line)
+            .also { cachedRemoteViews = it }
+        remoteViews.setTextViewText(R.id.notification_text, singleLineInfo)
 
         return NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.drawable.ic_bolt)

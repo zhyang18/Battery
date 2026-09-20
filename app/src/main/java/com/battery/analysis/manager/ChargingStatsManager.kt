@@ -64,6 +64,15 @@ class ChargingStatsManager private constructor(private val context: Context) {
         private var instance: ChargingStatsManager? = null
 
         /**
+         * 线程安全的时间格式化器，采用 ThreadLocal 实现每线程单例，
+         * 避免在充电会话持久化等高频调用场景内重复创建 SimpleDateFormat 对象，
+         * 降低 GC 分配压力。SimpleDateFormat 非线程安全，ThreadLocal 保证每线程独占实例。
+         */
+        val dateFormatter: ThreadLocal<java.text.SimpleDateFormat> = ThreadLocal.withInitial {
+            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+        }
+
+        /**
          * 获取 ChargingStatsManager 单例对象。
          *
          * @param context 应用程序上下文
@@ -120,7 +129,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
             val alreadyPersisted = hasPersistedCurrentSession || (currentSummary.startTimestamp > 0L && currentSummary.startTimestamp == lastPersistedStartTimestamp)
             if (!alreadyPersisted && (duration >= 10000L || finalChargedEnergyWh > 0.005f || levelGain > 0)) {
                 try {
-                    val recordTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(now))
+                    val recordTime = dateFormatter.get()!!.format(Date(now))
                     val snapshotPoints = synchronized(samplePoints) { samplePoints.toList() }
                     val pointsJson = ChargingHistoryRecord.pointsToJson(snapshotPoints)
 
@@ -539,7 +548,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
         // 3. 充电持续时长超过 10 秒或充入能量大于 0.005Wh 或有电量增量时，自动持久化至充电历史数据库
         if (duration >= 10000L || finalEnergy > 0.005f || levelGain > 0) {
             try {
-                val recordTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(now))
+                val recordTime = dateFormatter.get()!!.format(Date(now))
                 val snapshotPoints = synchronized(samplePoints) { samplePoints.toList() }
                 val pointsJson = ChargingHistoryRecord.pointsToJson(snapshotPoints)
 

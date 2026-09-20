@@ -104,6 +104,15 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         /**
+         * 线程安全的时间格式化器，采用 ThreadLocal 实现每线程单例，
+         * 避免在高频调用方法（如 archiveDischargeSession）内部重复创建 SimpleDateFormat 对象，
+         * 降低 GC 分配压力。SimpleDateFormat 非线程安全，ThreadLocal 保证每线程独占实例。
+         */
+        val dateFormatter: ThreadLocal<SimpleDateFormat> = ThreadLocal.withInitial {
+            SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+        }
+
+        /**
          * 基于硬件放电时序采样点（时间戳、瞬时电压、瞬时电流）的时间切片数值微积分模型。
          * 遵循物理能量守恒定律与微积分定义（对标 BatteryRecorder 硬件放电积分实现）：
          * E = ∫ P(t) dt = Σ [ ((P(i) + P(i+1)) / 2) * Δt ]
@@ -551,7 +560,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         return try {
-            val timeStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(now))
+            val timeStr = dateFormatter.get()!!.format(Date(now))
             val currentMode = getSelectedMode()
             val fullPackage = loadPowerData(currentMode)
             val powerRecord = PowerUsageRecord.fromFullPowerPackage(

@@ -109,9 +109,9 @@ class AppUsageDetailBottomSheetDialog(
         tvPackage.text = "${item.packageName}$uidStr"
 
         // 2. 状态标签（根据真实前后台活动时长设定）
-        val hasFg = item.foregroundTimeMs >= 1000L
-        val hasBg = item.backgroundTimeMs >= 1000L
-        val hasFgs = item.fgsDurationMs >= 1000L
+        val hasFg = item.foregroundTimeMs > 0L
+        val hasBg = item.backgroundTimeMs > 0L
+        val hasFgs = item.fgsDurationMs > 0L
         when {
             hasFg && hasFgs -> {
                 tvStatusBadge.text = "前台+常驻"
@@ -149,7 +149,7 @@ class AppUsageDetailBottomSheetDialog(
         // 功率列
         val fgPwrStr = if (item.foregroundPowerWatts >= 0.005f) {
             formatWattsValue(item.foregroundPowerWatts)
-        } else if (item.foregroundTimeMs >= 1000L && item.avgPowerWatts >= 0.005f) {
+        } else if (item.foregroundTimeMs > 0L && item.avgPowerWatts >= 0.005f) {
             formatWattsValue(item.avgPowerWatts)
         } else {
             "--"

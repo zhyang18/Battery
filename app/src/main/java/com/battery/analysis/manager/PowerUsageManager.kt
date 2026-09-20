@@ -1887,7 +1887,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 for ((pkgName, pair) in deltas) {
                     val timeMs = pair.first.coerceAtMost(elapsedMs)
                     val lastUsed = pair.second
-                    if (timeMs >= 1000L && isUserInstalledApp(pkgName)) {
+                    if (timeMs > 0L && isUserInstalledApp(pkgName)) {
                         try {
                             val appInfo = pm.getApplicationInfo(pkgName, 0)
                             val appName = pm.getApplicationLabel(appInfo).toString()
@@ -1975,26 +1975,67 @@ class PowerUsageManager private constructor(private val context: Context) {
 
                 // 仅对合理时间间隔（1ms ~ 120s）进行连续切片数值梯形微积分
                 if (dt in 1L..120_000L) {
-                    val midTs = (prev.timestamp + curr.timestamp) / 2
-                    // 严格对标 BatteryRecorder RecordAppStatsComputer.kt 第54行逻辑：
-                    // 每个时间切片的能量和时长归属完全由前一个记录点（prev）的前台包名决定
-                    val matchedPkg = prev.packageName?.takeIf { it.isNotEmpty() }
-                        ?: curr.packageName?.takeIf { it.isNotEmpty() }
-                        ?: appIntervals.firstOrNull { midTs in it.startTs..it.endTs }?.packageName
+                    val sliceStart = prev.timestamp
+                    val sliceEnd = curr.timestamp
+                    val midTs = (sliceStart + sliceEnd) / 2
+                    val avgPower = (prev.powerWatts + curr.powerWatts) * 0.5
+                    val avgT = (prev.temperature + curr.temperature) * 0.5
+                    val stepMax = maxOf(prev.temperature, curr.temperature)
 
-                    if (matchedPkg != null) {
-                        val acc = appSliceMap.getOrPut(matchedPkg) { SliceAccumulator() }
-                        val avgPower = (prev.powerWatts + curr.powerWatts) * 0.5
-                        val dEnergyWs = avgPower * (dt / 1000.0)
-                        acc.sampledDurationMs += dt
-                        acc.sampledEnergyWs += dEnergyWs
+                    // 1. 优先在系统底层精确记录的前台活跃区间中匹配重叠应用
+                    val overlappingIntervals = appIntervals.filter { interval ->
+                        maxOf(sliceStart, interval.startTs) < minOf(sliceEnd, interval.endTs)
+                    }
 
-                        val avgT = (prev.temperature + curr.temperature) * 0.5
-                        acc.tempDurationMs += dt
-                        acc.weightedTempSum += avgT * dt
-                        val currentMax = acc.maxTempCelsius
-                        val stepMax = maxOf(prev.temperature, curr.temperature)
-                        acc.maxTempCelsius = if (currentMax == null) stepMax else maxOf(currentMax, stepMax)
+                    if (overlappingIntervals.isNotEmpty()) {
+                        var allocatedOverlapMs = 0L
+                        for (interval in overlappingIntervals) {
+                            val overlapStart = maxOf(sliceStart, interval.startTs)
+                            val overlapEnd = minOf(sliceEnd, interval.endTs)
+                            val overlapMs = (overlapEnd - overlapStart).coerceAtLeast(0L)
+                            if (overlapMs > 0L) {
+                                allocatedOverlapMs += overlapMs
+                                val acc = appSliceMap.getOrPut(interval.packageName) { SliceAccumulator() }
+                                val dEnergyWs = avgPower * (overlapMs / 1000.0)
+                                acc.sampledDurationMs += overlapMs
+                                acc.sampledEnergyWs += dEnergyWs
+                                acc.tempDurationMs += overlapMs
+                                acc.weightedTempSum += avgT * overlapMs
+                                val currentMax = acc.maxTempCelsius
+                                acc.maxTempCelsius = if (currentMax == null) stepMax else maxOf(currentMax, stepMax)
+                            }
+                        }
+                        // 若重叠分配后仍有剩余未覆盖的时间切片，且采样点自带包名，则归入该采样点包名
+                        val remainingMs = dt - allocatedOverlapMs
+                        if (remainingMs > 0L) {
+                            val fallbackPkg = curr.packageName?.takeIf { it.isNotEmpty() } ?: prev.packageName?.takeIf { it.isNotEmpty() }
+                            if (fallbackPkg != null && !overlappingIntervals.any { it.packageName == fallbackPkg }) {
+                                val acc = appSliceMap.getOrPut(fallbackPkg) { SliceAccumulator() }
+                                val dEnergyWs = avgPower * (remainingMs / 1000.0)
+                                acc.sampledDurationMs += remainingMs
+                                acc.sampledEnergyWs += dEnergyWs
+                                acc.tempDurationMs += remainingMs
+                                acc.weightedTempSum += avgT * remainingMs
+                                val currentMax = acc.maxTempCelsius
+                                acc.maxTempCelsius = if (currentMax == null) stepMax else maxOf(currentMax, stepMax)
+                            }
+                        }
+                    } else {
+                        // 2. 无重叠区间时（如 UsageStats 未采集到或未授权）：使用采样点前台包名
+                        val matchedPkg = curr.packageName?.takeIf { it.isNotEmpty() }
+                            ?: prev.packageName?.takeIf { it.isNotEmpty() }
+                            ?: appIntervals.firstOrNull { midTs in it.startTs..it.endTs }?.packageName
+
+                        if (matchedPkg != null) {
+                            val acc = appSliceMap.getOrPut(matchedPkg) { SliceAccumulator() }
+                            val dEnergyWs = avgPower * (dt / 1000.0)
+                            acc.sampledDurationMs += dt
+                            acc.sampledEnergyWs += dEnergyWs
+                            acc.tempDurationMs += dt
+                            acc.weightedTempSum += avgT * dt
+                            val currentMax = acc.maxTempCelsius
+                            acc.maxTempCelsius = if (currentMax == null) stepMax else maxOf(currentMax, stepMax)
+                        }
                     }
                 }
                 prev = curr
@@ -2005,6 +2046,19 @@ class PowerUsageManager private constructor(private val context: Context) {
         if (sortedSamples.isNotEmpty()) {
             for (sample in sortedSamples) {
                 if (sample.powerWatts > 0f) {
+                    for (interval in appIntervals) {
+                        if (sample.timestamp in interval.startTs..interval.endTs) {
+                            val acc = appSliceMap.getOrPut(interval.packageName) { SliceAccumulator() }
+                            if (acc.sampledDurationMs <= 0L) {
+                                val intervalDurationMs = (interval.endTs - interval.startTs).coerceAtLeast(1L)
+                                acc.sampledDurationMs = intervalDurationMs
+                                acc.sampledEnergyWs = sample.powerWatts * (intervalDurationMs / 1000.0)
+                            }
+                            if (acc.maxTempCelsius == null) {
+                                acc.maxTempCelsius = sample.temperature
+                            }
+                        }
+                    }
                     if (!sample.packageName.isNullOrEmpty()) {
                         val acc = appSliceMap.getOrPut(sample.packageName) { SliceAccumulator() }
                         if (acc.sampledDurationMs <= 0L) {
@@ -2015,42 +2069,42 @@ class PowerUsageManager private constructor(private val context: Context) {
                             acc.maxTempCelsius = sample.temperature
                         }
                     }
-                    for (interval in appIntervals) {
-                        if (sample.timestamp in interval.startTs..interval.endTs) {
-                            val acc = appSliceMap.getOrPut(interval.packageName) { SliceAccumulator() }
-                            if (acc.sampledDurationMs <= 0L) {
-                                acc.sampledDurationMs = 1000L
-                                acc.sampledEnergyWs = sample.powerWatts * 1.0
-                            }
-                            if (acc.maxTempCelsius == null) {
-                                acc.maxTempCelsius = sample.temperature
-                            }
-                        }
-                    }
                 }
             }
         }
 
         return appItems.map { item ->
-            val fgHours = if (item.foregroundTimeMs >= 1000L) item.foregroundTimeMs / 3600000f else 0f
+            val fgHours = if (item.foregroundTimeMs > 0L) item.foregroundTimeMs / 3600000f else 0f
             val acc = appSliceMap[item.packageName]
 
             val finalFgWatts: Float
             val finalFgEnergy: Float
 
-            if (item.foregroundTimeMs >= 1000L) {
+            if (item.foregroundTimeMs > 0L) {
                 if (acc != null && acc.sampledDurationMs > 0L && acc.sampledEnergyWs > 0.0) {
                     // 1. 梯形微积分算出的真实硬件平均放电功耗：总焦耳 (W*s) / 总采样秒数 (s)
                     val sampledWatts = (acc.sampledEnergyWs / (acc.sampledDurationMs / 1000.0)).toFloat()
                     finalFgWatts = (Math.round(sampledWatts * 100f) / 100f).coerceAtLeast(0f)
                     finalFgEnergy = (finalFgWatts * fgHours).coerceAtLeast(0f)
                 } else {
-                    // 2. 短时运行应用（如切片采样点不足）：优先查找活跃时间窗口内的真实亮屏瞬时采样均值，次选应用自身真实能耗换算功耗
-                    val refTs = intervalMap[item.packageName]?.lastOrNull()?.endTs ?: item.lastUsedTimeMs
-                    val windowStart = refTs - (item.foregroundTimeMs * 2).coerceAtLeast(30_000L)
-                    val windowEnd = refTs + 5000L
-                    val windowSamples = sortedSamples.filter { it.isScreenOn && it.powerWatts > 0f && it.timestamp in windowStart..windowEnd }
-                    val windowAvgWatts = if (windowSamples.size >= 2) {
+                    // 2. 短时运行应用（如切片采样点不足）：严格在该应用活跃的时间区间内查找真实亮屏瞬时采样均值，杜绝 30 秒大窗口污染
+                    val appIntervalList = intervalMap[item.packageName] ?: emptyList()
+                    val windowSamples = if (appIntervalList.isNotEmpty()) {
+                        // 在应用各段活跃区间（前后仅允许 1500ms 采样时钟相位微调容差）内检索真实的放电采样点
+                        sortedSamples.filter { sample ->
+                            sample.isScreenOn && sample.powerWatts > 0f &&
+                                appIntervalList.any { interval ->
+                                    sample.timestamp in (interval.startTs - 1500L)..(interval.endTs + 1500L)
+                                }
+                        }
+                    } else {
+                        // 无切片记录时，严格以最近使用时间及其前台时长为窗口
+                        val refTs = item.lastUsedTimeMs
+                        val windowStart = refTs - item.foregroundTimeMs - 1500L
+                        val windowEnd = refTs + 1500L
+                        sortedSamples.filter { it.isScreenOn && it.powerWatts > 0f && it.timestamp in windowStart..windowEnd }
+                    }
+                    val windowAvgWatts = if (windowSamples.isNotEmpty()) {
                         windowSamples.map { it.powerWatts }.average().toFloat()
                     } else {
                         null
@@ -2091,7 +2145,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val intervals = intervalMap[item.packageName] ?: emptyList()
                 val matchedTemps = if (intervals.isNotEmpty() && historyTempPoints.isNotEmpty()) {
                     historyTempPoints.filter { (ts, _) ->
-                        intervals.any { interval -> ts in interval.startTs..interval.endTs }
+                        intervals.any { interval -> ts in (interval.startTs - 1500L)..(interval.endTs + 1500L) }
                     }.map { it.second }
                 } else {
                     emptyList()

@@ -57,19 +57,22 @@ data class AppPowerUsageItem(
             foregroundEnergyWh
         } else if (directEnergyWh != null && directEnergyWh > 0f && foregroundTimeMs > 0L) {
             directEnergyWh
-        } else if (avgPowerWatts > 0f && foregroundTimeMs >= 1000L) {
+        } else if (avgPowerWatts > 0f && foregroundTimeMs > 0L) {
             (avgPowerWatts * (foregroundTimeMs / 3600000f)).coerceAtLeast(0f)
         } else {
             0f
         }
 
     /**
-     * 格式化指定毫秒时长为人类可读字符串（如 "19m38s"、"58s"、"2h15m"）。
+     * 格式化指定毫秒时长为人类可读字符串（如 "19m38s"、"58s"、"2h15m" 或 "350ms"）。
+     * 对少于 1 秒的毫秒级运行时长精确展示（如 "350ms"），杜绝被粗暴丢弃或显示为 "0s"。
      *
      * @param durationMs 待格式化的时间毫秒数
      * @return 格式化后的时间字符串
      */
     private fun formatDurationMs(durationMs: Long): String {
+        if (durationMs <= 0L) return "0s"
+        if (durationMs < 1000L) return "${durationMs}ms"
         val totalSeconds = durationMs / 1000
         if (totalSeconds < 60) {
             return "${totalSeconds}s"
@@ -158,8 +161,8 @@ data class AppPowerUsageItem(
      * @return 格式化后的组合时长文本
      */
     fun getFormattedCombinedDuration(): String {
-        val hasFg = foregroundTimeMs >= 1000L
-        val hasBg = backgroundTimeMs >= 1000L
+        val hasFg = foregroundTimeMs > 0L
+        val hasBg = backgroundTimeMs > 0L
         return when {
             hasFg && hasBg -> "${formatDurationMs(foregroundTimeMs)} | 后台 ${formatDurationMs(backgroundTimeMs)}"
             hasFg -> formatDurationMs(foregroundTimeMs)
@@ -223,16 +226,17 @@ data class AppPowerUsageItem(
 
     /**
      * 获取纯前台亮屏运行平均功耗展示文本（如 "1.44W" 或 "--"）。
-     * 当未处于前台运行或运行时长不足有效统计门槛（1秒）时显示为 "--"。
+     * 只要应用在前台产生过活跃工时（包含少于 1 秒的短时启动），均如实计算并展示其前台平均功耗；
+     * 纯后台运行应用因未独占屏幕交互且无法切出硬件放电切片，诚实显示为 "--"。
      *
      * @return 格式化后的纯前台平均功耗文本
      */
     fun getFormattedForegroundAvgWatts(): String {
         val fgPwr = if (foregroundPowerWatts > 0f) {
             foregroundPowerWatts
-        } else if (foregroundTimeMs >= 1000L && foregroundEnergyWh > 0f) {
+        } else if (foregroundTimeMs > 0L && foregroundEnergyWh > 0f) {
             (foregroundEnergyWh / (foregroundTimeMs / 3600000f)).coerceAtLeast(0f)
-        } else if (foregroundTimeMs >= 1000L && avgPowerWatts > 0f) {
+        } else if (foregroundTimeMs > 0L && avgPowerWatts > 0f) {
             avgPowerWatts
         } else {
             0f

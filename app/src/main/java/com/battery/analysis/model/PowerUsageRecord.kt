@@ -131,8 +131,8 @@ data class PowerUsageRecord(
                 val fgEnergy = obj.optDouble("fgEnergy", 0.0).toFloat()
                 val bgEnergy = obj.optDouble("bgEnergy", 0.0).toFloat()
                 val directEnergy = obj.optDouble("directEnergy", (fgEnergy + bgEnergy).toDouble()).toFloat()
-                val fgPwr = obj.optDouble("fgPower", if (timeMs >= 1000L) powerW.toDouble() else 0.0).toFloat()
-                val bgPwr = obj.optDouble("bgPower", if (timeMs < 1000L && bgTime >= 1000L) powerW.toDouble() else 0.0).toFloat()
+                val fgPwr = obj.optDouble("fgPower", if (timeMs > 0L) powerW.toDouble() else 0.0).toFloat()
+                val bgPwr = obj.optDouble("bgPower", if (timeMs <= 0L && bgTime > 0L) powerW.toDouble() else 0.0).toFloat()
 
                 appList.add(
                     AppPowerUsageItem(

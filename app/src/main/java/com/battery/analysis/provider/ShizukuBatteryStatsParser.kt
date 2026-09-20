@@ -498,8 +498,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             val effectiveBackgroundMs = safeBgMs
 
                             // 运行平均功耗计算：独立核算前台与后台，并避免微小时长除法放大
-                            val fgHours = if (foregroundMs >= 1000L) foregroundMs / 3600000.0 else 0.0
-                            val bgHours = if (effectiveBackgroundMs >= 1000L) effectiveBackgroundMs / 3600000.0 else 0.0
+                            val fgHours = if (foregroundMs > 0L) foregroundMs / 3600000.0 else 0.0
+                            val bgHours = if (effectiveBackgroundMs > 0L) effectiveBackgroundMs / 3600000.0 else 0.0
                             val fgWatts = if (fgHours > 0.0 && fgEnergyWh > 0f) (fgEnergyWh / fgHours).toFloat() else 0f
                             val bgWatts = if (bgHours > 0.0 && bgEnergyWh > 0f) (bgEnergyWh / bgHours).toFloat() else 0f
                             val avgWatts = if (fgWatts > 0f) fgWatts else bgWatts
@@ -1002,8 +1002,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             val maxAllowedBg = (dischargeMs - effectiveFg).coerceAtLeast(0L)
             val effectiveFinalBg = safeBgMs.coerceIn(0L, maxAllowedBg)
 
-            val fgHours = if (effectiveFg >= 1000L) effectiveFg / 3600000.0 else 0.0
-            val bgHours = if (effectiveFinalBg >= 1000L) effectiveFinalBg / 3600000.0 else 0.0
+            val fgHours = if (effectiveFg > 0L) effectiveFg / 3600000.0 else 0.0
+            val bgHours = if (effectiveFinalBg > 0L) effectiveFinalBg / 3600000.0 else 0.0
             val fgWatts = if (fgHours > 0.0 && fgEnergyWh > 0f) (fgEnergyWh / fgHours).toFloat() else 0f
             val bgWatts = if (bgHours > 0.0 && bgEnergyWh > 0f) (bgEnergyWh / bgHours).toFloat() else 0f
             val avgWatts = if (fgWatts > 0f) fgWatts else bgWatts
@@ -1048,7 +1048,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
         for ((pkgName, fgTime) in preciseTimes) {
             val safeFgTime = fgTime.coerceAtMost(dischargeMs)
-            if (safeFgTime >= 1000L && isUserInstalledApp(pkgName) && !existingMap.containsKey(pkgName)) {
+            if (safeFgTime > 0L && isUserInstalledApp(pkgName) && !existingMap.containsKey(pkgName)) {
                 val (appName, icon) = getAppMetadata(pkgName, pm)
                 val uid = try { pm.getApplicationInfo(pkgName, 0).uid } catch (_: Exception) { -1 }
                 val hw = if (uid > 0) hwStatsMap[uid] else null
@@ -1131,7 +1131,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         // 严格遵循 BatteryRecorder 算法：
         // 纯后台应用（前台时长为 0）不编造后台能量，能量归 0f，仅统计后台工时；
         // 前台活跃应用能量全部忠实归属于前台物理放电交互，后台能量严格为 0f。
-        return if (foregroundMs >= 1000L) {
+        return if (foregroundMs > 0L) {
             Triple(totalEnergy, 0f, effectiveBg)
         } else {
             Triple(0f, 0f, effectiveBg)

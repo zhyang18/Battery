@@ -1051,8 +1051,29 @@ class PowerUsageCalculationTest {
             backgroundPowerWatts = 0f
         )
         assertEquals("功耗严格反映前台真实物理功耗 1.89W", "1.89W", zeroBgItem.getFormattedCombinedAvgWatts())
+        assertEquals("前台时长格式化正常", "1s", zeroBgItem.getFormattedDuration())
 
-        // 场景 3：纯后台运行应用（无前台运行），功耗诚实展示为 --
+        // 场景 3：前台运行少于 1 秒（500ms）的应用，功耗精确展示为 2.10W，时长精确展示为 500ms
+        val subSecondItem = AppPowerUsageItem(
+            packageName = "com.battery.quicklaunch",
+            appName = "快速启动",
+            icon = null,
+            foregroundTimeMs = 500L, // 500ms
+            avgPowerWatts = 2.10f,
+            avgTemperature = 35.0f,
+            maxTemperature = 35.0f,
+            lastUsedTimeMs = System.currentTimeMillis(),
+            backgroundTimeMs = 0L,
+            foregroundEnergyWh = 0.00029f,
+            backgroundEnergyWh = 0f,
+            foregroundPowerWatts = 2.10f,
+            backgroundPowerWatts = 0f
+        )
+        assertEquals("少于 1 秒应用功耗精确反映前台真实功耗 2.10W", "2.10W", subSecondItem.getFormattedCombinedAvgWatts())
+        assertEquals("少于 1 秒应用时长精确展示为 500ms", "500ms", subSecondItem.getFormattedDuration())
+        assertEquals("少于 1 秒应用组合时长精确展示为 500ms", "500ms", subSecondItem.getFormattedCombinedDuration())
+
+        // 场景 4：纯后台运行应用（无前台运行），功耗诚实展示为 --，时长为 0s
         val pureBgItem = AppPowerUsageItem(
             packageName = "com.example.purebg",
             appName = "纯后台",
@@ -1069,6 +1090,7 @@ class PowerUsageCalculationTest {
             backgroundPowerWatts = 0f
         )
         assertEquals("纯后台应用功耗诚实显示为 --", "--", pureBgItem.getFormattedCombinedAvgWatts())
+        assertEquals("纯后台应用前台时长为 0s", "0s", pureBgItem.getFormattedDuration())
     }
 
     /**
@@ -1862,6 +1884,56 @@ class PowerUsageCalculationTest {
         // 验证：断层微元（6600秒）因超过 120 秒门限被自动跳过，未被线性插值放大为 3.04Wh
         assertTrue("深度睡眠断层不应被线性插值放大，积分能量必须远小于断层插值值", energyWh < 0.1f)
         assertTrue("有效采样平均功率应忠实反映真实采样水平", avgWatts <= 0.3f)
+    }
+
+    /**
+     * 验证启动少于 1 秒（如 350ms、800ms）的应用平均功耗与运行能量精确计算。
+     * 确保不会因时长低于 1 秒被粗暴划入纯后台，且时长能够精确格式化为毫秒（如 "350ms"）。
+     */
+    @Test
+    fun testSubSecondAppPowerAndEnergyCalculation() {
+        // 场景 A：前台运行 350ms，瞬时功耗 2.50W，消耗能量 2.5W * (0.35s / 3600h) ≈ 0.000243Wh
+        val msItem = AppPowerUsageItem(
+            packageName = "com.battery.flashlaunch",
+            appName = "闪开应用",
+            icon = null,
+            foregroundTimeMs = 350L,
+            avgPowerWatts = 2.50f,
+            avgTemperature = 32.0f,
+            maxTemperature = 32.0f,
+            lastUsedTimeMs = System.currentTimeMillis(),
+            backgroundTimeMs = 0L,
+            foregroundEnergyWh = 0.000243f,
+            backgroundEnergyWh = 0f,
+            foregroundPowerWatts = 2.50f,
+            backgroundPowerWatts = 0f
+        )
+        assertEquals("毫秒级运行应用时长必须精确展示为 350ms", "350ms", msItem.getFormattedDuration())
+        assertEquals("毫秒级运行应用组合时长展示正常", "350ms", msItem.getFormattedCombinedDuration())
+        assertEquals("毫秒级运行应用功耗严格等于 2.50W", "2.50W", msItem.getFormattedCombinedAvgWatts())
+        assertEquals("毫秒级运行应用前台功耗严格等于 2.50W", "2.50W", msItem.getFormattedForegroundAvgWatts())
+        assertEquals("毫秒级运行应用微小能量精确格式化为 <0.001Wh", "<0.001Wh", msItem.getFormattedCombinedEnergyWh())
+        assertTrue("毫秒级运行应用总能耗大于 0", msItem.energyWh > 0f)
+
+        // 场景 B：前台运行 800ms，仅有能量（0.0006Wh），无直接功耗，由能量反推功耗：0.0006 / (0.8 / 3600) = 2.70W
+        val energyOnlyItem = AppPowerUsageItem(
+            packageName = "com.battery.calcfromenergy",
+            appName = "能量换算应用",
+            icon = null,
+            foregroundTimeMs = 800L,
+            avgPowerWatts = 0f,
+            avgTemperature = 34.0f,
+            maxTemperature = 34.0f,
+            lastUsedTimeMs = System.currentTimeMillis(),
+            backgroundTimeMs = 0L,
+            foregroundEnergyWh = 0.0006f,
+            backgroundEnergyWh = 0f,
+            foregroundPowerWatts = 0f,
+            backgroundPowerWatts = 0f
+        )
+        assertEquals("由能量反推的前台功耗必须精确计算为 2.70W", "2.70W", energyOnlyItem.getFormattedForegroundAvgWatts())
+        assertEquals("800ms 时长精确展示", "800ms", energyOnlyItem.getFormattedDuration())
+        assertEquals("大于 0.0005Wh 能量展示为 0.001Wh", "0.001Wh", energyOnlyItem.getFormattedCombinedEnergyWh())
     }
 }
 

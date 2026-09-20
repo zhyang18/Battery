@@ -779,18 +779,44 @@ object SysfsBatterySampler {
     // ──────────────────────────── 私有辅助方法 ────────────────────────────
 
     /**
+     * 轻量直接读取节点文件首行 ASCII 文本内容，采用 64 字节定长栈缓冲区，
+     * 彻底杜绝 [File.readText] 产生的多层封装输入流与动态扩容字节数组对象分配，
+     * 在每秒高频硬件采样场景下大幅削减堆内存对象分配与垃圾回收（GC）开销。
+     *
+     * @param path 目标节点文件绝对路径
+     * @return 读取并修剪空白后的首行字符串，读取失败或内容为空则返回 null
+     */
+    private fun readFirstLineDirect(path: String): String? {
+        var fis: java.io.FileInputStream? = null
+        return try {
+            fis = java.io.FileInputStream(path)
+            val buf = ByteArray(64)
+            val n = fis.read(buf, 0, 63)
+            if (n <= 0) return null
+            var len = n
+            for (i in 0 until n) {
+                if (buf[i] == '\n'.code.toByte() || buf[i] == '\r'.code.toByte()) {
+                    len = i
+                    break
+                }
+            }
+            if (len <= 0) null else String(buf, 0, len, java.nio.charset.StandardCharsets.US_ASCII).trim()
+        } catch (_: Throwable) {
+            null
+        } finally {
+            try { fis?.close() } catch (_: Throwable) {}
+        }
+    }
+
+    /**
      * 直接尝试从指定路径读取状态文本原始值（不调用 exists()）。
      *
      * @param path sysfs 节点文件绝对路径
      * @return 状态文本，若读取失败则返回 null
      */
     private fun tryReadStatusFile(path: String): String? {
-        return try {
-            val raw = File(path).readText().trim()
-            if (raw.isNotEmpty()) raw else null
-        } catch (_: Throwable) {
-            null
-        }
+        val raw = readFirstLineDirect(path) ?: return null
+        return if (raw.isNotEmpty()) raw else null
     }
 
     /**
@@ -800,13 +826,9 @@ object SysfsBatterySampler {
      * @return 归一化后的毫安值，若读取失败则返回 null
      */
     private fun tryReadCurrentFile(path: String): Float? {
-        return try {
-            val raw = File(path).readText().trim().toLongOrNull() ?: return null
-            if (raw == 0L) return null
-            normalizeCurrentToMa(Math.abs(raw))
-        } catch (_: Throwable) {
-            null
-        }
+        val raw = readFirstLineDirect(path)?.toLongOrNull() ?: return null
+        if (raw == 0L) return null
+        return normalizeCurrentToMa(Math.abs(raw))
     }
 
     /**
@@ -816,13 +838,9 @@ object SysfsBatterySampler {
      * @return 归一化后的伏特值，若读取失败则返回 null
      */
     private fun tryReadVoltageFile(path: String): Float? {
-        return try {
-            val raw = File(path).readText().trim().toLongOrNull() ?: return null
-            if (raw <= 0L) return null
-            normalizeVoltageToVolts(raw)
-        } catch (_: Throwable) {
-            null
-        }
+        val raw = readFirstLineDirect(path)?.toLongOrNull() ?: return null
+        if (raw <= 0L) return null
+        return normalizeVoltageToVolts(raw)
     }
 
     /**
@@ -832,13 +850,9 @@ object SysfsBatterySampler {
      * @return 摄氏度温度值，若读取失败则返回 null
      */
     private fun tryReadTempFile(path: String): Float? {
-        return try {
-            val raw = File(path).readText().trim().toFloatOrNull() ?: return null
-            if (raw <= 0f) return null
-            if (raw >= 100f) raw / 10f else raw
-        } catch (_: Throwable) {
-            null
-        }
+        val raw = readFirstLineDirect(path)?.toFloatOrNull() ?: return null
+        if (raw <= 0f) return null
+        return if (raw >= 100f) raw / 10f else raw
     }
 
     /**

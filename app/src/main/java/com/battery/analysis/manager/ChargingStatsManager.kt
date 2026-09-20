@@ -85,6 +85,41 @@ class ChargingStatsManager private constructor(private val context: Context) {
         }
     }
 
+    /**
+     * 充电采样点后台异步持久化单线程池，消除在采样主线程/协程中执行大 JSON 序列化与写盘造成的 CPU 阻塞。
+     */
+    private val chargingDiskExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    @Volatile
+    private var unsavedChargingPointsCount = 0
+
+    @Volatile
+    private var lastChargingSaveTimeMs = 0L
+
+    /**
+     * 系统电池运行状态轻量内存缓存实体，用于 3000ms 防抖复用。
+     *
+     * @property timestamp 缓存获取时间戳（毫秒）
+     * @property isCharging 是否处于充电连接状态
+     * @property chargeType 充电接口类型描述
+     * @property level 当前电量百分比
+     * @property voltageVolts 实时电压（伏特 V）
+     * @property temperatureCelsius 实时温度（摄氏度 ℃）
+     * @property currentMa 实时电流（毫安 mA）
+     */
+    private data class CachedSystemBatteryStatus(
+        val timestamp: Long,
+        val isCharging: Boolean,
+        val chargeType: String,
+        val level: Int,
+        val voltageVolts: Float?,
+        val temperatureCelsius: Float?,
+        val currentMa: Float?
+    )
+
+    @Volatile
+    private var cachedSystemStatus: CachedSystemBatteryStatus? = null
+
     init {
         // 恢复保存在本地的最近一次充电记录
         loadSavedChargingSession()
@@ -188,29 +223,77 @@ class ChargingStatsManager private constructor(private val context: Context) {
 
 
     /**
-     * 实时检测系统当前是否处于充电状态及充电接口类型。
+     * 查询系统底层当前最新的电池广播运行参数，内部具备 3000ms 短期内存防抖缓存，
+     * 单次广播读取同时解析充电状态、接口类型、电量、电压、温度与电流，
+     * 彻底消除每秒多次重复向系统跨进程注册 [Intent.ACTION_BATTERY_CHANGED] 粘性广播造成的锁争用与 CPU 唤醒。
+     *
+     * @param force 是否强制跨进程刷新而不读取缓存
+     * @return 电池最新运行参数实体 [CachedSystemBatteryStatus]
+     */
+    private fun getOrRefreshSystemBatteryStatus(force: Boolean = false): CachedSystemBatteryStatus {
+        val now = System.currentTimeMillis()
+        val cached = cachedSystemStatus
+        if (!force && cached != null && (now - cached.timestamp) < 3_000L) {
+            return cached
+        }
+        return synchronized(this) {
+            val inner = cachedSystemStatus
+            if (!force && inner != null && (now - inner.timestamp) < 3_000L) {
+                return inner
+            }
+            val intentFilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+            val batteryStatus = context.registerReceiver(null, intentFilter)
+            val status = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+            val plugged = batteryStatus?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+            val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                    status == BatteryManager.BATTERY_STATUS_FULL ||
+                    plugged > 0
+
+            val chargeType = when (plugged) {
+                BatteryManager.BATTERY_PLUGGED_AC -> "交流快充"
+                BatteryManager.BATTERY_PLUGGED_USB -> "USB充电"
+                BatteryManager.BATTERY_PLUGGED_WIRELESS -> "无线充电"
+                else -> if (charging) "外部供电" else "未充电"
+            }
+
+            val rawLevel = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+            val level = if (rawLevel in 0..100) rawLevel else 0
+            val tempRaw = batteryStatus?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+            val temp = if (tempRaw > 0) tempRaw / 10f else null
+            val voltRaw = batteryStatus?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
+            val volt = if (voltRaw > 0) com.battery.analysis.util.BatteryUnitNormalizer.normalizeVoltageVolts(voltRaw.toLong()) else null
+
+            val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+            val rawCurrent = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) ?: 0
+            val currentMa = if (rawCurrent != 0 && rawCurrent != Int.MIN_VALUE) {
+                val curMa = com.battery.analysis.util.BatteryUnitNormalizer.normalizeCurrentMa(rawCurrent.toLong(), charging)
+                val isNetDischarging = rawCurrent < 0 || status == BatteryManager.BATTERY_STATUS_DISCHARGING || status == BatteryManager.BATTERY_STATUS_NOT_CHARGING
+                if (isNetDischarging) -curMa else curMa
+            } else null
+
+            isCurrentlyCharging = charging
+            val newStatus = CachedSystemBatteryStatus(
+                timestamp = now,
+                isCharging = charging,
+                chargeType = chargeType,
+                level = level,
+                voltageVolts = volt,
+                temperatureCelsius = temp,
+                currentMa = currentMa
+            )
+            cachedSystemStatus = newStatus
+            newStatus
+        }
+    }
+
+    /**
+     * 实时检测系统当前是否处于充电状态及充电接口类型（复用 3000ms 缓存）。
      *
      * @return 包含Pair(是否在充电, 充电类型文本)
      */
     fun checkCurrentSystemChargingState(): Pair<Boolean, String> {
-        val intentFilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-        val batteryStatus = context.registerReceiver(null, intentFilter)
-        val status = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-        val plugged = batteryStatus?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
-
-        val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
-                status == BatteryManager.BATTERY_STATUS_FULL ||
-                plugged > 0
-
-        val chargeType = when (plugged) {
-            BatteryManager.BATTERY_PLUGGED_AC -> "交流快充"
-            BatteryManager.BATTERY_PLUGGED_USB -> "USB充电"
-            BatteryManager.BATTERY_PLUGGED_WIRELESS -> "无线充电"
-            else -> if (charging) "外部供电" else "未充电"
-        }
-
-        isCurrentlyCharging = charging
-        return Pair(charging, chargeType)
+        val status = getOrRefreshSystemBatteryStatus()
+        return Pair(status.isCharging, status.chargeType)
     }
 
     /**
@@ -233,10 +316,9 @@ class ChargingStatsManager private constructor(private val context: Context) {
         isCurrentlyCharging = true
         hasPersistedCurrentSession = false
 
-        val provider = NormalApiProvider()
-        val info = provider.getBatteryInfo(context)
-        val fallbackTemp = info.temperature
-        val fallbackVolt = info.voltage?.let { it / 1000f }
+        val sysStatus = getOrRefreshSystemBatteryStatus(force = true)
+        val fallbackTemp = sysStatus.temperatureCelsius
+        val fallbackVolt = sysStatus.voltageVolts
 
         // 优先采用 BatteryRecorder JNI / sysfs 硬件直读通道获取无滤波瞬时快充物理指标
         val hwSample = com.battery.analysis.util.SysfsBatterySampler.sampleHardwareCharging(
@@ -246,9 +328,9 @@ class ChargingStatsManager private constructor(private val context: Context) {
         )
 
         val currentVolt = hwSample?.voltageVolts ?: (fallbackVolt ?: 0f)
-        val currentMa = hwSample?.currentMa ?: (info.currentNow ?: 0f)
+        val currentMa = hwSample?.currentMa ?: (sysStatus.currentMa ?: 0f)
         val currentTemp = hwSample?.temperatureCelsius ?: (fallbackTemp ?: 0f)
-        val rawPower = hwSample?.powerWatts ?: (info.powerWatts ?: com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(currentVolt, currentMa, isCharging = true))
+        val rawPower = hwSample?.powerWatts ?: com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(currentVolt, currentMa, isCharging = true)
         val currentPower = rawPower
 
         lastSampleTimestamp = now
@@ -304,14 +386,13 @@ class ChargingStatsManager private constructor(private val context: Context) {
      */
     fun sampleCurrentPoint(): ChargingSamplePoint {
         val now = System.currentTimeMillis()
-        val (charging, type) = checkCurrentSystemChargingState()
+        val sysStatus = getOrRefreshSystemBatteryStatus()
+        val charging = sysStatus.isCharging
+        val type = sysStatus.chargeType
 
-        val provider = NormalApiProvider()
-        val info = provider.getBatteryInfo(context)
-
-        val level = info.level ?: 0
-        val fallbackTemp = info.temperature
-        val fallbackVolt = info.voltage?.let { it / 1000f }
+        val level = sysStatus.level
+        val fallbackTemp = sysStatus.temperatureCelsius
+        val fallbackVolt = sysStatus.voltageVolts
 
         // 优先通过 BatteryRecorder JNI / sysfs 硬件直读通道获取真实瞬时快充物理指标
         val hwSample = com.battery.analysis.util.SysfsBatterySampler.sampleHardwareCharging(
@@ -321,9 +402,9 @@ class ChargingStatsManager private constructor(private val context: Context) {
         )
 
         val volt = hwSample?.voltageVolts ?: (fallbackVolt ?: 0f)
-        val curMa = hwSample?.currentMa ?: (info.currentNow ?: 0f)
+        val curMa = hwSample?.currentMa ?: (sysStatus.currentMa ?: 0f)
         val temp = hwSample?.temperatureCelsius ?: (fallbackTemp ?: 0f)
-        val rawPower = hwSample?.powerWatts ?: (info.powerWatts ?: com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(volt, curMa, charging))
+        val rawPower = hwSample?.powerWatts ?: com.battery.analysis.util.BatteryUnitNormalizer.calculatePowerWatts(volt, curMa, charging)
         val power = rawPower
 
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -410,9 +491,27 @@ class ChargingStatsManager private constructor(private val context: Context) {
 
         // 重新计算并汇总指标
         updateSummaryMetrics(point, type, charging, deltaEnergyWh, deltaScreenOffMs, deltaScreenOffGain, deltaScreenOffEnergy)
-        saveChargingSessionToPrefs()
+
+        // 极致低功耗设计：日常采样纯内存追加，每积累 60 个点（约 1~2 分钟）或超过 2 分钟才异步落盘一次，
+        // 彻底消除每秒为 500 个点频繁全量创建 JSONObject 与 SharedPreferences 频繁写盘开销
+        unsavedChargingPointsCount++
+        val nowMs = System.currentTimeMillis()
+        if (unsavedChargingPointsCount >= 60 || (nowMs - lastChargingSaveTimeMs >= 120_000L && unsavedChargingPointsCount >= 10)) {
+            unsavedChargingPointsCount = 0
+            lastChargingSaveTimeMs = nowMs
+            flushChargingSessionToPrefsAsync()
+        }
 
         return point
+    }
+
+    /**
+     * 异步持久化充电会话与采样点至本地 SharedPreferences，避免阻塞采样轮询线程。
+     */
+    fun flushChargingSessionToPrefsAsync() {
+        chargingDiskExecutor.execute {
+            saveChargingSessionToPrefs()
+        }
     }
 
     /**

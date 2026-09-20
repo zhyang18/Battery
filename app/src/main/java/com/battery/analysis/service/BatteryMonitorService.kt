@@ -82,6 +82,13 @@ class BatteryMonitorService : Service() {
     @Volatile
     private var cachedSingleLineInfo: String = "⚡ 电池监控持续运行中"
 
+    /**
+     * 屏幕点亮/交互状态内存缓存，由动态广播 [Intent.ACTION_SCREEN_ON] 与 [Intent.ACTION_SCREEN_OFF] 实时维护。
+     * 采样循环直接读取此变量，消除每秒调用 [PowerManager.isInteractive] 发起的跨进程 Binder IPC。
+     */
+    @Volatile
+    private var cachedIsInteractive: Boolean = true
+
     // 内存缓存通知栏上一次推送的内容与时间戳，避免无变化时频繁唤醒 SystemUI 和进行 IPC 通信
     @Volatile
     private var lastNotifiedContent: String? = null
@@ -125,12 +132,14 @@ class BatteryMonitorService : Service() {
                     handlePowerDisconnected(appContext)
                 }
                 Intent.ACTION_SCREEN_ON -> {
-                    // 屏幕点亮瞬间：立即恢复轮询协程并强制刷新一次通知，消除用户视觉滞后
+                    // 屏幕点亮瞬间：标记屏幕状态、恢复轮询协程并强制刷新一次通知
+                    cachedIsInteractive = true
                     startMonitorSamplingLoop()
                     updateNotification(force = true)
                 }
                 Intent.ACTION_SCREEN_OFF -> {
                     // 屏幕熄灭瞬间：
+                    cachedIsInteractive = false
                     // 1. 将内存采样点异步刷盘固化，防止异常退出导致轨迹丢失
                     PowerUsageManager.getInstance(appContext).flushDischargeSamplesToDisk()
 
@@ -158,8 +167,7 @@ class BatteryMonitorService : Service() {
                     // 极致省电：仅亮屏时刷新通知，息屏直接跳过
                     updateNotification(force = false)
 
-                    val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
-                    val isInteractive = pm?.isInteractive ?: true
+                    val isInteractive = cachedIsInteractive
                     val screenOffInterval = getScreenOffIntervalMs(appContext)
 
                     if (cachedIsCharging) {
@@ -437,7 +445,6 @@ class BatteryMonitorService : Service() {
         monitorSamplingJob = serviceScope.launch(Dispatchers.IO) {
             val chargingManager = ChargingStatsManager.getInstance(applicationContext)
             val powerManager = PowerUsageManager.getInstance(applicationContext)
-            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
 
             // 在协程启动时读取一次采样间隔配置，循环内不重复读取 SharedPreferences。
             // 配置变更时调用 startMonitorSamplingLoop() 会取消并重建本协程，无需内循环轮询配置。
@@ -446,7 +453,7 @@ class BatteryMonitorService : Service() {
 
             while (isActive) {
                 val isCharging = cachedIsCharging
-                val isInteractive = pm?.isInteractive ?: true
+                val isInteractive = cachedIsInteractive
 
                 // 若亮屏且配置为不采样(-1L)，直接退出轮询协程，彻底杜绝 5 秒无意义空转
                 if (isInteractive && screenOnInterval == INTERVAL_NEVER) {

@@ -123,9 +123,10 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
             }
             tvAppEnergy.text = String.format(
                 Locale.getDefault(),
-                "%s | MAX: %.1f℃",
+//                "%s | MAX: %.1f℃",
+                "MAX: %.1f℃ | %s",
+                item.maxTemperature,
                 energyStr,
-                item.maxTemperature
             )
             tvDuration.text = if (showBackgroundStats) {
                 item.getFormattedCombinedDuration()

@@ -210,6 +210,52 @@ class PowerUsageManager private constructor(private val context: Context) {
     private val gameAppCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     /**
+     * 进程内持久化的应用信息缓存（包名 → (图标 Drawable, 应用名称, UID)）。
+     * 以 ConcurrentHashMap 实现线程安全。每次调用 [buildTimelineState] 或 [buildTrendDischargePoints]
+     * 时优先命中此缓存，避免对同一包名重复发起 PackageManager Binder IPC。
+     * 缓存上限 200 条，超出后自动移除最早插入的条目（FIFO 淘汰）。
+     * 若应用被卸载，缓存中对应条目在下次查询时自然淘汰（pm 抛异常即置 null icon）。
+     */
+    private val appInfoCache = object : java.util.LinkedHashMap<String, Triple<android.graphics.drawable.Drawable?, String, Int>>(64, 0.75f, false) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, Triple<android.graphics.drawable.Drawable?, String, Int>>?): Boolean {
+            return size > 200
+        }
+    }
+
+    /**
+     * 查询或加载指定包名的应用信息（图标、名称、UID），优先命中进程内缓存。
+     * 缓存未命中时向 PackageManager 发起一次 Binder IPC，并将结果存入缓存供后续复用。
+     *
+     * @param packageName 目标应用包名
+     * @return 包含图标、应用名称、UID 的三元组（图标可能为 null）
+     */
+    private fun getAppInfo(packageName: String): Triple<android.graphics.drawable.Drawable?, String, Int> {
+        synchronized(appInfoCache) {
+            appInfoCache[packageName]?.let { return it }
+        }
+        val pm = context.packageManager
+        val (icon, name, uid) = try {
+            val ai = pm.getApplicationInfo(packageName, 0)
+            Triple(pm.getApplicationIcon(ai), pm.getApplicationLabel(ai).toString(), ai.uid)
+        } catch (_: Exception) {
+            Triple(null, packageName.substringAfterLast('.'), 10000)
+        }
+        val triple = Triple(icon, name, uid)
+        synchronized(appInfoCache) {
+            appInfoCache[packageName] = triple
+        }
+        return triple
+    }
+
+    /**
+     * 优雅关闭后台 I/O 线程池，等待已提交任务完成后终止线程。
+     * 供 [BatteryMonitorService.onDestroy] 调用，防止服务销毁后游离线程继续运行。
+     */
+    fun shutdownDiskIoExecutor() {
+        diskIoExecutor.shutdown()
+    }
+
+    /**
      * 记录放电过程中的实时瞬时采样点。
      * 包含秒级时间戳、瞬时电量、电压、温度、瞬时功耗及屏幕开关状态。
      * 采用纯内存快速追加与批处理异步刷盘机制，确保极低 CPU 与磁盘 I/O 消耗。
@@ -240,14 +286,36 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         val startTs = getLastUnplugTime().let { if (it > 0L) it else timestamp }
         val elapsedHours = (timestamp - startTs).coerceAtLeast(0L) / 3600000f
+        val safeLevel = batteryLevel.coerceIn(0, 100)
+        val roundedVolt = (Math.round(voltageVolts * 1000f) / 1000f).coerceAtLeast(0f)
+        val roundedTemp = (Math.round(temperature * 10f) / 10f)
+        val roundedWatts = (Math.round(powerWatts * 100f) / 100f).coerceAtLeast(0f)
+
+        // 静止场景降载优化（如息屏恒定待机）：若电量、亮息屏、包名完全一致且物理参数波动在测量噪声内，
+        // 在 60 秒周期内就地更新最后一个点的时间戳与耗时，不重复追加冗余数据点，大幅削减内存占用与 GC 开销
+        if (lastPoint != null &&
+            lastPoint.batteryLevel == safeLevel &&
+            lastPoint.isScreenOn == isScreenOn &&
+            lastPoint.packageName == packageName &&
+            kotlin.math.abs(lastPoint.powerWatts - roundedWatts) < 0.02f &&
+            kotlin.math.abs(lastPoint.temperature - roundedTemp) < 0.1f &&
+            kotlin.math.abs(lastPoint.voltageVolts - roundedVolt) < 0.005f &&
+            (timestamp - lastPoint.timestamp) < 60_000L
+        ) {
+            dischargeRealtimeSamples[dischargeRealtimeSamples.size - 1] = lastPoint.copy(
+                timestamp = timestamp,
+                elapsedHours = elapsedHours
+            )
+            return
+        }
 
         val point = PowerDischargePoint(
             timestamp = timestamp,
             elapsedHours = elapsedHours,
-            batteryLevel = batteryLevel.coerceIn(0, 100),
-            voltageVolts = (Math.round(voltageVolts * 1000f) / 1000f).coerceAtLeast(0f),
-            temperature = (Math.round(temperature * 10f) / 10f),
-            powerWatts = (Math.round(powerWatts * 100f) / 100f).coerceAtLeast(0f),
+            batteryLevel = safeLevel,
+            voltageVolts = roundedVolt,
+            temperature = roundedTemp,
+            powerWatts = roundedWatts,
             activeAppIcons = emptyList(),
             isScreenOn = isScreenOn,
             activeAppNames = emptyList(),
@@ -2492,10 +2560,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             appInfoMap[item.packageName] = Pair(item.icon, item.appName)
         }
         if (!appInfoMap.containsKey(context.packageName)) {
-            try {
-                val ai = pm.getApplicationInfo(context.packageName, 0)
-                appInfoMap[context.packageName] = Pair(pm.getApplicationIcon(ai), pm.getApplicationLabel(ai).toString())
-            } catch (_: Exception) {}
+            val (icon, name, _) = getAppInfo(context.packageName)
+            appInfoMap[context.packageName] = Pair(icon, name)
         }
 
         // 确定放电周期的前台主力应用（时长最长的主活跃应用，优先选择有桌面入口的用户三方应用）
@@ -2507,10 +2573,8 @@ class PowerUsageManager private constructor(private val context: Context) {
         val otherApps = candidateApps.filter { it.packageName != primaryPkg && isUserInstalledApp(it.packageName) }
 
         if (!appInfoMap.containsKey(primaryPkg)) {
-            try {
-                val ai = pm.getApplicationInfo(primaryPkg, 0)
-                appInfoMap[primaryPkg] = Pair(pm.getApplicationIcon(ai), pm.getApplicationLabel(ai).toString())
-            } catch (_: Exception) {}
+            val (icon, name, _) = getAppInfo(primaryPkg)
+            appInfoMap[primaryPkg] = Pair(icon, name)
         }
 
         // 优先采用放电期间后台精准采集的秒级瞬时物理数据点（包含瞬时实时功率、温度、电压与电量）
@@ -2543,8 +2607,11 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val icons = mutableListOf<android.graphics.drawable.Drawable>()
                 val names = mutableListOf<String>()
                 if (matchedPkg != null) {
-                    val info = appInfoMap[matchedPkg]
-                    if (info?.first != null) {
+                    val info = appInfoMap.getOrPut(matchedPkg) {
+                        val (icon, name, _) = getAppInfo(matchedPkg)
+                        Pair(icon, name)
+                    }
+                    if (info.first != null) {
                         icons.add(info.first!!)
                         names.add(info.second)
                     }
@@ -2693,22 +2760,9 @@ class PowerUsageManager private constructor(private val context: Context) {
         // D. 将分配到的各切片应用图标填入对应步长，保证连续性与单前台纯净性
         for (i in 0..steps) {
             val pkg = assignedPkgArray[i] ?: continue
-            var cached = appInfoMap[pkg]
-            if (cached == null) {
-                val icon = try {
-                    val ai = pm.getApplicationInfo(pkg, 0)
-                    pm.getApplicationIcon(ai)
-                } catch (_: Exception) {
-                    null
-                }
-                val name = try {
-                    val ai = pm.getApplicationInfo(pkg, 0)
-                    pm.getApplicationLabel(ai).toString()
-                } catch (_: Exception) {
-                    pkg.substringAfterLast('.')
-                }
-                cached = Pair(icon, name)
-                appInfoMap[pkg] = cached
+            val cached = appInfoMap.getOrPut(pkg) {
+                val (icon, name, _) = getAppInfo(pkg)
+                Pair(icon, name)
             }
 
             val icon = cached.first
@@ -3359,24 +3413,10 @@ class PowerUsageManager private constructor(private val context: Context) {
             val pkg = interval.packageName
             val item = appMap[pkg]
             val duration = (interval.endTs - interval.startTs).coerceAtLeast(0L)
-            val appName = item?.appName ?: try {
-                val ai = pm.getApplicationInfo(pkg, 0)
-                pm.getApplicationLabel(ai).toString()
-            } catch (_: Exception) {
-                pkg
-            }
-            val icon = item?.icon ?: try {
-                val ai = pm.getApplicationInfo(pkg, 0)
-                pm.getApplicationIcon(ai)
-            } catch (_: Exception) {
-                null
-            }
-
-            val uid = try {
-                pm.getApplicationInfo(pkg, 0).uid
-            } catch (_: Exception) {
-                10000
-            }
+            val info = getAppInfo(pkg)
+            val appName = item?.appName ?: info.second
+            val icon = item?.icon ?: info.first
+            val uid = info.third
 
             val directWh = item?.energyWh?.toDouble()
             val directMwh = directWh?.times(1000.0)
@@ -3444,23 +3484,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                     val fallbackStart = maxOf(lastAppEvent?.endTime ?: startTs, endTs - 60_000L, startTs)
                     if (endTs > fallbackStart) {
                         val item = appMap[currentPkg]
-                        val appName = item?.appName ?: try {
-                            val ai = pm.getApplicationInfo(currentPkg, 0)
-                            pm.getApplicationLabel(ai).toString()
-                        } catch (_: Exception) {
-                            currentPkg
-                        }
-                        val icon = item?.icon ?: try {
-                            val ai = pm.getApplicationInfo(currentPkg, 0)
-                            pm.getApplicationIcon(ai)
-                        } catch (_: Exception) {
-                            null
-                        }
-                        val uid = try {
-                            pm.getApplicationInfo(currentPkg, 0).uid
-                        } catch (_: Exception) {
-                            10000
-                        }
+                        val info = getAppInfo(currentPkg)
+                        val appName = item?.appName ?: info.second
+                        val icon = item?.icon ?: info.first
+                        val uid = info.third
                         appEvents.add(
                             AppTimelineEvent(
                                 packageName = currentPkg,

@@ -475,6 +475,25 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
+     * 视图从窗口脱附时的回调（如页签切走、Fragment 销毁等）。
+     * 主动调用 [DrawableBitmapCache.trimToLevel] 释放 50% 图标 Bitmap，
+     * 降低时间轴页面不可见期间的后台内存占用。
+     */
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        DrawableBitmapCache.trimToLevel(20)
+    }
+
+    /**
+     * 视图重新附着至窗口时的回调（如页签切回）。
+     * 使曲线缓存失效，确保下次 onDraw 时重新计算绘制路径。
+     */
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        invalidateCurveCache()
+    }
+
+    /**
      * 核心 Canvas 绘制流程：
      * 1. 绘制横向基准虚线网格；
      * 2. 多选曲线自适应锚点绘制（功耗、电量阶梯折线及百分比点标、温度阶梯折线及数值点标、电压阶梯折线及数值点标）；

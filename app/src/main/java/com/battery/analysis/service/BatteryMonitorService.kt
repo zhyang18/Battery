@@ -353,6 +353,9 @@ class BatteryMonitorService : Service() {
             PowerUsageManager.getInstance(applicationContext).flushDischargeSamplesToDisk()
         } catch (_: Exception) {}
         try {
+            PowerUsageManager.getInstance(applicationContext).shutdownDiskIoExecutor()
+        } catch (_: Exception) {}
+        try {
             unregisterReceiver(powerReceiver)
         } catch (_: Exception) {}
         monitorSamplingJob?.cancel()

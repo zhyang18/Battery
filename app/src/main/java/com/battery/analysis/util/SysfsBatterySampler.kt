@@ -67,6 +67,13 @@ object SysfsBatterySampler {
     /** Shizuku 进程 fork 采样最小冷却间隔（3 秒），彻底杜绝秒级循环高频 fork 进程唤醒 CPU */
     private const val SHIZUKU_SAMPLE_COOLDOWN_MS = 3_000L
 
+    /** Shizuku 采样失败最大退避冷却间隔（60 秒），防止异常节点下持续高频唤醒 */
+    private const val SHIZUKU_SAMPLE_MAX_COOLDOWN_MS = 60_000L
+
+    /** Shizuku 连续采样失败计数器，用于指数退避 */
+    @Volatile
+    private var shizukuFailCount: Int = 0
+
     /** 上次执行 Shizuku 进程 fork 采样的时间戳（毫秒） */
     @Volatile
     private var lastShizukuSampleTime: Long = 0L
@@ -923,7 +930,12 @@ object SysfsBatterySampler {
         isCharging: Boolean = false
     ): HardwareSample? {
         val now = System.currentTimeMillis()
-        if (now - lastShizukuSampleTime < SHIZUKU_SAMPLE_COOLDOWN_MS && cachedShizukuSample != null) {
+        val currentCooldown = if (shizukuFailCount > 0) {
+            minOf(SHIZUKU_SAMPLE_COOLDOWN_MS * (1L shl minOf(shizukuFailCount, 5)), SHIZUKU_SAMPLE_MAX_COOLDOWN_MS)
+        } else {
+            SHIZUKU_SAMPLE_COOLDOWN_MS
+        }
+        if (now - lastShizukuSampleTime < currentCooldown) {
             return cachedShizukuSample
         }
 
@@ -937,20 +949,36 @@ object SysfsBatterySampler {
         val statusIndex = if (statusPath != null) { pathList.add(statusPath); pathList.size - 1 } else -1
 
         return try {
-            val method = getNewProcessMethod() ?: return null
+            val method = getNewProcessMethod() ?: run {
+                lastShizukuSampleTime = now
+                shizukuFailCount++
+                return null
+            }
             val cmd = "cat ${pathList.joinToString(" ")} 2>/dev/null"
             val proc = method.invoke(
                 null,
                 arrayOf("sh", "-c", cmd),
                 null,
                 null
-            ) as? Process ?: return null
+            ) as? Process ?: run {
+                lastShizukuSampleTime = now
+                shizukuFailCount++
+                return null
+            }
 
             val lines = proc.inputStream.bufferedReader().use { it.readLines() }
             proc.waitFor()
             if (lines.size >= 2) {
-                val rawCur = lines[0].trim().toLongOrNull() ?: return null
-                val rawVolt = lines[1].trim().toLongOrNull() ?: return null
+                val rawCur = lines[0].trim().toLongOrNull() ?: run {
+                    lastShizukuSampleTime = now
+                    shizukuFailCount++
+                    return null
+                }
+                val rawVolt = lines[1].trim().toLongOrNull() ?: run {
+                    lastShizukuSampleTime = now
+                    shizukuFailCount++
+                    return null
+                }
                 val rawTemp = if (tempIndex in lines.indices) lines[tempIndex].trim().toFloatOrNull() else null
                 val rawStatus = if (statusIndex in lines.indices) lines[statusIndex].trim() else null
 
@@ -990,11 +1018,21 @@ object SysfsBatterySampler {
                     )
                     lastShizukuSampleTime = now
                     cachedShizukuSample = sample
+                    shizukuFailCount = 0
                     sample
-                } else null
-            } else null
+                } else {
+                    lastShizukuSampleTime = now
+                    shizukuFailCount++
+                    null
+                }
+            } else {
+                lastShizukuSampleTime = now
+                shizukuFailCount++
+                null
+            }
         } catch (_: Throwable) {
             lastShizukuSampleTime = now
+            shizukuFailCount++
             null
         }
     }

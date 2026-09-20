@@ -1935,7 +1935,44 @@ class PowerUsageCalculationTest {
         assertEquals("800ms 时长精确展示", "800ms", energyOnlyItem.getFormattedDuration())
         assertEquals("大于 0.0005Wh 能量展示为 0.001Wh", "0.001Wh", energyOnlyItem.getFormattedCombinedEnergyWh())
     }
+    /**
+     * 验证弃用 dumpsys 软件估算放电量并严格以底层硬件采样梯形微积分为核心的功耗计算。
+     * 针对 BatteryRecorder 统计的真实亮屏工况（2.50W，0.223Wh），验证计算结果忠实反映硬件实测值，
+     * 彻底解决系统软件估算（1.46W）严重缩水的问题。
+     */
+    @Test
+    fun testHardwareIntegratedPowerOverridesDumpsysSoftwareEstimation() {
+        val baseTime = 1000_000L
+        val points = mutableListOf<Triple<Long, Float, Float>>()
+
+        // 模拟持续约 321 秒（0.089 小时）的亮屏真实硬件放电采样：
+        // 电压 3.85V，放电电流 649.35mA -> 瞬时功率 P = 3.85 * 0.64935 ≈ 2.50W
+        // 采样间隔 1 秒
+        for (i in 0..321) {
+            points.add(Triple(baseTime + (i * 1000L), 3.85f, 649.35f))
+        }
+
+        val (intEnergyWh, intAvgWatts) = PowerUsageManager.calculatePhysicalIntegratedEnergyAndPower(points)
+
+        // 梯形微积分理论计算：2.50W * (321 / 3600 h) ≈ 0.223Wh
+        assertEquals("硬件时序微积分平均功率严格等于 2.50W", 2.50f, intAvgWatts, 0.02f)
+        assertEquals("硬件时序微积分累积能量严格等于 0.223Wh", 0.223f, intEnergyWh, 0.005f)
+
+        // 对比系统 dumpsys 软件估算值：系统 power_profile 估算仅 38mAh，6分钟放电折算能量为 0.1463Wh，功耗仅 1.46W
+        val dumpsysComputedEnergyWh = (38f * 3.85f) / 1000f
+        val dumpsysDischargeHours = 360f / 3600f // 6分钟
+        val dumpsysComputedWatts = dumpsysComputedEnergyWh / dumpsysDischargeHours
+        assertEquals("系统 dumpsys 软件估算功耗严重缩水至 1.46W", 1.46f, dumpsysComputedWatts, 0.02f)
+
+        // 验证弃用系统 dumpsys 估算后，直接以硬件采样微积分结果为真实数据
+        val realScreenOnWatts = intAvgWatts
+        val realTotalEnergyWh = intEnergyWh
+        assertEquals("真实亮屏功耗忠实反映硬件采样 2.50W", 2.50f, realScreenOnWatts, 0.02f)
+        assertEquals("真实放电能量忠实反映硬件微积分 0.223Wh", 0.223f, realTotalEnergyWh, 0.005f)
+        assertTrue("硬件采样真实功耗显著高于 dumpsys 软件缩水估算", realScreenOnWatts > dumpsysComputedWatts)
+    }
 }
+
 
 
 

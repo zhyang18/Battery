@@ -427,8 +427,8 @@ class BatteryMonitorService : Service() {
                 val screenOnInterval = getScreenOnIntervalMs(applicationContext)
                 val screenOffInterval = getScreenOffIntervalMs(applicationContext)
 
-                // 若亮屏与息屏均配置为不采样，直接终止轮询协程
-                if (screenOnInterval == INTERVAL_NEVER && screenOffInterval == INTERVAL_NEVER) {
+                // 若亮屏且配置为不采样(-1L)，直接退出轮询协程，彻底杜绝 5 秒无意义空转
+                if (isInteractive && screenOnInterval == INTERVAL_NEVER) {
                     break
                 }
 
@@ -491,10 +491,10 @@ class BatteryMonitorService : Service() {
                 // 息屏期间自动跳过通知刷新，亮屏期间才刷新
                 updateNotification(force = false)
 
-                val targetInterval = if (isInteractive) {
-                    if (screenOnInterval == INTERVAL_NEVER) 5000L else screenOnInterval
-                } else {
-                    if (screenOffInterval <= 0L) 5000L else screenOffInterval
+                // 严格依据当前屏幕状态所配置的真实采样间隔休眠，若为不采样则退出协程
+                val targetInterval = if (isInteractive) screenOnInterval else screenOffInterval
+                if (targetInterval <= 0L) {
+                    break
                 }
                 val costMs = SystemClock.elapsedRealtime() - loopStartRealtime
                 val sleepInterval = (targetInterval - costMs).coerceAtLeast(0L)

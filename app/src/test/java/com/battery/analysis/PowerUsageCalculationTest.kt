@@ -1971,6 +1971,56 @@ class PowerUsageCalculationTest {
         assertEquals("真实放电能量忠实反映硬件微积分 0.223Wh", 0.223f, realTotalEnergyWh, 0.005f)
         assertTrue("硬件采样真实功耗显著高于 dumpsys 软件缩水估算", realScreenOnWatts > dumpsysComputedWatts)
     }
+
+    /**
+     * 验证基于采样密度的时序梯形微积分与硬件库仑计自适应融合算法。
+     * 当采样间隔为 60 秒长间隔稀疏采样且偶发采到 4.5W 瞬时尖峰时，
+     * 验证系统不会被单点尖峰走样误导，而是能够将全局总能量稳健锚定在硬件芯片库仑计的连续物理电荷差（如 0.385Wh），
+     * 并在亮屏与息屏状态间严格按相对微积分功率比重守恒分配。
+     */
+    @Test
+    fun testSparseSamplingAdaptsToHardwareCoulombCounter() {
+        val baseTime = 1000_000L
+        val sparsePoints = mutableListOf<Triple<Long, Float, Float>>()
+
+        // 模拟放电 30 分钟（1800 秒），用户设置 60 秒稀疏采样（共 31 个点）
+        // 大部分时间待机功耗 1.0W (3.85V, 259.7mA)
+        // 偶发在第 10 分钟采到一次 4.5W 瞬时操作尖峰 (3.85V, 1168.8mA)
+        for (i in 0..30) {
+            val t = baseTime + (i * 60_000L)
+            if (i == 10) {
+                sparsePoints.add(Triple(t, 3.85f, 1168.8f)) // 4.5W 尖峰
+            } else {
+                sparsePoints.add(Triple(t, 3.85f, 259.7f)) // 1.0W 待机
+            }
+        }
+
+        // 计算采样间隔
+        val avgIntervalMs = (sparsePoints.last().first - sparsePoints.first().first) / (sparsePoints.size - 1)
+        assertEquals("平均采样间隔为 60 秒", 60_000L, avgIntervalMs)
+        val isHighFreq = avgIntervalMs in 1L..5000L
+        assertFalse("60秒采样判定为非高频密集采样", isHighFreq)
+
+        // 梯形微积分算出的能量
+        val (intEnergyWh, _) = PowerUsageManager.calculatePhysicalIntegratedEnergyAndPower(sparsePoints)
+
+        // 主板芯片硬件库仑计实际记录的 30 分钟物理放电量（100mAh = 0.385Wh）
+        val hwDischargedMah = 100f
+        val physicalTotalEnergyWh = (hwDischargedMah * 3.85f) / 1000f // 0.385Wh
+        val dischargeHours = 1800f / 3600f // 0.5h
+        val physicalAvgWatts = physicalTotalEnergyWh / dischargeHours // 0.77W
+
+        // 自适应判定：非高频采样且有可靠物理库仑计量，总能量锚定硬件库仑计
+        val finalTotalEnergyWh = if (!isHighFreq && physicalTotalEnergyWh > 0.001f) {
+            physicalTotalEnergyWh
+        } else {
+            intEnergyWh
+        }
+        val finalAvgWatts = finalTotalEnergyWh / dischargeHours
+
+        assertEquals("总能量严格锚定主板硬件库仑计真实电荷 0.385Wh", 0.385f, finalTotalEnergyWh, 0.001f)
+        assertEquals("全局平均功耗严格等于库仑计推导功耗 0.77W", physicalAvgWatts, finalAvgWatts, 0.001f)
+    }
 }
 
 

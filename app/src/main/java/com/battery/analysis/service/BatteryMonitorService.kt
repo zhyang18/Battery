@@ -73,6 +73,12 @@ class BatteryMonitorService : Service() {
     private var cachedIsCharging: Boolean = false
     @Volatile
     private var cachedDischargePowerWatts: Float? = null
+    /** 亮屏状态下最新测得的瞬时放电功率缓存（单位：W） */
+    @Volatile
+    private var cachedScreenOnDischargePowerWatts: Float? = null
+    /** 息屏待机状态下最新测得的瞬时放电功率缓存（单位：W） */
+    @Volatile
+    private var cachedScreenOffDischargePowerWatts: Float? = null
     @Volatile
     private var cachedSingleLineInfo: String = "⚡ 电池监控持续运行中"
 
@@ -168,12 +174,16 @@ class BatteryMonitorService : Service() {
                                 fallbackVoltageVolts = cachedVoltageVolts,
                                 fallbackTempCelsius = cachedTemperature
                             )
-                            val pWatts = hwSample?.powerWatts ?: (cachedDischargePowerWatts ?: 0f)
+                            // 息屏待机状态：严格使用息屏专属功率缓存，彻底杜绝亮屏高功耗跨状态污染
+                            val pWatts = hwSample?.powerWatts ?: (cachedScreenOffDischargePowerWatts ?: 0f)
                             val curVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
                             val curTemp = hwSample?.temperatureCelsius ?: cachedTemperature
                             if (hwSample?.voltageVolts != null) cachedVoltageVolts = curVolt
                             if (hwSample?.temperatureCelsius != null) cachedTemperature = curTemp
-                            if (hwSample?.powerWatts != null) cachedDischargePowerWatts = pWatts
+                            if (hwSample?.powerWatts != null) {
+                                cachedScreenOffDischargePowerWatts = pWatts
+                                cachedDischargePowerWatts = pWatts
+                            }
 
                             powerManager.recordDischargeRealtimeSample(
                                 timestamp = System.currentTimeMillis(),
@@ -444,8 +454,12 @@ class BatteryMonitorService : Service() {
                             fallbackVoltageVolts = cachedVoltageVolts,
                             fallbackTempCelsius = cachedTemperature
                         )
-                        // 若本次采样未能获取有效功率，复用上次缓存的实测值（避免再次调用 sampleHardwareDischarge 造成双重采样）
-                        val pWatts = hwSample?.powerWatts ?: (cachedDischargePowerWatts ?: 0f)
+                        // 若本次采样未能获取有效功率，严格复用对应屏幕状态的历史缓存（避免息屏错误复用亮屏高功耗）
+                        val pWatts = hwSample?.powerWatts ?: if (isInteractive) {
+                            cachedScreenOnDischargePowerWatts ?: 0f
+                        } else {
+                            cachedScreenOffDischargePowerWatts ?: 0f
+                        }
                         val currentVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
                         val currentTemp = hwSample?.temperatureCelsius ?: cachedTemperature
                         val currentPkg = if (isInteractive) getForegroundPackageName() else null
@@ -453,7 +467,14 @@ class BatteryMonitorService : Service() {
                         // 同步刷新本地缓存
                         if (hwSample?.voltageVolts != null) cachedVoltageVolts = currentVolt
                         if (hwSample?.temperatureCelsius != null) cachedTemperature = currentTemp
-                        cachedDischargePowerWatts = pWatts
+                        if (hwSample?.powerWatts != null) {
+                            if (isInteractive) {
+                                cachedScreenOnDischargePowerWatts = pWatts
+                            } else {
+                                cachedScreenOffDischargePowerWatts = pWatts
+                            }
+                            cachedDischargePowerWatts = pWatts
+                        }
 
                         powerManager.recordDischargeRealtimeSample(
                             timestamp = System.currentTimeMillis(),

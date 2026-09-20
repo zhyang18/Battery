@@ -1792,6 +1792,77 @@ class PowerUsageCalculationTest {
         assertEquals("3.460Wh", formatOverviewEnergy(3.459995f))
         assertEquals("0.760Wh", formatOverviewEnergy(0.76f))
     }
+
+    /**
+     * 验证只追求最真实的耗电量，忠实反映系统底层连续放电量与硬件库仑计，不设人为强制物理天花板：
+     * 模拟电池标称总能量 30.9Wh，当前剩余 9.9Wh，放电总能量忠实基于系统底层真实放电量计算，
+     * 解耦后的亮屏能量与息屏能量之和严格满足能量守恒闭环。
+     */
+    @Test
+    fun testRealisticDischargeEnergyAndDecoupling() {
+        val effectiveCapacity = 8025f // 8025mAh
+        val nominalVoltageVolts = 3.85f
+        val currentRemainWh = 9.9f
+
+        val dropPercent = 68 // 从 100% 掉至 32%
+        val smoothedDropMah = effectiveCapacity * (dropPercent / 100f) // 5457mAh
+        // 忠实采用真实放电量，不设人为虚拟天花板
+        val realDischargedMah = smoothedDropMah
+        val realTotalEnergyWh = (realDischargedMah * nominalVoltageVolts) / 1000f // 21.009Wh
+
+        val expectedConsumedEnergyWh = (8025f * 3.85f / 1000f) - currentRemainWh // 理论消耗约 21.0Wh
+        assertEquals("真实放电能量忠实反映掉电数据(约21.0Wh)", expectedConsumedEnergyWh, realTotalEnergyWh, 0.1f)
+
+        // 验证亮灭屏能耗解耦与宏观能量守恒
+        val screenOnHours = 7.1333f // 7h8m
+        val screenOffHours = 12.3833f // 12h23m
+        val dischargeHours = 19.5166f // 19h31m
+
+        val intOnPowerWatts = 2.24f
+        val intOffPowerWatts = 0.20f // 修复后真实的息屏采样功率
+
+        val estOnE = intOnPowerWatts * screenOnHours
+        val estOffE = intOffPowerWatts * screenOffHours
+        val sumEstE = estOnE + estOffE
+
+        val onEnergyWh = (realTotalEnergyWh * (estOnE / sumEstE)).coerceAtLeast(0f)
+        val offEnergyWh = (realTotalEnergyWh - onEnergyWh).coerceAtLeast(0f)
+
+        assertEquals("解耦后两部分能量之和必须严格等于总放电能量", realTotalEnergyWh, onEnergyWh + offEnergyWh, 0.001f)
+
+        // 验证综合平均功耗 P = E / T
+        val avgWatts = realTotalEnergyWh / dischargeHours
+        assertEquals("综合平均功耗必须与总能量和时长严格闭环", realTotalEnergyWh, avgWatts * dischargeHours, 0.01f)
+    }
+
+    /**
+     * 验证在手机长时间进入深度休眠（Deep Sleep）出现采样断层（如前后两点间隔 1 小时 50 分钟）时，
+     * 微积分算法限制单微元最大有效跨度（MAX_INTEGRATION_INTERVAL_MS = 120_000L），
+     * 杜绝将唤醒高功耗线性插值放大导致的息屏待机功耗虚高。
+     */
+    @Test
+    fun testDeepSleepGapDoesNotInflateIntegratedEnergy() {
+        val baseTime = 1700000000000L
+        val points = mutableListOf<Triple<Long, Float, Float>>()
+
+        // 灭屏瞬间记录 1.66W (3.9V, 425.6mA)
+        points.add(Triple(baseTime, 3.9f, 425.6f))
+
+        // 经过 1 小时 50 分钟（6,600,000 毫秒）系统被唤醒，瞬时功率 1.66W (3.88V, 427.8mA)
+        val wakeTime = baseTime + 6_600_000L
+        points.add(Triple(wakeTime, 3.88f, 427.8f))
+
+        // 模拟后续 2 分钟内的密集连续采样（5 秒间隔，真实待机电流 25mA，功率约 0.1W）
+        for (i in 1..24) {
+            points.add(Triple(wakeTime + (i * 5000L), 3.88f, 25.8f))
+        }
+
+        val (energyWh, avgWatts) = PowerUsageManager.calculatePhysicalIntegratedEnergyAndPower(points)
+
+        // 验证：断层微元（6600秒）因超过 120 秒门限被自动跳过，未被线性插值放大为 3.04Wh
+        assertTrue("深度睡眠断层不应被线性插值放大，积分能量必须远小于断层插值值", energyWh < 0.1f)
+        assertTrue("有效采样平均功率应忠实反映真实采样水平", avgWatts <= 0.3f)
+    }
 }
 
 

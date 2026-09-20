@@ -85,6 +85,9 @@ class PowerUsageManager private constructor(private val context: Context) {
         private const val PREF_KEY_UNPLUG_BG_SERVICE_SNAPSHOT = "pref_unplug_bg_service_snapshot"
         private const val PREF_KEY_REALTIME_SAMPLES_JSON = "pref_discharge_realtime_samples_json"
 
+        /** 连续时序微积分单微元最大有效跨度门限（单位：毫秒，默认 2 分钟，杜绝息屏 Deep Sleep 断层插值放大） */
+        const val MAX_INTEGRATION_INTERVAL_MS = 120_000L
+
         @Volatile
         private var instance: PowerUsageManager? = null
 
@@ -128,7 +131,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val p2 = points[i + 1]
 
                 val dtMillis = p2.first - p1.first
-                if (dtMillis <= 0L) continue
+                if (dtMillis <= 0L || dtMillis > MAX_INTEGRATION_INTERVAL_MS) continue
 
                 val dtSeconds = dtMillis / 1000.0
                 // 瞬时功率 P = U (V) * I (A)，电流为 mA 时需除以 1000
@@ -1175,7 +1178,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                     0f
                 }
 
-                // 忠实采用底层 dumpsys 或硬件库仑计放电量
+                // 忠实采用系统底层 dumpsys 连续放电量、硬件库仑计或实际掉电量，绝不人为捏造与设置虚拟天花板
                 val validComputedMah = if (stats.computedDrainMah > 0f) stats.computedDrainMah else 0f
                 val validHwMah = if (hwDischargedMah > 0f) hwDischargedMah else 0f
 
@@ -1188,78 +1191,96 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
                 var realTotalEnergyWh = (realDischargedMah * nominalVoltageVolts) / 1000f
 
-                // 物理瞬时采样计算平均功耗：
-                // 优先采用后台服务在当前放电周期内连续实测的物理采样点（dischargeRealtimeSamples）真实均值
+                // 硬件时序切片微积分：用于获取亮灭屏真实工况功率特性
                 val recentSamples = getDischargeRealtimeSamples().filter { it.timestamp in (startTs - 60_000L)..now }
-                val realtimeAvgWatts = if (recentSamples.size >= 2) {
-                    val validPowers = recentSamples.map { it.powerWatts }.filter { it > 0.1f }
-                    if (validPowers.isNotEmpty()) validPowers.average().toFloat() else null
-                } else {
-                    null
+                val (intTotalEnergyWh, _) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = null)
+                val (_, intOnPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = true)
+                val (_, intOffPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = false)
+
+                // 仅在无底层权威记录且电量未出现百分比掉电时（如刚拔电数分钟内），以微积分辅助作为初始真实放电能量
+                if (realTotalEnergyWh <= 0.001f && intTotalEnergyWh > 0f) {
+                    realTotalEnergyWh = intTotalEnergyWh
                 }
 
-                val calculatedAvgWatts = if (dischargeHours > 0f && realTotalEnergyWh > 0f) {
+                // 全局综合平均放电功耗（遵循严格物理定义 P = E / T，确保 P * T == E 严密闭环）
+                val avgWatts = if (dischargeHours > 0f && realTotalEnergyWh > 0f) {
                     realTotalEnergyWh / dischargeHours
                 } else {
                     0f
                 }
 
-                // 硬件时序切片微积分：直接对底层物理放电采样点按亮灭屏做数值微积分
-                val (_, intOnPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = true)
-                val (_, intOffPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = false)
-                val (intTotalEnergyWh, intTotalPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = null)
-
-                val avgWatts = when {
-                    intTotalPowerWatts > 0.05f && recentSamples.size >= 2 -> {
-                        realTotalEnergyWh = if (intTotalEnergyWh > 0f) intTotalEnergyWh else realTotalEnergyWh
-                        intTotalPowerWatts
-                    }
-                    realtimeAvgWatts != null -> {
-                        // 采用实测物理采样均值
-                        realTotalEnergyWh = (realtimeAvgWatts * dischargeHours).coerceAtLeast(0.001f)
-                        realtimeAvgWatts
-                    }
-                    else -> calculatedAvgWatts
-                }
-
-                // 2. 统计真实息屏记录功耗与亮屏功耗解耦（严格遵循物理计算与能量守恒，不设人为上限截断与保底捏造）
+                // 亮屏与息屏功耗、能量的物理严格守恒解耦（E_on + E_off == E_total）
+                val offEnergyWh: Float
+                val onEnergyWh: Float
                 val screenOffWatts: Float
-                if (intOffPowerWatts > 0.05f && screenOffHours > 0f) {
-                    screenOffWatts = intOffPowerWatts
-                } else if (screenOffHours <= 0f || screenOffMs < 30000L) {
-                    // 若无有效息屏时长或息屏不足 30 秒，按纯亮屏处理，息屏功耗置 0f（UI 规范展示为 "--"）
-                    screenOffWatts = 0f
-                } else if (screenOnHours <= 0f) {
-                    // 全周期均为纯息屏待机状态，整机平均功耗即为息屏功耗，忠实遵循物理实测值
-                    screenOffWatts = avgWatts.coerceAtLeast(0f)
-                } else {
-                    // 既有亮屏又有息屏：优先使用系统底层独立的息屏放电量
-                    if (stats.screenOffDrainMah > 0f) {
-                        val rawOffWatts = (stats.screenOffDrainMah * nominalVoltageVolts) / (1000f * screenOffHours)
-                        screenOffWatts = rawOffWatts.coerceAtLeast(0f)
-                    } else {
-                        // 底层无独立息屏统计通道时，结合纯后台应用实耗能耗客观推导
-                        val bgEnergyWh = stats.appList.filter { it.foregroundTimeMs <= 0L }.sumOf { it.energyWh.toDouble() }.toFloat()
-                        val bgPowerWatts = if (screenOffHours > 0f) (bgEnergyWh / screenOffHours) else 0f
-                        screenOffWatts = bgPowerWatts.coerceAtLeast(0f)
-                    }
-                }
+                val screenOnWatts: Float
 
-                // 3. 依据物理硬件微积分或能量守恒解耦亮屏功耗：P_on = E_on / T_on
-                val screenOnWatts = if (screenOnHours > 0f) {
-                    if (intOnPowerWatts > 0.05f) {
-                        // 优先采纳亮屏硬件时序采样的真实微积分功耗
-                        intOnPowerWatts
-                    } else if (screenOffHours <= 0f || screenOffMs < 30000L || screenOffWatts <= 0f) {
-                        // 若全周期均为亮屏状态，亮屏平均放电功耗即等同于整机放电平均功耗
-                        avgWatts
-                    } else {
-                        val offEnergy = screenOffWatts * screenOffHours
-                        val onEnergy = (realTotalEnergyWh - offEnergy).coerceAtLeast(0f)
-                        onEnergy / screenOnHours
-                    }
+                if (screenOffHours <= 0f || screenOffMs < 30000L) {
+                    // 纯亮屏场景（息屏不足 30 秒）
+                    offEnergyWh = 0f
+                    screenOffWatts = 0f
+                    onEnergyWh = realTotalEnergyWh
+                    screenOnWatts = if (screenOnHours > 0f) onEnergyWh / screenOnHours else avgWatts
+                } else if (screenOnHours <= 0f) {
+                    // 纯息屏场景（全周期未点亮屏幕）
+                    onEnergyWh = 0f
+                    screenOnWatts = 0f
+                    offEnergyWh = realTotalEnergyWh
+                    screenOffWatts = if (screenOffHours > 0f) offEnergyWh / screenOffHours else avgWatts
                 } else {
-                    0f
+                    // 既有亮屏又有息屏场景
+                    // 1. 优先使用系统底层 dumpsys batterystats 权威息屏放电量
+                    if (stats.screenOffDrainMah > 0f) {
+                        val rawOffEnergyWh = (stats.screenOffDrainMah * nominalVoltageVolts) / 1000f
+                        offEnergyWh = minOf(rawOffEnergyWh, realTotalEnergyWh)
+                        onEnergyWh = (realTotalEnergyWh - offEnergyWh).coerceAtLeast(0f)
+                        screenOffWatts = if (screenOffHours > 0f) offEnergyWh / screenOffHours else 0f
+                        screenOnWatts = if (screenOnHours > 0f) onEnergyWh / screenOnHours else 0f
+                    }
+                    // 2. 亮屏与息屏均有时序微积分有效功耗，按两态理论能耗比例在真实总能耗中守恒分配
+                    else if (intOnPowerWatts > 0.05f && intOffPowerWatts > 0.05f) {
+                        val estOnE = intOnPowerWatts * screenOnHours
+                        val estOffE = intOffPowerWatts * screenOffHours
+                        val sumEstE = estOnE + estOffE
+                        if (sumEstE > 0f && realTotalEnergyWh > 0f) {
+                            onEnergyWh = (realTotalEnergyWh * (estOnE / sumEstE)).coerceAtLeast(0f)
+                            offEnergyWh = (realTotalEnergyWh - onEnergyWh).coerceAtLeast(0f)
+                        } else {
+                            val ratio = (screenOnHours / dischargeHours).coerceIn(0f, 1f)
+                            onEnergyWh = realTotalEnergyWh * ratio
+                            offEnergyWh = (realTotalEnergyWh - onEnergyWh).coerceAtLeast(0f)
+                        }
+                        screenOnWatts = if (screenOnHours > 0f) onEnergyWh / screenOnHours else intOnPowerWatts
+                        screenOffWatts = if (screenOffHours > 0f) offEnergyWh / screenOffHours else intOffPowerWatts
+                    }
+                    // 3. 仅捕获到亮屏有效时序微积分功耗
+                    else if (intOnPowerWatts > 0.05f) {
+                        val rawOnEnergy = intOnPowerWatts * screenOnHours
+                        if (rawOnEnergy < realTotalEnergyWh) {
+                            onEnergyWh = rawOnEnergy
+                            offEnergyWh = realTotalEnergyWh - onEnergyWh
+                        } else {
+                            val ratio = (screenOnHours / dischargeHours).coerceIn(0f, 1f)
+                            onEnergyWh = realTotalEnergyWh * ratio
+                            offEnergyWh = (realTotalEnergyWh - onEnergyWh).coerceAtLeast(0f)
+                        }
+                        screenOnWatts = if (screenOnHours > 0f) onEnergyWh / screenOnHours else intOnPowerWatts
+                        screenOffWatts = if (screenOffHours > 0f) offEnergyWh / screenOffHours else 0f
+                    }
+                    // 4. 底层无独立息屏统计且无有效采样时，结合纯后台应用实耗或时间占比客观守恒推导
+                    else {
+                        val bgEnergyWh = stats.appList.filter { it.foregroundTimeMs <= 0L }.sumOf { it.energyWh.toDouble() }.toFloat()
+                        if (bgEnergyWh in 0.001f..realTotalEnergyWh) {
+                            offEnergyWh = bgEnergyWh
+                            onEnergyWh = realTotalEnergyWh - offEnergyWh
+                        } else {
+                            val ratio = (screenOnHours / dischargeHours).coerceIn(0f, 1f)
+                            onEnergyWh = realTotalEnergyWh * ratio
+                            offEnergyWh = (realTotalEnergyWh - onEnergyWh).coerceAtLeast(0f)
+                        }
+                        screenOnWatts = if (screenOnHours > 0f) onEnergyWh / screenOnHours else avgWatts
+                        screenOffWatts = if (screenOffHours > 0f) offEnergyWh / screenOffHours else 0f
+                    }
                 }
 
                 // 4. 计算理论剩余续航：当前能量 Wh / 对应工况功耗 W（低于 0.05W 显示 "--" 杜绝荒谬的超长续航）
@@ -1302,9 +1323,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                 )
 
                 // 4. 后台所有应用能耗、后台真实活跃时长、平均功耗与剩余续航统计
-                val offEnergyWh = if (screenOffHours > 0f && screenOffWatts > 0f) (screenOffWatts * screenOffHours) else 0f
-                val onEnergyWh = if (screenOnHours > 0f) (realTotalEnergyWh - offEnergyWh).coerceAtLeast(0f) else 0f
-
                 val rawAllBgEnergyWh = validatedAppList.sumOf { it.backgroundEnergyWh.toDouble() }.toFloat()
                 // 物理能量守恒天花板：后台所有应用消耗的能量之和，绝不能超过整机息屏待机总放电量
                 val maxAllowedBgEnergyWh = if (offEnergyWh > 0f) offEnergyWh else realTotalEnergyWh
@@ -1490,7 +1508,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         if (recentSamples.isEmpty()) return null
 
         val currentBattery = getCurrentBatteryStatus()
-        val (intTotalEnergyWh, intTotalPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = null)
+        val (_, intTotalPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = null)
         val (_, intOnPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = true)
         val (_, intOffPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = false)
 
@@ -2777,7 +2795,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             0f
         }
 
-        // 忠实采用硬件电荷计数器或真实掉电量
+        // 忠实采用硬件电荷计数器或真实掉电量，绝不人为捏造与设置虚拟天花板
         val validHwMah = if (hwDischargedMah > 0f) {
             hwDischargedMah
         } else {
@@ -2792,37 +2810,22 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
         var realTotalEnergyWh = (realDischargedMah * nominalVoltageVolts) / 1000f
 
-        // 物理瞬时采样与短时平滑修正：
-        // 优先采用后台服务在当前放电周期内连续实测的物理采样点真实均值
+        // 硬件时序切片微积分：直接对底层物理放电采样点按亮灭屏做数值微积分
         val recentSamples = getDischargeRealtimeSamples().filter { it.timestamp in startTs..now }
-        val realtimeAvgWatts = if (recentSamples.size >= 2) {
-            val validPowers = recentSamples.map { it.powerWatts }.filter { it > 0.1f }
-            if (validPowers.isNotEmpty()) validPowers.average().toFloat() else null
-        } else {
-            null
+        val (intTotalEnergyWh, _) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = null)
+        val (_, intOnPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = true)
+        val (_, intOffPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = false)
+
+        // 仅在无底层权威记录且电量未出现百分比掉电时（如刚拔电数分钟内），以微积分辅助作为初始真实放电能量
+        if (realTotalEnergyWh <= 0.001f && intTotalEnergyWh > 0f) {
+            realTotalEnergyWh = intTotalEnergyWh
         }
 
-        // 硬件时序切片微积分：直接对底层物理放电采样点按亮灭屏做数值微积分
-        val (intTotalEnergyWh, intTotalPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = null)
-        val (intOnEnergyWh, intOnPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = true)
-        val (intOffEnergyWh, intOffPowerWatts) = calculatePhysicalIntegratedEnergyAndPower(recentSamples, filterScreenOn = false)
-
-        val calculatedAvgPower = if (dischargeHours > 0f && realTotalEnergyWh > 0f) {
+        // 全局平均放电功耗（遵循严格物理定义 P = E / T，确保 P * T == E 严密闭环）
+        val avgPower = if (dischargeHours > 0f && realTotalEnergyWh > 0f) {
             realTotalEnergyWh / dischargeHours
         } else {
             0f
-        }
-
-        val avgPower = when {
-            intTotalPowerWatts > 0.05f && recentSamples.size >= 2 -> {
-                realTotalEnergyWh = if (intTotalEnergyWh > 0f) intTotalEnergyWh else realTotalEnergyWh
-                intTotalPowerWatts
-            }
-            realtimeAvgWatts != null -> {
-                realTotalEnergyWh = (realtimeAvgWatts * dischargeHours).coerceAtLeast(0.001f)
-                realtimeAvgWatts
-            }
-            else -> calculatedAvgPower
         }
 
         // 亮屏与息屏功耗物理守恒解耦（严格忠实硬件实测与能量守恒，E_on + E_off == E_total）
@@ -3347,14 +3350,13 @@ class PowerUsageManager private constructor(private val context: Context) {
             val p0 = samples[i - 1]
             val p1 = samples[i]
             val dtMs = (p1.timestamp - p0.timestamp).coerceAtLeast(0L)
-            if (dtMs in 1L..(3600_000L * 2)) {
-                // 严格对标 BatteryRecorder RecordDetailPowerStatsComputer 第104行逻辑：
-                // 区间的亮/灭屏归属仅由前一个采样点（p0）的屏幕状态决定，
-                // 不要求两端都满足（避免跨屏幕切换区间的误分类）
+            // 连续性硬约束：仅对连续采样周期（<= 2分钟）内的有效切片进行梯形数值微积分，
+            // 严禁将系统休眠断层（数十分钟至两小时未知黑盒）直接按唤醒瞬间功率线性插值，杜绝息屏功耗虚高
+            if (dtMs in 1L..MAX_INTEGRATION_INTERVAL_MS) {
                 val match = when (filterScreenOn) {
                     null  -> true
-                    true  -> p0.isScreenOn
-                    false -> !p0.isScreenOn
+                    true  -> p0.isScreenOn && p1.isScreenOn
+                    false -> !p0.isScreenOn && !p1.isScreenOn
                 }
                 if (match) {
                     val avgWatts = ((p0.powerWatts + p1.powerWatts) / 2.0).coerceAtLeast(0.0)

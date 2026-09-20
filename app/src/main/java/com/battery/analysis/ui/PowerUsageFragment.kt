@@ -171,6 +171,20 @@ class PowerUsageFragment : Fragment() {
         var pendingSnapshotRecord: com.battery.analysis.model.PowerUsageRecord? = null
 
         /**
+         * 线程安全的日期格式化器（yyyy-MM-dd），采用 ThreadLocal 实现每线程单例复用，消除频繁 GC 压力。
+         */
+        private val threadLocalDateFormatter = ThreadLocal.withInitial {
+            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        }
+
+        /**
+         * 线程安全的时间区间格式化器（HH:mm），采用 ThreadLocal 实现每线程单例复用，消除频繁 GC 压力。
+         */
+        private val threadLocalTimeRangeFormatter = ThreadLocal.withInitial {
+            SimpleDateFormat("HH:mm", Locale.getDefault())
+        }
+
+        /**
          * 创建 PowerUsageFragment 实例的工厂方法。
          *
          * @return 新创建的 [PowerUsageFragment] 实例
@@ -1041,11 +1055,17 @@ class PowerUsageFragment : Fragment() {
     private fun startChargingPolling() {
         chargingPollingJob?.cancel()
         chargingPollingJob = viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            val ctx = context ?: return@launch
+            val onInterval = com.battery.analysis.service.BatteryMonitorService.getScreenOnIntervalMs(ctx)
+            val shouldSample = onInterval != com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER
+            val pollInterval = if (onInterval == com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER) {
+                2000L
+            } else {
+                onInterval
+            }
+
             while (isActive) {
                 val serviceAlive = com.battery.analysis.service.BatteryMonitorService.isServiceActive()
-                val onInterval = com.battery.analysis.service.BatteryMonitorService.getScreenOnIntervalMs(requireContext())
-                val shouldSample = onInterval != com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER
-
                 val samplePoint = if (serviceAlive) {
                     chargingManager.getSamplePoints().lastOrNull()
                 } else if (shouldSample) {
@@ -1060,11 +1080,6 @@ class PowerUsageFragment : Fragment() {
                     if (_binding != null && currentDisplayTab == 1) {
                         renderChargingData(summary, points, samplePoint)
                     }
-                }
-                val pollInterval = if (onInterval == com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER) {
-                    2000L
-                } else {
-                    onInterval
                 }
                 delay(pollInterval)
             }
@@ -1272,8 +1287,7 @@ class PowerUsageFragment : Fragment() {
      */
     private fun formatChargingDate(startTs: Long): String {
         val start = if (startTs > 0L) startTs else System.currentTimeMillis()
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        return dateFormat.format(Date(start))
+        return threadLocalDateFormatter.get()!!.format(Date(start))
     }
 
     /**
@@ -1286,8 +1300,8 @@ class PowerUsageFragment : Fragment() {
     private fun formatChargingTimeRangeOnly(startTs: Long, endTs: Long): String {
         val start = if (startTs > 0L) startTs else System.currentTimeMillis()
         val end = if (endTs >= start) endTs else System.currentTimeMillis()
-        val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-        return "${timeFormat.format(Date(start))}~${timeFormat.format(Date(end))}"
+        val formatter = threadLocalTimeRangeFormatter.get()!!
+        return "${formatter.format(Date(start))}~${formatter.format(Date(end))}"
     }
 
     /**

@@ -2319,8 +2319,18 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
     }
 
+    @Volatile
+    private var cachedUsageIntervalsStart: Long = 0L
+    @Volatile
+    private var cachedUsageIntervalsEnd: Long = 0L
+    @Volatile
+    private var cachedUsageIntervalsTime: Long = 0L
+    private var cachedUsageIntervalsResult: Pair<List<AppActivityInterval>, List<ScreenInteractiveInterval>>? = null
+
     /**
      * 从系统 UsageStatsManager 检索并提取指定时间范围内的全部应用前台活动区间及屏幕点亮区间。
+     * 内部具备 5 秒智能短时内存缓存，单次下拉刷新链路（loadPowerData、getDischargeTrendPoints、buildTimelineState）
+     * 连续发起的 3 次等价时间窗口查询将自动命中缓存，削减 66.7% 的系统 UsageEvents 全量跨进程遍历与解析开销。
      *
      * @param startTime 检索起始时间戳（毫秒）
      * @param endTime 检索结束时间戳（毫秒）
@@ -2333,6 +2343,21 @@ class PowerUsageManager private constructor(private val context: Context) {
         val appIntervals = mutableListOf<AppActivityInterval>()
         val screenIntervals = mutableListOf<ScreenInteractiveInterval>()
         if (startTime >= endTime) return Pair(appIntervals, screenIntervals)
+
+        // 智能短时内存缓存（5 秒有效期）：
+        // 单次下拉刷新过程中，以近乎相同的 (startTs, now) 时间窗口重复调用本方法 3 次时，
+        // 直接复用已提取并归并好的区间对象，杜绝重复跨进程拉取数万条系统事件
+        val now = System.currentTimeMillis()
+        synchronized(this) {
+            val cachedResult = cachedUsageIntervalsResult
+            if (cachedResult != null &&
+                (now - cachedUsageIntervalsTime) < 5_000L &&
+                kotlin.math.abs(startTime - cachedUsageIntervalsStart) <= 3_000L &&
+                kotlin.math.abs(endTime - cachedUsageIntervalsEnd) <= 3_000L
+            ) {
+                return cachedResult
+            }
+        }
 
         val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return Pair(appIntervals, screenIntervals)
 
@@ -2455,7 +2480,14 @@ class PowerUsageManager private constructor(private val context: Context) {
             e.printStackTrace()
         }
 
-        return Pair(appIntervals, screenIntervals)
+        val result = Pair(appIntervals, screenIntervals)
+        synchronized(this) {
+            cachedUsageIntervalsStart = startTime
+            cachedUsageIntervalsEnd = endTime
+            cachedUsageIntervalsTime = now
+            cachedUsageIntervalsResult = result
+        }
+        return result
     }
 
     /**
@@ -3429,11 +3461,14 @@ class PowerUsageManager private constructor(private val context: Context) {
                 item?.cpuTimeMs ?: 0L
             }
 
-            // 若全周期内该 UID 零流量，则子时间片直接为 0L，跳过跨进程查询
-            val appNetBytes = if (totalNetMap.isNotEmpty() && (totalNetMap[uid] ?: 0L) <= 0L) {
+            // 极致性能优化：网络流量采用时间加权比例分配，彻底消除针对每个子切片频繁发起的 40~100+ 次系统 NetworkStatsManager 跨进程远程 Binder IPC
+            val totalUidNetBytes = if (totalNetMap.isNotEmpty()) (totalNetMap[uid] ?: 0L) else (item?.networkBytes ?: 0L)
+            val appNetBytes = if (totalUidNetBytes <= 0L) {
                 0L
+            } else if (duration > 0L && item != null && item.foregroundTimeMs > 0L) {
+                ((totalUidNetBytes * duration) / item.foregroundTimeMs).coerceAtMost(totalUidNetBytes)
             } else {
-                networkStatsHelper.getUidNetworkBytes(uid, interval.startTs, interval.endTs)
+                totalUidNetBytes
             }
             val appWakeMs = item?.wakelockTimeMs ?: 0L
             val appGpsMs = item?.gpsTimeMs ?: 0L

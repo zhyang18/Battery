@@ -86,6 +86,20 @@ object TimelineScaleCalculator {
     }
 
     /**
+     * 跨天时间刻度格式化器（如 "09/20 14:30"），采用 ThreadLocal 实现线程独占单例复用。
+     */
+    private val threadLocalDayHourFormatter = ThreadLocal.withInitial {
+        SimpleDateFormat("MM/dd HH:mm", Locale.getDefault())
+    }
+
+    /**
+     * 当日时间刻度格式化器（如 "14:30"），采用 ThreadLocal 实现线程独占单例复用。
+     */
+    private val threadLocalHourMinuteFormatter = ThreadLocal.withInitial {
+        SimpleDateFormat("HH:mm", Locale.getDefault())
+    }
+
+    /**
      * 动态计算当前可视时间范围内的展示时间刻度序列：
      * 起点固定显示放电开始时间（visibleStartTs），终点固定显示当前时间点（visibleEndTs），
      * 中间根据时间跨度自适应分布 0 ~ 3 个不重叠的时间刻度。
@@ -101,11 +115,11 @@ object TimelineScaleCalculator {
     ): List<TimeTick> {
         val duration = (visibleEndTs - visibleStartTs).coerceAtLeast(1000L)
 
-        // 时间格式统一采用 "HH:mm"（跨天则采用 "MM/dd HH:mm"），不显示秒
+        // 时间格式统一采用 "HH:mm"（跨天则采用 "MM/dd HH:mm"），复用 ThreadLocal 单例杜绝高频手势滑动时的 GC 抖动
         val formatter = if (duration > 24 * 3_600_000L) {
-            SimpleDateFormat("MM/dd HH:mm", Locale.getDefault())
+            threadLocalDayHourFormatter.get()!!
         } else {
-            SimpleDateFormat("HH:mm", Locale.getDefault())
+            threadLocalHourMinuteFormatter.get()!!
         }
 
         val startLabel = formatter.format(Date(visibleStartTs))

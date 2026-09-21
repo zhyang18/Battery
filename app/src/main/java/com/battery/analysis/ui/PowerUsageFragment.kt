@@ -1151,21 +1151,15 @@ class PowerUsageFragment : Fragment() {
         } else {
             "--"
         }
-        val bgPowerStr = if (overview.backgroundPowerWatts >= 0.05f) {
-            String.format(Locale.getDefault(), "%.2fW", overview.backgroundPowerWatts)
-        } else {
-            "--"
-        }
 
         binding.tvMetricScreenOnPower.text = onPowerStr
         binding.tvMetricGlobalPower.text = avgPowerStr
         binding.tvMetricScreenOffPower.text = offPowerStr
 
         // 同步刷新折叠吸顶 mini 指标卡片数据
-        binding.tvMiniPowerScreenOn.text = onPowerStr
-        binding.tvMiniPowerAvg.text = avgPowerStr
-        binding.tvMiniPowerScreenOff.text = offPowerStr
-        binding.tvMiniPowerBackground.text = bgPowerStr
+        binding.tvMiniScreenOnPower.text = onPowerStr
+        binding.tvMiniGlobalPower.text = avgPowerStr
+        binding.tvMiniScreenOffPower.text = offPowerStr
 
         // 2. 刷新应用列表（DiffUtil 会自动平滑更新 AVG 和 Duration 变动的条目）
         adapter.submitList(fullPackage.appList)
@@ -1538,14 +1532,24 @@ class PowerUsageFragment : Fragment() {
         binding.tvMetricGlobalPower.text = avgPowerStr
         binding.tvMetricGlobalRemaining.text = overview.remainingCompositeText
 
-        // 同步刷新折叠吸顶 mini 指标卡片数据（第一行时间，第二行纯功耗，不包含能量）
-        binding.tvMiniTimeScreenOn.text = overview.screenOnDurationText
-        binding.tvMiniTimeTotal.text = overview.totalDurationText
-        binding.tvMiniTimeScreenOff.text = overview.screenOffDurationText
+        // 同步刷新折叠吸顶 mini 指标卡片数据（与展开大卡片完全一致的三行指标：亮屏、息屏、全局）
+        // 第一行：亮屏数据
+        binding.tvMiniScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onRatioStr)
+        binding.tvMiniScreenOnEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", onEnergy), onRatioStr)
+        binding.tvMiniScreenOnPower.text = onPowerStr
+        binding.tvMiniScreenOnRemaining.text = overview.remainingScreenOnText
 
-        binding.tvMiniPowerScreenOn.text = onPowerStr
-        binding.tvMiniPowerAvg.text = avgPowerStr
-        binding.tvMiniPowerScreenOff.text = offPowerStr
+        // 第二行：息屏数据
+        binding.tvMiniScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offRatioStr)
+        binding.tvMiniScreenOffEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", offEnergy), offRatioStr)
+        binding.tvMiniScreenOffPower.text = offPowerStr
+        binding.tvMiniScreenOffRemaining.text = overview.remainingScreenOffText
+
+        // 第三行：全局数据
+        binding.tvMiniGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
+        binding.tvMiniGlobalEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", totalEnergy), "100%")
+        binding.tvMiniGlobalPower.text = avgPowerStr
+        binding.tvMiniGlobalRemaining.text = overview.remainingCompositeText
 
         // 3. 刷新应用场景列表
         adapter.submitList(fullPackage.appList)
@@ -1649,10 +1653,6 @@ class PowerUsageFragment : Fragment() {
      * @param show 是否在应用列表中展示后台运行应用及各应用后台工时与能耗
      */
     private fun updateBackgroundStatsVisibility(show: Boolean) {
-        with(binding) {
-            tvMiniTimeBackground.visibility = View.GONE
-            tvMiniPowerBackground.visibility = View.GONE
-        }
         adapter.setShowBackgroundStats(show)
         updateScrollLimitForShortList()
     }

@@ -117,7 +117,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     // 画笔体系（趋势折线改小一号为 dp1）
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = dp1
+        strokeWidth = dp1_5
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }

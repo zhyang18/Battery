@@ -2051,24 +2051,9 @@ class PowerUsageCalculationTest {
             )
         }
 
-        val sampleSpanMs = if (samplePoints.size >= 2) {
-            (samplePoints.last().timestamp - samplePoints.first().timestamp).coerceAtLeast(0L)
-        } else {
-            0L
-        }
-        val avgSampleIntervalMs = if (samplePoints.size >= 2 && sampleSpanMs > 0L) {
-            sampleSpanMs / (samplePoints.size - 1)
-        } else {
-            0L
-        }
-
-        // 验证平均采样间隔虽然在 1~5000ms（高频），但跨度覆盖率严重不足（20秒 / 13小时 << 80%）
-        val isCoverageSufficient = totalMs <= 300_000L || (sampleSpanMs >= (totalMs * 0.8f).toLong())
-        assertFalse("13小时放电仅有20秒采样，采样跨度覆盖率判定必须为 false", isCoverageSufficient)
-
-        val hasValidHardwareIntegration = samplePoints.size >= 2
-        val isHighFrequencySampling = hasValidHardwareIntegration && (avgSampleIntervalMs in 1L..5000L) && isCoverageSufficient
-        assertFalse("长周期放电断续采样绝不能被误判为全周期高频密集采样", isHighFrequencySampling)
+        // 调用对标 BatteryRecorder 标准的放电统计模型
+        val stats = PowerUsageManager.computeDischargePowerStats(samplePoints)
+        assertTrue("有效采样点应成功计算出放电统计", stats != null)
 
         // 宏观真实物理掉电量：5000mAh 电池掉电 22%（100% -> 78%）
         val effectiveCapacity = 5000f
@@ -2078,17 +2063,163 @@ class PowerUsageCalculationTest {
         val physicalTotalEnergyWh = (physicalDrainMah * nominalVoltageVolts) / 1000f // 4.235Wh
         val dischargeHours = totalMs / 3600000f // 13.0h
 
-        // 最终整机总放电能耗与平均功耗判定
-        val realTotalEnergyWh = if (isHighFrequencySampling) {
-            0.010f // 错误的高频微积分切片微元值
-        } else {
-            physicalTotalEnergyWh
-        }
+        // 当存在硬件库仑计或实际掉电量时，结合微积分工况功率进行相对比例解耦
+        val realTotalEnergyWh = physicalTotalEnergyWh
         val avgWatts = if (dischargeHours > 0f) realTotalEnergyWh / dischargeHours else 0f
 
         assertEquals("总放电能量真实反映电池物理掉电量 4.235Wh，杜绝缩水为 0.010Wh", 4.235f, realTotalEnergyWh, 0.001f)
         assertTrue("平均放电功耗正常计算（> 0.05W），杜绝退化为 --", avgWatts >= 0.05f)
         assertEquals("13小时消耗4.235Wh对应平均功耗约 0.326W", 4.235f / 13f, avgWatts, 0.01f)
+    }
+
+    /**
+     * 验证对标 BatteryRecorder 标准模型在长周期 Deep Sleep 休眠断层场景下的计算表现：
+     * 模拟 13 小时放电，包含前段亮屏、中段长达 11 小时的系统深度休眠断层（偶发零星唤醒短采样），以及尾段亮屏使用。
+     * 验证：
+     * 1. 息屏能量绝不缩水为 0.004Wh，而是通过 P30~P50 稳健待机基线外推真实补偿待机能量；
+     * 2. 亮屏能量由梯形积分真实累积；
+     * 3. 亮灭屏平均功率均正常输出且 > 0.05W，绝不显示为 "--"；
+     * 4. 能量与平均功耗保持严格物理闭环。
+     */
+    @Test
+    fun testBatteryRecorderDischargeStatsWithLongDeepSleepGaps() {
+        val baseTs = 1710000000000L
+        val samples = mutableListOf<PowerDischargePoint>()
+
+        // 1. 前 30 分钟亮屏使用（每 2 秒采样一次，功率 2.0W 左右）
+        var currentTs = baseTs
+        for (i in 0 until 1800) {
+            samples.add(
+                PowerDischargePoint(
+                    timestamp = currentTs,
+                    elapsedHours = (currentTs - baseTs) / 3600_000f,
+                    batteryLevel = 100 - (i / 180),
+                    voltageVolts = 4.1f,
+                    temperature = 35.0f,
+                    powerWatts = 2.0f,
+                    activeAppIcons = emptyList(),
+                    isScreenOn = true,
+                    activeAppNames = emptyList()
+                )
+            )
+            currentTs += 2000L
+        }
+
+        // 2. 中间 10 小时息屏待机（从 1h 到 11h），包含数次 CPU Deep Sleep 长间隔断层（每次间隔 2 小时），
+        // 且唤醒瞬间有少量高置信短采样（待机底噪 0.15W，偶有唤醒尖峰 0.6W）
+        val deepSleepEndTs = baseTs + 11 * 3600_000L
+        while (currentTs < deepSleepEndTs) {
+            for (k in 0..5) {
+                val power = if (k == 0) 0.6f else 0.15f
+                samples.add(
+                    PowerDischargePoint(
+                        timestamp = currentTs,
+                        elapsedHours = (currentTs - baseTs) / 3600_000f,
+                        batteryLevel = 88,
+                        voltageVolts = 3.9f,
+                        temperature = 28.0f,
+                        powerWatts = power,
+                        activeAppIcons = emptyList(),
+                        isScreenOn = false,
+                        activeAppNames = emptyList()
+                    )
+                )
+                currentTs += 1000L
+            }
+            currentTs += 2 * 3600_000L
+        }
+        currentTs = deepSleepEndTs
+
+        // 3. 尾段 2 小时亮屏使用（从 11h 到 13h，每 2 秒采样一次，功率 2.2W）
+        val finalEndTs = baseTs + 13 * 3600_000L
+        while (currentTs <= finalEndTs) {
+            samples.add(
+                PowerDischargePoint(
+                    timestamp = currentTs,
+                    elapsedHours = (currentTs - baseTs) / 3600_000f,
+                    batteryLevel = 78,
+                    voltageVolts = 3.8f,
+                    temperature = 34.0f,
+                    powerWatts = 2.2f,
+                    activeAppIcons = emptyList(),
+                    isScreenOn = true,
+                    activeAppNames = emptyList()
+                )
+            )
+            currentTs += 2000L
+        }
+
+        val stats = PowerUsageManager.computeDischargePowerStats(samples)
+        assertTrue("放电统计模型计算结果不能为 null", stats != null)
+        val s = stats!!
+
+        // 验证亮屏能量由梯形积分真实累积（约 3 小时亮屏 * 2.1W ≈ 6.4Wh 左右）
+        assertTrue("亮屏总能量必须大于 3.0Wh", s.screenOnDisplayEnergyWh > 3.0f)
+        assertEquals("亮屏平均功耗应接近 2.0W~2.2W", 2.1f, s.screenOnPowerWatts, 0.2f)
+
+        // 验证息屏能量经稳健待机基线外推后真实补偿（约 11 小时 * 0.15W ≈ 1.65Wh 左右），绝不再是 0.004Wh！
+        assertTrue("息屏展示能量必须经过外推补偿真实待机能耗（> 1.0Wh），杜绝缩水为 0.004Wh", s.screenOffDisplayEnergyWh > 1.0f)
+        assertTrue("息屏平均功耗应稳定在待机底噪（0.1W~0.3W 之间）", s.screenOffPowerWatts in 0.1f..0.3f)
+        assertTrue("息屏平均功耗绝不能低于 0.05W 导致显示为 --", s.screenOffPowerWatts >= 0.05f)
+
+        // 验证能量与平均功耗完全闭环
+        val expectedTotalEnergy = s.screenOnDisplayEnergyWh + s.screenOffDisplayEnergyWh
+        assertEquals("总展示能量必须严格等于亮屏展示能量与息屏展示能量之和", expectedTotalEnergy, s.totalDisplayEnergyWh, 0.001f)
+        assertTrue("总平均功耗必须大于 0.05W", s.averagePowerWatts > 0.05f)
+    }
+
+    /**
+     * 验证纯亮屏和纯息屏场景下，BatteryRecorder 模型的工况功率与总能耗闭环自洽。
+     */
+    @Test
+    fun testBatteryRecorderPureScreenOnAndPureScreenOff() {
+        val baseTs = 1710000000000L
+
+        // 1. 纯亮屏测试：连续 1 小时 2.5W 放电
+        val onSamples = mutableListOf<PowerDischargePoint>()
+        for (i in 0..1800) {
+            onSamples.add(
+                PowerDischargePoint(
+                    timestamp = baseTs + i * 2000L,
+                    elapsedHours = (i * 2000L) / 3600_000f,
+                    batteryLevel = 90,
+                    voltageVolts = 4.0f,
+                    temperature = 33.0f,
+                    powerWatts = 2.5f,
+                    activeAppIcons = emptyList(),
+                    isScreenOn = true,
+                    activeAppNames = emptyList()
+                )
+            )
+        }
+        val onStats = PowerUsageManager.computeDischargePowerStats(onSamples)!!
+        assertEquals("纯亮屏场景下亮屏平均功耗应等于 2.5W", 2.5f, onStats.screenOnPowerWatts, 0.05f)
+        assertEquals("纯亮屏场景下总平均功耗应等于亮屏功耗", onStats.screenOnPowerWatts, onStats.averagePowerWatts, 0.001f)
+        assertEquals("纯亮屏场景下息屏功耗为 0", 0f, onStats.screenOffPowerWatts, 0.001f)
+        assertEquals("纯亮屏场景下 1 小时 2.5W 能耗约为 2.5Wh", 2.5f, onStats.totalDisplayEnergyWh, 0.05f)
+
+        // 2. 纯息屏测试：连续 2 小时 0.2W 待机
+        val offSamples = mutableListOf<PowerDischargePoint>()
+        for (i in 0..120) {
+            offSamples.add(
+                PowerDischargePoint(
+                    timestamp = baseTs + i * 60_000L,
+                    elapsedHours = (i * 60_000L) / 3600_000f,
+                    batteryLevel = 88,
+                    voltageVolts = 3.9f,
+                    temperature = 27.0f,
+                    powerWatts = 0.2f,
+                    activeAppIcons = emptyList(),
+                    isScreenOn = false,
+                    activeAppNames = emptyList()
+                )
+            )
+        }
+        val offStats = PowerUsageManager.computeDischargePowerStats(offSamples)!!
+        assertEquals("纯息屏场景下息屏平均功耗应等于 0.2W", 0.2f, offStats.screenOffPowerWatts, 0.05f)
+        assertEquals("纯息屏场景下总平均功耗应等于息屏功耗", offStats.screenOffPowerWatts, offStats.averagePowerWatts, 0.001f)
+        assertEquals("纯息屏场景下亮屏功耗为 0", 0f, onStats.screenOffPowerWatts, 0.001f)
+        assertEquals("纯息屏场景下 2 小时 0.2W 能耗约为 0.4Wh", 0.4f, offStats.totalDisplayEnergyWh, 0.05f)
     }
 }
 

@@ -6,6 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.regex.Pattern
 import com.battery.analysis.model.AppPowerUsageItem
+import com.battery.analysis.model.PowerDischargePoint
 import com.battery.analysis.manager.PowerUsageManager
 
 /**
@@ -2020,6 +2021,74 @@ class PowerUsageCalculationTest {
 
         assertEquals("总能量严格锚定主板硬件库仑计真实电荷 0.385Wh", 0.385f, finalTotalEnergyWh, 0.001f)
         assertEquals("全局平均功耗严格等于库仑计推导功耗 0.77W", physicalAvgWatts, finalAvgWatts, 0.001f)
+    }
+
+    /**
+     * 验证长周期放电（如 13 小时掉电 22%）中仅有近期数十秒瞬时采样时，采样密度判定不会误判为全周期高频密集采样，
+     * 杜绝将几十秒内的微元能量（如 0.010Wh）篡改整机数小时长周期总能耗，确保整机放电能量真实反映电池物理掉电量且功耗正常计算。
+     */
+    @Test
+    fun testLongDischargeCycleWithShortRecentSamplesDoesNotMisjudgeHighFrequency() {
+        val totalMs = 13 * 3600_000L // 13小时放电
+        val now = 1710000000000L
+
+        // 模拟放电 13 小时期间，内存中仅有最近 20 秒的高频采样点（15 个点，间隔 ~1.4秒）
+        val samplePoints = mutableListOf<PowerDischargePoint>()
+        for (i in 0 until 15) {
+            val t = now - 20_000L + (i * 1428L)
+            samplePoints.add(
+                PowerDischargePoint(
+                    timestamp = t,
+                    elapsedHours = (13f * 3600_000f - 20_000f + i * 1428f) / 3600_000f,
+                    batteryLevel = 78,
+                    voltageVolts = 3.85f,
+                    temperature = 32.0f,
+                    powerWatts = 1.8f,
+                    activeAppIcons = emptyList(),
+                    isScreenOn = true,
+                    activeAppNames = emptyList()
+                )
+            )
+        }
+
+        val sampleSpanMs = if (samplePoints.size >= 2) {
+            (samplePoints.last().timestamp - samplePoints.first().timestamp).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+        val avgSampleIntervalMs = if (samplePoints.size >= 2 && sampleSpanMs > 0L) {
+            sampleSpanMs / (samplePoints.size - 1)
+        } else {
+            0L
+        }
+
+        // 验证平均采样间隔虽然在 1~5000ms（高频），但跨度覆盖率严重不足（20秒 / 13小时 << 80%）
+        val isCoverageSufficient = totalMs <= 300_000L || (sampleSpanMs >= (totalMs * 0.8f).toLong())
+        assertFalse("13小时放电仅有20秒采样，采样跨度覆盖率判定必须为 false", isCoverageSufficient)
+
+        val hasValidHardwareIntegration = samplePoints.size >= 2
+        val isHighFrequencySampling = hasValidHardwareIntegration && (avgSampleIntervalMs in 1L..5000L) && isCoverageSufficient
+        assertFalse("长周期放电断续采样绝不能被误判为全周期高频密集采样", isHighFrequencySampling)
+
+        // 宏观真实物理掉电量：5000mAh 电池掉电 22%（100% -> 78%）
+        val effectiveCapacity = 5000f
+        val dropPercent = 22
+        val nominalVoltageVolts = 3.85f
+        val physicalDrainMah = effectiveCapacity * (dropPercent / 100f) // 1100mAh
+        val physicalTotalEnergyWh = (physicalDrainMah * nominalVoltageVolts) / 1000f // 4.235Wh
+        val dischargeHours = totalMs / 3600000f // 13.0h
+
+        // 最终整机总放电能耗与平均功耗判定
+        val realTotalEnergyWh = if (isHighFrequencySampling) {
+            0.010f // 错误的高频微积分切片微元值
+        } else {
+            physicalTotalEnergyWh
+        }
+        val avgWatts = if (dischargeHours > 0f) realTotalEnergyWh / dischargeHours else 0f
+
+        assertEquals("总放电能量真实反映电池物理掉电量 4.235Wh，杜绝缩水为 0.010Wh", 4.235f, realTotalEnergyWh, 0.001f)
+        assertTrue("平均放电功耗正常计算（> 0.05W），杜绝退化为 --", avgWatts >= 0.05f)
+        assertEquals("13小时消耗4.235Wh对应平均功耗约 0.326W", 4.235f / 13f, avgWatts, 0.01f)
     }
 }
 

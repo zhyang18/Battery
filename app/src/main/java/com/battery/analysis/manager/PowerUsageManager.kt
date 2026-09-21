@@ -1274,15 +1274,22 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val hasValidHardwareIntegration = recentSamples.size >= 2 &&
                         (intTotalEnergyWh > 0f || intTotalPowerWatts > 0f || intOnPowerWatts > 0f || intOffPowerWatts > 0f)
 
-                // 采样密度评估：计算平均采样间隔（毫秒），用于评估时序微积分的离散拟合可信度
-                val avgSampleIntervalMs = if (recentSamples.size >= 2) {
-                    val sampleSpanMs = recentSamples.last().timestamp - recentSamples.first().timestamp
-                    if (sampleSpanMs > 0L) (sampleSpanMs / (recentSamples.size - 1)) else 0L
+                // 采样密度评估：计算采样跨度与平均采样间隔（毫秒），用于评估时序微积分的离散拟合可信度
+                val sampleSpanMs = if (recentSamples.size >= 2) {
+                    (recentSamples.last().timestamp - recentSamples.first().timestamp).coerceAtLeast(0L)
                 } else {
                     0L
                 }
-                // 高频密集采样判定：平均采样间隔 <= 5000ms（如默认的 1 秒/2 秒等高频监控模式）
-                val isHighFrequencySampling = hasValidHardwareIntegration && (avgSampleIntervalMs in 1L..5000L)
+                val avgSampleIntervalMs = if (recentSamples.size >= 2 && sampleSpanMs > 0L) {
+                    sampleSpanMs / (recentSamples.size - 1)
+                } else {
+                    0L
+                }
+                // 采样覆盖率评估：仅当采样时间跨度有效覆盖了放电周期的绝大部分（>= 80%）或放电极短（<= 5分钟拔电初期）时，
+                // 切片微积分累积能量才能代表全周期的总能耗；杜绝长周期放电仅有近期数十秒采样时被误判为全周期高频密集采样导致能量严重缩水失真
+                val isCoverageSufficient = durationMs <= 300_000L || (sampleSpanMs >= (durationMs * 0.8f).toLong())
+                // 高频密集采样判定：平均采样间隔 <= 5000ms 且采样时间跨度有效覆盖放电周期
+                val isHighFrequencySampling = hasValidHardwareIntegration && (avgSampleIntervalMs in 1L..5000L) && isCoverageSufficient
 
                 var realTotalEnergyWh: Float
                 var realDischargedMah: Float
@@ -1366,7 +1373,12 @@ class PowerUsageManager private constructor(private val context: Context) {
                                 offEnergyWh = realTotalEnergyWh - onEnergyWh
                             } else {
                                 val ratio = (screenOnHours / dischargeHours).coerceIn(0f, 1f)
-                                onEnergyWh = realTotalEnergyWh * ratio
+                                val fgTotalEnergy = stats.appList.sumOf { it.foregroundEnergyWh.toDouble() }.toFloat()
+                                onEnergyWh = if (fgTotalEnergy in 0.001f..realTotalEnergyWh) {
+                                    maxOf(realTotalEnergyWh * ratio, fgTotalEnergy)
+                                } else {
+                                    realTotalEnergyWh * ratio
+                                }
                                 offEnergyWh = (realTotalEnergyWh - onEnergyWh).coerceAtLeast(0f)
                             }
                             screenOnWatts = intOnPowerWatts
@@ -3028,15 +3040,22 @@ class PowerUsageManager private constructor(private val context: Context) {
         val hasValidHardwareIntegration = recentSamples.size >= 2 &&
                 (intTotalEnergyWh > 0f || intTotalPowerWatts > 0f || intOnPowerWatts > 0f || intOffPowerWatts > 0f)
 
-        // 采样密度评估：计算平均采样间隔（毫秒），用于评估时序微积分的离散拟合可信度
-        val avgSampleIntervalMs = if (recentSamples.size >= 2) {
-            val sampleSpanMs = recentSamples.last().timestamp - recentSamples.first().timestamp
-            if (sampleSpanMs > 0L) (sampleSpanMs / (recentSamples.size - 1)) else 0L
+        // 采样密度评估：计算采样跨度与平均采样间隔（毫秒），用于评估时序微积分的离散拟合可信度
+        val sampleSpanMs = if (recentSamples.size >= 2) {
+            (recentSamples.last().timestamp - recentSamples.first().timestamp).coerceAtLeast(0L)
         } else {
             0L
         }
-        // 高频密集采样判定：平均采样间隔 <= 5000ms（如默认的 1 秒/2 秒等高频监控模式）
-        val isHighFrequencySampling = hasValidHardwareIntegration && (avgSampleIntervalMs in 1L..5000L)
+        val avgSampleIntervalMs = if (recentSamples.size >= 2 && sampleSpanMs > 0L) {
+            sampleSpanMs / (recentSamples.size - 1)
+        } else {
+            0L
+        }
+        // 采样覆盖率评估：仅当采样时间跨度有效覆盖了放电周期的绝大部分（>= 80%）或放电极短（<= 5分钟拔电初期）时，
+        // 切片微积分累积能量才能代表全周期的总能耗；杜绝长周期放电仅有近期数十秒采样时被误判为全周期高频密集采样导致能量严重缩水失真
+        val isCoverageSufficient = totalMs <= 300_000L || (sampleSpanMs >= (totalMs * 0.8f).toLong())
+        // 高频密集采样判定：平均采样间隔 <= 5000ms 且采样时间跨度有效覆盖放电周期
+        val isHighFrequencySampling = hasValidHardwareIntegration && (avgSampleIntervalMs in 1L..5000L) && isCoverageSufficient
 
         var realTotalEnergyWh: Float
         var realDischargedMah: Float
@@ -3120,7 +3139,12 @@ class PowerUsageManager private constructor(private val context: Context) {
                         offEnergyWh = realTotalEnergyWh - onEnergyWh
                     } else {
                         val ratio = (screenOnHours / dischargeHours).coerceIn(0f, 1f)
-                        onEnergyWh = realTotalEnergyWh * ratio
+                        val fgTotalEnergy = appList.sumOf { it.energyWh.toDouble() }.toFloat()
+                        onEnergyWh = if (fgTotalEnergy in 0.001f..realTotalEnergyWh) {
+                            maxOf(realTotalEnergyWh * ratio, fgTotalEnergy)
+                        } else {
+                            realTotalEnergyWh * ratio
+                        }
                         offEnergyWh = (realTotalEnergyWh - onEnergyWh).coerceAtLeast(0f)
                     }
                     screenOnPower = intOnPowerWatts

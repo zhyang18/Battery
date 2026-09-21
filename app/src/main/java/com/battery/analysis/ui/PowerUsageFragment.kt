@@ -552,6 +552,10 @@ class PowerUsageFragment : Fragment() {
             Shizuku.removeBinderReceivedListener(shizukuBinderReceivedListener)
         } catch (_: Exception) {
         }
+        // 主动释放大对象引用，让 GC 能及时回收 FullPowerDataPackage（含应用列表、时序点数组等）
+        lastRenderedPackage = null
+        // 清空 RecyclerView Adapter 持有的应用列表，避免 Adapter 阻止列表数据被 GC 回收
+        adapter.submitList(emptyList())
         _binding = null
     }
 

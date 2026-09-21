@@ -10,7 +10,7 @@ import androidx.collection.LruCache
  * 应用图标 Drawable 到 Bitmap 的内存缓存工具类。
  * 避免在 Canvas 绘制循环中频繁进行 Drawable 转换与内存分配，提升整体帧率。
  *
- * 优化：改为基于 Bitmap 字节大小的 [LruCache]，上限取应用可用堆的 1/8，
+ * 优化：改为基于 Bitmap 字节大小的 [LruCache]，上限取应用可用堆的 1/16（最大 8MB），
  * 避免固定 100 条目在低内存设备上常驻过多内存；
  * 同时提供 [trimToLevel] 方法响应系统 [android.content.ComponentCallbacks2] 低内存回调，
  * 在内存紧张时主动 evict 缓存，降低 OOM 风险。
@@ -18,14 +18,14 @@ import androidx.collection.LruCache
 object DrawableBitmapCache {
 
     /**
-     * 计算当前进程 Bitmap 图标缓存的最大字节上限（取当前最大可用堆内存的 1/8）。
+     * 计算当前进程 Bitmap 图标缓存的最大字节上限（取当前最大可用堆内存的 1/16，最大 8MB）。
      *
      * @return 最大缓存字节数
      */
     private fun calcMaxMemoryBytes(): Int {
-        // Runtime.maxMemory() 返回 JVM 可用最大堆大小，取 1/8 作为图标缓存上限
+        // Runtime.maxMemory() 返回 JVM 可用最大堆大小，取 1/16 作为图标缓存上限，最大不超过 8MB
         val maxHeap = Runtime.getRuntime().maxMemory()
-        return (maxHeap / 8).coerceIn(2 * 1024 * 1024L, 16 * 1024 * 1024L).toInt()
+        return (maxHeap / 16).coerceIn(1 * 1024 * 1024L, 8 * 1024 * 1024L).toInt()
     }
 
     /**
@@ -92,15 +92,14 @@ object DrawableBitmapCache {
      * Activity/Service 的 [android.content.ComponentCallbacks2.onTrimMemory] 中调用。
      *
      * @param level 系统低内存等级，参见 [android.content.ComponentCallbacks2] 常量：
-     *   - TRIM_MEMORY_UI_HIDDEN (20)：UI 不可见，释放 50% 缓存
-     *   - TRIM_MEMORY_BACKGROUND (40)：进程已进入后台 LRU 列表，释放 75% 缓存
+     *   - TRIM_MEMORY_UI_HIDDEN (20)：UI 不可见，释放 75% 缓存
+     *   - TRIM_MEMORY_BACKGROUND (40)：进程已进入后台 LRU 列表，清空全部缓存
      *   - TRIM_MEMORY_MODERATE (60) / TRIM_MEMORY_COMPLETE (80)：内存极度紧张，清空全部缓存
      */
     fun trimToLevel(level: Int) {
         when {
-            level >= 80 -> cache.evictAll()                           // TRIM_MEMORY_COMPLETE：清空
-            level >= 40 -> cache.trimToSize(cache.maxSize() / 4)     // TRIM_MEMORY_BACKGROUND：保留 25%
-            level >= 20 -> cache.trimToSize(cache.maxSize() / 2)     // TRIM_MEMORY_UI_HIDDEN：保留 50%
+            level >= 40 -> cache.evictAll()                           // TRIM_MEMORY_BACKGROUND 及以上：清空全部
+            level >= 20 -> cache.trimToSize(cache.maxSize() / 4)     // TRIM_MEMORY_UI_HIDDEN：保留 25%
         }
     }
 

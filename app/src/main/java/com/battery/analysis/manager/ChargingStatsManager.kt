@@ -476,16 +476,17 @@ class ChargingStatsManager private constructor(private val context: Context) {
                 )
             }
             samplePoints.add(point)
-            // 控制容量上限，满时进行等距全局稀疏抽稀（抽稀50%），始终保留从起始时刻至当前时刻的完整全局时间轴
-            if (samplePoints.size > MAX_SAMPLE_POINTS) {
-                val downsampled = mutableListOf<ChargingSamplePoint>()
-                downsampled.add(samplePoints.first())
-                for (i in 1 until samplePoints.size - 1 step 2) {
-                    downsampled.add(samplePoints[i])
+            // 优化：上限从 5000 降至 2000，同时改为原地逆向删除奇数索引点，
+            // 彻底消除创建等大临时 List 导致的双倍内存峰值
+            if (samplePoints.size > 2000) {
+                val lastIdx = samplePoints.size - 1
+                var i = lastIdx - 1
+                while (i >= 1) {
+                    if (i % 2 == 1) {
+                        samplePoints.removeAt(i)
+                    }
+                    i--
                 }
-                downsampled.add(samplePoints.last())
-                samplePoints.clear()
-                samplePoints.addAll(downsampled)
             }
         }
 
@@ -519,6 +520,9 @@ class ChargingStatsManager private constructor(private val context: Context) {
      * 采用标准的梯形微元时间积分持续累加充入能量与时间加权平均功率，避免重新遍历局部抽稀列表导致的能量丢失；
      * 当硬件电流传感器受限导致瞬时功率为 0 但电量实际增长时，基于电量增量与电池有效容量进行物理守恒核算。
      *
+     * 优化：将原先的 O(n) 全量遍历改为 O(1) 增量更新，仅对新采样点与当前 summary 中的最大值
+     * 直接比较更新，无需每次重新遍历数千个历史采样点，显著降低 CPU 占用与 GC 压力。
+     *
      * @param latestPoint 最新采样的物理数据点
      * @param chargeType 当前充电类型
      * @param isCharging 是否正在充电
@@ -536,28 +540,21 @@ class ChargingStatsManager private constructor(private val context: Context) {
         deltaScreenOffGain: Int = 0,
         deltaScreenOffEnergy: Float = 0f
     ) {
-        val pointsSnapshot = synchronized(samplePoints) { samplePoints.toList() }
-        if (pointsSnapshot.isEmpty()) return
-
-        var maxP = currentSummary.maxPowerWatts
-        var maxT = currentSummary.maxTemperature
-        var sumT = 0f
-
-        for (p in pointsSnapshot) {
-            if (p.powerWatts > maxP && p.powerWatts > 0f) maxP = p.powerWatts
-            if (p.temperature > maxT) maxT = p.temperature
-            sumT += p.temperature
+        // O(1) 增量更新：仅与当前最大值比较，无需遍历全部历史点
+        val newMaxP = if (latestPoint.powerWatts > 0f && latestPoint.powerWatts > currentSummary.maxPowerWatts) {
+            latestPoint.powerWatts
+        } else {
+            currentSummary.maxPowerWatts
         }
-        if (latestPoint.powerWatts > maxP && latestPoint.powerWatts > 0f) maxP = latestPoint.powerWatts
-        if (latestPoint.temperature > maxT) maxT = latestPoint.temperature
+        val newMaxT = if (latestPoint.temperature > currentSummary.maxTemperature) {
+            latestPoint.temperature
+        } else {
+            currentSummary.maxTemperature
+        }
 
-        val count = pointsSnapshot.size
-        val avgT = if (count > 0) sumT / count else latestPoint.temperature
-
-        // 1. 采用时序微元持续累加充入能量 Wh，保证单调递增，绝不因前端或内存抽稀而丢失已累计能量
+        // 采用时序微元持续累加充入能量 Wh，保证单调递增，绝不因前端或内存抽稀而丢失已累计能量
         val accumulatedEnergyWh = (currentSummary.chargedEnergyWh + deltaEnergyWh).coerceAtLeast(0f)
 
-        // 2. 基于电量增量与有效电池容量进行物理核算
         val levelGain = (latestPoint.batteryLevel - currentSummary.startLevel).coerceAtLeast(0)
         val durationHours = ((latestPoint.timestamp - currentSummary.startTimestamp).coerceAtLeast(0L)) / 3600000.0f
         val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 0f
@@ -575,26 +572,31 @@ class ChargingStatsManager private constructor(private val context: Context) {
             0f
         }
 
-        // 3. 时间加权平均充电功率：总充入能量 / 总充电时长
         val avgP = if (durationHours > 0.001f && finalChargedWh > 0f) {
             finalChargedWh / durationHours
         } else if (latestPoint.powerWatts > 0f) {
             latestPoint.powerWatts
-        } else if (count > 0 && maxP > 0f) {
-            pointsSnapshot.map { it.powerWatts }.filter { it > 0f }.let { validList ->
-                if (validList.isNotEmpty()) validList.average().toFloat() else 0f
-            }
         } else {
             currentSummary.avgPowerWatts
+        }
+
+        // O(1) 更新平均温度：用已存的 avgTemperature 和新点做指数平滑（避免全量求和）
+        val pointCount = synchronized(samplePoints) { samplePoints.size }.coerceAtLeast(1)
+        val newAvgT = if (pointCount <= 1) {
+            latestPoint.temperature
+        } else {
+            // 指数移动平均（EMA）近似：新均值 = 旧均值 * (n-1)/n + 新点/n
+            currentSummary.avgTemperature * ((pointCount - 1).toFloat() / pointCount) +
+                    latestPoint.temperature / pointCount
         }
 
         currentSummary = currentSummary.copy(
             endTimestamp = latestPoint.timestamp,
             currentLevel = latestPoint.batteryLevel,
-            maxPowerWatts = maxP,
+            maxPowerWatts = newMaxP,
             avgPowerWatts = avgP,
-            maxTemperature = maxT,
-            avgTemperature = avgT,
+            maxTemperature = newMaxT,
+            avgTemperature = newAvgT,
             chargedEnergyWh = finalChargedWh,
             chargeType = if (chargeType.isNotEmpty()) chargeType else currentSummary.chargeType,
             isCharging = isCharging,
@@ -750,13 +752,13 @@ class ChargingStatsManager private constructor(private val context: Context) {
                 put("screenOffEnergyWh", currentSummary.screenOffEnergyWh.toDouble())
             }
 
-            // 全局等距均匀抽样保留至多 500 个点，跨越完整起止时间轴
+            // 全局等距均匀抽样保留至多 300 个点，跨越完整起止时间轴
             val pointsArray = JSONArray()
             val pointsToSave = synchronized(samplePoints) {
-                if (samplePoints.size > 500) {
+                if (samplePoints.size > 300) {
                     val sampled = mutableListOf<ChargingSamplePoint>()
-                    val step = (samplePoints.size - 1).toFloat() / 499f
-                    for (i in 0 until 500) {
+                    val step = (samplePoints.size - 1).toFloat() / 299f
+                    for (i in 0 until 300) {
                         val index = (i * step).toInt().coerceIn(0, samplePoints.size - 1)
                         sampled.add(samplePoints[index])
                     }

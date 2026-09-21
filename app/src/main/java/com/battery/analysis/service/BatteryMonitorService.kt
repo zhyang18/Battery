@@ -747,16 +747,19 @@ class BatteryMonitorService : Service() {
                 return
             }
 
-            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
-            val isInteractive = pm?.isInteractive ?: true
-            if (!isInteractive && !force) {
+            // 优化：直接使用内存缓存的屏幕交互状态，消除 pm.isInteractive 的跨进程 Binder IPC 开销
+            if (!cachedIsInteractive && !force) {
                 return
             }
 
             val singleLineInfo = computeSingleLineInfo()
             val now = SystemClock.elapsedRealtime()
-            // 若非强制刷新且内容完全未变，则跳过重复构建与推送，消除多余跨进程 IPC
+            // 非强制刷新：同时校验内容是否变化与 500ms 最小推送间隔，双重节流消除高频无意义 IPC 唤醒 SystemUI
             if (!force && singleLineInfo == lastNotifiedContent) {
+                return
+            }
+            // 追加时间节流：非强制刷新时，距上次推送不足 500ms 则直接跳过
+            if (!force && (now - lastNotifiedTime) < 500L) {
                 return
             }
             lastNotifiedContent = singleLineInfo

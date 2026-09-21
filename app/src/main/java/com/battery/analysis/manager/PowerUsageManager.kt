@@ -441,28 +441,50 @@ class PowerUsageManager private constructor(private val context: Context) {
     private val gameAppCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     /**
-     * 进程内持久化的应用信息缓存（包名 → (图标 Drawable, 应用名称, UID)）。
-     * 以 ConcurrentHashMap 实现线程安全。每次调用 [buildTimelineState] 或 [buildTrendDischargePoints]
+     * 进程内持久化的应用信息缓存（包名 → (图标 Drawable 弱引用, 应用名称, UID)）。
+     * 以 LinkedHashMap + synchronized 实现线程安全的 FIFO 淘汰策略。
+     * 每次调用 [buildTimelineState] 或 [buildTrendDischargePoints]
      * 时优先命中此缓存，避免对同一包名重复发起 PackageManager Binder IPC。
-     * 缓存上限 200 条，超出后自动移除最早插入的条目（FIFO 淘汰）。
+     *
+     * 优化：
+     * 1. 缓存上限从 200 条降低至 80 条，减少 Native Heap 中 Drawable bitmap 常驻内存。
+     * 2. Drawable 改为 [java.lang.ref.WeakReference] 弱引用存储，GC 压力大时系统自动
+     *    回收 Drawable 持有的 Native bitmap 内存；命中时检测弱引用有效性，失效则透明
+     *    重新向 PackageManager 查询，彻底消除大量 Drawable 长期强驻内存问题。
      * 若应用被卸载，缓存中对应条目在下次查询时自然淘汰（pm 抛异常即置 null icon）。
      */
-    private val appInfoCache = object : java.util.LinkedHashMap<String, Triple<android.graphics.drawable.Drawable?, String, Int>>(64, 0.75f, false) {
-        override fun removeEldestEntry(eldest: Map.Entry<String, Triple<android.graphics.drawable.Drawable?, String, Int>>?): Boolean {
-            return size > 200
+    private val appInfoCache = object : java.util.LinkedHashMap<String, Triple<java.lang.ref.WeakReference<android.graphics.drawable.Drawable>?, String, Int>>(64, 0.75f, false) {
+        /**
+         * 当缓存条目数超过上限时，自动移除最早插入的条目（FIFO 淘汰）。
+         *
+         * @param eldest 最早插入的缓存条目
+         * @return 是否移除该条目
+         */
+        override fun removeEldestEntry(eldest: Map.Entry<String, Triple<java.lang.ref.WeakReference<android.graphics.drawable.Drawable>?, String, Int>>?): Boolean {
+            return size > 80
         }
     }
 
     /**
-     * 查询或加载指定包名的应用信息（图标、名称、UID），优先命中进程内缓存。
-     * 缓存未命中时向 PackageManager 发起一次 Binder IPC，并将结果存入缓存供后续复用。
+     * 查询或加载指定包名的应用信息（图标、名称、UID），优先命中进程内弱引用缓存。
+     * 缓存未命中或弱引用已被 GC 回收时，向 PackageManager 发起一次 Binder IPC，
+     * 并将结果重新存入缓存供后续复用。
      *
      * @param packageName 目标应用包名
      * @return 包含图标、应用名称、UID 的三元组（图标可能为 null）
      */
     private fun getAppInfo(packageName: String): Triple<android.graphics.drawable.Drawable?, String, Int> {
         synchronized(appInfoCache) {
-            appInfoCache[packageName]?.let { return it }
+            val cached = appInfoCache[packageName]
+            if (cached != null) {
+                val icon = cached.first?.get() // 解引用弱引用
+                // 若弱引用仍有效（Drawable 未被 GC 回收），直接返回缓存
+                if (icon != null || cached.first == null) {
+                    return Triple(icon, cached.second, cached.third)
+                }
+                // 弱引用已失效（GC 回收了 Drawable），移除过期条目，重新向 PM 查询
+                appInfoCache.remove(packageName)
+            }
         }
         val pm = context.packageManager
         val (icon, name, uid) = try {
@@ -471,11 +493,13 @@ class PowerUsageManager private constructor(private val context: Context) {
         } catch (_: Exception) {
             Triple(null, packageName.substringAfterLast('.'), 10000)
         }
-        val triple = Triple(icon, name, uid)
+        // 使用弱引用存储 Drawable，GC 在内存紧张时可自动释放 Native bitmap
+        val weakIcon = if (icon != null) java.lang.ref.WeakReference(icon) else null
+        val cacheEntry = Triple(weakIcon, name, uid)
         synchronized(appInfoCache) {
-            appInfoCache[packageName] = triple
+            appInfoCache[packageName] = cacheEntry
         }
-        return triple
+        return Triple(icon, name, uid)
     }
 
     /**
@@ -553,16 +577,19 @@ class PowerUsageManager private constructor(private val context: Context) {
             packageName = packageName
         )
         dischargeRealtimeSamples.add(point)
-        // 达到容量上限时进行全局等距抽稀（50%），确保从拔电初始到当前时刻的放电走势时间轴完整保留
-        if (dischargeRealtimeSamples.size > 5000) {
-            val downsampled = mutableListOf<PowerDischargePoint>()
-            downsampled.add(dischargeRealtimeSamples.first())
-            for (i in 1 until dischargeRealtimeSamples.size - 1 step 2) {
-                downsampled.add(dischargeRealtimeSamples[i])
+        // 优化：将触发阈值从 5000 降至 2000（约 33 分钟），并改为原地逆向删除，
+        // 避免创建与原列表等大的临时副本，消除抽稀时的双倍内存峰值。
+        // 逆向遍历奇数索引（1, 3, 5, ...）并删除，保留偶数索引（即保留首尾及偶数点），实现 50% 等距抽稀。
+        if (dischargeRealtimeSamples.size > 2000) {
+            val lastIdx = dischargeRealtimeSamples.size - 1
+            // 从倒数第 2 个点开始，逆向删除奇数索引点（跳过首点 0 和尾点 lastIdx）
+            var i = lastIdx - 1
+            while (i >= 1) {
+                if (i % 2 == 1) {
+                    dischargeRealtimeSamples.removeAt(i)
+                }
+                i--
             }
-            downsampled.add(dischargeRealtimeSamples.last())
-            dischargeRealtimeSamples.clear()
-            dischargeRealtimeSamples.addAll(downsampled)
         }
 
         // 同步记录时序温度点
@@ -749,16 +776,17 @@ class PowerUsageManager private constructor(private val context: Context) {
         val lastPoint = dischargeTempPoints.lastOrNull()
         if (lastPoint == null || (timestamp - lastPoint.first) >= 10000L || Math.abs(formatted - lastPoint.second) >= 0.2f) {
             dischargeTempPoints.add(Pair(timestamp, formatted))
-            // 达到容量上限时进行全局等距抽稀（50%），确保放电温度时间轴完整
-            if (dischargeTempPoints.size > 3000) {
-                val downsampled = mutableListOf<Pair<Long, Float>>()
-                downsampled.add(dischargeTempPoints.first())
-                for (i in 1 until dischargeTempPoints.size - 1 step 2) {
-                    downsampled.add(dischargeTempPoints[i])
+            // 优化：上限从 3000 降至 1500（约 4.2 小时），改为原地逆向删除避免临时副本内存峰值
+            if (dischargeTempPoints.size > 1500) {
+                val lastIdx = dischargeTempPoints.size - 1
+                // 从倒数第 2 个点开始逆向删除奇数索引点，保留首点和尾点
+                var i = lastIdx - 1
+                while (i >= 1) {
+                    if (i % 2 == 1) {
+                        dischargeTempPoints.removeAt(i)
+                    }
+                    i--
                 }
-                downsampled.add(dischargeTempPoints.last())
-                dischargeTempPoints.clear()
-                dischargeTempPoints.addAll(downsampled)
             }
         }
     }

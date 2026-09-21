@@ -476,12 +476,23 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     /**
      * 视图从窗口脱附时的回调（如页签切走、Fragment 销毁等）。
-     * 主动调用 [DrawableBitmapCache.trimToLevel] 释放 50% 图标 Bitmap，
-     * 降低时间轴页面不可见期间的后台内存占用。
+     * 主动调用 [DrawableBitmapCache.trimToLevel] 清空图标 Bitmap 缓存，
+     * 同时清理 [cachedSlotItems]、各曲线缓存 markers 及使曲线缓存失效，
+     * 彻底释放时间轴页面不可见期间的后台绘制内存。
      */
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        DrawableBitmapCache.trimToLevel(20)
+        // 进入后台时清空全部 Bitmap 图标缓存（BACKGROUND 级别）
+        DrawableBitmapCache.trimToLevel(40)
+        // 清理 App 时间槽布局缓存列表
+        cachedSlotItems.clear()
+        // 清理各曲线 Marker 标注点列表（Path 本身置为失效即可，下次重建）
+        cachedPowerCurve.markers.clear()
+        cachedBatteryCurve.markers.clear()
+        cachedTempCurve.markers.clear()
+        cachedVoltCurve.markers.clear()
+        // 标记曲线缓存失效，下次 attach 时重新计算
+        isCurveCacheValid = false
     }
 
     /**

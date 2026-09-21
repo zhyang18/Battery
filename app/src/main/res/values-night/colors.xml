@@ -15,4 +15,8 @@
     <color name="dialog_card_stroke">#3C3C46</color>
     <color name="dialog_badge_bg">#172A40</color>
     <color name="dialog_badge_stroke">#25456A</color>
+
+    <!-- 耗电统计卡片状态图标色彩体系（深色模式：对标图二亮白与暗灰） -->
+    <color name="power_icon_screen_on">#CBD5E1</color>
+    <color name="power_icon_screen_off">#64748B</color>
 </resources>

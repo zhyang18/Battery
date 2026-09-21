@@ -28,4 +28,8 @@
     <color name="dialog_card_stroke">#EDF2F7</color>
     <color name="dialog_badge_bg">#EFF6FF</color>
     <color name="dialog_badge_stroke">#DBEAFE</color>
+
+    <!-- 耗电统计卡片状态图标色彩体系（浅色模式） -->
+    <color name="power_icon_screen_on">#334155</color>
+    <color name="power_icon_screen_off">#94A3B8</color>
 </resources>

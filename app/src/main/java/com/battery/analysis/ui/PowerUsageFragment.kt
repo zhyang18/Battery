@@ -18,6 +18,9 @@ import android.widget.ImageView
 import android.widget.PopupWindow
 import android.widget.TextView
 import android.widget.Toast
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.AbsoluteSizeSpan
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
@@ -1154,10 +1157,9 @@ class PowerUsageFragment : Fragment() {
             "--"
         }
 
-        binding.tvPowerScreenOn.text = onPowerStr
-        binding.tvPowerAvg.text = avgPowerStr
-        binding.tvPowerScreenOff.text = offPowerStr
-        binding.tvPowerBackground.text = bgPowerStr
+        binding.tvMetricScreenOnPower.text = onPowerStr
+        binding.tvMetricGlobalPower.text = avgPowerStr
+        binding.tvMetricScreenOffPower.text = offPowerStr
 
         // 同步刷新折叠吸顶 mini 指标卡片数据
         binding.tvMiniPowerScreenOn.text = onPowerStr
@@ -1475,11 +1477,32 @@ class PowerUsageFragment : Fragment() {
             getString(R.string.power_status_unplugged)
         }
 
-        // 2. 刷新核心功耗指标卡片（按：时间 -> 功耗 -> 能量 -> 续航，低于 0.05W 统一规范展示为 "--" 杜绝显示 0.00W 误导用户）
-        val onEnergyStr = formatOverviewEnergy(overview.screenOnEnergyWh)
-        val totalEnergyStr = formatOverviewEnergy(overview.totalEnergyWh)
-        val offEnergyStr = formatOverviewEnergy(overview.screenOffEnergyWh)
-        val bgEnergyStr = formatOverviewEnergy(overview.backgroundEnergyWh)
+        // 2. 刷新核心功耗指标卡片（按图一三行四列高密结构：亮屏 / 息屏 / 全局，每行呈现：图标 + 时长占比 + 能量占比 + 功率 + 续航）
+        val onEnergy = overview.screenOnEnergyWh
+        val offEnergy = overview.screenOffEnergyWh
+        val totalEnergy = overview.totalEnergyWh
+
+        val onRatioStr = if (totalEnergy > 0f) {
+            val ratio = (onEnergy / totalEnergy * 100f).coerceIn(0f, 100f)
+            String.format(Locale.getDefault(), "%.1f%%", ratio)
+        } else {
+            "0.0%"
+        }
+
+        val offRatioStr = if (totalEnergy > 0f) {
+            val ratio = (offEnergy / totalEnergy * 100f).coerceIn(0f, 100f)
+            String.format(Locale.getDefault(), "%.1f%%", ratio)
+        } else {
+            "0.0%"
+        }
+
+        val onDurationMs = if (overview.screenOnDurationMs > 0L) overview.screenOnDurationMs else parseDurationTextToMs(overview.screenOnDurationText)
+        val offDurationMs = if (overview.screenOffDurationMs > 0L) overview.screenOffDurationMs else parseDurationTextToMs(overview.screenOffDurationText)
+        val totalDurationMs = if (overview.totalDurationMs > 0L) overview.totalDurationMs else parseDurationTextToMs(overview.totalDurationText)
+
+        val onDurationStr = formatCardDuration(onDurationMs, overview.screenOnDurationText)
+        val offDurationStr = formatCardDuration(offDurationMs, overview.screenOffDurationText)
+        val totalDurationStr = formatCardDuration(totalDurationMs, overview.totalDurationText)
 
         val onPowerStr = if (overview.screenOnPowerWatts >= 0.05f) {
             String.format(Locale.getDefault(), "%.2fW", overview.screenOnPowerWatts)
@@ -1496,46 +1519,33 @@ class PowerUsageFragment : Fragment() {
         } else {
             "--"
         }
-        val bgPowerStr = if (overview.backgroundPowerWatts >= 0.05f) {
-            String.format(Locale.getDefault(), "%.2fW", overview.backgroundPowerWatts)
-        } else {
-            "--"
-        }
 
-        // 第一行：时间
-        binding.tvTimeScreenOn.text = overview.screenOnDurationText
-        binding.tvTimeTotal.text = overview.totalDurationText
-        binding.tvTimeScreenOff.text = overview.screenOffDurationText
-        binding.tvTimeBackground.text = overview.backgroundDurationText
+        // 第一行：亮屏数据（图标已由 XML 设置）
+        binding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onRatioStr)
+        binding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", onEnergy), onRatioStr)
+        binding.tvMetricScreenOnPower.text = onPowerStr
+        binding.tvMetricScreenOnRemaining.text = overview.remainingScreenOnText
 
-        // 第二行：纯功耗（W）
-        binding.tvPowerScreenOn.text = onPowerStr
-        binding.tvPowerAvg.text = avgPowerStr
-        binding.tvPowerScreenOff.text = offPowerStr
-        binding.tvPowerBackground.text = bgPowerStr
+        // 第二行：息屏数据
+        binding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offRatioStr)
+        binding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", offEnergy), offRatioStr)
+        binding.tvMetricScreenOffPower.text = offPowerStr
+        binding.tvMetricScreenOffRemaining.text = overview.remainingScreenOffText
 
-        // 第三行：能量（Wh）
-        binding.tvEnergyScreenOn.text = onEnergyStr
-        binding.tvEnergyAvg.text = totalEnergyStr
-        binding.tvEnergyScreenOff.text = offEnergyStr
-        binding.tvEnergyBackground.text = bgEnergyStr
-
-        // 第四行：预估续航
-        binding.tvRemainingScreenOn.text = overview.remainingScreenOnText
-        binding.tvRemainingComposite.text = overview.remainingCompositeText
-        binding.tvRemainingScreenOff.text = overview.remainingScreenOffText
-        binding.tvRemainingBackground.text = overview.remainingBackgroundText
+        // 第三行：全局数据
+        binding.tvMetricGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
+        binding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", totalEnergy), "100%")
+        binding.tvMetricGlobalPower.text = avgPowerStr
+        binding.tvMetricGlobalRemaining.text = overview.remainingCompositeText
 
         // 同步刷新折叠吸顶 mini 指标卡片数据（第一行时间，第二行纯功耗，不包含能量）
-        binding.tvMiniTimeScreenOn.text = binding.tvTimeScreenOn.text
-        binding.tvMiniTimeTotal.text = binding.tvTimeTotal.text
-        binding.tvMiniTimeScreenOff.text = binding.tvTimeScreenOff.text
-        binding.tvMiniTimeBackground.text = binding.tvTimeBackground.text
+        binding.tvMiniTimeScreenOn.text = overview.screenOnDurationText
+        binding.tvMiniTimeTotal.text = overview.totalDurationText
+        binding.tvMiniTimeScreenOff.text = overview.screenOffDurationText
 
         binding.tvMiniPowerScreenOn.text = onPowerStr
         binding.tvMiniPowerAvg.text = avgPowerStr
         binding.tvMiniPowerScreenOff.text = offPowerStr
-        binding.tvMiniPowerBackground.text = bgPowerStr
 
         // 3. 刷新应用场景列表
         adapter.submitList(fullPackage.appList)
@@ -1548,20 +1558,98 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
+     * 将包含数值和括号百分比的文本（如 "13m44s(45.1%)" 或 "0.406Wh(45.1%)"）转换为富文本，
+     * 将括号及内部百分比部分的字号缩小两号（由 12sp 缩至 10sp），突出主数值可读性。
+     *
+     * @param mainText 前置主要数值文本（如 "13m44s" 或 "0.406Wh"）
+     * @param percentText 括号内的百分比文本（如 "45.1%" 或 "100%"）
+     * @return 格式化后的富文本对象 [CharSequence]
+     */
+    private fun formatValueWithSmallPercent(mainText: String, percentText: String): CharSequence {
+        val fullText = "$mainText($percentText)"
+        val startIndex = mainText.length
+        val spannable = SpannableString(fullText)
+        spannable.setSpan(
+            AbsoluteSizeSpan(8, true),
+            startIndex,
+            fullText.length,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        return spannable
+    }
+
+    /**
+     * 将毫秒时长按 "0m0s" 规范格式化为紧凑友好文本。
+     * 当小于 1 小时时展示为分秒格式（如 "0m0s"、"13m44s"、"49m55s"）；
+     * 当大于等于 1 小时且小于 1 天时展示为时分格式（如 "1h03m"）；
+     * 当大于等于 1 天时展示为天时格式（如 "1d03h"）。
+     *
+     * @param ms 物理持续时长毫秒值
+     * @param fallbackText 当毫秒值为 0 或无效时的备用文本
+     * @return 格式化后的紧凑时长字符串（如 "0m0s"、"13m44s"）
+     */
+    private fun formatCardDuration(ms: Long, fallbackText: String): String {
+        if (ms <= 0L) {
+            return if (fallbackText.isNotBlank()) fallbackText else "0m0s"
+        }
+        val totalSec = ms / 1000L
+        val days = totalSec / 86400L
+        val hours = (totalSec % 86400L) / 3600L
+        val minutes = (totalSec % 3600L) / 60L
+        val seconds = totalSec % 60L
+        return when {
+            days > 0L -> String.format(Locale.getDefault(), "%dd%02dh", days, hours)
+            hours > 0L -> String.format(Locale.getDefault(), "%dh%02dm", hours, minutes)
+            else -> "${minutes}m${seconds}s"
+        }
+    }
+
+    /**
+     * 从历史快照等字符串中解析时长文本为物理毫秒值。
+     * 支持形如 "1d03h"、"1h03m"、"13m44s" 或 "13:44" 等格式。
+     *
+     * @param text 格式化时长字符串
+     * @return 解析出的物理毫秒数，无法解析时返回 0L
+     */
+    private fun parseDurationTextToMs(text: String): Long {
+        if (text.isBlank() || text == "--") return 0L
+        var totalMs = 0L
+        val dayMatch = Regex("(\\d+)d").find(text)
+        val hourMatch = Regex("(\\d+)h").find(text)
+        val minMatch = Regex("(\\d+)m").find(text)
+        val secMatch = Regex("(\\d+)s").find(text)
+        val colonMatch = Regex("(\\d+):(\\d+)(?::(\\d+))?").find(text)
+
+        if (colonMatch != null) {
+            val parts = colonMatch.destructured
+            if (parts.component3().isNotEmpty()) {
+                val h = parts.component1().toLongOrNull() ?: 0L
+                val m = parts.component2().toLongOrNull() ?: 0L
+                val s = parts.component3().toLongOrNull() ?: 0L
+                return (h * 3600L + m * 60L + s) * 1000L
+            } else {
+                val m = parts.component1().toLongOrNull() ?: 0L
+                val s = parts.component2().toLongOrNull() ?: 0L
+                return (m * 60L + s) * 1000L
+            }
+        }
+
+        dayMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 86400000L }
+        hourMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 3600000L }
+        minMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 60000L }
+        secMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 1000L }
+        return totalMs
+    }
+
+    /**
      * 更新应用使用场景列表中后台统计数据的显示与隐藏状态。
-     * 顶部核心指标卡片与折叠吸顶 Mini 卡片始终聚焦于【亮屏】、【综合】、【息屏】物理三态，
+     * 顶部核心指标卡片与折叠吸顶 Mini 卡片始终聚焦于【亮屏】、【息屏】与【全局】物理三态，
      * 此开关专门控制列表适配器切换展示纯前台或前后台组合数据，以及是否在列表中展示仅在后台运行的应用。
      *
      * @param show 是否在应用列表中展示后台运行应用及各应用后台工时与能耗
      */
     private fun updateBackgroundStatsVisibility(show: Boolean) {
         with(binding) {
-            tvHeaderBackground.visibility = View.GONE
-            tvTimeBackground.visibility = View.GONE
-            tvPowerBackground.visibility = View.GONE
-            tvEnergyBackground.visibility = View.GONE
-            tvRemainingBackground.visibility = View.GONE
-
             tvMiniTimeBackground.visibility = View.GONE
             tvMiniPowerBackground.visibility = View.GONE
         }

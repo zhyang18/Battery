@@ -1682,7 +1682,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                     screenOffEnergyWh = offEnergyWh,
                     backgroundEnergyWh = allBgEnergyWh,
                     usedDurationText = durationStr,
-                    remainingLifeText = remCompositeStr
+                    remainingLifeText = remCompositeStr,
+                    screenOnDurationMs = screenOnMs,
+                    screenOffDurationMs = screenOffMs,
+                    totalDurationMs = durationMs
                 )
 
                 val points = getDischargeTrendPoints(
@@ -3297,7 +3300,10 @@ class PowerUsageManager private constructor(private val context: Context) {
             screenOffEnergyWh = offEnergyWh,
             backgroundEnergyWh = allBgEnergyWh,
             usedDurationText = "$screenOnStr / $totalStr",
-            remainingLifeText = remCompStr
+            remainingLifeText = remCompStr,
+            screenOnDurationMs = screenOnMs,
+            screenOffDurationMs = screenOffMs,
+            totalDurationMs = totalMs
         )
     }
 
@@ -3317,8 +3323,8 @@ class PowerUsageManager private constructor(private val context: Context) {
         val h = (totalMinutes % 1440) / 60
         val m = totalMinutes % 60
         return when {
-            days > 0 -> "${days}d${h}h"
-            h > 0 -> "${h}h${m}m"
+            days > 0 -> String.format(Locale.getDefault(), "%dd%02dh", days, h)
+            h > 0 -> String.format(Locale.getDefault(), "%dh%02dm", h, m)
             else -> "${m}m"
         }
     }
@@ -3748,6 +3754,9 @@ data class BatteryStatusSnapshot(
  * @property backgroundEnergyWh 后台运行期间消耗总能量（单位：瓦时 Wh）
  * @property usedDurationText 兼容保留字段
  * @property remainingLifeText 兼容保留字段
+ * @property screenOnDurationMs 亮屏持续实际物理毫秒数
+ * @property screenOffDurationMs 息屏持续实际物理毫秒数
+ * @property totalDurationMs 放电总周期实际物理毫秒数
  */
 data class PowerOverviewStats(
     val avgPowerWatts: Float,
@@ -3767,7 +3776,10 @@ data class PowerOverviewStats(
     val screenOffEnergyWh: Float = 0f,
     val backgroundEnergyWh: Float = 0f,
     val usedDurationText: String = "",
-    val remainingLifeText: String = ""
+    val remainingLifeText: String = "",
+    val screenOnDurationMs: Long = 0L,
+    val screenOffDurationMs: Long = 0L,
+    val totalDurationMs: Long = 0L
 )
 
 /**

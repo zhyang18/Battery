@@ -1096,8 +1096,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     }
 
     /**
-     * 对标 BatteryRecorder 算法解耦应用的真实前台能量与后台工时。
-     * 单应用能耗与功耗严格基于前台物理放电采样，后台不统计虚拟消耗能量，仅保留真实后台运行工时。
+     * 科学解耦应用的真实前台能量、后台能量与有效后台活跃时长。
+     * 根据应用真实的前台工作时长与后台活跃工时（CPU 算力与持锁等），按物理实际占比科学分配 dumpsys 采集到的总放电能量，
+     * 消除常驻后台核心应用（如 System UI、GKD 等）因偶发几毫秒前台记录而被误扣全天后台能耗、导致除法放大为数万瓦荒谬功耗的缺陷。
      *
      * @param totalEnergy 应用程序从系统底层采集到的总放电能量（单位：瓦时 Wh）
      * @param foregroundMs 应用程序前台活跃运行时长（单位：毫秒）
@@ -1105,9 +1106,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * @param cpuMs 应用程序净 CPU 消耗时长（单位：毫秒）
      * @param dischargeMs 本次放电周期总时长（单位：毫秒）
      * @param isGame 是否为 3D 图形游戏应用
-     * @return 包含解耦后的前台能量（Wh）、后台能量（严格为 0f）与有效后台活跃时长（毫秒）的三元组 [Triple]
+     * @return 包含解耦后的前台能量（Wh）、后台能量（Wh）与有效后台活跃时长（毫秒）的三元组 [Triple]
      */
-    @Suppress("UNUSED_PARAMETER")
     fun decoupleAppEnergyAndTimes(
         totalEnergy: Float,
         foregroundMs: Long,
@@ -1116,26 +1116,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         dischargeMs: Long,
         isGame: Boolean = false
     ): Triple<Float, Float, Long> {
-        val effectiveBg = if (backgroundMs > 0L) {
-            backgroundMs.coerceAtMost(dischargeMs)
-        } else if (cpuMs > foregroundMs) {
-            (cpuMs - foregroundMs).coerceAtMost(dischargeMs)
-        } else {
-            0L
-        }
-
-        if (totalEnergy <= 0.0001f) {
-            return Triple(0f, 0f, effectiveBg)
-        }
-
-        // 严格遵循 BatteryRecorder 算法：
-        // 纯后台应用（前台时长为 0）不编造后台能量，能量归 0f，仅统计后台工时；
-        // 前台活跃应用能量全部忠实归属于前台物理放电交互，后台能量严格为 0f。
-        return if (foregroundMs > 0L) {
-            Triple(totalEnergy, 0f, effectiveBg)
-        } else {
-            Triple(0f, 0f, effectiveBg)
-        }
+        return Companion.decoupleAppEnergyAndTimes(totalEnergy, foregroundMs, backgroundMs, cpuMs, dischargeMs, isGame)
     }
 
     /**
@@ -1579,5 +1560,59 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
         /** 手机息屏待机状态下的典型底座基础功率（单位：W），客观反映基带待机与系统基础唤醒保活底噪 */
         const val DEFAULT_STANDBY_BASE_WATTS = 0.15f
+
+        /**
+         * 科学解耦应用的真实前台能量、后台能量与有效后台活跃时长。
+         * 根据应用真实的前台工作时长与后台活跃工时（CPU 算力与持锁等），按物理实际占比科学分配 dumpsys 采集到的总放电能量，
+         * 消除常驻后台核心应用（如 System UI、GKD 等）因偶发几毫秒前台记录而被误扣全天后台能耗、导致除法放大为数万瓦荒谬功耗的缺陷。
+         *
+         * @param totalEnergy 应用程序从系统底层采集到的总放电能量（单位：瓦时 Wh）
+         * @param foregroundMs 应用程序前台活跃运行时长（单位：毫秒）
+         * @param backgroundMs 应用程序后台运行活跃时长（单位：毫秒）
+         * @param cpuMs 应用程序净 CPU 消耗时长（单位：毫秒）
+         * @param dischargeMs 本次放电周期总时长（单位：毫秒）
+         * @param isGame 是否为 3D 图形游戏应用
+         * @return 包含解耦后的前台能量（Wh）、后台能量（Wh）与有效后台活跃时长（毫秒）的三元组 [Triple]
+         */
+        @Suppress("UNUSED_PARAMETER")
+        fun decoupleAppEnergyAndTimes(
+            totalEnergy: Float,
+            foregroundMs: Long,
+            backgroundMs: Long,
+            cpuMs: Long,
+            dischargeMs: Long,
+            isGame: Boolean = false
+        ): Triple<Float, Float, Long> {
+            val effectiveBg = if (backgroundMs > 0L) {
+                backgroundMs.coerceAtMost(dischargeMs)
+            } else if (cpuMs > foregroundMs) {
+                (cpuMs - foregroundMs).coerceAtMost(dischargeMs)
+            } else {
+                0L
+            }
+
+            if (totalEnergy <= 0.0001f) {
+                return Triple(0f, 0f, effectiveBg)
+            }
+
+            // 1. 纯后台应用：前台无运行时长，总能量如实归属于后台消耗
+            if (foregroundMs <= 0L) {
+                return Triple(0f, totalEnergy, effectiveBg)
+            }
+
+            // 2. 纯前台应用（无后台活跃工时）：能量全部归属于前台物理放电
+            if (effectiveBg <= 0L) {
+                return Triple(totalEnergy, 0f, 0L)
+            }
+
+            // 3. 既有前台也有后台的混合应用（如微信、系统服务、GKD等）：
+            // 依据前台活跃时长与后台有效工时的客观真实比例科学解耦分配能量，杜绝将整天后台能耗全扣在毫秒级前台头上
+            val totalWorkMs = (foregroundMs + effectiveBg).toDouble()
+            val fgRatio = (foregroundMs.toDouble() / totalWorkMs).toFloat()
+            val fgEnergyWh = (totalEnergy * fgRatio).coerceAtLeast(0f)
+            val bgEnergyWh = (totalEnergy - fgEnergyWh).coerceAtLeast(0f)
+
+            return Triple(fgEnergyWh, bgEnergyWh, effectiveBg)
+        }
     }
 }

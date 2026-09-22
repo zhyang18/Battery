@@ -140,10 +140,38 @@ class BatteryMonitorService : Service() {
                 Intent.ACTION_SCREEN_OFF -> {
                     // 屏幕熄灭瞬间：
                     cachedIsInteractive = false
-                    // 1. 将内存采样点异步刷盘固化，防止异常退出导致轨迹丢失
+
+                    // 1. 在灭屏瞬间立即采样并记录息屏物理采样点，截断亮屏放电状态，消除休眠大断层被误判为亮屏能耗的问题
+                    if (!cachedIsCharging) {
+                        val powerManager = PowerUsageManager.getInstance(appContext)
+                        val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
+                            context = this@BatteryMonitorService,
+                            fallbackVoltageVolts = cachedVoltageVolts,
+                            fallbackTempCelsius = cachedTemperature
+                        )
+                        val pWatts = hwSample?.powerWatts ?: (cachedScreenOffDischargePowerWatts ?: 0f)
+                        val curVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
+                        val curTemp = hwSample?.temperatureCelsius ?: cachedTemperature
+                        if (hwSample?.voltageVolts != null) cachedVoltageVolts = curVolt
+                        if (hwSample?.temperatureCelsius != null) cachedTemperature = curTemp
+                        if (hwSample?.powerWatts != null) {
+                            cachedScreenOffDischargePowerWatts = pWatts
+                            cachedDischargePowerWatts = pWatts
+                        }
+                        powerManager.recordDischargeRealtimeSample(
+                            timestamp = System.currentTimeMillis(),
+                            batteryLevel = cachedLevelPercent,
+                            voltageVolts = curVolt,
+                            temperature = curTemp,
+                            powerWatts = pWatts,
+                            isScreenOn = false
+                        )
+                    }
+
+                    // 2. 将内存采样点异步刷盘固化，防止异常退出导致轨迹丢失
                     PowerUsageManager.getInstance(appContext).flushDischargeSamplesToDisk()
 
-                    // 2. 检查息屏待机策略：若为智能省电模式（<=0L），无论是充电还是放电，彻底停止轮询协程，完全释放 CPU 休眠
+                    // 3. 检查息屏待机策略：若为智能省电模式（<=0L），无论是充电还是放电，彻底停止轮询协程，完全释放 CPU 休眠
                     val screenOffInterval = getScreenOffIntervalMs(appContext)
                     if (screenOffInterval <= 0L) {
                         monitorSamplingJob?.cancel()

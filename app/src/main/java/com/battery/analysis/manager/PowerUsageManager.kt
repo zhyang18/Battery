@@ -262,13 +262,68 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val segmentEnergyWh = avgWatts * (dt.toDouble() / 3600000.0)
                 totalDurationMs += dt
 
-                if (prev.isScreenOn) {
-                    screenOnDurationMs += dt
-                    screenOnEnergyWh += segmentEnergyWh
+                val isPrevOn = prev.isScreenOn
+                val isCurrOn = current.isScreenOn
+
+                if (isPrevOn && isCurrOn) {
+                    // 双亮屏切片：
                     if (dt <= confidenceThresholdMs) {
+                        // 高置信连续亮屏切片
+                        screenOnDurationMs += dt
+                        screenOnEnergyWh += segmentEnergyWh
                         screenOnConfidentEnergyWh += segmentEnergyWh
+                    } else {
+                        // 亮屏长间隔大断层：在屏幕持续点亮交互状态下绝不可能连续数十秒不采样，说明中间发生了关屏深度休眠或后台服务暂停
+                        val edgeOnMs = minOf(recordIntervalMs, dt / 2)
+                        val edgeOnEnergyWh = (prev.powerWatts * (edgeOnMs / 3600000.0)) + (current.powerWatts * (edgeOnMs / 3600000.0))
+                        screenOnDurationMs += (edgeOnMs * 2)
+                        screenOnEnergyWh += edgeOnEnergyWh
+                        val gapOffMs = dt - (edgeOnMs * 2)
+                        if (gapOffMs > 0L) {
+                            screenOffDurationMs += gapOffMs
+                            screenOffLongIntervals.add(LongIntervalSample(0.0, gapOffMs))
+                        }
+                    }
+                } else if (isPrevOn && !isCurrOn) {
+                    // 亮屏转息屏（灭屏过渡切片）
+                    val onMs = minOf(recordIntervalMs, dt)
+                    val onEnergy = prev.powerWatts * (onMs / 3600000.0)
+                    screenOnDurationMs += onMs
+                    screenOnEnergyWh += onEnergy
+                    val offMs = dt - onMs
+                    if (offMs > 0L) {
+                        screenOffDurationMs += offMs
+                        val offEnergy = current.powerWatts * (offMs / 3600000.0)
+                        screenOffEnergyWh += offEnergy
+                        if (offMs <= confidenceThresholdMs) {
+                            screenOffConfidentEnergyWh += offEnergy
+                            screenOffConfidentDurationMs += offMs
+                            screenOffShortIntervalPowers.add(WeightedPowerSample(current.powerWatts.toDouble(), offMs))
+                        } else {
+                            screenOffLongIntervals.add(LongIntervalSample(offEnergy, offMs))
+                        }
+                    }
+                } else if (!isPrevOn && isCurrOn) {
+                    // 息屏转亮屏（唤醒过渡切片）
+                    val onMs = minOf(recordIntervalMs, dt)
+                    val onEnergy = current.powerWatts * (onMs / 3600000.0)
+                    screenOnDurationMs += onMs
+                    screenOnEnergyWh += onEnergy
+                    val offMs = dt - onMs
+                    if (offMs > 0L) {
+                        screenOffDurationMs += offMs
+                        val offEnergy = prev.powerWatts * (offMs / 3600000.0)
+                        screenOffEnergyWh += offEnergy
+                        if (offMs <= confidenceThresholdMs) {
+                            screenOffConfidentEnergyWh += offEnergy
+                            screenOffConfidentDurationMs += offMs
+                            screenOffShortIntervalPowers.add(WeightedPowerSample(prev.powerWatts.toDouble(), offMs))
+                        } else {
+                            screenOffLongIntervals.add(LongIntervalSample(offEnergy, offMs))
+                        }
                     }
                 } else {
+                    // 纯息屏切片
                     screenOffDurationMs += dt
                     screenOffEnergyWh += segmentEnergyWh
                     if (dt <= confidenceThresholdMs) {
@@ -2285,8 +2340,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val curr = sortedSamples[i]
                 val dt = curr.timestamp - prev.timestamp
 
-                // 仅对合理时间间隔（1ms ~ 120s）进行连续切片数值梯形微积分
-                if (dt in 1L..120_000L) {
+                // 仅对屏幕点亮状态且合理时间间隔（1ms ~ 120s）进行前台切片连续梯形微积分，
+                // 严禁将息屏休眠切片（0.1W~0.2W）计入前台应用累加器，彻底杜绝应用 AVG 功耗被待机低功耗严重拉低跳变
+                val isScreenActive = prev.isScreenOn && curr.isScreenOn
+                if (isScreenActive && dt in 1L..120_000L) {
                     val sliceStart = prev.timestamp
                     val sliceEnd = curr.timestamp
                     val midTs = (sliceStart + sliceEnd) / 2
@@ -2333,7 +2390,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                             }
                         }
                     } else {
-                        // 2. 无重叠区间时（如 UsageStats 未采集到或未授权）：使用采样点前台包名
+                        // 2. 无重叠区间时（如 UsageStats 未采集到或未授权）：仅在屏幕点亮时使用采样点前台包名
                         val matchedPkg = curr.packageName?.takeIf { it.isNotEmpty() }
                             ?: prev.packageName?.takeIf { it.isNotEmpty() }
                             ?: appIntervals.firstOrNull { midTs in it.startTs..it.endTs }?.packageName
@@ -2354,10 +2411,10 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
         }
 
-        // 针对单点采样落入区间的补充统计（如果梯形时长为0，但有点落在区间内或自带包名）
+        // 针对单点采样落入区间的补充统计（必须为亮屏状态点）
         if (sortedSamples.isNotEmpty()) {
             for (sample in sortedSamples) {
-                if (sample.powerWatts > 0f) {
+                if (sample.powerWatts > 0f && sample.isScreenOn) {
                     for (interval in appIntervals) {
                         if (sample.timestamp in interval.startTs..interval.endTs) {
                             val acc = appSliceMap.getOrPut(interval.packageName) { SliceAccumulator() }
@@ -2435,7 +2492,12 @@ class PowerUsageManager private constructor(private val context: Context) {
                     val avgSampleScreenWatts = sortedSamples.filter { it.isScreenOn && it.powerWatts > 0f }
                         .map { it.powerWatts }.takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 0f
                     val baselineWatts = if (screenOnWatts > 0.05f) screenOnWatts else if (avgSampleScreenWatts > 0.05f) avgSampleScreenWatts else 0f
-                    val fallbackWatts = windowAvgWatts ?: selfCalcWatts ?: baselineWatts
+                    // 毫秒级极短前台应用（如 System UI 14ms、GKD 1s）硬件上无法分离独立瞬时放电，如实对齐亮屏放电基准功率
+                    val fallbackWatts = if (item.foregroundTimeMs < 2000L) {
+                        windowAvgWatts ?: baselineWatts
+                    } else {
+                        windowAvgWatts ?: selfCalcWatts ?: baselineWatts
+                    }
 
                     finalFgWatts = (Math.round(fallbackWatts * 100f) / 100f).coerceAtLeast(0f)
                     finalFgEnergy = (finalFgWatts * fgHours).coerceAtLeast(0f)

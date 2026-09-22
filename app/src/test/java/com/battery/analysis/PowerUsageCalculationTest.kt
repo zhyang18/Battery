@@ -2221,6 +2221,139 @@ class PowerUsageCalculationTest {
         assertEquals("纯息屏场景下亮屏功耗为 0", 0f, onStats.screenOffPowerWatts, 0.001f)
         assertEquals("纯息屏场景下 2 小时 0.2W 能耗约为 0.4Wh", 0.4f, offStats.totalDisplayEnergyWh, 0.05f)
     }
+
+    /**
+     * 验证系统服务与无障碍后台应用（如 System UI 14ms、GKD 1s）的能量解耦机制：
+     * 1. 消除将整天累积的后台能耗全扣在毫秒级前台工时上的严重缺陷；
+     * 2. 避免前台平均功耗除法暴涨至数万瓦（如 36000W）；
+     * 3. 前台真实能量客观微小（<0.001Wh），后台累积能量如实沉淀。
+     */
+    @Test
+    fun testShortForegroundEnergyDecouplingPreventsWattsExplosion() {
+        // 1. 模拟系统用户界面：前台 14ms，后台 13 小时（46,800,000ms），总能耗 0.140Wh
+        val (sysFgEnergy, sysBgEnergy, sysBgMs) = com.battery.analysis.provider.ShizukuBatteryStatsParser.decoupleAppEnergyAndTimes(
+            totalEnergy = 0.140f,
+            foregroundMs = 14L,
+            backgroundMs = 46_800_000L,
+            cpuMs = 3_600_000L,
+            dischargeMs = 50_000_000L
+        )
+
+        assertTrue("系统用户界面前台能量应微小（远小于 0.001Wh）", sysFgEnergy < 0.0001f)
+        assertTrue("系统用户界面绝大部分能耗归属于后台能耗", sysBgEnergy > 0.139f)
+        assertEquals("后台工时被如实记录", 46_800_000L, sysBgMs)
+
+        // 计算此时前台功耗率：绝不再是 36,000W
+        val fgHours = 14L / 3600000.0
+        val fgWatts = (sysFgEnergy / fgHours).toFloat()
+        assertTrue("前台放电功耗率处于正常低功耗范围（绝不超过 1W）", fgWatts < 1.0f)
+
+        // 2. 模拟 GKD 无障碍应用：前台 1s，后台 10 小时（36,000,000ms），总能耗 0.132Wh
+        val (gkdFgEnergy, gkdBgEnergy, _) = com.battery.analysis.provider.ShizukuBatteryStatsParser.decoupleAppEnergyAndTimes(
+            totalEnergy = 0.132f,
+            foregroundMs = 1000L,
+            backgroundMs = 36_000_000L,
+            cpuMs = 1_800_000L,
+            dischargeMs = 50_000_000L
+        )
+
+        assertTrue("GKD 前台能量应微小（远小于 0.001Wh）", gkdFgEnergy < 0.0001f)
+        assertTrue("GKD 绝大部分能耗归属于后台能耗", gkdBgEnergy > 0.131f)
+        val gkdFgHours = 1000L / 3600000.0
+        val gkdFgWatts = (gkdFgEnergy / gkdFgHours).toFloat()
+        assertTrue("GKD 前台功耗处于正常低功耗范围（绝不再是 376W）", gkdFgWatts < 1.0f)
+    }
+
+    /**
+     * 验证包含长深度休眠断层时，亮屏能量与功耗保持真实稳定，杜绝休眠大断层全额计入亮屏能耗突破电池容量。
+     */
+    @Test
+    fun testDischargeStatsWithSleepGapsPreservesScreenOnEnergy() {
+        val baseTs = 1710000000000L
+        val samples = mutableListOf<PowerDischargePoint>()
+
+        // 1. 阶段一：前 30 分钟亮屏（每 2 秒一个采样点，2.0W 功耗）
+        var curTs = baseTs
+        for (i in 0 until 900) {
+            samples.add(
+                PowerDischargePoint(
+                    timestamp = curTs,
+                    elapsedHours = (curTs - baseTs) / 3600_000f,
+                    batteryLevel = 100,
+                    voltageVolts = 4.0f,
+                    temperature = 35.0f,
+                    powerWatts = 2.0f,
+                    activeAppIcons = emptyList(),
+                    isScreenOn = true,
+                    activeAppNames = emptyList()
+                )
+            )
+            curTs += 2000L
+        }
+
+        // 2. 灭屏瞬间打点（模拟锁屏瞬间的 isScreenOn = false 物理采样点）
+        samples.add(
+            PowerDischargePoint(
+                timestamp = curTs,
+                elapsedHours = (curTs - baseTs) / 3600_000f,
+                batteryLevel = 98,
+                voltageVolts = 3.95f,
+                temperature = 34.0f,
+                powerWatts = 0.25f,
+                activeAppIcons = emptyList(),
+                isScreenOn = false,
+                activeAppNames = emptyList()
+            )
+        )
+
+        // 3. 阶段二：长达 8 小时黑夜深度休眠断层（直到 8 小时后被心跳唤醒采到一个息屏待机点）
+        curTs += 8 * 3600_000L
+        samples.add(
+            PowerDischargePoint(
+                timestamp = curTs,
+                elapsedHours = (curTs - baseTs) / 3600_000f,
+                batteryLevel = 90,
+                voltageVolts = 3.9f,
+                temperature = 26.0f,
+                powerWatts = 0.15f,
+                activeAppIcons = emptyList(),
+                isScreenOn = false,
+                activeAppNames = emptyList()
+            )
+        )
+
+        // 4. 阶段三：早晨唤醒后 30 分钟亮屏（每 2 秒一个点，2.2W）
+        for (i in 0 until 900) {
+            samples.add(
+                PowerDischargePoint(
+                    timestamp = curTs,
+                    elapsedHours = (curTs - baseTs) / 3600_000f,
+                    batteryLevel = 89,
+                    voltageVolts = 3.85f,
+                    temperature = 33.0f,
+                    powerWatts = 2.2f,
+                    activeAppIcons = emptyList(),
+                    isScreenOn = true,
+                    activeAppNames = emptyList()
+                )
+            )
+            curTs += 2000L
+        }
+
+        val stats = PowerUsageManager.computeDischargePowerStats(samples)!!
+        // 总亮屏时长约为 1 小时（30m + 30m）
+        val screenOnHours = stats.screenOnDurationMs / 3600_000.0
+        assertTrue("亮屏时长应约为 1 小时左右（绝不能被休眠断层膨胀为 9 小时）", screenOnHours in 0.9..1.1)
+
+        // 亮屏平均功耗应严格反映 2.0W~2.2W 的真实硬件亮屏放电功耗
+        assertEquals("亮屏平均功耗应稳定在 2.1W 左右", 2.1f, stats.screenOnPowerWatts, 0.2f)
+
+        // 亮屏总能量应严格约为 2.1W * 1h ≈ 2.1Wh（绝不能虚增到 15Wh+）
+        assertTrue("亮屏总能量应接近真实物理消耗（2.0Wh~2.4Wh）", stats.screenOnDisplayEnergyWh in 1.9f..2.5f)
+
+        // 息屏待机功耗应稳定在 0.15W~0.25W
+        assertTrue("息屏平均功耗应在 0.1W~0.3W 之间", stats.screenOffPowerWatts in 0.1f..0.3f)
+    }
 }
 
 

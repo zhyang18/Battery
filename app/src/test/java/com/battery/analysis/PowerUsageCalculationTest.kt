@@ -7,6 +7,7 @@ import org.junit.Test
 import java.util.regex.Pattern
 import com.battery.analysis.model.AppPowerUsageItem
 import com.battery.analysis.model.PowerDischargePoint
+import com.battery.analysis.model.PowerUsageRecord
 import com.battery.analysis.manager.PowerUsageManager
 
 /**
@@ -2353,6 +2354,60 @@ class PowerUsageCalculationTest {
 
         // 息屏待机功耗应稳定在 0.15W~0.25W
         assertTrue("息屏平均功耗应在 0.1W~0.3W 之间", stats.screenOffPowerWatts in 0.1f..0.3f)
+    }
+
+    /**
+     * 验证耗电记录历史列表项中亮屏时间展示逻辑：
+     * 1. 当记录自带格式化亮屏时长文本时，优先且直接返回该文本；
+     * 2. 当亮屏时长文本为空但折线点集包含有效亮屏点时，根据点集时序间隔计算出时长文本；
+     * 3. 当完全无有效数据时，遵循如实反映原则返回未知占位符 "--"。
+     */
+    @Test
+    fun testPowerUsageRecordDisplayScreenOnDuration() {
+        // 场景 1：实体中已存在亮屏时长文本
+        val record1 = PowerUsageRecord(
+            recordTime = "2026-09-22 16:50:00",
+            levelPercent = 34,
+            voltageVolts = 3.85f,
+            temperature = 35.0f,
+            energyWh = 15.0f,
+            isCharging = false,
+            avgPowerWatts = 1.32f,
+            screenOnPowerWatts = 1.32f,
+            screenOffPowerWatts = 0.15f,
+            screenOnDurationText = "1h55m",
+            screenOffDurationText = "20m",
+            totalDurationText = "2h15m",
+            remainingScreenOnText = "11h",
+            remainingCompositeText = "11h",
+            remainingScreenOffText = "100h",
+            isShizukuRealData = true,
+            appCount = 5,
+            trendPointsJson = "[]",
+            appListJson = "[]"
+        )
+        assertEquals("1h55m", record1.getDisplayScreenOnDuration())
+
+        // 场景 2：亮屏文本为空，但点集有时序采样（例如亮屏持续 40 分钟 = 2400000ms）
+        val baseTs = 1710000000000L
+        val pointsJson = """
+            [
+                {"ts":$baseTs,"screenOn":true},
+                {"ts":${baseTs + 2400000L},"screenOn":false}
+            ]
+        """.trimIndent()
+        val record2 = record1.copy(
+            screenOnDurationText = "",
+            trendPointsJson = pointsJson
+        )
+        assertEquals("40m0s", record2.getDisplayScreenOnDuration())
+
+        // 场景 3：无有效亮屏文本且无点集数据时，如实返回未知占位符 "--"
+        val record3 = record1.copy(
+            screenOnDurationText = "",
+            trendPointsJson = "[]"
+        )
+        assertEquals("--", record3.getDisplayScreenOnDuration())
     }
 }
 

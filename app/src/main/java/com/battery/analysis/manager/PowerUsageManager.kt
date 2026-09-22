@@ -3477,28 +3477,39 @@ class PowerUsageManager private constructor(private val context: Context) {
      * 将全量耗电数据包转换为功耗时间轴状态模型。
      * 时间轴严格以开始这次放电时间（最近一次拔电时刻）为起点，当前时刻为终点。
      *
+     * 将包含采样点与应用列表的完整数据包转换为功耗时间轴状态模型 [BatteryTimelineState]。
+     *
      * @param fullPackage 包含采样点与应用列表的完整数据包 [FullPowerDataPackage]
      * @param metric 默认选中的指标类型，默认为 POWER [TimelineMetric]
+     * @param isHistoryRecord 是否为历史快照记录，若为 true 则强制使用快照自身的起止时间与数据点构建时间轴
      * @return 转换后的时间轴状态模型 [BatteryTimelineState]
      */
     fun buildTimelineState(
         fullPackage: FullPowerDataPackage,
-        metric: TimelineMetric = TimelineMetric.POWER
+        metric: TimelineMetric = TimelineMetric.POWER,
+        isHistoryRecord: Boolean = false
     ): BatteryTimelineState {
         val points = fullPackage.trendPoints
         val now = System.currentTimeMillis()
         val unplugTime = getLastUnplugTime()
 
-        // 判断是否为历史快照记录（只有在显式快照或点集首尾均在24小时以前时）
-        val isHistoryRecord = points.isNotEmpty() && points.last().timestamp < (now - 3600_000L * 24)
+        // 判断是否为历史快照记录（调用方显式指定，或点集最后时间早于当前拔电时刻，或点集首尾均在24小时以前）
+        val isHistory = isHistoryRecord || (points.isNotEmpty() && (points.last().timestamp < (now - 3600_000L * 24) || (unplugTime > 0L && points.last().timestamp < unplugTime)))
 
-        // 确定时间轴起点与终点：以开始这次放电时间为起点，当前时间为终点
+        // 确定时间轴起点与终点：历史记录严格取快照点集首尾时间戳，实时放电取当前拔电时刻与当前时刻
         val startTs: Long
         val endTs: Long
 
-        if (isHistoryRecord) {
-            startTs = points.first().timestamp
-            endTs = points.last().timestamp
+        if (isHistory) {
+            val durMs = if (fullPackage.overviewStats.totalDurationMs > 0L) {
+                fullPackage.overviewStats.totalDurationMs
+            } else {
+                ShizukuBatteryStatsParser.parseDurationStringToMs(fullPackage.overviewStats.totalDurationText)
+            }
+            val firstTs = points.firstOrNull()?.timestamp ?: (now - durMs)
+            val lastTs = points.lastOrNull()?.timestamp ?: now
+            startTs = if (firstTs < lastTs) firstTs else (lastTs - durMs).coerceAtLeast(0L)
+            endTs = maxOf(lastTs, startTs + 1000L)
         } else {
             val effectiveUnplug = if (unplugTime in 1..now) unplugTime else (points.firstOrNull()?.timestamp ?: (now - 3600_000L))
             startTs = effectiveUnplug
@@ -3509,9 +3520,15 @@ class PowerUsageManager private constructor(private val context: Context) {
         val samples = mutableListOf<BatterySample>()
         if (points.isNotEmpty()) {
             val firstPt = points.first()
-            val initialLevel = getLastUnplugLevel()
             val snap = fullPackage.batterySnapshot
             val lastPt = points.last()
+
+            val initialLevel = if (isHistory) {
+                if (fullPackage.startLevelPercent in 1..100) fullPackage.startLevelPercent else firstPt.batteryLevel
+            } else {
+                val unplugLvl = getLastUnplugLevel()
+                if (unplugLvl in 1..100) unplugLvl else firstPt.batteryLevel
+            }
 
             // 根据整机平均功耗与当前电压估算放电电流（取代硬编码 500mA）
             val estAvgCurrentMa = if (snap.voltageVolts > 0.5f) {
@@ -3524,7 +3541,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             samples.add(
                 BatterySample(
                     timestamp = startTs,
-                    batteryLevel = if (initialLevel in 1..100) initialLevel else firstPt.batteryLevel,
+                    batteryLevel = initialLevel,
                     voltageMv = (firstPt.voltageVolts * 1000).toInt(),
                     currentMa = if (firstPt.voltageVolts > 0.5f) (firstPt.powerWatts * 1000.0 / firstPt.voltageVolts) else estAvgCurrentMa,
                     temperatureC = firstPt.temperature.toDouble(),
@@ -3550,7 +3567,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
             }
 
-            // 必须包含终点采样点 (endTs)
             // 包含终点采样点 (endTs)
             if (endTs > startTs) {
                 val latestPwrMw = if (lastPt.powerWatts > 0.05f) {
@@ -3560,13 +3576,21 @@ class PowerUsageManager private constructor(private val context: Context) {
                 } else {
                     0.0
                 }
+                val finalLevel = if (isHistory) lastPt.batteryLevel else snap.levelPercent
+                val finalVoltMv = if (isHistory) {
+                    if (lastPt.voltageVolts > 0f) (lastPt.voltageVolts * 1000).toInt() else (snap.voltageVolts * 1000).toInt()
+                } else {
+                    if (snap.voltageVolts > 0f) (snap.voltageVolts * 1000).toInt() else (lastPt.voltageVolts * 1000).toInt()
+                }
+                val finalTemp = if (isHistory) lastPt.temperature.toDouble() else snap.temperature.toDouble()
+
                 samples.add(
                     BatterySample(
                         timestamp = endTs,
-                        batteryLevel = snap.levelPercent,
-                        voltageMv = if (snap.voltageVolts > 0f) (snap.voltageVolts * 1000).toInt() else (lastPt.voltageVolts * 1000).toInt(),
+                        batteryLevel = finalLevel,
+                        voltageMv = finalVoltMv,
                         currentMa = estAvgCurrentMa,
-                        temperatureC = snap.temperature.toDouble(),
+                        temperatureC = finalTemp,
                         powerMw = latestPwrMw
                     )
                 )
@@ -3705,7 +3729,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         // 5. 实时监控状态闭合校准：确保最新时刻（endTs / now）若处于亮屏状态，前台应用事件与 endTs 完全闭合对齐
-        if (!isHistoryRecord && endTs >= now - 120_000L && screenEvents.any { it.isScreenOn && it.endTime >= endTs - 10_000L }) {
+        if (!isHistory && endTs >= now - 120_000L && screenEvents.any { it.isScreenOn && it.endTime >= endTs - 10_000L }) {
             val lastAppEvent = appEvents.maxByOrNull { it.endTime }
             if (lastAppEvent != null && lastAppEvent.endTime < endTs && lastAppEvent.endTime >= endTs - 60_000L) {
                 // 若末尾最后一个事件与当前时间接近，直接闭合其 endTime 到 endTs

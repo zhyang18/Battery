@@ -11,7 +11,7 @@ import java.util.Locale
 
 /**
  * 耗电历史记录单行列表适配器。
- * 遵循现代化双行双列设计图样式渲染，展示起止时间范围、放电时长与电量变化区间、平均亮屏功耗数值与说明标签。
+ * 遵循现代化双行双列设计图样式渲染，展示起止时间范围、放电时长与电量变化区间、平均放电功耗数值与亮屏时间显示。
  * 支持点击条目跳转详情页面，并支持长按条目触发删除操作。
  *
  * @param onItemClick 点击列表项回调函数，触发详情页面跳转或快照载入
@@ -183,8 +183,8 @@ class PowerHistoryAdapter(
             // 3. 左下：时长与电量变化区间（如 "46m · 76%~69%(-7%)"）
             binding.tvHistorySubInfo.text = record.getFormattedDurationAndLevel()
 
-            // 4. 右下：功耗说明标签（如 "平均亮屏功耗"）
-            binding.tvHistoryPowerLabel.text = record.getDisplayPowerLabel()
+            // 4. 右下：亮屏时间数值（与右上角平均功耗值保持相同的大字粗体样式，如 "1h55m"）
+            binding.tvHistoryScreenOnTime.text = record.getDisplayScreenOnDuration()
 
             // 5. 多选删除选择框显示与选中联动
             if (isSelectionMode) {

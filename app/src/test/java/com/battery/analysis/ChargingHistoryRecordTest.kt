@@ -200,4 +200,37 @@ class ChargingHistoryRecordTest {
         }
         assertTrue(positiveEnergyWh > 0.0)
     }
+
+    /**
+     * 测试亮屏充电时长的物理差值计算及多时段友好文本格式化输出。
+     */
+    @Test
+    fun testScreenOnDurationCalculationAndFormatting() {
+        val record1 = ChargingHistoryRecord(
+            id = 1700000000000L,
+            recordTime = "2026-09-22 17:00:00",
+            startTimestamp = 1700000000000L,
+            endTimestamp = 1700000430000L,
+            durationMs = 430000L,
+            startLevel = 50,
+            endLevel = 55,
+            levelGain = 5,
+            chargedEnergyWh = 2.0f,
+            avgPowerWatts = 18.0f,
+            maxPowerWatts = 20.0f,
+            maxTemperature = 35.0f,
+            chargeType = "交流快充",
+            screenOffDurationMs = 0L
+        )
+        assertEquals(430000L, record1.getScreenOnDurationMs())
+        assertEquals("7m10s", record1.getFormattedScreenOnDuration())
+
+        val record2 = record1.copy(
+            durationMs = 5130000L,
+            screenOffDurationMs = 1210000L
+        )
+        assertEquals(3920000L, record2.getScreenOnDurationMs())
+        assertEquals("1h5m20s", record2.getFormattedScreenOnDuration())
+    }
 }
+

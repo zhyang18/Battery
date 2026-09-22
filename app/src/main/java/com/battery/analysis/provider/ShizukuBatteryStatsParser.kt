@@ -1279,44 +1279,6 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         return Triple(safeFg, safeBg, safeCpu)
     }
 
-    /**
-     * 将持续时间文本（如 "1d 2h 30m 45s"、"58m45s"、"19m 38s" 或 "500ms"）解析为毫秒数。
-     * 使用严谨的正则 Token 匹配，杜绝毫秒 ms 的 'm' 被当做分钟误匹配。
-     *
-     * @param durationStr 时间文本字符串
-     * @return 解析得到的毫秒数值
-     */
-    fun parseDurationStringToMs(durationStr: String): Long {
-        var totalMs = 0L
-        val clean = durationStr.trim()
-        if (clean.isBlank()) return 0L
-
-        // 优先匹配 ms，再匹配 d, h, m, s，防止 ms 的 'm' 被当做分钟误匹配
-        val regex = Regex("(\\d+)\\s*(ms|d|h|m|s)", RegexOption.IGNORE_CASE)
-        val matches = regex.findAll(clean)
-        var matchedAny = false
-        for (match in matches) {
-            matchedAny = true
-            val value = match.groupValues[1].toLongOrNull() ?: continue
-            val unit = match.groupValues[2].lowercase()
-            when (unit) {
-                "d" -> totalMs += value * 86400000L
-                "h" -> totalMs += value * 3600000L
-                "m" -> totalMs += value * 60000L
-                "s" -> totalMs += value * 1000L
-                "ms" -> totalMs += value
-            }
-        }
-
-        if (!matchedAny) {
-            val pureNumber = clean.toLongOrNull()
-            if (pureNumber != null) {
-                totalMs = pureNumber
-            }
-        }
-
-        return totalMs
-    }
 
     /**
      * 解析 dumpsys batterystats --checkin 原始输出，提取所有 UID 的硬件消耗细节（CPU、网络、唤醒锁、GPS、前台服务）。
@@ -1726,6 +1688,45 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             val bgEnergyWh = (totalEnergy - fgEnergyWh).coerceAtLeast(0f)
 
             return Triple(fgEnergyWh, bgEnergyWh, effectiveBg)
+        }
+
+        /**
+         * 将持续时间文本（如 "1d 2h 30m 45s"、"58m45s"、"19m 38s" 或 "500ms"）解析为毫秒数。
+         * 使用严谨的正则 Token 匹配，杜绝毫秒 ms 的 'm' 被当做分钟误匹配。
+         *
+         * @param durationStr 时间文本字符串
+         * @return 解析得到的毫秒数值
+         */
+        fun parseDurationStringToMs(durationStr: String): Long {
+            var totalMs = 0L
+            val clean = durationStr.trim()
+            if (clean.isBlank()) return 0L
+
+            // 优先匹配 ms，再匹配 d, h, m, s，防止 ms 的 'm' 被当做分钟误匹配
+            val regex = Regex("(\\d+)\\s*(ms|d|h|m|s)", RegexOption.IGNORE_CASE)
+            val matches = regex.findAll(clean)
+            var matchedAny = false
+            for (match in matches) {
+                matchedAny = true
+                val value = match.groupValues[1].toLongOrNull() ?: continue
+                val unit = match.groupValues[2].lowercase()
+                when (unit) {
+                    "d" -> totalMs += value * 86400000L
+                    "h" -> totalMs += value * 3600000L
+                    "m" -> totalMs += value * 60000L
+                    "s" -> totalMs += value * 1000L
+                    "ms" -> totalMs += value
+                }
+            }
+
+            if (!matchedAny) {
+                val pureNumber = clean.toLongOrNull()
+                if (pureNumber != null) {
+                    totalMs = pureNumber
+                }
+            }
+
+            return totalMs
         }
     }
 }

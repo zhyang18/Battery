@@ -453,6 +453,7 @@
     <string name="charging_history_clear_message">Are you sure you want to clear all charging history records?</string>
     <string name="charging_detail_title">Charging Session Details</string>
     <string name="charging_detail_total_duration">Total Duration</string>
+    <string name="charging_detail_screen_on_duration">Screen-on Duration</string>
     <string name="charging_detail_screen_off_duration">Screen-off Duration</string>
     <string name="charging_detail_battery_section">Battery &amp; Energy</string>
     <string name="charging_detail_level_change">Level Change</string>

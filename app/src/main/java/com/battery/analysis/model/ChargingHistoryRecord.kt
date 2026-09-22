@@ -62,6 +62,33 @@ data class ChargingHistoryRecord(
     }
 
     /**
+     * 计算亮屏充电持续时长（毫秒）。
+     * 由总充电时长与息屏充电时长的物理差值计算得到。
+     *
+     * @return 亮屏充电持续时长（毫秒）
+     */
+    fun getScreenOnDurationMs(): Long {
+        return (durationMs - screenOffDurationMs).coerceAtLeast(0L)
+    }
+
+    /**
+     * 格式化输出亮屏充电时长的友好文本（如 "10m15s" 或 "1h20m15s"）。
+     *
+     * @return 格式化后的亮屏持续时长字符串
+     */
+    fun getFormattedScreenOnDuration(): String {
+        val totalSec = (getScreenOnDurationMs() / 1000L).coerceAtLeast(0L)
+        val hours = totalSec / 3600L
+        val minutes = (totalSec % 3600L) / 60L
+        val seconds = totalSec % 60L
+        return if (hours > 0L) {
+            "${hours}h${minutes}m${seconds}s"
+        } else {
+            "${minutes}m${seconds}s"
+        }
+    }
+
+    /**
      * 格式化输出息屏充电时长的友好文本（如 "10m15s"）。
      *
      * @return 格式化后的息屏持续时长字符串

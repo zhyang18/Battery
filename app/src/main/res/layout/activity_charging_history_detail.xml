@@ -60,8 +60,8 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:clipToPadding="false"
-        android:paddingHorizontal="14dp"
-        android:paddingVertical="12dp">
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="5dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -82,7 +82,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="14dp">
+                    android:padding="10dp">
 
                     <!-- 1. 顶部 Header：充电类型与时段 -->
                     <LinearLayout
@@ -185,7 +185,7 @@
                         android:layout_marginVertical="12dp"
                         android:background="#14888888" />
 
-                    <!-- 3. 时长对比：总充电时长与息屏充电时长（息屏充电时长靠右对齐） -->
+                    <!-- 3. 时长对比：总充电时长、亮屏充电时长与息屏充电时长 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -217,8 +217,34 @@
                         </LinearLayout>
 
                         <LinearLayout
-                            android:layout_width="wrap_content"
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/charging_detail_screen_on_duration"
+                                android:textColor="?android:attr/textColorSecondary"
+                                android:textSize="12sp" />
+
+                            <TextView
+                                android:id="@+id/tv_screen_on_duration"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                tools:text="5m20s" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
                             android:gravity="end"
                             android:orientation="vertical">
 
@@ -405,7 +431,7 @@
                 android:id="@+id/card_charging_chart"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="5dp"
                 android:layout_marginBottom="16dp"
                 app:cardBackgroundColor="#14888888"
                 app:cardCornerRadius="14dp"
@@ -416,8 +442,8 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:paddingHorizontal="12dp"
-                    android:paddingTop="12dp"
+                    android:paddingHorizontal="10dp"
+                    android:paddingTop="10dp"
                     android:paddingBottom="10dp">
 
                     <!-- 自定义三合一（功率、电量、温度）折线图 -->

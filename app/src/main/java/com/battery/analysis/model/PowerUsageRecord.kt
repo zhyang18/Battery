@@ -294,6 +294,46 @@ data class PowerUsageRecord(
     }
 
     /**
+     * 获取设计图右下角展示的亮屏时间文本。
+     * 优先使用实体中记录的亮屏时长文本；若为空则尝试从放电折线点集计算亮屏时长，若仍无法获取则返回未知占位符 "--"。
+     *
+     * @return 格式化后的亮屏时长文本（如 "1h55m"、"46m" 或 "--"）
+     */
+    fun getDisplayScreenOnDuration(): String {
+        if (screenOnDurationText.isNotBlank()) {
+            return screenOnDurationText
+        }
+        try {
+            val jsonArray = JSONArray(trendPointsJson)
+            if (jsonArray.length() > 1) {
+                var totalScreenOnMs = 0L
+                for (i in 0 until jsonArray.length() - 1) {
+                    val p1 = jsonArray.getJSONObject(i)
+                    val p2 = jsonArray.getJSONObject(i + 1)
+                    val isScreenOn = p1.optBoolean("screenOn", true)
+                    if (isScreenOn) {
+                        val dt = (p2.optLong("ts", 0L) - p1.optLong("ts", 0L)).coerceAtLeast(0L)
+                        totalScreenOnMs += dt
+                    }
+                }
+                if (totalScreenOnMs > 0L) {
+                    val totalSec = totalScreenOnMs / 1000L
+                    val days = totalSec / 86400L
+                    val hours = (totalSec % 86400L) / 3600L
+                    val minutes = (totalSec % 3600L) / 60L
+                    val seconds = totalSec % 60L
+                    return when {
+                        days > 0L -> "${days}d${hours}h"
+                        hours > 0L -> "${hours}h${minutes}m"
+                        else -> "${minutes}m${seconds}s"
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return "--"
+    }
+
+    /**
      * 获取本次放电记录的总持续时长（单位：毫秒）。
      *
      * @return 转换后的持续时长毫秒数

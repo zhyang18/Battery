@@ -1471,7 +1471,7 @@ class PowerUsageFragment : Fragment() {
 
         // 构建并绑定功耗时间轴最新状态（多选模式，优先复用后台异步预构建的 timelineState 避免主线程卡顿）
         val selectedMetrics = binding.metricSelectorView.getSelectedMetrics()
-        val baseState = prebuiltTimelineState ?: powerManager.buildTimelineState(fullPackage)
+        val baseState = prebuiltTimelineState ?: powerManager.buildTimelineState(fullPackage, isHistoryRecord = isViewingSnapshot)
         val timelineState = baseState.copy(selectedMetrics = selectedMetrics)
         binding.batteryTimelineView.setState(timelineState)
 
@@ -1882,6 +1882,7 @@ class PowerUsageFragment : Fragment() {
                     .setMessage(
                         "充电接口：${record.chargeType}\n" +
                         "总充电时长：${record.getFormattedDuration()}\n" +
+                        "亮屏充电时长：${record.getFormattedScreenOnDuration()}\n" +
                         "息屏充电时长：${record.getFormattedScreenOffDuration()}\n" +
                         "电量变化：${record.startLevel}% → ${record.endLevel}% (+${record.levelGain}%)\n" +
                         "充入能量：+${String.format(Locale.getDefault(), "%.2f", record.chargedEnergyWh)} Wh\n" +
@@ -1986,12 +1987,18 @@ class PowerUsageFragment : Fragment() {
         isViewingSnapshot = true
         currentLoadedSnapshotTime = record.recordTime
 
+        // 确保切换至耗电模式并使核心放电容器与卡片呈现为可见状态
+        applySmartChargingMode(isCharging = false, showToast = false)
+
         binding.tvPowerSnapshotHint.text = getString(R.string.power_history_banner_format, record.recordTime)
         binding.layoutPowerSnapshotBanner.visibility = View.VISIBLE
+        binding.cardPowerMetrics.visibility = View.VISIBLE
+        binding.cardPowerMetrics.alpha = 1f
+        binding.cardPowerMetrics.translationY = 0f
 
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             val fullPackage = record.toFullPowerPackage(requireContext())
-            val timelineState = powerManager.buildTimelineState(fullPackage)
+            val timelineState = powerManager.buildTimelineState(fullPackage, isHistoryRecord = true)
             withContext(Dispatchers.Main) {
                 if (_binding != null) {
                     renderFullPowerData(fullPackage, timelineState)

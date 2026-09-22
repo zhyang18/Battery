@@ -115,6 +115,7 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
         binding.tvDetailTimeRange.text = record.getFormattedTimeRange()
 
         binding.tvTotalDuration.text = record.getFormattedDuration()
+        binding.tvScreenOnDuration.text = record.getFormattedScreenOnDuration()
         binding.tvScreenOffDuration.text = record.getFormattedScreenOffDuration()
 
         val sign = if (record.levelGain >= 0) "+${record.levelGain}%" else "${record.levelGain}%"

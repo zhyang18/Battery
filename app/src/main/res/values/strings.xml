@@ -454,6 +454,7 @@
     <string name="charging_history_clear_message">确定要清空所有已保存的充电历史记录吗？</string>
     <string name="charging_detail_title">充电会话详情</string>
     <string name="charging_detail_total_duration">总充电时长</string>
+    <string name="charging_detail_screen_on_duration">亮屏充电时长</string>
     <string name="charging_detail_screen_off_duration">息屏充电时长</string>
     <string name="charging_detail_battery_section">电量与充入能量</string>
     <string name="charging_detail_level_change">电量变化</string>

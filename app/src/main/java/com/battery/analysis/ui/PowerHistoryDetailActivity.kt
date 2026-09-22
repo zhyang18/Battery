@@ -2,6 +2,9 @@ package com.battery.analysis.ui
 
 import android.graphics.Color
 import android.os.Bundle
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.AbsoluteSizeSpan
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -146,21 +149,6 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 格式化瓦时能量为人类可读字符串，精确到小数点后三位（如 "2.710Wh"、"3.460Wh"、"0.000Wh" 或 "<0.001Wh"）。
-     *
-     * @param wh 待格式化的瓦时能量数值
-     * @return 格式化后的三位小数能量展示文本
-     */
-    private fun formatOverviewEnergy(wh: Float): String {
-        return if (wh <= 0f) {
-            "0.000Wh"
-        } else if (wh < 0.001f) {
-            "<0.001Wh"
-        } else {
-            String.format(Locale.getDefault(), "%.3fWh", wh)
-        }
-    }
 
     /**
      * 将解析后的完整耗电数据包绑定并渲染至卡片、图表与列表中。
@@ -186,63 +174,163 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         binding.tvDetailVoltage.text = String.format(Locale.getDefault(), "%.2f V", record.voltageVolts)
         binding.tvDetailEnergy.text = String.format(Locale.getDefault(), "%.1f Wh", record.energyWh)
 
-        // 2. 卡片 2：三维指标与后台指标（低于 0.05W 统一规范展示为 "--" 杜绝显示 0.00W 误导用户）
-        val onEnergyStr = formatOverviewEnergy(record.screenOnEnergyWh)
-        val totalEnergyStr = formatOverviewEnergy(record.totalEnergyWh)
-        val offEnergyStr = formatOverviewEnergy(record.screenOffEnergyWh)
-        val bgEnergyStr = formatOverviewEnergy(record.backgroundEnergyWh)
+        // 2. 卡片 2：三维核心功耗与续航指标（与耗电页顶部卡片一致，按亮屏 / 息屏 / 全局三行呈现）
+        val onEnergy = record.screenOnEnergyWh
+        val offEnergy = record.screenOffEnergyWh
+        val totalEnergy = record.totalEnergyWh
 
-        val onPwrStr = if (record.screenOnPowerWatts >= 0.05f) String.format(Locale.getDefault(), "%.2fW", record.screenOnPowerWatts) else "--"
-        val avgPwrStr = if (record.avgPowerWatts >= 0.05f) String.format(Locale.getDefault(), "%.2fW", record.avgPowerWatts) else "--"
-        val offPwrStr = if (record.screenOffPowerWatts >= 0.05f) String.format(Locale.getDefault(), "%.2fW", record.screenOffPowerWatts) else "--"
-        val bgPwrStr = if (record.backgroundPowerWatts >= 0.05f) String.format(Locale.getDefault(), "%.2fW", record.backgroundPowerWatts) else "--"
+        val onRatioStr = if (totalEnergy > 0f) {
+            val ratio = (onEnergy / totalEnergy * 100f).coerceIn(0f, 100f)
+            String.format(Locale.getDefault(), "%.1f%%", ratio)
+        } else {
+            "0.0%"
+        }
 
-        binding.tvMetricPowerScreenOn.text = if (onPwrStr != "--" || record.screenOnEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), onPwrStr, onEnergyStr)
+        val offRatioStr = if (totalEnergy > 0f) {
+            val ratio = (offEnergy / totalEnergy * 100f).coerceIn(0f, 100f)
+            String.format(Locale.getDefault(), "%.1f%%", ratio)
+        } else {
+            "0.0%"
+        }
+
+        val onDurationMs = parseDurationTextToMs(record.screenOnDurationText)
+        val offDurationMs = parseDurationTextToMs(record.screenOffDurationText)
+        val totalDurationMs = parseDurationTextToMs(record.totalDurationText)
+
+        val onDurationStr = formatCardDuration(onDurationMs, record.screenOnDurationText)
+        val offDurationStr = formatCardDuration(offDurationMs, record.screenOffDurationText)
+        val totalDurationStr = formatCardDuration(totalDurationMs, record.totalDurationText)
+
+        val onPowerStr = if (record.screenOnPowerWatts >= 0.05f) {
+            String.format(Locale.getDefault(), "%.2fW", record.screenOnPowerWatts)
+        } else {
+            "--"
+        }
+        val avgPowerStr = if (record.avgPowerWatts >= 0.05f) {
+            String.format(Locale.getDefault(), "%.2fW", record.avgPowerWatts)
+        } else {
+            "--"
+        }
+        val offPowerStr = if (record.screenOffPowerWatts >= 0.05f) {
+            String.format(Locale.getDefault(), "%.2fW", record.screenOffPowerWatts)
         } else {
             "--"
         }
 
-        binding.tvMetricPowerAvg.text = if (avgPwrStr != "--" || record.totalEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), avgPwrStr, totalEnergyStr)
-        } else {
-            "--"
-        }
+        // 第一行：亮屏数据（前置亮色太阳图标，时长占比 / 能量占比 / 功耗 / 续航）
+        binding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onRatioStr)
+        binding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", onEnergy), onRatioStr)
+        binding.tvMetricScreenOnPower.text = onPowerStr
+        binding.tvMetricScreenOnRemaining.text = record.remainingScreenOnText
 
-        binding.tvMetricPowerScreenOff.text = if (offPwrStr != "--" || record.screenOffEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), offPwrStr, offEnergyStr)
-        } else {
-            "--"
-        }
+        // 第二行：息屏数据（前置暗色太阳图标，时长占比 / 能量占比 / 功耗 / 续航）
+        binding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offRatioStr)
+        binding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", offEnergy), offRatioStr)
+        binding.tvMetricScreenOffPower.text = offPowerStr
+        binding.tvMetricScreenOffRemaining.text = record.remainingScreenOffText
 
-        binding.tvMetricPowerBackground.text = if (bgPwrStr != "--" || record.backgroundEnergyWh > 0f) {
-            String.format(Locale.getDefault(), getString(R.string.power_value_format_with_energy), bgPwrStr, bgEnergyStr)
-        } else {
-            "--"
-        }
-
-        binding.tvMetricTimeScreenOn.text = record.screenOnDurationText
-        binding.tvMetricTimeTotal.text = record.totalDurationText
-        binding.tvMetricTimeScreenOff.text = record.screenOffDurationText
-        binding.tvMetricTimeBackground.text = record.backgroundDurationText
-
-        binding.tvMetricRemScreenOn.text = record.remainingScreenOnText
-        binding.tvMetricRemComposite.text = record.remainingCompositeText
-        binding.tvMetricRemScreenOff.text = record.remainingScreenOffText
-        binding.tvMetricRemBackground.text = record.remainingBackgroundText
+        // 第三行：全局数据（前置半亮半暗太阳图标，时长占比 / 能量占比 / 功耗 / 续航）
+        binding.tvMetricGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
+        binding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", totalEnergy), "100%")
+        binding.tvMetricGlobalPower.text = avgPowerStr
+        binding.tvMetricGlobalRemaining.text = record.remainingCompositeText
 
         // 3. 卡片 3 与 4：反序列化全量数据包加载功耗时间轴与应用排行榜
         lifecycleScope.launch(Dispatchers.IO) {
             val fullPackage = record.toFullPowerPackage(this@PowerHistoryDetailActivity)
             val powerMgr = PowerUsageManager.getInstance(this@PowerHistoryDetailActivity)
             val selectedMetrics = binding.metricSelectorView.getSelectedMetrics()
-            val timelineState = powerMgr.buildTimelineState(fullPackage).copy(selectedMetrics = selectedMetrics)
+            val timelineState = powerMgr.buildTimelineState(fullPackage, isHistoryRecord = true).copy(selectedMetrics = selectedMetrics)
             withContext(Dispatchers.Main) {
                 binding.batteryTimelineView.setState(timelineState)
                 binding.tvAppListTitle.text = getString(R.string.power_history_app_count_format, fullPackage.appList.size)
                 appAdapter.submitList(fullPackage.appList)
             }
         }
+    }
+
+    /**
+     * 将包含数值和括号百分比的文本（如 "13m44s(45.1%)" 或 "0.406Wh(45.1%)"）转换为富文本，
+     * 将括号及内部百分比部分的字号缩小两号（由 12sp 缩至 8dp），突出主数值可读性。
+     *
+     * @param mainText 前置主要数值文本（如 "13m44s" 或 "0.406Wh"）
+     * @param percentText 括号内的百分比文本（如 "45.1%" 或 "100%"）
+     * @return 格式化后的富文本对象 [CharSequence]
+     */
+    private fun formatValueWithSmallPercent(mainText: String, percentText: String): CharSequence {
+        val fullText = "$mainText($percentText)"
+        val startIndex = mainText.length
+        val spannable = SpannableString(fullText)
+        spannable.setSpan(
+            AbsoluteSizeSpan(8, true),
+            startIndex,
+            fullText.length,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        return spannable
+    }
+
+    /**
+     * 将毫秒时长按 "0m0s" 规范格式化为紧凑友好文本。
+     * 当小于 1 小时时展示为分秒格式（如 "0m0s"、"13m44s"、"49m55s"）；
+     * 当大于等于 1 小时且小于 1 天时展示为时分格式（如 "1h03m"）；
+     * 当大于等于 1 天时展示为天时格式（如 "1d03h"）。
+     *
+     * @param ms 物理持续时长毫秒值
+     * @param fallbackText 当毫秒值为 0 或无效时的备用文本
+     * @return 格式化后的紧凑时长字符串（如 "0m0s"、"13m44s"）
+     */
+    private fun formatCardDuration(ms: Long, fallbackText: String): String {
+        if (ms <= 0L) {
+            return if (fallbackText.isNotBlank()) fallbackText else "0m0s"
+        }
+        val totalSec = ms / 1000L
+        val days = totalSec / 86400L
+        val hours = (totalSec % 86400L) / 3600L
+        val minutes = (totalSec % 3600L) / 60L
+        val seconds = totalSec % 60L
+        return when {
+            days > 0L -> String.format(Locale.getDefault(), "%dd%02dh", days, hours)
+            hours > 0L -> String.format(Locale.getDefault(), "%dh%02dm", hours, minutes)
+            else -> "${minutes}m${seconds}s"
+        }
+    }
+
+    /**
+     * 从历史快照等字符串中解析时长文本为物理毫秒值。
+     * 支持形如 "1d03h"、"1h03m"、"13m44s" 或 "13:44" 等格式。
+     *
+     * @param text 格式化时长字符串
+     * @return 解析出的物理毫秒数，无法解析时返回 0L
+     */
+    private fun parseDurationTextToMs(text: String): Long {
+        if (text.isBlank() || text == "--") return 0L
+        var totalMs = 0L
+        val dayMatch = Regex("(\\d+)d").find(text)
+        val hourMatch = Regex("(\\d+)h").find(text)
+        val minMatch = Regex("(\\d+)m").find(text)
+        val secMatch = Regex("(\\d+)s").find(text)
+        val colonMatch = Regex("(\\d+):(\\d+)(?::(\\d+))?").find(text)
+
+        if (colonMatch != null) {
+            val parts = colonMatch.destructured
+            if (parts.component3().isNotEmpty()) {
+                val h = parts.component1().toLongOrNull() ?: 0L
+                val m = parts.component2().toLongOrNull() ?: 0L
+                val s = parts.component3().toLongOrNull() ?: 0L
+                return (h * 3600L + m * 60L + s) * 1000L
+            } else {
+                val m = parts.component1().toLongOrNull() ?: 0L
+                val s = parts.component2().toLongOrNull() ?: 0L
+                return (m * 60L + s) * 1000L
+            }
+        }
+
+        dayMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 86400000L }
+        hourMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 3600000L }
+        minMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 60000L }
+        secMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 1000L }
+        return totalMs
     }
 
     /**

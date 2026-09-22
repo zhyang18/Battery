@@ -50,7 +50,7 @@ data class AppPowerUsageItem(
 ) {
     /**
      * 计算该应用消耗的总电量（单位：瓦时 Wh）。
-     * 严格对标 BatteryRecorder 物理积分规范：功耗与能量仅统计应用前台物理放电切片，后台不统计虚拟能耗。
+     * 物理积分规范：功耗与能量仅统计应用前台物理放电切片，后台不统计虚拟能耗。
      */
     val energyWh: Float
         get() = if (foregroundEnergyWh > 0f) {
@@ -118,7 +118,7 @@ data class AppPowerUsageItem(
 
     /**
      * 获取前后台模式下的能量消耗展示文本。
-     * 严格遵循 BatteryRecorder 算法：功耗与能量仅统计前台真实物理放电；
+     * 功耗与能量仅统计前台真实物理放电；
      * 若应用在前台运行则展示真实前台能量（精确到小数点后三位），纯后台运行应用如实显示为 "--"，杜绝虚假发配后台电量。
      *
      * @return 格式化后的能量展示文本
@@ -163,8 +163,14 @@ data class AppPowerUsageItem(
     fun getFormattedCombinedDuration(): String {
         val hasFg = foregroundTimeMs > 0L
         val hasBg = backgroundTimeMs > 0L
+//        return when {
+//            hasFg && hasBg -> "${formatDurationMs(foregroundTimeMs)} | 后台 ${formatDurationMs(backgroundTimeMs)}"
+//            hasFg -> formatDurationMs(foregroundTimeMs)
+//            hasBg -> "后台: ${formatDurationMs(backgroundTimeMs)}"
+//            else -> "0s"
+//        }
         return when {
-            hasFg && hasBg -> "${formatDurationMs(foregroundTimeMs)} | 后台 ${formatDurationMs(backgroundTimeMs)}"
+            hasFg && hasBg -> "${formatDurationMs(foregroundTimeMs)} | ${formatDurationMs(backgroundTimeMs)}"
             hasFg -> formatDurationMs(foregroundTimeMs)
             hasBg -> "后台: ${formatDurationMs(backgroundTimeMs)}"
             else -> "0s"
@@ -188,7 +194,7 @@ data class AppPowerUsageItem(
 
     /**
      * 获取前后台模式下的平均放电功耗展示文本。
-     * 严格遵循 BatteryRecorder 算法：平均功耗仅基于前台屏幕点亮与独占交互物理切片计算；
+     * 平均功耗仅基于前台屏幕点亮与独占交互物理切片计算；
      * 纯后台运行应用因在硬件上无法切出独立放电电流，诚实显示为 "--"，杜绝模糊估算。
      *
      * @return 格式化后的平均功耗展示文本

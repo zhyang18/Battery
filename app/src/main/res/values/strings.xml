@@ -437,8 +437,8 @@
     <string name="charging_status_standard">标准充电中</string>
     <string name="charging_status_full">已充满电</string>
     <string name="charging_status_discharging">未连接充电器</string>
-    <string name="toast_auto_switch_charging">⚡ 已连接电源，切换至充电</string>
-    <string name="toast_auto_switch_discharging">🔋 已断开电源，切换至耗电</string>
+    <string name="toast_auto_switch_charging">已连接电源，切换至充电</string>
+    <string name="toast_auto_switch_discharging">已断开电源，切换至耗电</string>
     <string name="charging_reset_confirm_title">重置充电统计</string>
     <string name="charging_reset_confirm_msg">确定要清空当前充电走势图表与统计采样数据吗？</string>
     <string name="charging_reset_success">充电统计已重置</string>

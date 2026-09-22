@@ -18,7 +18,6 @@ import kotlinx.coroutines.launch
 /**
  * 电池电源状态广播接收器（静态注册，进程被强杀后依然生效）。
  *
- * 参考 BatteryRecorder 核心技术路线实现双层兜底机制：
  * 1. 静态广播（AndroidManifest 声明）：即使 App 进程被强杀，系统也会在插拔电源时唤醒进程触发此接收器；
  * 2. WakeLock 持锁机制：唤醒进程后立即申请 WakeLock，防止 CPU 在异步 IO 完成前进入 Deep Sleep；
  * 3. 自动重启前台服务：充放电事件处理完成后，自动重新拉起 BatteryMonitorService 恢复持续监控；
@@ -55,7 +54,7 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
 
     /**
      * 执行连接外部电源后的防抖校验与充电统计会话初始化。
-     * 参考 BatteryRecorder：申请 WakeLock 后通过 goAsync 在后台线程完成 IO，
+     * 申请 WakeLock 后通过 goAsync 在后台线程完成 IO，
      * 最终释放 WakeLock 并重新拉起前台监控服务。
      *
      * @param context 应用程序上下文
@@ -80,7 +79,6 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
             } finally {
                 pendingResult.finish()
                 wakeLock?.release()
-                // 广播处理完成后，自动重启前台监控服务（BatteryRecorder 核心策略）
                 restartServiceIfNeeded(appContext)
             }
         }
@@ -120,7 +118,7 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
 
     /**
      * 执行断开电源后的防抖校验、电池快照异步提取与数据库保存。
-     * 参考 BatteryRecorder：申请 WakeLock 后通过 goAsync 在后台线程完成 IO，
+     * 申请 WakeLock 后通过 goAsync 在后台线程完成 IO，
      * 最终释放 WakeLock 并重新拉起前台监控服务。
      *
      * @param context 应用程序上下文
@@ -146,7 +144,6 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
             } finally {
                 pendingResult.finish()
                 wakeLock?.release()
-                // 广播处理完成后，自动重启前台监控服务（BatteryRecorder 核心策略）
                 restartServiceIfNeeded(appContext)
             }
         }
@@ -185,7 +182,7 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
 
     /**
      * 处理设备开机启动事件，执行状态自愈核对，并在配置了自启时唤醒后台监控服务。
-     * 参考 BatteryRecorder：开机时检测离线期间是否有充放电状态断层并自动修复。
+     * 开机时检测离线期间是否有充放电状态断层并自动修复。
      *
      * @param context 应用程序上下文
      */
@@ -214,7 +211,7 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
     }
 
     /**
-     * 参考 BatteryRecorder 核心策略：充放电事件结算完成后，尝试重新拉起前台监控服务。
+     *  核心策略：充放电事件结算完成后，尝试重新拉起前台监控服务。
      * 若服务已配置为启用且当前未处于活跃运行状态，尝试重启，确保持续采样不中断；
      * 若服务已在活跃运行中，无需重复调用 startForegroundService，消除时序竞争与 IPC 消耗。
      *

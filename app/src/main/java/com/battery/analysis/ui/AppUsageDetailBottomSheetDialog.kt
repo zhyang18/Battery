@@ -33,13 +33,15 @@ import java.util.Locale
  */
 class AppUsageDetailBottomSheetDialog(
     context: Context,
-    private val item: AppPowerUsageItem,
+    private var item: AppPowerUsageItem,
     private val isShizuku: Boolean = true,
     private val periodRangeText: String? = null
 ) : BottomSheetDialog(context) {
 
     private val dateTimeFormatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
     private val timeOnlyFormatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+
+    private var rootView: View? = null
 
     /**
      * 对话框初始化生命周期回调。
@@ -49,8 +51,21 @@ class AppUsageDetailBottomSheetDialog(
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val view = LayoutInflater.from(context).inflate(R.layout.dialog_app_usage_detail, null)
+        rootView = view
         setContentView(view)
         bindData(view)
+    }
+
+    /**
+     * 异步更新弹窗中单应用的后台硬件消耗与网络流量等详细数据。
+     * 当后台协程定向查询到该单个应用的深度后台指标后，在主线程调用此方法刷新对应控件。
+     *
+     * @param detailedItem 包含了完整后台硬件开销与网络流量的应用实体 [AppPowerUsageItem]
+     */
+    fun updateAppDetails(detailedItem: AppPowerUsageItem) {
+        this.item = detailedItem
+        val root = rootView ?: return
+        bindData(root)
     }
 
     /**
@@ -139,7 +154,7 @@ class AppUsageDetailBottomSheetDialog(
             }
         }
 
-        // 3. 核心指标矩阵（严格遵循 BatteryRecorder 规范：仅基于前台物理切片统计功耗与能量，后台只统计工时）
+        // 3. 核心指标矩阵（ 规范：仅基于前台物理切片统计功耗与能量，后台只统计工时）
         // 能量列
         val fgEnergyVal = item.foregroundEnergyWh
         tvEnergyPrimary.text = formatEnergyValue(fgEnergyVal)
@@ -172,7 +187,7 @@ class AppUsageDetailBottomSheetDialog(
         }
         tvTotalDuration.text = formatDurationMs(item.foregroundTimeMs + item.backgroundTimeMs)
 
-        // 5. 电量消耗分配（严格遵循 BatteryRecorder 物理切片准则）
+        // 5. 电量消耗分配
         tvFgEnergy.text = formatEnergyValue(fgEnergyVal)
         tvBgEnergy.text = "-- (整机息屏统一统计)"
         tvTotalEnergy.text = formatEnergyValue(fgEnergyVal)

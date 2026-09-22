@@ -157,7 +157,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
     /**
      * 切换排序模式并以差量方式重新排序刷新列表。
      *
-     * @param mode 0-按时长降序，1-按功耗降序，2-按消耗电量(Wh)降序，3-按名称升序
+     * @param mode 0-按时长排序，1-按功耗升序，2-按消耗电量降序，3-按名称升序
      */
     fun setSortMode(mode: Int) {
         sortMode = mode
@@ -166,27 +166,43 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
 
     /**
      * 根据后台统计开关对应用列表进行过滤，并依据当前排序模式对展示列表进行排序。
-     * 若开启后台统计则展示包含后台应用在内的全部应用；若关闭后台统计则过滤掉纯后台运行应用，仅保留前台运行应用（foregroundTimeMs > 0L）。
-     * 排序模式 0（按使用时长）始终按前台使用时长（foregroundTimeMs）降序排序。
+     * 排序规则：前台运行应用（foregroundTimeMs > 0L）始终排在前面，纯后台运行应用（foregroundTimeMs <= 0L）始终排在前台应用后面；
+     * - 排序模式 0（按时长）：前台应用按前台时长降序，纯后台应用在后按后台时长降序；
+     * - 排序模式 1（按功耗）：前台应用按功耗升序，纯后台应用在后按功耗升序；
+     * - 排序模式 2（按电量）：前台应用按前台电量降序，纯后台应用在后按后台电量降序；
+     * - 排序模式 3（按名称）：前台应用按名称升序，纯后台应用在后按名称升序；
+     * 若关闭后台统计（showBackgroundStats == false），纯后台应用直接被过滤不予展示。
      */
     private fun applyFilterAndSort() {
-        displayItems.clear()
-        if (showBackgroundStats) {
-            displayItems.addAll(allItems)
+        val fgList = allItems.filter { it.foregroundTimeMs > 0L }.toMutableList()
+        val bgList = if (showBackgroundStats) {
+            allItems.filter { it.foregroundTimeMs <= 0L }.toMutableList()
         } else {
-            displayItems.addAll(allItems.filter { it.foregroundTimeMs > 0L })
+            mutableListOf()
         }
 
         when (sortMode) {
-            0 -> displayItems.sortByDescending { it.foregroundTimeMs }
-            1 -> displayItems.sortByDescending { it.avgPowerWatts }
-            2 -> if (showBackgroundStats) {
-                displayItems.sortByDescending { it.energyWh }
-            } else {
-                displayItems.sortByDescending { it.getForegroundEnergyValue() }
+            0 -> {
+                fgList.sortByDescending { it.foregroundTimeMs }
+                bgList.sortByDescending { it.backgroundTimeMs }
             }
-            3 -> displayItems.sortBy { it.appName }
+            1 -> {
+                fgList.sortBy { it.avgPowerWatts }
+                bgList.sortBy { if (it.backgroundPowerWatts > 0f) it.backgroundPowerWatts else it.avgPowerWatts }
+            }
+            2 -> {
+                fgList.sortByDescending { it.getForegroundEnergyValue() }
+                bgList.sortByDescending { it.backgroundEnergyWh }
+            }
+            3 -> {
+                fgList.sortBy { it.appName }
+                bgList.sortBy { it.appName }
+            }
         }
+
+        displayItems.clear()
+        displayItems.addAll(fgList)
+        displayItems.addAll(bgList)
     }
 
     /**

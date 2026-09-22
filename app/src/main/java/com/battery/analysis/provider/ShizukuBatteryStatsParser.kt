@@ -108,23 +108,21 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * @param batteryTempCelsius 当前测得的电池温度（单位：摄氏度 ℃）
      * @param unplugTime 最近一次断开充电或手动重置的时间戳（毫秒），默认为 0L
      * @param localHistoryTempPoints 本地放电时序温度采样点列表（用于 dumpsys 历史缺损时兜底）
+     * @param enableBackgroundStats 是否开启后台统计（默认 false）
      * @return 包含概要及各应用耗电列表的解析结果 [BatteryStatsResult]
      */
     fun parseChargedBatteryStats(
         batteryVoltageVolts: Float,
         batteryTempCelsius: Float,
         unplugTime: Long = 0L,
-        localHistoryTempPoints: List<Pair<Long, Float>> = emptyList()
+        localHistoryTempPoints: List<Pair<Long, Float>> = emptyList(),
+        enableBackgroundStats: Boolean = false
     ): BatteryStatsResult {
         // 1. 通过全局缓存与异步预热机制极速加载全系统所有应用的 UID 到包名映射表
         val uidPkgMap = loadUidPackageMap()
 
-        // 2. 并发拉取 dumpsys batterystats --checkin 与 dumpsys batterystats --charged，耗时缩短 50% 以上
-        val checkinFuture = java.util.concurrent.CompletableFuture.supplyAsync({ executeShizukuCommand("dumpsys batterystats --checkin") }, asyncCmdExecutor)
-        val chargedFuture = java.util.concurrent.CompletableFuture.supplyAsync({ executeShizukuCommand("dumpsys batterystats --charged") }, asyncCmdExecutor)
-        val checkinOutput = try { checkinFuture.get(8, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { "" }
-        val rawInitial = try { chargedFuture.get(10, java.util.concurrent.TimeUnit.SECONDS) } catch (_: Exception) { "" }
-        val checkinHwMap = parseHardwareStatsFromCheckin(checkinOutput)
+        // 2. 下拉刷新仅拉取 dumpsys batterystats --charged，不再全量扫描昂贵的 checkin 硬件明细
+        val rawInitial = executeShizukuCommand("dumpsys batterystats --charged")
 
         // 3. 校验并按需兜底拉取完整账本
         var rawOutput = rawInitial
@@ -149,25 +147,28 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             return BatteryStatsResult(4500f, 0f, 0L, 0L, 0L, 0f, emptyList())
         }
 
-        // 4. 若 checkin 解析为空或缺少部分 UID，结合文本段落进行互补
-        val plainHwMap = parseHardwareStatsFromPlainText(rawOutput)
-        val combinedHwMap = checkinHwMap.toMutableMap()
-        for ((uid, pStats) in plainHwMap) {
-            val exist = combinedHwMap[uid]
-            if (exist == null) {
-                combinedHwMap[uid] = pStats
+        val hwStats = if (enableBackgroundStats) {
+            val plainHw = parseHardwareStatsFromPlainText(rawOutput)
+            if (plainHw.isNotEmpty()) {
+                plainHw
             } else {
-                if (exist.cpuUserMs == 0L && exist.cpuSystemMs == 0L) {
-                    exist.cpuUserMs = pStats.cpuUserMs
-                    exist.cpuSystemMs = pStats.cpuSystemMs
-                }
-                if (exist.wakelockMs == 0L) exist.wakelockMs = pStats.wakelockMs
-                if (exist.gpsMs == 0L) exist.gpsMs = pStats.gpsMs
-                if (exist.networkBytes == 0L) exist.networkBytes = pStats.networkBytes
+                val checkinOutput = executeShizukuCommand("dumpsys batterystats --checkin")
+                parseHardwareStatsFromCheckin(checkinOutput)
             }
+        } else {
+            emptyMap()
         }
 
-        return parseStatsText(rawOutput, batteryVoltageVolts, batteryTempCelsius, uidPkgMap, unplugTime, combinedHwMap, localHistoryTempPoints)
+        return parseStatsText(
+            rawText = rawOutput,
+            voltageVolts = batteryVoltageVolts,
+            tempCelsius = batteryTempCelsius,
+            uidPkgMap = uidPkgMap,
+            unplugTime = unplugTime,
+            hwStatsMap = hwStats,
+            localHistoryTempPoints = localHistoryTempPoints,
+            enableBackgroundStats = enableBackgroundStats
+        )
     }
 
     /**
@@ -180,6 +181,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * @param unplugTime 最近一次断开充电或手动重置的时间戳（毫秒），默认为 0L
      * @param hwStatsMap 事先通过 Checkin 或文本扫描提取的各 UID 权威硬件开销字典
      * @param localHistoryTempPoints 本地放电时序温度采样点列表（用于 dumpsys 历史缺损时兜底）
+     * @param enableBackgroundStats 是否开启后台统计（默认 false）
      * @return 解析完成的 [BatteryStatsResult]
      */
     fun parseStatsText(
@@ -189,7 +191,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         uidPkgMap: Map<Int, String> = emptyMap(),
         unplugTime: Long = 0L,
         hwStatsMap: Map<Int, UidHardwareStats> = emptyMap(),
-        localHistoryTempPoints: List<Pair<Long, Float>> = emptyList()
+        localHistoryTempPoints: List<Pair<Long, Float>> = emptyList(),
+        enableBackgroundStats: Boolean = false
     ): BatteryStatsResult {
         val pm = context.packageManager
         var capacityMah = 4500f
@@ -466,36 +469,44 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                         }
 
                         if (!pkgName.isNullOrEmpty()) {
-                            pkgDrainMahMap[pkgName] = drainMah
-                            val (foregroundMs, backgroundMs, cpuMs) = parseAppTimesFromDetails(
+                            val (foregroundMs, rawBackgroundMs, cpuMs) = parseAppTimesFromDetails(
                                 extraDetails,
                                 dischargeDurationMs,
                                 isHistoricalDumpsys
                             )
+                            // 若未开启后台统计，纯后台应用（foregroundMs <= 0L）直接跳过不展示且不加入列表
+                            if (!enableBackgroundStats && foregroundMs <= 0L) {
+                                continue
+                            }
+
+                            pkgDrainMahMap[pkgName] = drainMah
+                            val backgroundMs = if (enableBackgroundStats) rawBackgroundMs else 0L
                             val totalDirectEnergyWh = (drainMah * voltageVolts) / 1000f
 
                             val hw = hwStatsMap[uid]
                             val realCpuMs = if (hw != null && hw.getTotalCpuMs() > 0L) hw.getTotalCpuMs() else cpuMs
-                            val baseBg = if (hw != null) {
+                            val baseBg = if (hw != null && enableBackgroundStats) {
                                 val bgCpu = (hw.getTotalCpuMs() - foregroundMs).coerceAtLeast(0L)
                                 val directBg = hw.cpuBackgroundMs
-                                // 后台活跃时间严格统计实际 CPU 算力与持锁唤醒时间，常驻服务挂载时长独立记录在 fgsDurationMs
                                 maxOf(bgCpu, directBg) + hw.wakelockMs
                             } else {
                                 backgroundMs
                             }
 
-                            // 前后台能量解耦：基于真实物理功耗合理性模型与 CPU 算力分配，彻底消除后台能耗全部算给前台的缺陷
                             val isGame = com.battery.analysis.manager.PowerUsageManager.getInstance(context).isGameApp(pkgName)
-                            val (fgEnergyWh, bgEnergyWh, safeBgMs) = decoupleAppEnergyAndTimes(
-                                totalEnergy = totalDirectEnergyWh,
-                                foregroundMs = foregroundMs,
-                                backgroundMs = maxOf(backgroundMs, baseBg),
-                                cpuMs = realCpuMs,
-                                dischargeMs = dischargeDurationMs,
-                                isGame = isGame
-                            )
-                            val effectiveBackgroundMs = safeBgMs
+                            val (fgEnergyWh, bgEnergyWh, safeBgMs) = if (enableBackgroundStats) {
+                                decoupleAppEnergyAndTimes(
+                                    totalEnergy = totalDirectEnergyWh,
+                                    foregroundMs = foregroundMs,
+                                    backgroundMs = maxOf(backgroundMs, baseBg),
+                                    cpuMs = realCpuMs,
+                                    dischargeMs = dischargeDurationMs,
+                                    isGame = isGame
+                                )
+                            } else {
+                                Triple(totalDirectEnergyWh, 0f, 0L)
+                            }
+                            val effectiveBackgroundMs = if (enableBackgroundStats) safeBgMs else 0L
 
                             // 运行平均功耗计算：独立核算前台与后台，并避免微小时长除法放大
                             val fgHours = if (foregroundMs > 0L) foregroundMs / 3600000.0 else 0.0
@@ -583,7 +594,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             cycleAvgTemp,
             cycleMaxTemp,
             unplugTime,
-            hwStatsMap
+            hwStatsMap,
+            enableBackgroundStats
         )
 
         // 6. 若仍未匹配到亮屏时长，通过所有前台应用的累计活跃时长进行真实计算
@@ -596,14 +608,20 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val maxAllowedTimeMs = dischargeDurationMs
         val validatedList = userAppList.map { item ->
             val safeFg = item.foregroundTimeMs.coerceIn(0L, maxAllowedTimeMs)
-            val maxBgForApp = (maxAllowedTimeMs - safeFg).coerceAtLeast(0L)
-            val safeBg = item.backgroundTimeMs.coerceIn(0L, maxBgForApp)
+            val maxBgForApp = if (enableBackgroundStats) (maxAllowedTimeMs - safeFg).coerceAtLeast(0L) else 0L
+            val safeBg = if (enableBackgroundStats) item.backgroundTimeMs.coerceIn(0L, maxBgForApp) else 0L
             if (safeFg != item.foregroundTimeMs || safeBg != item.backgroundTimeMs) {
                 item.copy(foregroundTimeMs = safeFg, backgroundTimeMs = safeBg)
             } else {
                 item
             }
-        }.filter { it.foregroundTimeMs > 0L || it.backgroundTimeMs > 0L || it.energyWh > 0.001f }.toMutableList()
+        }.filter {
+            if (enableBackgroundStats) {
+                it.foregroundTimeMs > 0L || it.backgroundTimeMs > 0L || it.energyWh > 0.001f
+            } else {
+                it.foregroundTimeMs > 0L
+            }
+        }.toMutableList()
 
         // 7. 校验最近一次拔电起点与消除长段充满待机平线
         var finalUnplugTs = detectedUnplugTs
@@ -944,7 +962,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         cycleAvgTemp: Float,
         cycleMaxTemp: Float,
         unplugTime: Long = 0L,
-        hwStatsMap: Map<Int, UidHardwareStats> = emptyMap()
+        hwStatsMap: Map<Int, UidHardwareStats> = emptyMap(),
+        enableBackgroundStats: Boolean = false
     ): MutableList<AppPowerUsageItem> {
         val pm = context.packageManager
         val endTime = System.currentTimeMillis()
@@ -958,8 +977,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             emptyMap()
         }
 
-        // 批量一次性查询全量应用在本次放电周期内的双通道网络流量，避免逐个应用高频 IPC 查询
-        val allUidsNetMap = networkStatsHelper.getAllUidsNetworkBytes(startTime, endTime)
+        // 下拉刷新时仅提取基础使用时间数据，网络流量按需在列表项点击时单应用查询，避免高频全量 IPC 查询
+        val allUidsNetMap = emptyMap<Int, Long>()
 
         // 1. 对 dumpsys 原本提取的应用进行前台时长、后台活跃时长与硬件开销的精准补全
         val existingKeys = existingMap.keys.toList()
@@ -969,7 +988,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             val hw = hwStatsMap[uid]
 
             var effectiveFg = old.foregroundTimeMs
-            var effectiveBg = old.backgroundTimeMs
+            var effectiveBg = if (enableBackgroundStats) old.backgroundTimeMs else 0L
 
             // 优先依据系统级精确 UsageEvents 计算的前台活跃时长矫正
             val preciseFg = preciseTimes[pkg]
@@ -979,10 +998,15 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 effectiveFg = effectiveFg.coerceAtMost(dischargeMs)
             }
 
+            // 若未开启后台统计且前台时长为 0，直接移除纯后台应用
+            if (!enableBackgroundStats && effectiveFg <= 0L) {
+                existingMap.remove(pkg)
+                continue
+            }
+
             val realCpuMs = hw?.getTotalCpuMs() ?: old.cpuTimeMs
-            val baseBg = if (hw != null) {
+            val baseBg = if (hw != null && enableBackgroundStats) {
                 val bgCpu = (hw.getTotalCpuMs() - effectiveFg).coerceAtLeast(0L)
-                // 后台活跃时间严格统计实际 CPU 算力与持锁唤醒时间，常驻服务挂载时长独立记录在 fgsDurationMs
                 maxOf(bgCpu, hw.cpuBackgroundMs) + hw.wakelockMs
             } else {
                 effectiveBg
@@ -991,16 +1015,20 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             // 依据真实补全后的前后台时长，重新科学解耦前台消耗能量、后台消耗能量以及亮屏平均功耗
             val totalEnergy = old.directEnergyWh ?: ((pkgDrainMahMap[pkg] ?: 0f) * voltage / 1000f)
             val isGame = com.battery.analysis.manager.PowerUsageManager.getInstance(context).isGameApp(pkg)
-            val (fgEnergyWh, bgEnergyWh, safeBgMs) = decoupleAppEnergyAndTimes(
-                totalEnergy = totalEnergy,
-                foregroundMs = effectiveFg,
-                backgroundMs = maxOf(effectiveBg, baseBg),
-                cpuMs = realCpuMs,
-                dischargeMs = dischargeMs,
-                isGame = isGame
-            )
-            val maxAllowedBg = (dischargeMs - effectiveFg).coerceAtLeast(0L)
-            val effectiveFinalBg = safeBgMs.coerceIn(0L, maxAllowedBg)
+            val (fgEnergyWh, bgEnergyWh, safeBgMs) = if (enableBackgroundStats) {
+                decoupleAppEnergyAndTimes(
+                    totalEnergy = totalEnergy,
+                    foregroundMs = effectiveFg,
+                    backgroundMs = maxOf(effectiveBg, baseBg),
+                    cpuMs = realCpuMs,
+                    dischargeMs = dischargeMs,
+                    isGame = isGame
+                )
+            } else {
+                Triple(totalEnergy, 0f, 0L)
+            }
+            val maxAllowedBg = if (enableBackgroundStats) (dischargeMs - effectiveFg).coerceAtLeast(0L) else 0L
+            val effectiveFinalBg = if (enableBackgroundStats) safeBgMs.coerceIn(0L, maxAllowedBg) else 0L
 
             val fgHours = if (effectiveFg > 0L) effectiveFg / 3600000.0 else 0.0
             val bgHours = if (effectiveFinalBg > 0L) effectiveFinalBg / 3600000.0 else 0.0
@@ -1060,7 +1088,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 val realCpu = hw?.getTotalCpuMs() ?: 0L
                 val realWake = hw?.wakelockMs ?: 0L
                 val realGps = hw?.gpsMs ?: 0L
-                val bgTime = if (hw != null) {
+                val bgTime = if (hw != null && enableBackgroundStats) {
                     ((realCpu - safeFgTime).coerceAtLeast(0L) + realWake).coerceAtMost(dischargeMs)
                 } else {
                     0L
@@ -1068,31 +1096,84 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
                 val fgEnergy = (baselineWatts * (safeFgTime / 3600000f)).coerceAtLeast(0f)
 
-                    existingMap[pkgName] = AppPowerUsageItem(
-                        packageName = pkgName,
-                        appName = appName,
-                        icon = icon,
-                        foregroundTimeMs = safeFgTime,
-                        avgPowerWatts = baselineWatts,
-                        avgTemperature = cycleAvgTemp,
-                        maxTemperature = cycleMaxTemp,
-                        lastUsedTimeMs = endTime,
-                        directEnergyWh = fgEnergy,
-                        backgroundTimeMs = bgTime,
-                        foregroundEnergyWh = fgEnergy,
-                        backgroundEnergyWh = 0f,
-                        cpuTimeMs = realCpu,
-                        networkBytes = netBytes,
-                        wakelockTimeMs = realWake,
-                        gpsTimeMs = realGps,
-                        foregroundPowerWatts = baselineWatts,
-                        backgroundPowerWatts = 0f,
-                        fgsDurationMs = hw?.fgsMs ?: 0L
-                    )
+                existingMap[pkgName] = AppPowerUsageItem(
+                    packageName = pkgName,
+                    appName = appName,
+                    icon = icon,
+                    foregroundTimeMs = safeFgTime,
+                    avgPowerWatts = baselineWatts,
+                    avgTemperature = cycleAvgTemp,
+                    maxTemperature = cycleMaxTemp,
+                    lastUsedTimeMs = endTime,
+                    directEnergyWh = fgEnergy,
+                    backgroundTimeMs = bgTime,
+                    foregroundEnergyWh = fgEnergy,
+                    backgroundEnergyWh = 0f,
+                    cpuTimeMs = realCpu,
+                    networkBytes = netBytes,
+                    wakelockTimeMs = realWake,
+                    gpsTimeMs = realGps,
+                    foregroundPowerWatts = baselineWatts,
+                    backgroundPowerWatts = 0f,
+                    fgsDurationMs = hw?.fgsMs ?: 0L
+                )
             }
         }
 
-        return existingMap.values.toMutableList()
+        // 3. 若开启后台统计，补充 dumpsys Estimated power use 遗漏但确实有后台 CPU 工时的应用
+        if (enableBackgroundStats && hwStatsMap.isNotEmpty()) {
+            val uidPkg = loadUidPackageMap()
+            for ((uid, hw) in hwStatsMap) {
+                if (uid <= 0) continue
+                val totalCpu = hw.getTotalCpuMs()
+                val bgCpu = hw.cpuBackgroundMs
+                val wakeMs = hw.wakelockMs
+                val bgWorkMs = maxOf(totalCpu, bgCpu) + wakeMs
+                if (bgWorkMs <= 0L) continue
+
+                val pkgName = uidPkg[uid] ?: try { pm.getPackagesForUid(uid)?.firstOrNull() } catch (_: Exception) { null }
+                if (pkgName.isNullOrBlank() || existingMap.containsKey(pkgName)) continue
+
+                if (!isUserInstalledApp(pkgName)) continue
+
+                val safeBgTime = bgWorkMs.coerceAtMost(dischargeMs)
+                if (safeBgTime <= 0L) continue
+
+                val (appName, icon) = getAppMetadata(pkgName, pm)
+                val rawDrainMah = pkgDrainMahMap[pkgName] ?: 0f
+                val totalEnergy = if (rawDrainMah > 0f) (rawDrainMah * voltage / 1000f) else 0f
+                val bgHours = safeBgTime / 3600000.0
+                val bgWatts = if (bgHours > 0.0 && totalEnergy > 0f) (totalEnergy / bgHours).toFloat() else 0f
+
+                existingMap[pkgName] = AppPowerUsageItem(
+                    packageName = pkgName,
+                    appName = appName,
+                    icon = icon,
+                    foregroundTimeMs = 0L,
+                    avgPowerWatts = bgWatts,
+                    avgTemperature = cycleAvgTemp,
+                    maxTemperature = cycleMaxTemp,
+                    lastUsedTimeMs = endTime,
+                    directEnergyWh = totalEnergy,
+                    backgroundTimeMs = safeBgTime,
+                    foregroundEnergyWh = 0f,
+                    backgroundEnergyWh = totalEnergy,
+                    cpuTimeMs = totalCpu,
+                    networkBytes = hw.networkBytes,
+                    wakelockTimeMs = wakeMs,
+                    gpsTimeMs = hw.gpsMs,
+                    foregroundPowerWatts = 0f,
+                    backgroundPowerWatts = bgWatts,
+                    fgsDurationMs = hw.fgsMs
+                )
+            }
+        }
+
+        return if (enableBackgroundStats) {
+            existingMap.values.toMutableList()
+        } else {
+            existingMap.values.filter { it.foregroundTimeMs > 0L }.toMutableList()
+        }
     }
 
     /**
@@ -1504,6 +1585,38 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * @return 执行输出文本
      */
     private fun executeShizukuCommand(command: String): String = executeShizukuShellCommand(command)
+
+    /**
+     * 查询指定包名及 UID 在系统底层 batterystats 中的实时硬件消耗详情（CPU、唤醒锁、GPS、常驻服务）。
+     * 通过向 Shizuku 发送指定包名的 dumpsys 命令定向获取单应用的硬件开销，杜绝全量扫描的高额 IPC 与内存消耗。
+     *
+     * @param packageName 目标应用程序包名
+     * @param uid 目标应用程序系统数值 UID
+     * @return 解析得到的单应用硬件资源消耗实体 [UidHardwareStats]，查询失败返回 null
+     */
+    fun querySingleAppHardwareStats(packageName: String, uid: Int): UidHardwareStats? {
+        if (packageName.isBlank() || uid <= 0) return null
+        try {
+            // 优先通过 checkin 定向查询单个包名，开销极小且字段明确
+            val checkinOutput = executeShizukuCommand("dumpsys batterystats --checkin $packageName")
+            if (checkinOutput.isNotBlank()) {
+                val checkinMap = parseHardwareStatsFromCheckin(checkinOutput)
+                val stats = checkinMap[uid]
+                if (stats != null) {
+                    return stats
+                }
+            }
+            // 若 checkin 未提取到有效指标，回退查询常规文本并提取
+            val cmdOutput = executeShizukuCommand("dumpsys batterystats $packageName")
+            if (cmdOutput.isNotBlank()) {
+                val hwMap = parseHardwareStatsFromPlainText(cmdOutput)
+                return hwMap[uid]
+            }
+        } catch (_: Exception) {
+            // 如实处理异常，返回 null
+        }
+        return null
+    }
 
     /**
      * 通过 Shizuku 提权执行 dumpsys batterystats --reset 重置系统底层的放电统计账本。

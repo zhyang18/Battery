@@ -223,7 +223,7 @@ class MetricSelectorView @JvmOverloads constructor(
                 TimelineMetric.POWER -> Color.parseColor("#90CAF9") // 淡蓝功耗
                 TimelineMetric.TEMPERATURE -> Color.parseColor("#FF8A65") // 珊瑚橙温度
                 TimelineMetric.VOLTAGE -> Color.parseColor("#FFD54F") // 金黄电压
-                TimelineMetric.APP -> Color.parseColor("#E0F7FA") // 浅青应用
+                TimelineMetric.APP -> Color.parseColor("#5F9EA0") // 应用
             }
 
             val dotDrawable = android.graphics.drawable.GradientDrawable().apply {

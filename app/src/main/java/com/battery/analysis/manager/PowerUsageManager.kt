@@ -115,7 +115,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         /**
          * 基于硬件放电时序采样点（时间戳、瞬时电压、瞬时电流）的时间切片数值微积分模型。
-         * 遵循物理能量守恒定律与微积分定义（对标 BatteryRecorder 硬件放电积分实现）：
+         * 遵循物理能量守恒定律与微积分定义（硬件放电积分实现）：
          * E = ∫ P(t) dt = Σ [ ((P(i) + P(i+1)) / 2) * Δt ]
          * 采用梯形数值积分法，计算放电过程中的真实物理能耗与平均放电功率。
          *
@@ -191,7 +191,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         /**
          * 放电时序微积分与工况功率统计结果数据类。
-         * 遵循 BatteryRecorder 工业标准设计：能量与各工况平均功耗完全由真实微积分与稳健基线外推闭环产生。
+         * 工业标准设计：能量与各工况平均功耗完全由真实微积分与稳健基线外推闭环产生。
          *
          * @property totalDisplayEnergyWh 总消耗能量（单位：瓦时 Wh）
          * @property screenOnDisplayEnergyWh 亮屏消耗能量（单位：瓦时 Wh）
@@ -216,7 +216,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         )
 
         /**
-         * 按真实物理采样点序列计算放电工况功耗与能量统计（对标 BatteryRecorder 工业级算法实现）。
+         * 按真实物理采样点序列计算放电工况功耗与能量统计。
          *
          * 核心设计：
          * 1. 彻底废除人为主观百分比门限（如 80% 覆盖率），以真实的物理时钟步进为准；
@@ -384,7 +384,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         /**
-         * 计算息屏展示能量（对标 BatteryRecorder 的 computeScreenOffWhDisplayEnergyRawMs）。
+         * 计算息屏展示能量。
          *
          * @param screenOffDurationMs 总息屏时长（毫秒）
          * @param screenOffEnergyWh 原始息屏梯形积分总能量（瓦时）
@@ -423,7 +423,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         /**
-         * 按样本区间时长加权计算功率分位数（对标 BatteryRecorder 的 weightedPercentile）。
+         * 按样本区间时长加权计算功率分位数
          *
          * @param samples 加权功率样本列表
          * @param percentile 目标分位比例（0.0 ~ 1.0）
@@ -1421,9 +1421,10 @@ class PowerUsageManager private constructor(private val context: Context) {
      * 加载当前模式下的完整耗电数据（包含各应用耗电列表与三大核心指标）。
      *
      * @param mode 当前指定的工作模式（[MODE_SHIZUKU] 或 [MODE_NORMAL]）
+     * @param enableBackgroundStats 是否开启后台统计（默认 false）
      * @return 完整的功耗与应用列表数据包装 [FullPowerDataPackage]
      */
-    fun loadPowerData(mode: Int): FullPowerDataPackage {
+    fun loadPowerData(mode: Int, enableBackgroundStats: Boolean = false): FullPowerDataPackage {
         val batterySnapshot = getCurrentBatteryStatus()
         val unplugTime = getLastUnplugTime()
         val unplugLevel = getLastUnplugLevel().coerceIn(0, 100)
@@ -1435,7 +1436,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                 batteryVoltageVolts = batterySnapshot.voltageVolts,
                 batteryTempCelsius = batterySnapshot.temperature,
                 unplugTime = unplugTime,
-                localHistoryTempPoints = getDischargeTempPoints()
+                localHistoryTempPoints = getDischargeTempPoints(),
+                enableBackgroundStats = enableBackgroundStats
             )
 
             if (stats.appList.isNotEmpty() || stats.dischargeDurationMs > 0L) {
@@ -1560,7 +1562,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
                 val physicalTotalEnergyWh = (physicalDrainMah * nominalVoltageVolts) / 1000f
 
-                // 硬件时序切片微积分：通过底层 sysfs 采样点直接计算物理能耗与功率（对标 BatteryRecorder 工业级标准）
+                // 硬件时序切片微积分：通过底层 sysfs 采样点直接计算物理能耗与功率
                 val recentSamples = getDischargeRealtimeSamples().filter { it.timestamp in (startTs - 60_000L)..now }
                 val dischargeStats = computeDischargePowerStats(recentSamples)
                 val intTotalEnergyWh = dischargeStats?.totalDisplayEnergyWh ?: 0f
@@ -1582,7 +1584,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val offEnergyWh: Float
 
                 if (hasValidHardwareIntegration) {
-                    // 1. 忠实采用底层硬件时序切片真实物理微积分结果（对标 BatteryRecorder 工业级标准）：
+                    // 1. 忠实采用底层硬件时序切片真实物理微积分结果：
                     // 算出来多少就是多少，严禁人为阈值拦截或捏造篡改数据
                     onEnergyWh = intOnEnergyWh
                     offEnergyWh = intOffEnergyWh
@@ -1673,9 +1675,15 @@ class PowerUsageManager private constructor(private val context: Context) {
                     } else {
                         item
                     }
-                }.filter { it.foregroundTimeMs > 0L || it.backgroundTimeMs > 0L || it.energyWh > 0.001f }
+                }.filter {
+                    if (enableBackgroundStats) {
+                        it.foregroundTimeMs > 0L || it.backgroundTimeMs > 0L || it.backgroundEnergyWh > 0.001f || it.energyWh > 0.001f
+                    } else {
+                        it.foregroundTimeMs > 0L
+                    }
+                }
 
-                // 严格对标 BatteryRecorder 算法：基于应用前台时间切片与硬件时序瞬时采样点（dischargeRealtimeSamples）
+                // 算法：基于应用前台时间切片与硬件时序瞬时采样点（dischargeRealtimeSamples）
                 // 采用梯形数值微积分（E = ∫ P(t) dt）精准归集各前台应用的真实物理平均放电功耗与能量，彻底废除 dumpsys 的拼凑模型
                 val validatedAppList = calculateAppPowerAndTempWithTimeSlices(
                     appItems = rawAppList,
@@ -1687,37 +1695,43 @@ class PowerUsageManager private constructor(private val context: Context) {
                 )
 
                 // 4. 后台所有应用能耗、后台真实活跃时长、平均功耗与剩余续航统计
-                val rawAllBgEnergyWh = validatedAppList.sumOf { it.backgroundEnergyWh.toDouble() }.toFloat()
+                val rawAllBgEnergyWh = if (enableBackgroundStats) {
+                    validatedAppList.sumOf { it.backgroundEnergyWh.toDouble() }.toFloat()
+                } else {
+                    0f
+                }
                 // 物理能量守恒天花板：后台所有应用消耗的能量之和，绝不能超过整机息屏待机总放电量
                 val maxAllowedBgEnergyWh = if (offEnergyWh > 0f) offEnergyWh else realTotalEnergyWh
-                val allBgEnergyWh = rawAllBgEnergyWh.coerceAtMost(maxAllowedBgEnergyWh)
+                val allBgEnergyWh = if (enableBackgroundStats) rawAllBgEnergyWh.coerceAtMost(maxAllowedBgEnergyWh) else 0f
 
                 // 整机后台放电时长严格从拔电时刻计算：
                 // 物理上整机后台待机时长严格对应本次放电周期内的息屏时间 screenOffMs，
                 // 且总时长守恒: 亮屏时长 screenOnMs + 息屏/后台时长 screenOffMs == durationMs。
-                // 严禁使用未受周期截断的单应用后台时长反向污染整机后台时长！
-                val rawBgMs = screenOffMs.coerceIn(0L, durationMs)
-                val effectiveBgMs = if (rawBgMs >= 1000L) {
+                val rawBgMs = if (enableBackgroundStats) screenOffMs.coerceIn(0L, durationMs) else 0L
+                val effectiveBgMs = if (!enableBackgroundStats) {
+                    0L
+                } else if (rawBgMs >= 1000L) {
                     rawBgMs
                 } else if (durationMs > screenOnMs) {
                     (durationMs - screenOnMs).coerceIn(0L, durationMs)
                 } else if (allBgEnergyWh > 0.001f) {
-                    // 全亮屏场景：屏幕虽持续点亮，但后台常驻应用与系统服务伴随整机全周期持续运行并消耗电量
                     durationMs
                 } else {
                     0L
                 }
                 val effectiveBgHours = effectiveBgMs / 3600000f
                 val calcBgWatts = if (effectiveBgHours > 0f && allBgEnergyWh > 0f) (allBgEnergyWh / effectiveBgHours) else 0f
-                val bgWatts = if (screenOffWatts > 0.05f && screenOffMs >= 1000L) {
+                val bgWatts = if (!enableBackgroundStats) {
+                    0f
+                } else if (screenOffWatts > 0.05f && screenOffMs >= 1000L) {
                     minOf(calcBgWatts, screenOffWatts)
                 } else if (calcBgWatts >= 0.005f) {
                     if (screenOffWatts > 0f) minOf(calcBgWatts, screenOffWatts) else calcBgWatts
                 } else {
                     0f
                 }
-                val remBackgroundStr = if (bgWatts >= 0.05f && energy > 0f) formatHoursToText(energy / bgWatts) else "--"
-                val bgDurationStr = formatDuration(effectiveBgMs)
+                val remBackgroundStr = if (enableBackgroundStats && bgWatts >= 0.05f && energy > 0f) formatHoursToText(energy / bgWatts) else "--"
+                val bgDurationStr = if (enableBackgroundStats) formatDuration(effectiveBgMs) else "--"
 
                 val overview = PowerOverviewStats(
                     avgPowerWatts = avgWatts,
@@ -1804,7 +1818,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             0f
         }
 
-        // 严格遵循 BatteryRecorder 算法标准：
+        // 算法标准：
         // 分 App 功耗与能量严格基于前台独占运行的硬件物理放电采样切片；
         // 后台由于多应用交替唤醒且与射频基带深度交织，单 App 后台只统计运行工时（活跃工时与常驻时长），
         val startTs = now - elapsedMs
@@ -1846,6 +1860,54 @@ class PowerUsageManager private constructor(private val context: Context) {
             trendPoints = points,
             isShizukuRealData = false,
             startLevelPercent = startLevel
+        )
+    }
+
+    /**
+     * 针对单个应用程序查询其在当前放电时间段内的后台相关数据（包括精确网络流量、CPU 算力、持锁唤醒、GPS定位与常驻服务）。
+     * 该方法仅在用户主动点击具体应用列表项时由后台协程异步调用，按需定向查询，消除全量下拉刷新的性能瓶颈。
+     *
+     * @param item 被点击的目标应用当前功耗展示实体 [AppPowerUsageItem]
+     * @param startTime 统计区间起始时间戳（毫秒）
+     * @param endTime 统计区间结束时间戳（毫秒）
+     * @return 补充了后台硬件与网络真实统计数据的完整应用实体 [AppPowerUsageItem]
+     */
+    fun loadSingleAppBackgroundDetails(
+        item: AppPowerUsageItem,
+        startTime: Long,
+        endTime: Long
+    ): AppPowerUsageItem {
+        val pm = context.packageManager
+        val uid = try {
+            pm.getApplicationInfo(item.packageName, 0).uid
+        } catch (_: Exception) {
+            -1
+        }
+        if (uid <= 0) {
+            return item
+        }
+
+        // 1. 定向查询该 UID 在指定时间段内的 Wi-Fi 与移动蜂窝真实网络流量（仅针对单 UID）
+        val netBytes = networkStatsHelper.getUidNetworkBytes(uid, startTime, endTime)
+
+        // 2. 定向查询该应用在底层 batterystats 中的真实硬件消耗（CPU、持锁、GPS、常驻服务）
+        val hwStats = if (isShizukuAuthorized()) {
+            shizukuParser.querySingleAppHardwareStats(item.packageName, uid)
+        } else {
+            null
+        }
+
+        val realCpu = hwStats?.getTotalCpuMs() ?: item.cpuTimeMs
+        val realWake = hwStats?.wakelockMs ?: item.wakelockTimeMs
+        val realGps = hwStats?.gpsMs ?: item.gpsTimeMs
+        val realFgs = hwStats?.fgsMs ?: item.fgsDurationMs
+
+        return item.copy(
+            networkBytes = if (netBytes > 0L) netBytes else item.networkBytes,
+            cpuTimeMs = realCpu,
+            wakelockTimeMs = realWake,
+            gpsTimeMs = realGps,
+            fgsDurationMs = realFgs
         )
     }
 
@@ -2302,7 +2364,7 @@ class PowerUsageManager private constructor(private val context: Context) {
     /**
      * 基于应用前台时间切片与底层时序硬件放电采样点（dischargeRealtimeSamples / historyTempPoints），
      * 采用梯形数值微积分（E = ∫ P(t) dt）精准计算各前台应用运行期间的真实物理放电平均功耗、消耗能量与真实温度。
-     * 严格对标 BatteryRecorder 算法标准：将整机电池在各应用前台活跃区间的物理瞬时放电功率进行微积分归集，
+     * 算法标准：将整机电池在各应用前台活跃区间的物理瞬时放电功率进行微积分归集，
      * 彻底废除 dumpsys 的静态 UID 能耗与屏幕底座估算拼凑。纯后台运行应用仅统计工时，功耗与能量归零。
      *
      * @param appItems 原始解析出的应用耗电实体列表
@@ -2323,7 +2385,7 @@ class PowerUsageManager private constructor(private val context: Context) {
     ): List<AppPowerUsageItem> {
         val intervalMap = appIntervals.groupBy { it.packageName }
 
-        // 微积分聚合器（对标 BatteryRecorder RecordAppStatsComputer）
+        // 微积分聚合器
         class SliceAccumulator {
             var sampledDurationMs: Long = 0L
             var sampledEnergyWs: Double = 0.0 // 瓦秒 W*s
@@ -2543,14 +2605,14 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
 
             item.copy(
-                avgPowerWatts = finalFgWatts,
+                avgPowerWatts = if (item.foregroundTimeMs > 0L) finalFgWatts else item.avgPowerWatts,
                 foregroundPowerWatts = finalFgWatts,
-                backgroundPowerWatts = 0f,
+                backgroundPowerWatts = item.backgroundPowerWatts,
                 avgTemperature = avgTemp,
                 maxTemperature = maxTemp,
                 foregroundEnergyWh = finalFgEnergy,
-                backgroundEnergyWh = 0f,
-                directEnergyWh = finalFgEnergy
+                backgroundEnergyWh = item.backgroundEnergyWh,
+                directEnergyWh = if (item.foregroundTimeMs > 0L) finalFgEnergy else item.directEnergyWh
             )
         }
     }
@@ -3244,7 +3306,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
         val physicalTotalEnergyWh = (physicalDrainMah * nominalVoltageVolts) / 1000f
 
-        // 硬件时序切片微积分：直接对底层物理放电采样点按亮灭屏做数值微积分（对标 BatteryRecorder 工业级标准）
+        // 硬件时序切片微积分：直接对底层物理放电采样点按亮灭屏做数值微积分
         val recentSamples = getDischargeRealtimeSamples().filter { it.timestamp in startTs..now }
         val dischargeStats = computeDischargePowerStats(recentSamples)
         val intTotalEnergyWh = dischargeStats?.totalDisplayEnergyWh ?: 0f
@@ -3266,7 +3328,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         val offEnergyWh: Float
 
         if (hasValidHardwareIntegration) {
-            // 1. 忠实采用底层硬件时序切片真实物理微积分结果（对标 BatteryRecorder 工业级标准）：
+            // 1. 忠实采用底层硬件时序切片真实物理微积分结果
             // 算出来多少就是多少，严禁人为阈值拦截或捏造篡改数据
             onEnergyWh = intOnEnergyWh
             offEnergyWh = intOffEnergyWh
@@ -3337,7 +3399,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         val remOnStr = if (screenOnPower >= 0.05f) formatHoursToText(remainingEnergyWh / screenOnPower) else "--"
         val remOffStr = if (screenOffPower >= 0.05f) formatHoursToText(remainingEnergyWh / screenOffPower) else "--"
 
-        // 严格遵循 BatteryRecorder 算法标准：分 App 不统计后台能耗与平均功耗，整机待机放电统一忠实由息屏三态承载
+        //算法标准：分 App 不统计后台能耗与平均功耗，整机待机放电统一忠实由息屏三态承载
         val allBgEnergyWh = 0f
         val bgWatts = 0f
         val remBgStr = "--"
@@ -3733,7 +3795,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 放电时序微积分与工况功率统计结果数据类。
-     * 遵循 BatteryRecorder 工业标准设计：能量与各工况平均功耗完全由真实微积分与稳健基线外推闭环产生。
+     * 能量与各工况平均功耗完全由真实微积分与稳健基线外推闭环产生。
      *
      * @property totalDisplayEnergyWh 总消耗能量（单位：瓦时 Wh）
      * @property screenOnDisplayEnergyWh 亮屏消耗能量（单位：瓦时 Wh）
@@ -3749,7 +3811,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 基于时序物理放电采样点切片微积分设备在指定时间区间内的真实消耗能量（单位：瓦时 Wh）与平均功率（单位：瓦特 W）。
-     * 遵循物理数值梯形微积分模型与稳健基线外推机制，严格对标 BatteryRecorder 工业标准。
+     * 遵循物理数值梯形微积分模型与稳健基线外推机制
      *
      * @param samples 物理放电时序采样点列表
      * @param filterScreenOn 过滤亮灭屏条件，null 表示全部，true 仅亮屏，false 仅息屏

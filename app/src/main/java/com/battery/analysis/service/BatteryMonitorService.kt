@@ -45,9 +45,8 @@ import java.util.Locale
 /**
  * 电池状态与充放电后台实时监控前台服务。
  *
- * 采用 BatteryRecorder 核心技术路线的双层兜底架构：
  * - **动态广播**（Service 内注册）：App 存活时毫秒级捕获插拔电源事件与电池状态变化；
- * - **AlarmManager 心跳**（BatteryRecorder 策略）：每隔 15 分钟触发一次心跳 Alarm，
+ * - **AlarmManager 心跳**：每隔 15 分钟触发一次心跳 Alarm，
  *   若服务意外被 OOM Killer 杀死，Alarm 广播会唤醒进程并重新拉起前台服务，实现自愈重启；
  * - **静态广播兜底**：配合 [com.battery.analysis.receiver.BatteryUnplugReceiver]，
  *   任何插拔电源事件均可唤醒进程并触发充放电结算，与动态广播互为备份。
@@ -316,7 +315,7 @@ class BatteryMonitorService : Service() {
         // 无论服务启动时处于充电还是放电状态，均自动开启全时态自适应采样轮询
         startMonitorSamplingLoop()
 
-        // 参考 BatteryRecorder 核心策略：启动 AlarmManager 心跳，每 15 分钟触发一次
+        // 核心策略：启动 AlarmManager 心跳，每 15 分钟触发一次
         // 若服务被 OOM Killer 杀死，心跳 Alarm 唤醒进程后会自动重启服务，实现自愈拉活
         scheduleHeartbeatAlarm(this)
     }
@@ -574,7 +573,7 @@ class BatteryMonitorService : Service() {
      * 获取当前处于系统最前台运行的应用包名。
      * 多级低功耗高精度探测：
      * 1. 优先使用 8 秒短效内存缓存，杜绝高频重复触发系统跨进程 IPC 与 CPU 唤醒；
-     * 2. 其次通过 Shizuku 特权 Binder 直调 IActivityTaskManager（对标 BatteryRecorder 架构，无需无障碍）；
+     * 2. 其次通过 Shizuku 特权 Binder 直调 IActivityTaskManager（无需无障碍）；
      * 3. 再次通过无障碍服务 [KeepAliveAccessibilityService] 事件驱动毫秒级读取（0 轮询开销）；
      * 4. 兜底策略：基于 [UsageStatsManager] 提取最近 10 秒增量事件并保持状态（若无新事件发生直接沿用上一有效应用），
      *    彻底废除过去 120 秒全量事件大遍历，兼顾极低整机能耗与前台归属准度。
@@ -588,7 +587,7 @@ class BatteryMonitorService : Service() {
         }
         lastForegroundQueryTime = now
 
-        // 1. 最高优先级：通过 Shizuku 特权 Binder 直调 IActivityTaskManager (对标 BatteryRecorder 架构，无需无障碍)
+        // 1. 最高优先级：通过 Shizuku 特权 Binder 直调 IActivityTaskManager (无需无障碍)
         val shizukuPkg = ShizukuForegroundAppDetector.getForegroundPackageName(this)
         if (!shizukuPkg.isNullOrEmpty()) {
             lastKnownForegroundPackage = shizukuPkg
@@ -1063,7 +1062,7 @@ class BatteryMonitorService : Service() {
             prefs.edit().putBoolean(KEY_BOOT_AUTO_START, enabled).apply()
         }
 
-        // ─── BatteryRecorder 核心策略：AlarmManager 心跳拉活 ───────────────────
+        // ─── 核心策略：AlarmManager 心跳拉活 ───────────────────
 
         /** 心跳广播 Action，由 [com.battery.analysis.receiver.HeartbeatAlarmReceiver] 接收 */
         const val ACTION_HEARTBEAT_ALARM = "com.battery.analysis.action.HEARTBEAT_ALARM"

@@ -85,7 +85,7 @@
                 android:value="Real-time battery charging and discharging monitoring" />
         </service>
 
-        <!-- 免 Root / 免 ADB 无障碍极速自愈保活服务 (BatteryRecorder 同款方案一) -->
+        <!-- 免 Root / 免 ADB 无障碍极速自愈保活服务 -->
         <service
             android:name=".service.KeepAliveAccessibilityService"
             android:enabled="true"
@@ -113,7 +113,7 @@
             </intent-filter>
         </receiver>
 
-        <!-- AlarmManager 心跳广播接收器（BatteryRecorder 核心自愈拉活策略） -->
+        <!-- AlarmManager 心跳广播接收器（ 核心自愈拉活策略） -->
         <receiver
             android:name=".receiver.HeartbeatAlarmReceiver"
             android:enabled="true"

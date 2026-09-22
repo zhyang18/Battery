@@ -10,7 +10,7 @@ import rikka.shizuku.SystemServiceHelper
 /**
  * 基于 Shizuku 特权 Binder 的前台应用极速探测器。
  *
- * 深度对标 BatteryRecorder 架构，当用户通过 Shizuku 授权后，直接获取
+ * 架构，当用户通过 Shizuku 授权后，直接获取
  * 系统 `activity_task` (IActivityTaskManager) 或 `activity` (IActivityManager) 的
  * Shell UID 特权 Binder 代理，通过纯 Binder IPC 调用 `getTasks(1)` 提取置顶前台任务，
  * 实现微秒级、0 额外进程、100% 精准的前台应用包名获取，无需依赖无障碍服务。
@@ -165,7 +165,7 @@ object ShizukuForegroundAppDetector {
 
     /**
      * 通过 IActivityTaskManager (activity_task) 的 getFocusedRootTaskInfo 或 getTasks 获取置顶前台应用包名。
-     * 深度对标 BatteryRecorder 架构，优先读取当前聚焦的 RootTaskInfo，特别识别 ACTIVITY_TYPE_HOME（桌面启动器），
+     * 架构，优先读取当前聚焦的 RootTaskInfo，特别识别 ACTIVITY_TYPE_HOME（桌面启动器），
      * 杜绝最近任务栈顺序导致的桌面包名误判为上一个普通应用。
      *
      * @return 置顶前台应用包名，失败返回 null
@@ -188,7 +188,7 @@ object ShizukuForegroundAppDetector {
                 service.javaClass
             }
 
-            // 1. 最高优先级：调用 getFocusedRootTaskInfo()（与 BatteryRecorder 完全一致，获取真实聚焦窗口）
+            // 1. 最高优先级：调用 getFocusedRootTaskInfo()（获取真实聚焦窗口）
             try {
                 val getFocusedMethod = atmInterface.getMethod("getFocusedRootTaskInfo").apply { isAccessible = true }
                 val rootTask = getFocusedMethod.invoke(service)

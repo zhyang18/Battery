@@ -411,6 +411,7 @@ class PowerUsageFragment : Fragment() {
     private fun checkFirstTimeConfiguration() {
         if (powerManager.isPowerModeConfigured()) {
             binding.layoutFirstTimeSetup.visibility = View.GONE
+            updateBackgroundStatsSwitchVisibility()
             val isCharging = chargingManager.isCharging()
             applySmartChargingMode(isCharging = isCharging, showToast = false)
         } else {
@@ -517,6 +518,7 @@ class PowerUsageFragment : Fragment() {
             if (latestMode != currentMode) {
                 currentMode = latestMode
             }
+            updateBackgroundStatsSwitchVisibility()
             if (!isViewingSnapshot && !isCharging && currentDisplayTab == 0) {
                 loadData()
             }
@@ -637,6 +639,7 @@ class PowerUsageFragment : Fragment() {
         Toast.makeText(requireContext(), tip, Toast.LENGTH_SHORT).show()
 
         // 首次配置完成后，校准并对齐当前放电初始基准，根据当前设备实际充放电状态自适应呈现界面
+        updateBackgroundStatsSwitchVisibility()
         powerManager.checkAndReconcileDischargeState()
         val isCharging = chargingManager.isCharging()
         applySmartChargingMode(isCharging = isCharging, showToast = false)
@@ -681,6 +684,7 @@ class PowerUsageFragment : Fragment() {
 
     /**
      * 初始化应用耗电 RecyclerView 列表，并注册列表项点击弹出前后台深度能耗详情 BottomSheet 弹窗监听。
+     * 点击单个应用条目时，按需异步定向查询该应用在放电时间段内的后台相关数据（流量、硬件开销），并实时刷新呈现。
      */
     private fun setupRecyclerView() {
         binding.recyclerAppUsage.layoutManager = LinearLayoutManager(requireContext())
@@ -697,7 +701,23 @@ class PowerUsageFragment : Fragment() {
                     if (durText.isNotBlank()) "$sStr - $eStr ($durText)" else "$sStr - $eStr"
                 } else null
             }
-            AppUsageDetailBottomSheetDialog(requireContext(), item, isShizuku, periodRange).show()
+            val dialog = AppUsageDetailBottomSheetDialog(requireContext(), item, isShizuku, periodRange)
+            dialog.show()
+
+            // 若在 Shizuku 模式下，针对单个 App 定向异步查询放电周期内的后台相关数据（流量、CPU、持锁、GPS、常驻服务）并刷新弹窗
+            if (isShizuku) {
+                val now = System.currentTimeMillis()
+                val durationMs = lastRenderedPackage?.overviewStats?.totalDurationMs ?: 0L
+                val startTs = if (durationMs > 0L) (now - durationMs).coerceAtLeast(0L) else 0L
+                viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                    val detailedItem = powerManager.loadSingleAppBackgroundDetails(item, startTs, now)
+                    withContext(Dispatchers.Main) {
+                        if (dialog.isShowing) {
+                            dialog.updateAppDetails(detailedItem)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -884,10 +904,14 @@ class PowerUsageFragment : Fragment() {
         val isBgStatsEnabled = statsPrefs.getBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, false)
         binding.switchBackgroundStats.isChecked = isBgStatsEnabled
         updateBackgroundStatsVisibility(isBgStatsEnabled)
+        updateBackgroundStatsSwitchVisibility()
 
         binding.switchBackgroundStats.setOnCheckedChangeListener { _, isChecked ->
             statsPrefs.edit().putBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, isChecked).apply()
             updateBackgroundStatsVisibility(isChecked)
+            if (currentMode == PowerUsageManager.MODE_SHIZUKU && powerManager.isPowerModeConfigured() && !isViewingSnapshot) {
+                loadData()
+            }
         }
 
         // 场景排序菜单按钮（漏斗）：弹出多选排序弹窗
@@ -908,11 +932,6 @@ class PowerUsageFragment : Fragment() {
         // 功耗时间轴底部指标多选/反选监听（功耗 / 电量 / 温度 / 电压 / 应用）
         binding.metricSelectorView.setOnMetricsChangedListener { selectedMetrics ->
             binding.batteryTimelineView.setSelectedMetrics(selectedMetrics)
-        }
-
-        // 功耗时间轴 App 图标点击监听：弹出 App 详细能耗 BottomSheet
-        binding.batteryTimelineView.setOnAppEventListener { event ->
-            AppEnergyDetailBottomSheetDialog(requireContext(), event).show()
         }
 
         // 充电大卡片右上角屏幕常亮灯泡点击监听
@@ -981,7 +1000,7 @@ class PowerUsageFragment : Fragment() {
             startChargingPolling()
 
             if (showToast) {
-                Toast.makeText(requireContext(), getString(R.string.toast_auto_switch_charging), Toast.LENGTH_SHORT).show()
+//                Toast.makeText(requireContext(), getString(R.string.toast_auto_switch_charging), Toast.LENGTH_SHORT).show()
             }
         } else {
             // 智能呈现【耗电统计】界面并恢复屏幕休眠
@@ -1012,7 +1031,7 @@ class PowerUsageFragment : Fragment() {
             loadData()
 
             if (showToast) {
-                Toast.makeText(requireContext(), getString(R.string.toast_auto_switch_discharging), Toast.LENGTH_SHORT).show()
+//                Toast.makeText(requireContext(), getString(R.string.toast_auto_switch_discharging), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -1401,11 +1420,14 @@ class PowerUsageFragment : Fragment() {
         updateShizukuBannerState()
         checkNormalPermissionBanner()
 
+        val statsPrefs = requireContext().getSharedPreferences(PREFS_POWER_STATS, Context.MODE_PRIVATE)
+        val isBgStatsEnabled = statsPrefs.getBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, false)
+
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             if (currentMode == PowerUsageManager.MODE_SHIZUKU && powerManager.isShizukuAuthorized()) {
                 powerManager.grantUsageStatsPermissionViaShizuku()
             }
-            val fullPackage = powerManager.loadPowerData(currentMode)
+            val fullPackage = powerManager.loadPowerData(currentMode, enableBackgroundStats = isBgStatsEnabled)
             val timelineState = powerManager.buildTimelineState(fullPackage)
 
             withContext(Dispatchers.Main) {
@@ -1643,6 +1665,16 @@ class PowerUsageFragment : Fragment() {
         minMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 60000L }
         secMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 1000L }
         return totalMs
+    }
+
+    /**
+     * 根据当前工作模式更新后台统计开关容器的可见性：
+     * 耗电统计页的后台统计开关仅在 Shizuku 模式下显示，标准模式下直接隐藏该容器。
+     */
+    private fun updateBackgroundStatsSwitchVisibility() {
+        if (_binding == null) return
+        val isShizuku = currentMode == PowerUsageManager.MODE_SHIZUKU
+        binding.layoutBackgroundStatsContainer.visibility = if (isShizuku) View.VISIBLE else View.GONE
     }
 
     /**

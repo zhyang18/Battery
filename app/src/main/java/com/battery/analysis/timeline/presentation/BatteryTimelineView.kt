@@ -117,7 +117,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     // 画笔体系（趋势折线改小一号为 dp1）
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = dp1_5
+        strokeWidth = dp1
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
@@ -773,9 +773,16 @@ class BatteryTimelineView @JvmOverloads constructor(
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
+
+        // 功耗纵向区间严格限制不超过整图表高度的 0.85（按 0.85f 比例映射，顶部留出 1/4 空间）
+        fun calcPowerY(powerW: Float): Float {
+            val ratio = (powerW / maxScaleW.toFloat()).coerceIn(0f, 1f)
+            return topPadding + (1f - ratio * 0.85f) * availableH
+        }
+
         val firstSample = downsampled.first()
         val firstPW = (abs(firstSample.powerMw) / 1000.0).toFloat().coerceIn(0f, maxScaleW.toFloat())
-        val firstY = topPadding + (1f - (firstPW / maxScaleW).toFloat()) * availableH
+        val firstY = calcPowerY(firstPW)
 
         cache.path.moveTo(contentLeft, firstY)
         var lastX = contentLeft
@@ -784,7 +791,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         for (s in downsampled) {
             val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
             val pW = (abs(s.powerMw) / 1000.0).toFloat().coerceIn(0f, maxScaleW.toFloat())
-            val y = topPadding + (1f - (pW / maxScaleW).toFloat()) * availableH
+            val y = calcPowerY(pW)
 
             if (x > lastX) {
                 val cX = (lastX + x) / 2f
@@ -805,7 +812,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         fun toMarker(s: BatterySample, isPriority: Boolean): CurveMarker {
             val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
             val pW = (abs(s.powerMw) / 1000.0).toFloat().coerceIn(0f, maxScaleW.toFloat())
-            val y = topPadding + (1f - (pW / maxScaleW).toFloat()) * availableH
+            val y = calcPowerY(pW)
             val label = formatPowerWatts(pW)
             return CurveMarker(x, y, label, isPriority)
         }

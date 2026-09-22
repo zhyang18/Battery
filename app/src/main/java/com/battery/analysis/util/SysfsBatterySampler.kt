@@ -12,11 +12,11 @@ import java.io.File
 /**
  * Linux 内核底层电源节点 (sysfs) 硬件直读采样器。
  *
- * 深度对标 BatteryRecorder 架构，优先通过 C/C++ JNI 直读
+ * 架构，优先通过 C/C++ JNI 直读
  * /sys/class/power_supply/battery/current_now、voltage_now 等节点，
  * 支持三级降级：JNI → 直接文件读取 → Shizuku Shell 通道。
  * 全面优化：已验证可用的路径会被缓存，Shizuku 可用性每 5 秒重新检查一次，
- * 彻底绕过 Android Framework 低通平滑滤波，实现与 BatteryRecorder 一致的瞬时真实功耗。
+ * 彻底绕过 Android Framework 低通平滑滤波，实现瞬时真实功耗。
  */
 object SysfsBatterySampler {
 
@@ -274,7 +274,7 @@ object SysfsBatterySampler {
     /**
      * 从 Linux 底层节点或 Android Health HAL 直接采样当前瞬时硬件物理指标（通用方法，支持充电与放电场景）。
      *
-     * 优化能效阶梯策略（极致低功耗设计，对标 BatteryRecorder）：
+     * 优化能效阶梯策略（极致低功耗设计）：
      * 1. 优先尝试 JNI 原生缓存直读（微秒级，0 IPC，0 fork）；
      * 2. 尝试 App 内部直接文件流读取（若权限允许，0 IPC，0 fork）；
      * 3. 优先通过 Android Health HAL 原生硬件寄存器直读（BatteryManager.BATTERY_PROPERTY_CURRENT_NOW，微秒级，0 进程 fork）；
@@ -295,7 +295,7 @@ object SysfsBatterySampler {
     /**
      * 从 Linux 底层节点或 Android Health HAL 直接采样当前瞬时硬件物理指标（通用方法，支持充电与放电场景）。
      *
-     * 优化能效阶梯策略（极致低功耗设计，深度对标 BatteryRecorder）：
+     * 优化能效阶梯策略（极致低功耗设计）：
      * 1. 优先尝试 JNI 原生缓存直读（微秒级，0 IPC，0 fork）；
      * 2. 尝试 App 内部直接文件流读取（若权限允许，0 IPC，0 fork）；
      * 3. 优先通过 Android Health HAL 原生硬件寄存器直读（BatteryManager.BATTERY_PROPERTY_CURRENT_NOW，微秒级，0 进程 fork）；
@@ -383,7 +383,7 @@ object SysfsBatterySampler {
             )
         }
 
-        // 3. 优先通过 Android Health HAL 原生硬件寄存器直读（微秒级，0 进程 fork，对标 BatteryRecorder 极致低能耗）
+        // 3. 优先通过 Android Health HAL 原生硬件寄存器直读（微秒级，0 进程 fork， 极致低能耗）
         val bmSample = readViaBatteryManager(context, isCharging, fallbackVoltageVolts, fallbackTempCelsius)
         if (bmSample != null && Math.abs(bmSample.currentMa) > 0f) {
             return bmSample
@@ -552,7 +552,7 @@ object SysfsBatterySampler {
     }
 
     /**
-     * 从 Linux 底层节点直接采样当前瞬时充电硬件物理指标（深度对标 BatteryRecorder JNI 直读架构）。
+     * 从 Linux 底层节点直接采样当前瞬时充电硬件物理指标（JNI 直读架构）。
      *
      * @param context 应用程序上下文
      * @param fallbackVoltageVolts 广播提供的备用电压（伏特 V）

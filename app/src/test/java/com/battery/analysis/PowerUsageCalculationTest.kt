@@ -1010,7 +1010,7 @@ class PowerUsageCalculationTest {
     }
 
     /**
-     * 验证应用平均功耗展示严格遵循 BatteryRecorder 算法：
+     * 验证应用平均功耗展示严格遵循算法：
      * 功耗仅基于前台真实物理放电采样计算，后台不统计虚拟平均功耗：
      * 1. 具有前台运行记录的应用，展示前台真实平均功耗（如 "1.00W"、"1.89W"）；
      * 2. 纯后台应用由于无前台物理切片，功耗诚实显示为 "--"，杜绝虚假估算。
@@ -1331,13 +1331,13 @@ class PowerUsageCalculationTest {
         assertEquals("5m23s | 后台 1m20s", fgsApp.getFormattedCombinedDuration())
         assertEquals("1m25s | 后台 33s", nonFgsApp.getFormattedCombinedDuration())
 
-        // 验证功耗展示严格对标 BatteryRecorder：仅统计前台真实物理功耗
+        // 验证功耗展示：仅统计前台真实物理功耗
         assertEquals("1.09W", fgsApp.getFormattedCombinedAvgWatts())
         assertEquals("1.91W", nonFgsApp.getFormattedCombinedAvgWatts())
     }
 
     /**
-     * 验证方案 A 基于硬件时序采样点的数值微积分模型（对标 BatteryRecorder 积分算法）：
+     * 验证方案 A 基于硬件时序采样点的数值微积分模型（积分算法）：
      * 1. 模拟 8 小时息屏放电过程（每 60 秒产生一个采样点，电压 3.9V，电流 12.82mA，对应功率 0.05W）；
      * 2. 通过梯形数值积分准确计算出放电总能量约为 0.40Wh，平均放电功耗为 0.05W；
      * 3. 验证单点与边界条件下的容错性。
@@ -1373,7 +1373,7 @@ class PowerUsageCalculationTest {
     }
 
     /**
-     * 验证严格遵循 BatteryRecorder 算法标准：分 App 后台仅统计运行时长，不统计后台能耗与平均功耗：
+     * 算法标准：分 App 后台仅统计运行时长，不统计后台能耗与平均功耗：
      * 1. 纯后台应用：仅统计后台活跃工时与常驻时长，功耗与能量忠实显示为 "--"，杜绝虚假发配电量；
      * 2. 前后台混合应用：功耗与能量严格基于前台物理放电切片计算，时长展示组合工时（如 "10m | 后台 20m"）；
      * 3. 彻底根除 27 个后台应用累加出 3.29Wh 的 Bug，整机息屏放电统归于息屏宏观指标。
@@ -1416,7 +1416,7 @@ class PowerUsageCalculationTest {
             lastUsedTimeMs = System.currentTimeMillis(),
             backgroundTimeMs = 1_200_000L, // 20m
             foregroundEnergyWh = 0.25f,
-            backgroundEnergyWh = 0f, // 遵循 BatteryRecorder：后台能耗不虚拟统计
+            backgroundEnergyWh = 0f, // 后台能耗不虚拟统计
             foregroundPowerWatts = 1.50f,
             backgroundPowerWatts = 0f,
             fgsDurationMs = 0L
@@ -1451,10 +1451,10 @@ class PowerUsageCalculationTest {
     }
 
     /**
-     * 验证对标 BatteryRecorder 的应用前台切片与硬件瞬时采样点梯形数值微积分算法（E = ∫ P(t) dt）：
+     * 应用前台切片与硬件瞬时采样点梯形数值微积分算法（E = ∫ P(t) dt）：
      * 1. 严格使用梯形数值积分累加各切片物理能量：dEnergyWs = (P[i-1] + P[i]) * 0.5 * (dt / 1000.0)；
      * 2. 平均放电功耗准确归属于置顶前台应用：P_avg = TotalEnergyWs / TotalDurationSeconds；
-     * 3. 真实硬件数据测试：米家 2.21W、BatteryRecorder 1.69W、Scene 1.78W、电池统计 1.37W、荣耀桌面 0.90W；
+     * 3. 真实硬件数据测试：米家 2.21W、 1.69W、Scene 1.78W、电池统计 1.37W、荣耀桌面 0.90W；
      * 4. 验证整机能量守恒：各应用前台放电能量之和严格等于硬件积分总能量。
      */
     @Test
@@ -1464,11 +1464,11 @@ class PowerUsageCalculationTest {
 
         val baseTs = 1710000000000L
 
-        // 1. 构建与图一 BatteryRecorder 完全对齐的 5 大典型应用前台活跃区间（各运行 100 秒）
+        // 1. 构建与图一  完全对齐的 5 大典型应用前台活跃区间（各运行 100 秒）
         val intervals = listOf(
             AppInterval("com.hihonor.android.launcher", baseTs, baseTs + 100_000L), // 荣耀桌面：0.90W
             AppInterval("com.battery.analysis", baseTs + 105_000L, baseTs + 205_000L), // 电池统计：1.37W
-            AppInterval("com.itosang.batteryrecorder", baseTs + 210_000L, baseTs + 310_000L), // BatteryRecorder：1.69W
+            AppInterval("com.itosang.batteryrecorder", baseTs + 210_000L, baseTs + 310_000L), // 1.69W
             AppInterval("com.omarea.vtools", baseTs + 315_000L, baseTs + 415_000L), // Scene：1.78W
             AppInterval("com.xiaomi.smarthome", baseTs + 420_000L, baseTs + 520_000L) // 米家：2.21W
         )
@@ -1489,7 +1489,7 @@ class PowerUsageCalculationTest {
             SamplePoint(baseTs + 180_000L, 1.35f),
             SamplePoint(baseTs + 205_000L, 1.39f),
 
-            // BatteryRecorder 区间 (210~310s, 目标均值 1.69W)
+            // 区间 (210~310s, 目标均值 1.69W)
             SamplePoint(baseTs + 210_000L, 1.69f),
             SamplePoint(baseTs + 235_000L, 1.67f),
             SamplePoint(baseTs + 260_000L, 1.71f),
@@ -1541,7 +1541,7 @@ class PowerUsageCalculationTest {
             prev = curr
         }
 
-        // 4. 验证各应用计算出的平均功耗与 BatteryRecorder 严格一致
+        // 4. 验证各应用计算出的平均功耗
         val launcherWatts = (appStats["com.hihonor.android.launcher"]!!.energyWs / (appStats["com.hihonor.android.launcher"]!!.durationMs / 1000.0)).toFloat()
         val batteryAppWatts = (appStats["com.battery.analysis"]!!.energyWs / (appStats["com.battery.analysis"]!!.durationMs / 1000.0)).toFloat()
         val brWatts = (appStats["com.itosang.batteryrecorder"]!!.energyWs / (appStats["com.itosang.batteryrecorder"]!!.durationMs / 1000.0)).toFloat()
@@ -1938,7 +1938,7 @@ class PowerUsageCalculationTest {
     }
     /**
      * 验证弃用 dumpsys 软件估算放电量并严格以底层硬件采样梯形微积分为核心的功耗计算。
-     * 针对 BatteryRecorder 统计的真实亮屏工况（2.50W，0.223Wh），验证计算结果忠实反映硬件实测值，
+     * 针对 计的真实亮屏工况（2.50W，0.223Wh），验证计算结果忠实反映硬件实测值，
      * 彻底解决系统软件估算（1.46W）严重缩水的问题。
      */
     @Test
@@ -2051,7 +2051,7 @@ class PowerUsageCalculationTest {
             )
         }
 
-        // 调用对标 BatteryRecorder 标准的放电统计模型
+        // 调用对标标准的放电统计模型
         val stats = PowerUsageManager.computeDischargePowerStats(samplePoints)
         assertTrue("有效采样点应成功计算出放电统计", stats != null)
 
@@ -2073,7 +2073,7 @@ class PowerUsageCalculationTest {
     }
 
     /**
-     * 验证对标 BatteryRecorder 标准模型在长周期 Deep Sleep 休眠断层场景下的计算表现：
+     * 标准模型在长周期 Deep Sleep 休眠断层场景下的计算表现：
      * 模拟 13 小时放电，包含前段亮屏、中段长达 11 小时的系统深度休眠断层（偶发零星唤醒短采样），以及尾段亮屏使用。
      * 验证：
      * 1. 息屏能量绝不缩水为 0.004Wh，而是通过 P30~P50 稳健待机基线外推真实补偿待机能量；
@@ -2169,7 +2169,7 @@ class PowerUsageCalculationTest {
     }
 
     /**
-     * 验证纯亮屏和纯息屏场景下，BatteryRecorder 模型的工况功率与总能耗闭环自洽。
+     * 验证纯亮屏和纯息屏场景下，模型的工况功率与总能耗闭环自洽。
      */
     @Test
     fun testBatteryRecorderPureScreenOnAndPureScreenOff() {

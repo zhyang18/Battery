@@ -6,7 +6,7 @@ import android.content.Intent
 import com.battery.analysis.service.BatteryMonitorService
 
 /**
- * AlarmManager 心跳广播接收器（参考 BatteryRecorder 核心技术路线）。
+ * AlarmManager 心跳广播接收器
  *
  * 工作原理：
  * - [BatteryMonitorService] 启动时通过 AlarmManager 注册一个 15 分钟后触发的单次精确 Alarm；

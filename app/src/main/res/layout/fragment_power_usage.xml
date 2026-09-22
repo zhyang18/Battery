@@ -1094,23 +1094,31 @@
                                     android:gravity="center_vertical"
                                     android:orientation="horizontal">
 
-                                    <TextView
+                                    <LinearLayout
+                                        android:id="@+id/layout_background_stats_container"
                                         android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:text="@string/power_background_stats_label"
-                                        android:textColor="?android:attr/textColorSecondary"
-                                        android:textSize="12sp" />
+                                        android:gravity="center_vertical"
+                                        android:orientation="horizontal">
 
-                                    <com.google.android.material.materialswitch.MaterialSwitch
-                                        android:id="@+id/switch_background_stats"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:layout_marginStart="2dp"
-                                        android:layout_marginEnd="6dp"
-                                        android:scaleX="0.75"
-                                        android:scaleY="0.75"
-                                        app:thumbTint="@color/selector_switch_thumb"
-                                        app:trackTint="@color/selector_switch_track" />
+                                        <TextView
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="@string/power_background_stats_label"
+                                            android:textColor="?android:attr/textColorSecondary"
+                                            android:textSize="12sp" />
+
+                                        <com.google.android.material.materialswitch.MaterialSwitch
+                                            android:id="@+id/switch_background_stats"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:layout_marginStart="2dp"
+                                            android:layout_marginEnd="6dp"
+                                            android:scaleX="0.75"
+                                            android:scaleY="0.75"
+                                            app:thumbTint="@color/selector_switch_thumb"
+                                            app:trackTint="@color/selector_switch_track" />
+                                    </LinearLayout>
 
                                     <ImageView
                                         android:id="@+id/btn_scene_sort"

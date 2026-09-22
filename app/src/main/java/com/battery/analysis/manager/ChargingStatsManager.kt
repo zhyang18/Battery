@@ -320,7 +320,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
         val fallbackTemp = sysStatus.temperatureCelsius
         val fallbackVolt = sysStatus.voltageVolts
 
-        // 优先采用 BatteryRecorder JNI / sysfs 硬件直读通道获取无滤波瞬时快充物理指标
+        // 优先采用JNI / sysfs 硬件直读通道获取无滤波瞬时快充物理指标
         val hwSample = com.battery.analysis.util.SysfsBatterySampler.sampleHardwareCharging(
             context = context,
             fallbackVoltageVolts = fallbackVolt,
@@ -379,7 +379,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
 
     /**
      * 周期性采样并记录当前瞬时充电指标（功率、电量、温度、电压与电流），同时累计息屏充电数据。
-     * 深度对标 BatteryRecorder 架构：优先通过 JNI / sysfs 原生内核文件描述符直读芯片寄存器，
+     * 优先通过 JNI / sysfs 原生内核文件描述符直读芯片寄存器，
      * 绕过 Android Framework 低通滤波，并在权限受限时自动平滑降级至 Shizuku 与 BatteryManager 兜底。
      *
      * @return 采样生成的最新 [ChargingSamplePoint] 数据点，若未在充电则返回最新合成点
@@ -394,7 +394,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
         val fallbackTemp = sysStatus.temperatureCelsius
         val fallbackVolt = sysStatus.voltageVolts
 
-        // 优先通过 BatteryRecorder JNI / sysfs 硬件直读通道获取真实瞬时快充物理指标
+        //  JNI / sysfs 硬件直读通道获取真实瞬时快充物理指标
         val hwSample = com.battery.analysis.util.SysfsBatterySampler.sampleHardwareCharging(
             context = context,
             fallbackVoltageVolts = fallbackVolt,

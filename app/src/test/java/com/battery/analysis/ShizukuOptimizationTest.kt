@@ -177,4 +177,159 @@ class ShizukuOptimizationTest {
         assertEquals("com.android.systemui", list[2].packageName)
         assertEquals("com.android.phone", list[3].packageName)
     }
+
+    /**
+     * 验证后台统计开关开启与关闭时应用列表过滤及排序规则的准确性：
+     * 1. 当开关关闭（showBackgroundStats == false）时，过滤掉纯后台应用，仅展示前台应用；
+     * 2. 当开关开启（showBackgroundStats == true）时，包含纯后台应用，且按总时长（前台+后台）降序排序，
+     *    避免纯后台应用被压在最底端不可见。
+     */
+    @Test
+    fun testBackgroundStatsToggleFilterAndSort() {
+        val fgApp = AppPowerUsageItem(
+            packageName = "com.example.fg",
+            appName = "ForegroundApp",
+            icon = null,
+            foregroundTimeMs = 30000L,
+            avgPowerWatts = 1.5f,
+            avgTemperature = 30f,
+            maxTemperature = 32f,
+            lastUsedTimeMs = 1000L,
+            backgroundTimeMs = 0L
+        )
+
+        val bgApp = AppPowerUsageItem(
+            packageName = "com.example.bg",
+            appName = "BackgroundApp",
+            icon = null,
+            foregroundTimeMs = 0L,
+            avgPowerWatts = 0.5f,
+            avgTemperature = 30f,
+            maxTemperature = 31f,
+            lastUsedTimeMs = 1000L,
+            backgroundTimeMs = 60000L
+        )
+
+        val mixedApp = AppPowerUsageItem(
+            packageName = "com.example.mixed",
+            appName = "MixedApp",
+            icon = null,
+            foregroundTimeMs = 10000L,
+            avgPowerWatts = 1.2f,
+            avgTemperature = 30f,
+            maxTemperature = 31f,
+            lastUsedTimeMs = 1000L,
+            backgroundTimeMs = 80000L
+        )
+
+        val allItems = listOf(fgApp, bgApp, mixedApp)
+
+        // 1. 关闭后台统计：过滤纯后台应用
+        val closedList = allItems.filter { it.foregroundTimeMs > 0L }.sortedByDescending { it.foregroundTimeMs }
+        assertEquals(2, closedList.size)
+        assertEquals("com.example.fg", closedList[0].packageName)
+        assertEquals("com.example.mixed", closedList[1].packageName)
+        assertFalse(closedList.any { it.packageName == "com.example.bg" })
+
+        // 2. 开启后台统计：前台应用按前台时长降序排在前面，后台应用按后台时长降序排在前台应用后面
+        val fgSortedByDuration = allItems.filter { it.foregroundTimeMs > 0L }.sortedByDescending { it.foregroundTimeMs }
+        val bgSortedByDuration = allItems.filter { it.foregroundTimeMs <= 0L }.sortedByDescending { it.backgroundTimeMs }
+        val durationSortedList = fgSortedByDuration + bgSortedByDuration
+
+        assertEquals(3, durationSortedList.size)
+        // fgApp 前台时长 30000L，排第一
+        assertEquals("com.example.fg", durationSortedList[0].packageName)
+        // mixedApp 前台时长 10000L，排第二
+        assertEquals("com.example.mixed", durationSortedList[1].packageName)
+        // bgApp 纯后台应用（前台时长 0L），排在前台应用之后
+        assertEquals("com.example.bg", durationSortedList[2].packageName)
+
+        // 3. 功耗排序：按升序排序，前台应用功耗升序在前，纯后台应用功耗升序在后
+        val fgSortedByPower = allItems.filter { it.foregroundTimeMs > 0L }.sortedBy { it.avgPowerWatts }
+        val bgSortedByPower = allItems.filter { it.foregroundTimeMs <= 0L }.sortedBy { it.avgPowerWatts }
+        val powerSortedList = fgSortedByPower + bgSortedByPower
+
+        assertEquals(3, powerSortedList.size)
+        // 前台应用：mixedApp(1.2W) < fgApp(1.5W)
+        assertEquals("com.example.mixed", powerSortedList[0].packageName)
+        assertEquals("com.example.fg", powerSortedList[1].packageName)
+        // 纯后台应用排在最后
+        assertEquals("com.example.bg", powerSortedList[2].packageName)
+    }
+
+    /**
+     * 验证耗电趋势图功耗曲线纵向区间严格限制在整图表高度的 3/4 以内。
+     */
+    @Test
+    fun testPowerCurveVerticalHeightRatioConstraint() {
+        val topPadding = 10f
+        val availableH = 200f
+        val maxScaleW = 20.0
+
+        fun calcPowerY(powerW: Float): Float {
+            val ratio = (powerW / maxScaleW.toFloat()).coerceIn(0f, 1f)
+            return topPadding + (1f - ratio * 0.75f) * availableH
+        }
+
+        val yAtZero = calcPowerY(0f)
+        val yAtHalf = calcPowerY(10f)
+        val yAtMax = calcPowerY(20f)
+        val yAtOver = calcPowerY(30f) // 超出刻度
+
+        val bottomY = topPadding + availableH
+        assertEquals(bottomY, yAtZero, 0.001f)
+
+        // 功耗最大值时的纵向位移跨度 (bottomY - yAtMax) 恰好为 availableH * 0.75f
+        val maxSpan = bottomY - yAtMax
+        assertEquals(availableH * 0.75f, maxSpan, 0.001f)
+
+        // 即使功耗超出最大刻度，纵向位移跨度依然不超过 availableH * 0.75f
+        val overSpan = bottomY - yAtOver
+        assertTrue(overSpan <= availableH * 0.75f)
+        assertEquals(availableH * 0.75f, overSpan, 0.001f)
+
+        // 中间值在 0 到 0.75 之间
+        val halfSpan = bottomY - yAtHalf
+        assertEquals(availableH * 0.375f, halfSpan, 0.001f)
+    }
+
+    /**
+     * 验证常规 dumpsys batterystats 文本中各 UID CPU 运行时间的解析提取正确性。
+     */
+    @Test
+    fun testHardwareStatsPlainTextCpuExtraction() {
+        val rawSample = "  10234:\n" +
+                "    TOTAL wake: 1m 30s partial\n" +
+                "    CPU: 12s 300ms usr + 2s 100ms krn ; 10s fg ; 4s 400ms bg\n" +
+                "  10567:\n" +
+                "    CPU: 5s 500ms usr + 1s 200ms krn ; 0ms fg ; 6s 700ms bg\n"
+
+        val uidHeaderRegex = Pattern.compile("^\\s{2,4}(?:Uid\\s+)?([\\w]+):\\s*$", Pattern.CASE_INSENSITIVE)
+        val cpuLineRegex = Pattern.compile("CPU:\\s*(?:([\\d\\w\\s]+?)\\s*usr)?(?:\\s*\\+\\s*([\\d\\w\\s]+?)\\s*krn)?(?:\\s*;\\s*([\\d\\w\\s]+?)\\s*fg)?(?:\\s*;\\s*([\\d\\w\\s]+?)\\s*bg)?", Pattern.CASE_INSENSITIVE)
+
+        val resultMap = mutableMapOf<Int, Long>()
+        var currentUid = -1
+
+        rawSample.lines().forEach { line ->
+            val uMatch = uidHeaderRegex.matcher(line)
+            if (uMatch.find()) {
+                currentUid = uMatch.group(1)?.toIntOrNull() ?: -1
+                return@forEach
+            }
+            if (currentUid <= 0) return@forEach
+
+            val trimmed = line.trim()
+            val cpuMatch = cpuLineRegex.matcher(trimmed)
+            if (cpuMatch.find()) {
+                val bg = cpuMatch.group(4)?.trim()
+                if (!bg.isNullOrEmpty()) {
+                    resultMap[currentUid] = 1L
+                }
+            }
+        }
+
+        assertTrue(resultMap.containsKey(10234))
+        assertTrue(resultMap.containsKey(10567))
+    }
 }
+

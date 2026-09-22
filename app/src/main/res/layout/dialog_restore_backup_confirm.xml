@@ -109,13 +109,14 @@
 
             <TextView
                 android:id="@+id/tv_restore_records_count"
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="6dp"
+                android:layout_weight="1"
                 android:textColor="#10B981"
                 android:textSize="12.5sp"
                 android:textStyle="bold"
-                tools:text="共 18 条记录" />
+                tools:text="快照 18 条 · 充电 5 条 · 放电 6 条" />
         </LinearLayout>
 
         <!-- 偏好设置包含说明 -->

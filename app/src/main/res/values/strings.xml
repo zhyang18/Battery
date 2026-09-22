@@ -331,7 +331,7 @@
 
     <string name="settings_section_backup">数据备份与恢复</string>
     <string name="setting_export_backup">导出数据备份</string>
-    <string name="setting_export_backup_desc">将电池快照及设置导出为 JSON 文件</string>
+    <string name="setting_export_backup_desc">导出全部设置项及电池快照、充放电记录</string>
     <string name="setting_restore_backup">导入并恢复数据</string>
     <string name="setting_restore_backup_desc">从本地 JSON 备份中恢复数据与配置</string>
 
@@ -350,6 +350,7 @@
     <string name="dialog_restore_mode_overwrite">覆盖现有数据（清空本地后写入）</string>
     <string name="dialog_restore_mode_merge">合并现有数据（保留现有并去重追加）</string>
     <string name="dialog_restore_btn_confirm">立即恢复</string>
+    <string name="restore_preview_records_format">快照 %1$d 条 · 充电 %2$d 条 · 放电 %3$d 条</string>
 
     <!-- 健康度指南说明弹窗 -->
     <string name="guide_title">电池健康度计算说明</string>
@@ -380,9 +381,9 @@
     <string name="toast_clear_success">已清空历史记录</string>
     <string name="toast_save_snapshots_format">已保存【%s】快照</string>
     <string name="toast_no_data_to_save">暂无可保存数据</string>
-    <string name="toast_backup_success">已导出 %d 条记录</string>
+    <string name="toast_backup_success">已导出 %1$d 条快照、%2$d 条充电、%3$d 条放电记录</string>
     <string name="toast_backup_failed">备份失败: %s</string>
-    <string name="toast_restore_success">已%1$s恢复 %2$d 条记录</string>
+    <string name="toast_restore_success">已%1$s恢复 %2$d 条快照、%3$d 条充电、%4$d 条放电记录</string>
     <string name="toast_restore_failed">恢复失败: %s</string>
     <string name="toast_system_api_updated">系统 API 数据已更新</string>
     <string name="toast_shizuku_data_updated">Shizuku 数据已更新</string>

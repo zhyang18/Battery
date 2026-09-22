@@ -330,7 +330,7 @@
 
     <string name="settings_section_backup">Data Backup &amp; Restore</string>
     <string name="setting_export_backup">Export Data Backup</string>
-    <string name="setting_export_backup_desc">Export snapshots and settings as JSON</string>
+    <string name="setting_export_backup_desc">Export all settings, snapshots, and charge/discharge records</string>
     <string name="setting_restore_backup">Import &amp; Restore Data</string>
     <string name="setting_restore_backup_desc">Restore snapshots and settings from JSON</string>
 
@@ -349,6 +349,7 @@
     <string name="dialog_restore_mode_overwrite">Overwrite existing data (clear then import)</string>
     <string name="dialog_restore_mode_merge">Merge with existing data (deduplicate &amp; append)</string>
     <string name="dialog_restore_btn_confirm">Restore Now</string>
+    <string name="restore_preview_records_format">Snapshots: %1$d · Charging: %2$d · Discharge: %3$d</string>
 
     <!-- Health Calculation Guide Dialog -->
     <string name="guide_title">Battery Health Guide</string>
@@ -379,9 +380,9 @@
     <string name="toast_clear_success">History records cleared</string>
     <string name="toast_save_snapshots_format">Saved [%s] snapshot</string>
     <string name="toast_no_data_to_save">No data to save</string>
-    <string name="toast_backup_success">Exported %d records</string>
+    <string name="toast_backup_success">Exported %1$d snapshots, %2$d charging, %3$d discharge records</string>
     <string name="toast_backup_failed">Backup failed: %s</string>
-    <string name="toast_restore_success">%1$s restored (%2$d records)</string>
+    <string name="toast_restore_success">%1$s restored (%2$d snapshots, %3$d charging, %4$d discharge)</string>
     <string name="toast_restore_failed">Restore failed: %s</string>
     <string name="toast_system_api_updated">System API updated</string>
     <string name="toast_shizuku_data_updated">Shizuku data updated</string>

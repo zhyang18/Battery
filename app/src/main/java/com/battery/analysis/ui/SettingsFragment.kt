@@ -595,8 +595,12 @@ class SettingsFragment : Fragment() {
     private fun handleExportBackup(uri: Uri) {
         val ctx = context ?: return
         viewModel.exportBackup(ctx, uri) { result ->
-            result.onSuccess { count ->
-                Toast.makeText(ctx, getString(R.string.toast_backup_success, count), Toast.LENGTH_LONG).show()
+            result.onSuccess { summary ->
+                Toast.makeText(
+                    ctx,
+                    getString(R.string.toast_backup_success, summary.historyCount, summary.chargingCount, summary.powerUsageCount),
+                    Toast.LENGTH_LONG
+                ).show()
             }.onFailure { exception ->
                 Toast.makeText(ctx, getString(R.string.toast_backup_failed, exception.message ?: ""), Toast.LENGTH_LONG).show()
             }
@@ -639,10 +643,24 @@ class SettingsFragment : Fragment() {
 
         tvTime.text = backupData.backupTime.ifBlank { getString(R.string.unknown) }
         tvAppVersion.text = "v${backupData.appVersion}"
-        tvRecordsCount.text = getString(R.string.history_count_format, backupData.historyRecords.size)
+        tvRecordsCount.text = getString(
+            R.string.restore_preview_records_format,
+            backupData.historyRecords.size,
+            backupData.chargingRecords.size,
+            backupData.powerUsageRecords.size
+        )
 
         val settingsList = mutableListOf<String>()
-        if (backupData.settings.themeMode != null) settingsList.add(getString(R.string.setting_follow_system_theme))
+        val s = backupData.settings
+        if (s.languageMode != null) settingsList.add(getString(R.string.setting_language))
+        if (s.themeMode != null) settingsList.add(getString(R.string.setting_follow_system_theme))
+        if (s.chargeDischargeStatsEnabled != null) settingsList.add(getString(R.string.setting_charge_discharge_stats))
+        if (s.chargingKeepScreenOn != null) settingsList.add(getString(R.string.setting_charging_keep_screen_on))
+        if (s.powerStatsMode != null) settingsList.add(getString(R.string.setting_power_mode))
+        if (s.notificationDisplayEnabled != null || s.screenOnIntervalMs != null || s.screenOffIntervalMs != null) {
+            settingsList.add(getString(R.string.settings_keep_alive_category))
+        }
+        if (s.bootAutoStartEnabled != null) settingsList.add(getString(R.string.settings_boot_start_title))
 
         if (settingsList.isNotEmpty()) {
             tvSettingsInfo.text = settingsList.joinToString("、")
@@ -667,12 +685,16 @@ class SettingsFragment : Fragment() {
             val restoreSettings = cbRestoreSettings.isChecked
 
             viewModel.restoreBackup(ctx, backupData, isOverwrite, restoreSettings) { result ->
-                result.onSuccess { count ->
+                result.onSuccess { summary ->
                     if (restoreSettings) {
                         syncSettingsUiState()
                     }
                     val modeText = if (isOverwrite) getString(R.string.dialog_restore_mode_overwrite) else getString(R.string.dialog_restore_mode_merge)
-                    Toast.makeText(ctx, getString(R.string.toast_restore_success, modeText, count), Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        ctx,
+                        getString(R.string.toast_restore_success, modeText, summary.historyCount, summary.chargingCount, summary.powerUsageCount),
+                        Toast.LENGTH_LONG
+                    ).show()
                     dialog.dismiss()
                 }.onFailure { exception ->
                     Toast.makeText(ctx, getString(R.string.toast_restore_failed, exception.message), Toast.LENGTH_LONG).show()
@@ -703,6 +725,21 @@ class SettingsFragment : Fragment() {
         setupLanguageSettings()
         setupThemeSettings()
         setupChargingKeepScreenOnSettings()
+
+        // 同步充放电统计开关及底部导航栏
+        val isStatsEnabled = com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(requireContext())
+        binding.switchChargeDischargeStats.isChecked = isStatsEnabled
+        (activity as? MainActivity)?.onChargeDischargeStatsToggled(isStatsEnabled)
+
+        // 同步耗电检测模式副标题
+        val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(requireContext())
+        updatePowerModeDisplay(powerManager.getSelectedMode())
+
+        // 同步常驻通知栏监控开关与刷新采样间隔展示
+        val isNotificationDisplayEnabled = com.battery.analysis.service.BatteryMonitorService.isNotificationDisplayEnabled(requireContext())
+        binding.switchKeepAliveService.isChecked = isNotificationDisplayEnabled
+        binding.switchBootAutoStart.isChecked = com.battery.analysis.service.BatteryMonitorService.isBootAutoStartEnabled(requireContext())
+        updateKeepAliveIntervalDisplay()
 
         AppCompatDelegate.setDefaultNightMode(currentThemeMode)
     }

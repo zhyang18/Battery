@@ -146,6 +146,93 @@ class ChargingHistoryDbHelper private constructor(context: Context) :
     }
 
     /**
+     * 将充电历史记录对象映射构建为用于 SQLite 操作的 [ContentValues]。
+     *
+     * @param record 充电历史实体对象
+     * @param targetId 指定的主键 ID（可选，若传入则覆盖实体自身 ID）
+     * @return 填充完成的 [ContentValues] 键值对象
+     */
+    private fun buildContentValues(record: ChargingHistoryRecord, targetId: Long? = null): ContentValues {
+        return ContentValues().apply {
+            put(COL_ID, if (targetId != null && targetId > 0L) targetId else record.id)
+            put(COL_RECORD_TIME, record.recordTime)
+            put(COL_START_TIMESTAMP, record.startTimestamp)
+            put(COL_END_TIMESTAMP, record.endTimestamp)
+            put(COL_DURATION_MS, record.durationMs)
+            put(COL_START_LEVEL, record.startLevel)
+            put(COL_END_LEVEL, record.endLevel)
+            put(COL_LEVEL_GAIN, record.levelGain)
+            put(COL_CHARGED_ENERGY_WH, record.chargedEnergyWh)
+            put(COL_AVG_POWER_WATTS, record.avgPowerWatts)
+            put(COL_MAX_POWER_WATTS, record.maxPowerWatts)
+            put(COL_MAX_TEMPERATURE, record.maxTemperature)
+            put(COL_CHARGE_TYPE, record.chargeType)
+            put(COL_SCREEN_OFF_DURATION_MS, record.screenOffDurationMs)
+            put(COL_SCREEN_OFF_LEVEL_GAIN, record.screenOffLevelGain)
+            put(COL_SCREEN_OFF_ENERGY_WH, record.screenOffEnergyWh)
+            put(COL_SAMPLE_POINTS_JSON, record.samplePointsJson)
+        }
+    }
+
+    /**
+     * 事务批量插入充电历史记录列表（用于合并去重恢复）。
+     *
+     * @param records 待插入的充电历史记录列表
+     * @return 实际成功写入或更新的记录条数
+     */
+    fun insertRecords(records: List<ChargingHistoryRecord>): Int {
+        if (records.isEmpty()) return 0
+        val db = writableDatabase
+        var insertedCount = 0
+        db.beginTransaction()
+        try {
+            for (record in records) {
+                val existingId = findDuplicateRecordId(db, record)
+                val values = buildContentValues(record, existingId)
+                val rowId = if (existingId != null && existingId > 0L) {
+                    val updated = db.update(TABLE_NAME, values, "$COL_ID = ?", arrayOf(existingId.toString()))
+                    if (updated > 0) existingId else db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+                } else {
+                    db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+                }
+                if (rowId != -1L) {
+                    insertedCount++
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return insertedCount
+    }
+
+    /**
+     * 在单个事务中清空现有充电历史记录并写入新的记录列表（用于覆盖式数据恢复）。
+     *
+     * @param records 待恢复的充电历史记录列表
+     * @return 实际成功写入的记录条数
+     */
+    fun replaceRecords(records: List<ChargingHistoryRecord>): Int {
+        val db = writableDatabase
+        var insertedCount = 0
+        db.beginTransaction()
+        try {
+            db.delete(TABLE_NAME, null, null)
+            for (record in records) {
+                val values = buildContentValues(record, null)
+                val rowId = db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+                if (rowId != -1L) {
+                    insertedCount++
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return insertedCount
+    }
+
+    /**
      * 检索数据库中是否已存在与待插入记录同属单次会话的重复记录 ID。
      *
      * @param db SQLite 数据库实例

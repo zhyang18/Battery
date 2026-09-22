@@ -498,18 +498,30 @@ class BatteryViewModel : ViewModel() {
     }
 
     /**
-     * 导出全量电池检测记录及应用设置至指定的 SAF 备份文件 URI。
+     * 导出全量电池快照、充电历史、放电历史及应用设置至指定的 SAF 备份文件 URI。
      *
      * @param context 应用程序上下文
      * @param uri 用户选定的目标保存文件 URI
-     * @param onResult 导出完成回调函数，包含成功导出的记录数或异常信息
+     * @param onResult 导出完成回调函数，包含成功导出的各类记录汇总或异常信息
      */
-    fun exportBackup(context: Context, uri: Uri, onResult: (Result<Int>) -> Unit) {
+    fun exportBackup(context: Context, uri: Uri, onResult: (Result<com.battery.analysis.model.BackupRestoreSummary>) -> Unit) {
         val appCtx = context.applicationContext
         viewModelScope.launch(Dispatchers.IO) {
-            val dbHelper = HistoryDbHelper.getInstance(appCtx)
-            val allRecords = dbHelper.getAllRecords()
-            val result = BackupManager.getInstance().exportBackupToUri(appCtx, uri, allRecords)
+            val historyDb = HistoryDbHelper.getInstance(appCtx)
+            val chargingDb = com.battery.analysis.db.ChargingHistoryDbHelper.getInstance(appCtx)
+            val powerDb = com.battery.analysis.db.PowerUsageDbHelper.getInstance(appCtx)
+
+            val allHistory = historyDb.getAllRecords()
+            val allCharging = chargingDb.getAllRecords()
+            val allPower = powerDb.getAllRecords()
+
+            val result = BackupManager.getInstance().exportBackupToUri(
+                context = appCtx,
+                uri = uri,
+                historyRecords = allHistory,
+                chargingRecords = allCharging,
+                powerUsageRecords = allPower
+            )
             withContext(Dispatchers.Main) {
                 onResult(result)
             }
@@ -540,14 +552,14 @@ class BatteryViewModel : ViewModel() {
      * @param backupData 待恢复的备份数据对象
      * @param isOverwrite 是否覆盖现有数据（true 为清空后重写，false 为合并去重）
      * @param restoreSettings 是否同步恢复应用偏好配置
-     * @param onResult 恢复完成回调函数，包含恢复成功的记录数或异常信息
+     * @param onResult 恢复完成回调函数，包含恢复成功的各类记录汇总或异常信息
      */
     fun restoreBackup(
         context: Context,
         backupData: BackupData,
         isOverwrite: Boolean,
         restoreSettings: Boolean,
-        onResult: (Result<Int>) -> Unit
+        onResult: (Result<com.battery.analysis.model.BackupRestoreSummary>) -> Unit
     ) {
         val appCtx = context.applicationContext
         viewModelScope.launch(Dispatchers.IO) {

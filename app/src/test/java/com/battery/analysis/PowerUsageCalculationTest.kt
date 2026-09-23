@@ -2861,6 +2861,260 @@ class PowerUsageCalculationTest {
         assertEquals("48小时息屏能量与功耗 100% 物理闭环", stats.screenOffPowerWatts, calcOffWatts, 0.01f)
         assertEquals("48小时全局能量与功耗 100% 物理闭环", stats.averagePowerWatts, calcAvgWatts, 0.01f)
     }
+
+    /**
+     * 验证在息屏进入 Android Deep Sleep（深度休眠）导致软件采样完全缺失时，
+     * 双重物理锚定算法能将硬件芯片库仑计持续积分的物理总能量准确补偿至息屏能耗，
+     * 且绝对不污染或稀释亮屏高频微积分真实能量与功耗。
+     */
+    @Test
+    fun testDualAnchorCompensationWhenDeepSleepWithoutSamples() {
+        val nominalVoltage = 3.85f
+        val screenOnHours = 1.0f
+        val screenOffHours = 7.0f
+        val dischargeHours = 8.0f
+        val screenOffMs = 7 * 3600000L
+
+        // 软件 1Hz 采样微积分真值：亮屏 1 小时实耗 2.00Wh，平均 2.00W
+        val intOnEnergyWh = 2.00f
+        val intOnPowerWatts = 2.00f
+
+        // 息屏期间由于 Deep Sleep，软件几无采样，微积分仅统计到唤醒瞬间的 0.02Wh
+        val intOffEnergyWh = 0.02f
+        val intOffPowerWatts = 0.02f / screenOffHours
+        val intTotalEnergyWh = intOnEnergyWh + intOffEnergyWh
+        val intTotalPowerWatts = intTotalEnergyWh / dischargeHours
+
+        // 硬件芯片库仑计（PMIC Charge Counter）在硬件层持续积分电荷量：
+        // 测得整机总放电 919.48mAh，折算物理总能量为 3.54Wh
+        // （其中亮屏 2.00Wh 对应约 519.48mAh，息屏 7 小时深度休眠漏电 400mAh 对应 1.54Wh）
+        val physicalTotalEnergyWh = 3.54f
+
+        val result = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = intOnEnergyWh,
+            intOffEnergyWh = intOffEnergyWh,
+            intTotalEnergyWh = intTotalEnergyWh,
+            intOnPowerWatts = intOnPowerWatts,
+            intOffPowerWatts = intOffPowerWatts,
+            intTotalPowerWatts = intTotalPowerWatts,
+            physicalTotalEnergyWh = physicalTotalEnergyWh,
+            screenOnHours = screenOnHours,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = nominalVoltage
+        )
+
+        // 1. 亮屏能量 100% 锁定软件 1Hz 微积分真值，绝不被稀释或篡改
+        assertEquals("亮屏能量严格等于微积分真值 2.00Wh", 2.00f, result.onEnergyWh, 0.001f)
+        assertEquals("亮屏功耗准确计算为 2.00W", 2.00f, result.screenOnWatts, 0.001f)
+
+        // 2. 息屏能量精准吸纳硬件休眠漏电补偿：3.54Wh - 2.00Wh = 1.54Wh
+        assertEquals("息屏能量吸收深度休眠补偿准确达到 1.54Wh", 1.54f, result.offEnergyWh, 0.001f)
+        assertEquals("息屏功耗准确体现真实待机功耗 0.22W", 1.54f / 7.0f, result.screenOffWatts, 0.001f)
+
+        // 3. 整机总能量严格锚定硬件物理总能耗 3.54Wh
+        assertEquals("整机总能量严格等于硬件物理总能量 3.54Wh", 3.54f, result.totalEnergyWh, 0.001f)
+        assertEquals("全局平均功耗准确为 0.4425W", 3.54f / 8.0f, result.avgWatts, 0.001f)
+        assertEquals("实际放电毫安时精准对应 919.48mAh", (3.54f * 1000f) / nominalVoltage, result.realDischargedMah, 0.01f)
+
+        // 4. 严格物理闭环校验：E_total = E_on + E_off，且 P_total * T_total = P_on * T_on + P_off * T_off
+        val energySum = result.onEnergyWh + result.offEnergyWh
+        assertEquals("能量守恒：总能量等于亮屏能量加息屏能量", result.totalEnergyWh, energySum, 0.0001f)
+
+        val powerTimeSum = result.screenOnWatts * screenOnHours + result.screenOffWatts * screenOffHours
+        assertEquals("功率时间守恒：总能量等于各工况功耗乘时长之和", result.totalEnergyWh, powerTimeSum, 0.001f)
+    }
+
+    /**
+     * 验证全亮屏工况下（息屏时长为 0），息屏能耗与功耗严格为 0，
+     * 亮屏能耗与功耗对齐整机物理总能耗与全局平均功耗。
+     */
+    @Test
+    fun testDualAnchorWhenAllScreenOn() {
+        val nominalVoltage = 3.85f
+        val screenOnHours = 2.0f
+        val screenOffHours = 0.0f
+        val dischargeHours = 2.0f
+        val screenOffMs = 0L
+
+        val intOnEnergyWh = 3.80f
+        val intOffEnergyWh = 0.0f
+        val intTotalEnergyWh = 3.80f
+        val intOnPowerWatts = 1.90f
+        val intOffPowerWatts = 0.0f
+        val intTotalPowerWatts = 1.90f
+
+        // 硬件芯片库仑计记录实际放电 1000mAh = 3.85Wh
+        val physicalTotalEnergyWh = 3.85f
+
+        val result = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = intOnEnergyWh,
+            intOffEnergyWh = intOffEnergyWh,
+            intTotalEnergyWh = intTotalEnergyWh,
+            intOnPowerWatts = intOnPowerWatts,
+            intOffPowerWatts = intOffPowerWatts,
+            intTotalPowerWatts = intTotalPowerWatts,
+            physicalTotalEnergyWh = physicalTotalEnergyWh,
+            screenOnHours = screenOnHours,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = nominalVoltage
+        )
+
+        assertEquals("全亮屏工况息屏能耗严格为 0", 0.0f, result.offEnergyWh, 0.0001f)
+        assertEquals("全亮屏工况息屏功耗严格为 0", 0.0f, result.screenOffWatts, 0.0001f)
+        assertEquals("全亮屏工况亮屏能量严格等于总能量 3.85Wh", 3.85f, result.onEnergyWh, 0.001f)
+        assertEquals("全亮屏工况总能量严格等于硬件物理总能量 3.85Wh", 3.85f, result.totalEnergyWh, 0.001f)
+        assertEquals("全亮屏工况亮屏功耗严格等于全局平均功耗", result.avgWatts, result.screenOnWatts, 0.001f)
+        assertEquals("放电毫安时精准为 1000mAh", 1000f, result.realDischargedMah, 0.01f)
+    }
+
+    /**
+     * 验证全息屏工况下（亮屏时长为 0），亮屏能耗与功耗严格为 0，
+     * 息屏能耗与功耗对齐硬件芯片库仑计放电总能量与全局平均功耗。
+     */
+    @Test
+    fun testDualAnchorWhenAllScreenOff() {
+        val nominalVoltage = 3.85f
+        val screenOnHours = 0.0f
+        val screenOffHours = 10.0f
+        val dischargeHours = 10.0f
+        val screenOffMs = 10 * 3600000L
+
+        val intOnEnergyWh = 0.0f
+        val intOffEnergyWh = 0.05f
+        val intTotalEnergyWh = 0.05f
+        val intOnPowerWatts = 0.0f
+        val intOffPowerWatts = 0.005f
+        val intTotalPowerWatts = 0.005f
+
+        // 硬件库仑计检测到待机 10 小时共放电 500mAh = 1.925Wh
+        val physicalTotalEnergyWh = 1.925f
+
+        val result = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = intOnEnergyWh,
+            intOffEnergyWh = intOffEnergyWh,
+            intTotalEnergyWh = intTotalEnergyWh,
+            intOnPowerWatts = intOnPowerWatts,
+            intOffPowerWatts = intOffPowerWatts,
+            intTotalPowerWatts = intTotalPowerWatts,
+            physicalTotalEnergyWh = physicalTotalEnergyWh,
+            screenOnHours = screenOnHours,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = nominalVoltage
+        )
+
+        assertEquals("全息屏工况亮屏能耗严格为 0", 0.0f, result.onEnergyWh, 0.0001f)
+        assertEquals("全息屏工况亮屏功耗严格为 0", 0.0f, result.screenOnWatts, 0.0001f)
+        assertEquals("全息屏工况息屏能量严格等于硬件物理总能量 1.925Wh", 1.925f, result.offEnergyWh, 0.001f)
+        assertEquals("全息屏工况息屏功耗准确计算为 0.1925W", 0.1925f, result.screenOffWatts, 0.001f)
+        assertEquals("全息屏工况全局平均功耗准确计算为 0.1925W", 0.1925f, result.avgWatts, 0.001f)
+        assertEquals("全息屏工况放电毫安时精准为 500mAh", 500f, result.realDischargedMah, 0.01f)
+    }
+
+    /**
+     * 验证在短时间高动态放电（如刚开机游戏 5 分钟、电量百分比尚未跳变 1%）且硬件库仑计为 0 时，
+     * 双重物理锚定算法完整保留高精度高频软件微积分结果，绝不因硬件指标未更新而强行清零或虚构保底。
+     */
+    @Test
+    fun testDualAnchorWhenMicroIntegralExceedsCoulombCounter() {
+        val nominalVoltage = 3.85f
+        val screenOnHours = 5f / 60f // 5 分钟
+        val screenOffHours = 1f / 60f // 1 分钟
+        val dischargeHours = 6f / 60f
+        val screenOffMs = 60000L
+
+        // 软件 1 秒高频微积分准确测得：5 分钟游戏消耗 0.50Wh，1 分钟息屏消耗 0.01Wh
+        val intOnEnergyWh = 0.50f
+        val intOffEnergyWh = 0.01f
+        val intTotalEnergyWh = 0.51f
+        val intOnPowerWatts = 0.50f / screenOnHours // 6.0W
+        val intOffPowerWatts = 0.01f / screenOffHours // 0.6W
+        val intTotalPowerWatts = 0.51f / dischargeHours // 5.1W
+
+        // 刚拔电 6 分钟，电池百分比仍为 100%，掉电量为 0，硬件库仑计也尚未触发跳变
+        val physicalTotalEnergyWh = 0.0f
+
+        val result = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = intOnEnergyWh,
+            intOffEnergyWh = intOffEnergyWh,
+            intTotalEnergyWh = intTotalEnergyWh,
+            intOnPowerWatts = intOnPowerWatts,
+            intOffPowerWatts = intOffPowerWatts,
+            intTotalPowerWatts = intTotalPowerWatts,
+            physicalTotalEnergyWh = physicalTotalEnergyWh,
+            screenOnHours = screenOnHours,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = nominalVoltage
+        )
+
+        // 验证微积分真值被 100% 忠实保留
+        assertEquals("亮屏能量忠实保留微积分 0.50Wh", 0.50f, result.onEnergyWh, 0.001f)
+        assertEquals("息屏能量忠实保留微积分 0.01Wh", 0.01f, result.offEnergyWh, 0.001f)
+        assertEquals("总能量忠实保留微积分 0.51Wh", 0.51f, result.totalEnergyWh, 0.001f)
+        assertEquals("亮屏功耗准确计算为 6.0W", 6.0f, result.screenOnWatts, 0.01f)
+        assertEquals("息屏功耗准确计算为 0.6W", 0.6f, result.screenOffWatts, 0.01f)
+        assertEquals("全局平均功耗准确计算为 5.1W", 5.1f, result.avgWatts, 0.01f)
+        assertEquals("放电电量依标称电压真实折算约 132.47mAh", (0.51f * 1000f) / nominalVoltage, result.realDischargedMah, 0.01f)
+    }
+
+    /**
+     * 验证 24 小时超长周期多段混合深度休眠工况下，双重物理锚定算法的守恒性与准确性。
+     */
+    @Test
+    fun testDualAnchorLongPeriod24HoursWithDeepSleep() {
+        val nominalVoltage = 3.85f
+        val screenOnHours = 3.0f
+        val screenOffHours = 21.0f
+        val dischargeHours = 24.0f
+        val screenOffMs = 21 * 3600000L
+
+        // 亮屏 3 小时微积分实耗 6.00Wh（平均 2.00W）
+        val intOnEnergyWh = 6.00f
+        val intOnPowerWatts = 2.00f
+
+        // 息屏 21 小时多次深度休眠，软件仅记录 0.10Wh
+        val intOffEnergyWh = 0.10f
+        val intOffPowerWatts = 0.10f / screenOffHours
+        val intTotalEnergyWh = 6.10f
+        val intTotalPowerWatts = intTotalEnergyWh / dischargeHours
+
+        // 硬件芯片库仑计记录整机共放电 2000mAh = 7.70Wh
+        val physicalTotalEnergyWh = 7.70f
+
+        val result = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = intOnEnergyWh,
+            intOffEnergyWh = intOffEnergyWh,
+            intTotalEnergyWh = intTotalEnergyWh,
+            intOnPowerWatts = intOnPowerWatts,
+            intOffPowerWatts = intOffPowerWatts,
+            intTotalPowerWatts = intTotalPowerWatts,
+            physicalTotalEnergyWh = physicalTotalEnergyWh,
+            screenOnHours = screenOnHours,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = nominalVoltage
+        )
+
+        assertEquals("24小时亮屏能量准确为 6.00Wh", 6.00f, result.onEnergyWh, 0.001f)
+        assertEquals("24小时亮屏功耗准确为 2.00W", 2.00f, result.screenOnWatts, 0.001f)
+        assertEquals("24小时息屏能量准确补偿为 1.70Wh", 1.70f, result.offEnergyWh, 0.001f)
+        assertEquals("24小时息屏功耗准确计算为 0.081W", 1.70f / 21.0f, result.screenOffWatts, 0.001f)
+        assertEquals("24小时总能量严格对齐硬件 7.70Wh", 7.70f, result.totalEnergyWh, 0.001f)
+        assertEquals("24小时全局平均功耗准确计算为 0.3208W", 7.70f / 24.0f, result.avgWatts, 0.001f)
+        assertEquals("24小时放电电量精准对应 2000mAh", 2000f, result.realDischargedMah, 0.01f)
+
+        // 验证 100% 物理闭环
+        val diff = Math.abs(result.totalEnergyWh - (result.screenOnWatts * screenOnHours + result.screenOffWatts * screenOffHours))
+        assertTrue("24小时全生命周期功耗与能量严格物理闭环", diff < 0.001f)
+    }
 }
 
 

@@ -451,6 +451,140 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
             return sorted.last().powerWatts
         }
+
+        /**
+         * 硬件微积分与芯片库仑计双重物理锚定计算结果数据类。
+         *
+         * @property onEnergyWh 对齐后的亮屏实耗能量（瓦时 Wh）
+         * @property offEnergyWh 对齐后的息屏实耗能量（瓦时 Wh，含深度休眠硬件漏电补偿）
+         * @property totalEnergyWh 严格物理守恒的整机放电总能量（瓦时 Wh，等于 onEnergyWh + offEnergyWh）
+         * @property screenOnWatts 亮屏平均功耗（瓦特 W）
+         * @property screenOffWatts 息屏平均功耗（瓦特 W）
+         * @property avgWatts 全局平均功耗（瓦特 W）
+         * @property realDischargedMah 折算后的真实物理放电电量（毫安时 mAh）
+         */
+        data class DualAnchorPowerStats(
+            val onEnergyWh: Float,
+            val offEnergyWh: Float,
+            val totalEnergyWh: Float,
+            val screenOnWatts: Float,
+            val screenOffWatts: Float,
+            val avgWatts: Float,
+            val realDischargedMah: Float
+        )
+
+        /**
+         * 基于硬件微积分与底层芯片库仑计/掉电百分比双重物理锚定，计算整机放电能量与各工况平均功耗。
+         *
+         * 针对 Android 系统在息屏状态下进入 Deep Sleep（深度休眠）导致 CPU 暂停、软件无采样点的问题，
+         * 保持亮屏高频微积分真值绝对置信度的同时，将硬件层持续统计的物理放电能量（库仑计或掉电容量）
+         * 与软件积分差值作为深度休眠漏电精准补偿至息屏能耗中，实现 $E = P \times T$ 100% 物理闭环守恒。
+         *
+         * @param intOnEnergyWh 软件高频微积分亮屏能量（瓦时 Wh）
+         * @param intOffEnergyWh 软件微积分息屏能量（瓦时 Wh）
+         * @param intTotalEnergyWh 软件微积分整机总能量（瓦时 Wh）
+         * @param intOnPowerWatts 软件微积分亮屏基础功耗（瓦特 W）
+         * @param intOffPowerWatts 软件微积分息屏基础功耗（瓦特 W）
+         * @param intTotalPowerWatts 软件微积分整机基础平均功耗（瓦特 W）
+         * @param physicalTotalEnergyWh 硬件芯片库仑计或电量百分比折算的总物理能量（瓦时 Wh）
+         * @param screenOnHours 亮屏总时长（小时 h）
+         * @param screenOffHours 息屏总时长（小时 h）
+         * @param dischargeHours 放电总时长（小时 h）
+         * @param screenOffMs 息屏总时长（毫秒 ms）
+         * @param nominalVoltageVolts 标称工作电压（伏特 V）
+         * @return 包含对齐后的亮屏能量、息屏能量、总能量、亮屏功耗、息屏功耗、全局平均功耗与实际放电毫安时的结果对象 [DualAnchorPowerStats]
+         */
+        fun calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh: Float,
+            intOffEnergyWh: Float,
+            intTotalEnergyWh: Float,
+            intOnPowerWatts: Float,
+            intOffPowerWatts: Float,
+            intTotalPowerWatts: Float,
+            physicalTotalEnergyWh: Float,
+            screenOnHours: Float,
+            screenOffHours: Float,
+            dischargeHours: Float,
+            screenOffMs: Long,
+            nominalVoltageVolts: Float
+        ): DualAnchorPowerStats {
+            var onEnergyWh = intOnEnergyWh
+            var offEnergyWh: Float
+            val realTotalEnergyWh: Float
+
+            if (screenOffHours <= 0f || screenOffMs < 1000L) {
+                // 全亮屏工况：息屏能耗与功耗严格为 0，亮屏能耗对齐整机总能耗
+                offEnergyWh = 0f
+                realTotalEnergyWh = if (physicalTotalEnergyWh > onEnergyWh) {
+                    physicalTotalEnergyWh
+                } else {
+                    if (intTotalEnergyWh > 0f) intTotalEnergyWh else onEnergyWh
+                }
+                onEnergyWh = realTotalEnergyWh
+            } else if (screenOnHours <= 0f) {
+                // 全息屏工况：亮屏能耗严格为 0，息屏能耗对齐整机总能耗
+                onEnergyWh = 0f
+                offEnergyWh = if (physicalTotalEnergyWh > intOffEnergyWh) {
+                    physicalTotalEnergyWh
+                } else {
+                    if (intTotalEnergyWh > 0f) intTotalEnergyWh else intOffEnergyWh
+                }
+                realTotalEnergyWh = offEnergyWh
+            } else {
+                // 亮息混合工况：
+                // 亮屏期间 CPU 活跃且高频（1Hz）连续采样，瞬时电压电流微积分具备最高物理真值置信度；
+                // 息屏期间系统进入 Deep Sleep（深度休眠），CPU 暂停导致软件采样缺失。
+                // 硬件芯片库仑计在硬件层持续积分电荷量，当硬件物理总能量大于软件亮屏能量时，
+                // 将差值补偿为息屏真实能耗（包含深度休眠漏电），实现整机物理闭环。
+                val hwCompensatedOffEnergyWh = if (physicalTotalEnergyWh > onEnergyWh) {
+                    physicalTotalEnergyWh - onEnergyWh
+                } else {
+                    0f
+                }
+                offEnergyWh = maxOf(intOffEnergyWh, hwCompensatedOffEnergyWh)
+                realTotalEnergyWh = onEnergyWh + offEnergyWh
+            }
+
+            val screenOnWatts = if (screenOnHours > 0f && onEnergyWh > 0f) {
+                onEnergyWh / screenOnHours
+            } else if (intOnPowerWatts > 0f) {
+                intOnPowerWatts
+            } else {
+                0f
+            }
+
+            val screenOffWatts = if (screenOffHours > 0f && offEnergyWh > 0f) {
+                offEnergyWh / screenOffHours
+            } else if (intOffPowerWatts > 0f) {
+                intOffPowerWatts
+            } else {
+                0f
+            }
+
+            val avgWatts = if (dischargeHours > 0f && realTotalEnergyWh > 0f) {
+                realTotalEnergyWh / dischargeHours
+            } else if (intTotalPowerWatts > 0f) {
+                intTotalPowerWatts
+            } else {
+                0f
+            }
+
+            val realDischargedMah = if (nominalVoltageVolts > 0f) {
+                (realTotalEnergyWh * 1000f) / nominalVoltageVolts
+            } else {
+                0f
+            }
+
+            return DualAnchorPowerStats(
+                onEnergyWh = onEnergyWh,
+                offEnergyWh = offEnergyWh,
+                totalEnergyWh = realTotalEnergyWh,
+                screenOnWatts = screenOnWatts,
+                screenOffWatts = screenOffWatts,
+                avgWatts = avgWatts,
+                realDischargedMah = realDischargedMah
+            )
+        }
     }
 
     private val prefs = context.getSharedPreferences("power_stats_prefs", Context.MODE_PRIVATE)
@@ -1912,7 +2046,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                         (intTotalEnergyWh > 0f || intTotalPowerWatts > 0f || intOnPowerWatts > 0f || intOffPowerWatts > 0f))
 
                 var realTotalEnergyWh: Float
-                var realDischargedMah: Float
                 val avgWatts: Float
                 val screenOnWatts: Float
                 val screenOffWatts: Float
@@ -1920,40 +2053,28 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val offEnergyWh: Float
 
                 if (hasValidHardwareIntegration) {
-                    // 1. 忠实采用底层硬件时序切片真实物理微积分结果：
-                    // 算出来多少就是多少，严禁人为阈值拦截或捏造篡改数据
-                    onEnergyWh = intOnEnergyWh
-                    offEnergyWh = intOffEnergyWh
-                    realTotalEnergyWh = if (intTotalEnergyWh > 0f) intTotalEnergyWh else (onEnergyWh + offEnergyWh)
-
-                    screenOnWatts = if (intOnPowerWatts > 0f) {
-                        intOnPowerWatts
-                    } else if (screenOnHours > 0f && onEnergyWh > 0f) {
-                        onEnergyWh / screenOnHours
-                    } else {
-                        0f
-                    }
-
-                    screenOffWatts = if (intOffPowerWatts > 0f) {
-                        intOffPowerWatts
-                    } else if (screenOffHours > 0f && offEnergyWh > 0f) {
-                        offEnergyWh / screenOffHours
-                    } else {
-                        0f
-                    }
-
-                    avgWatts = if (intTotalPowerWatts > 0f) {
-                        intTotalPowerWatts
-                    } else if (dischargeHours > 0f && realTotalEnergyWh > 0f) {
-                        realTotalEnergyWh / dischargeHours
-                    } else {
-                        0f
-                    }
-
-                    realDischargedMah = (realTotalEnergyWh * 1000f) / nominalVoltageVolts
+                    val dualStats = calculateDualAnchorEnergyAndPower(
+                        intOnEnergyWh = intOnEnergyWh,
+                        intOffEnergyWh = intOffEnergyWh,
+                        intTotalEnergyWh = intTotalEnergyWh,
+                        intOnPowerWatts = intOnPowerWatts,
+                        intOffPowerWatts = intOffPowerWatts,
+                        intTotalPowerWatts = intTotalPowerWatts,
+                        physicalTotalEnergyWh = physicalTotalEnergyWh,
+                        screenOnHours = screenOnHours,
+                        screenOffHours = screenOffHours,
+                        dischargeHours = dischargeHours,
+                        screenOffMs = screenOffMs,
+                        nominalVoltageVolts = nominalVoltageVolts
+                    )
+                    onEnergyWh = dualStats.onEnergyWh
+                    offEnergyWh = dualStats.offEnergyWh
+                    realTotalEnergyWh = dualStats.totalEnergyWh
+                    screenOnWatts = dualStats.screenOnWatts
+                    screenOffWatts = dualStats.screenOffWatts
+                    avgWatts = dualStats.avgWatts
                 } else if (physicalTotalEnergyWh > 0f) {
                     // 2. 无硬件连续采样点时，忠实采用系统底层库仑计/掉电量计算的真实物理能耗：
-                    realDischargedMah = physicalDrainMah
                     realTotalEnergyWh = physicalTotalEnergyWh
                     avgWatts = if (dischargeHours > 0f) realTotalEnergyWh / dischargeHours else 0f
 
@@ -1976,7 +2097,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                     }
                 } else {
                     // 3. 既无硬件采样点且系统无任何掉电量（如刚拔掉充电器数秒内）：真实数值均为 0
-                    realDischargedMah = 0f
                     realTotalEnergyWh = 0f
                     avgWatts = 0f
                     screenOnWatts = 0f
@@ -3682,7 +3802,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                 (intTotalEnergyWh > 0f || intTotalPowerWatts > 0f || intOnPowerWatts > 0f || intOffPowerWatts > 0f))
 
         var realTotalEnergyWh: Float
-        var realDischargedMah: Float
         val avgPower: Float
         val screenOnPower: Float
         val screenOffPower: Float
@@ -3690,40 +3809,28 @@ class PowerUsageManager private constructor(private val context: Context) {
         val offEnergyWh: Float
 
         if (hasValidHardwareIntegration) {
-            // 1. 忠实采用底层硬件时序切片真实物理微积分结果
-            // 算出来多少就是多少，严禁人为阈值拦截或捏造篡改数据
-            onEnergyWh = intOnEnergyWh
-            offEnergyWh = intOffEnergyWh
-            realTotalEnergyWh = if (intTotalEnergyWh > 0f) intTotalEnergyWh else (onEnergyWh + offEnergyWh)
-
-            screenOnPower = if (intOnPowerWatts > 0f) {
-                intOnPowerWatts
-            } else if (screenOnHours > 0f && onEnergyWh > 0f) {
-                onEnergyWh / screenOnHours
-            } else {
-                0f
-            }
-
-            screenOffPower = if (intOffPowerWatts > 0f) {
-                intOffPowerWatts
-            } else if (screenOffHours > 0f && offEnergyWh > 0f) {
-                offEnergyWh / screenOffHours
-            } else {
-                0f
-            }
-
-            avgPower = if (intTotalPowerWatts > 0f) {
-                intTotalPowerWatts
-            } else if (dischargeHours > 0f && realTotalEnergyWh > 0f) {
-                realTotalEnergyWh / dischargeHours
-            } else {
-                0f
-            }
-
-            realDischargedMah = (realTotalEnergyWh * 1000f) / nominalVoltageVolts
+            val dualStats = calculateDualAnchorEnergyAndPower(
+                intOnEnergyWh = intOnEnergyWh,
+                intOffEnergyWh = intOffEnergyWh,
+                intTotalEnergyWh = intTotalEnergyWh,
+                intOnPowerWatts = intOnPowerWatts,
+                intOffPowerWatts = intOffPowerWatts,
+                intTotalPowerWatts = intTotalPowerWatts,
+                physicalTotalEnergyWh = physicalTotalEnergyWh,
+                screenOnHours = screenOnHours,
+                screenOffHours = screenOffHours,
+                dischargeHours = dischargeHours,
+                screenOffMs = screenOffMs,
+                nominalVoltageVolts = nominalVoltageVolts
+            )
+            onEnergyWh = dualStats.onEnergyWh
+            offEnergyWh = dualStats.offEnergyWh
+            realTotalEnergyWh = dualStats.totalEnergyWh
+            screenOnPower = dualStats.screenOnWatts
+            screenOffPower = dualStats.screenOffWatts
+            avgPower = dualStats.avgWatts
         } else if (physicalTotalEnergyWh > 0f) {
             // 2. 无硬件连续采样点时，忠实采用系统底层库仑计/掉电量计算的真实物理能耗：
-            realDischargedMah = physicalDrainMah
             realTotalEnergyWh = physicalTotalEnergyWh
             avgPower = if (dischargeHours > 0f) realTotalEnergyWh / dischargeHours else 0f
 
@@ -3746,7 +3853,6 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
         } else {
             // 3. 既无硬件采样点且系统无任何掉电量（如刚拔掉充电器数秒内）：真实数值均为 0
-            realDischargedMah = 0f
             realTotalEnergyWh = 0f
             avgPower = 0f
             screenOnPower = 0f

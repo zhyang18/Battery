@@ -174,9 +174,18 @@ class AppUsageDetailBottomSheetDialog(
         tvPowerBg.text = "后: --"
 
         // 温度列
-        tvTempPrimary.text = String.format(Locale.getDefault(), "%.1f ℃", item.avgTemperature)
-        tvTempAvg.text = String.format(Locale.getDefault(), "平均: %.1f ℃", item.avgTemperature)
-        tvTempMax.text = String.format(Locale.getDefault(), "最高: %.1f ℃", item.maxTemperature)
+        if (item.avgTemperature > 0f) {
+            tvTempPrimary.text = String.format(Locale.getDefault(), "%.1f ℃", item.avgTemperature)
+            tvTempAvg.text = String.format(Locale.getDefault(), "平均: %.1f ℃", item.avgTemperature)
+        } else {
+            tvTempPrimary.text = "--"
+            tvTempAvg.text = "平均: --"
+        }
+        if (item.maxTemperature > 0f) {
+            tvTempMax.text = String.format(Locale.getDefault(), "最高: %.1f ℃", item.maxTemperature)
+        } else {
+            tvTempMax.text = "最高: --"
+        }
 
         // 4. 工况运行时长（明确区分前台、后台实际工作与常驻挂载总时长）
         tvFgDuration.text = formatDurationMs(item.foregroundTimeMs)

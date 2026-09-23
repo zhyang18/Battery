@@ -179,14 +179,14 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         val offEnergy = record.screenOffEnergyWh
         val totalEnergy = record.totalEnergyWh
 
-        val onRatioStr = if (totalEnergy > 0f) {
+        val onEnergyRatioStr = if (totalEnergy > 0f) {
             val ratio = (onEnergy / totalEnergy * 100f).coerceIn(0f, 100f)
             String.format(Locale.getDefault(), "%.1f%%", ratio)
         } else {
             "0.0%"
         }
 
-        val offRatioStr = if (totalEnergy > 0f) {
+        val offEnergyRatioStr = if (totalEnergy > 0f) {
             val ratio = (offEnergy / totalEnergy * 100f).coerceIn(0f, 100f)
             String.format(Locale.getDefault(), "%.1f%%", ratio)
         } else {
@@ -196,6 +196,20 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         val onDurationMs = parseDurationTextToMs(record.screenOnDurationText)
         val offDurationMs = parseDurationTextToMs(record.screenOffDurationText)
         val totalDurationMs = parseDurationTextToMs(record.totalDurationText)
+
+        val onDurationRatioStr = if (totalDurationMs > 0L) {
+            val ratio = (onDurationMs.toDouble() / totalDurationMs.toDouble() * 100.0).coerceIn(0.0, 100.0)
+            String.format(Locale.getDefault(), "%.1f%%", ratio)
+        } else {
+            "0.0%"
+        }
+
+        val offDurationRatioStr = if (totalDurationMs > 0L) {
+            val ratio = (offDurationMs.toDouble() / totalDurationMs.toDouble() * 100.0).coerceIn(0.0, 100.0)
+            String.format(Locale.getDefault(), "%.1f%%", ratio)
+        } else {
+            "0.0%"
+        }
 
         val onDurationStr = formatCardDuration(onDurationMs, record.screenOnDurationText)
         val offDurationStr = formatCardDuration(offDurationMs, record.screenOffDurationText)
@@ -218,14 +232,14 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         }
 
         // 第一行：亮屏数据（前置亮色太阳图标，时长占比 / 能量占比 / 功耗 / 续航）
-        binding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onRatioStr)
-        binding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", onEnergy), onRatioStr)
+        binding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
+        binding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", onEnergy), onEnergyRatioStr)
         binding.tvMetricScreenOnPower.text = onPowerStr
         binding.tvMetricScreenOnRemaining.text = record.remainingScreenOnText
 
         // 第二行：息屏数据（前置暗色太阳图标，时长占比 / 能量占比 / 功耗 / 续航）
-        binding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offRatioStr)
-        binding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", offEnergy), offRatioStr)
+        binding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
+        binding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", offEnergy), offEnergyRatioStr)
         binding.tvMetricScreenOffPower.text = offPowerStr
         binding.tvMetricScreenOffRemaining.text = record.remainingScreenOffText
 

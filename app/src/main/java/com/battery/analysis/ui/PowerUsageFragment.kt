@@ -1498,14 +1498,14 @@ class PowerUsageFragment : Fragment() {
         val offEnergy = overview.screenOffEnergyWh
         val totalEnergy = overview.totalEnergyWh
 
-        val onRatioStr = if (totalEnergy > 0f) {
+        val onEnergyRatioStr = if (totalEnergy > 0f) {
             val ratio = (onEnergy / totalEnergy * 100f).coerceIn(0f, 100f)
             String.format(Locale.getDefault(), "%.1f%%", ratio)
         } else {
             "0.0%"
         }
 
-        val offRatioStr = if (totalEnergy > 0f) {
+        val offEnergyRatioStr = if (totalEnergy > 0f) {
             val ratio = (offEnergy / totalEnergy * 100f).coerceIn(0f, 100f)
             String.format(Locale.getDefault(), "%.1f%%", ratio)
         } else {
@@ -1515,6 +1515,20 @@ class PowerUsageFragment : Fragment() {
         val onDurationMs = if (overview.screenOnDurationMs > 0L) overview.screenOnDurationMs else parseDurationTextToMs(overview.screenOnDurationText)
         val offDurationMs = if (overview.screenOffDurationMs > 0L) overview.screenOffDurationMs else parseDurationTextToMs(overview.screenOffDurationText)
         val totalDurationMs = if (overview.totalDurationMs > 0L) overview.totalDurationMs else parseDurationTextToMs(overview.totalDurationText)
+
+        val onDurationRatioStr = if (totalDurationMs > 0L) {
+            val ratio = (onDurationMs.toDouble() / totalDurationMs.toDouble() * 100.0).coerceIn(0.0, 100.0)
+            String.format(Locale.getDefault(), "%.1f%%", ratio)
+        } else {
+            "0.0%"
+        }
+
+        val offDurationRatioStr = if (totalDurationMs > 0L) {
+            val ratio = (offDurationMs.toDouble() / totalDurationMs.toDouble() * 100.0).coerceIn(0.0, 100.0)
+            String.format(Locale.getDefault(), "%.1f%%", ratio)
+        } else {
+            "0.0%"
+        }
 
         val onDurationStr = formatCardDuration(onDurationMs, overview.screenOnDurationText)
         val offDurationStr = formatCardDuration(offDurationMs, overview.screenOffDurationText)
@@ -1537,14 +1551,14 @@ class PowerUsageFragment : Fragment() {
         }
 
         // 第一行：亮屏数据（图标已由 XML 设置）
-        binding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onRatioStr)
-        binding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", onEnergy), onRatioStr)
+        binding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
+        binding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", onEnergy), onEnergyRatioStr)
         binding.tvMetricScreenOnPower.text = onPowerStr
         binding.tvMetricScreenOnRemaining.text = overview.remainingScreenOnText
 
         // 第二行：息屏数据
-        binding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offRatioStr)
-        binding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", offEnergy), offRatioStr)
+        binding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
+        binding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", offEnergy), offEnergyRatioStr)
         binding.tvMetricScreenOffPower.text = offPowerStr
         binding.tvMetricScreenOffRemaining.text = overview.remainingScreenOffText
 
@@ -1556,14 +1570,14 @@ class PowerUsageFragment : Fragment() {
 
         // 同步刷新折叠吸顶 mini 指标卡片数据（与展开大卡片完全一致的三行指标：亮屏、息屏、全局）
         // 第一行：亮屏数据
-        binding.tvMiniScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onRatioStr)
-        binding.tvMiniScreenOnEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", onEnergy), onRatioStr)
+        binding.tvMiniScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
+        binding.tvMiniScreenOnEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", onEnergy), onEnergyRatioStr)
         binding.tvMiniScreenOnPower.text = onPowerStr
         binding.tvMiniScreenOnRemaining.text = overview.remainingScreenOnText
 
         // 第二行：息屏数据
-        binding.tvMiniScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offRatioStr)
-        binding.tvMiniScreenOffEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", offEnergy), offRatioStr)
+        binding.tvMiniScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
+        binding.tvMiniScreenOffEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", offEnergy), offEnergyRatioStr)
         binding.tvMiniScreenOffPower.text = offPowerStr
         binding.tvMiniScreenOffRemaining.text = overview.remainingScreenOffText
 

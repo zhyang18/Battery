@@ -156,21 +156,15 @@ data class AppPowerUsageItem(
     }
 
     /**
-     * 获取前台使用时长与后台运行活跃时长的组合展示文本（格式："前台时长 | 后台时长" 或 "后台: xx"）。
+     * 获取前台使用时长与后台运行活跃时长的组合展示文本（格式："前台时长 | 后台 后台时长" 或 "后台: xx"）。
      *
      * @return 格式化后的组合时长文本
      */
     fun getFormattedCombinedDuration(): String {
         val hasFg = foregroundTimeMs > 0L
         val hasBg = backgroundTimeMs > 0L
-//        return when {
-//            hasFg && hasBg -> "${formatDurationMs(foregroundTimeMs)} | 后台 ${formatDurationMs(backgroundTimeMs)}"
-//            hasFg -> formatDurationMs(foregroundTimeMs)
-//            hasBg -> "后台: ${formatDurationMs(backgroundTimeMs)}"
-//            else -> "0s"
-//        }
         return when {
-            hasFg && hasBg -> "${formatDurationMs(foregroundTimeMs)} | ${formatDurationMs(backgroundTimeMs)}"
+            hasFg && hasBg -> "${formatDurationMs(foregroundTimeMs)} | 后台 ${formatDurationMs(backgroundTimeMs)}"
             hasFg -> formatDurationMs(foregroundTimeMs)
             hasBg -> "后台: ${formatDurationMs(backgroundTimeMs)}"
             else -> "0s"

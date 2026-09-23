@@ -236,7 +236,10 @@ class PowerUsageManager private constructor(private val context: Context) {
         ): DischargePowerStats? {
             if (samples.size < 2) return null
 
-            val confidenceThresholdMs = (recordIntervalMs * 30L).coerceAtLeast(30_000L)
+            val timeSpanMs = if (samples.size >= 2) (samples.last().timestamp - samples.first().timestamp).coerceAtLeast(0L) else 0L
+            val avgIntervalMs = if (samples.size > 1 && timeSpanMs > 0L) timeSpanMs / (samples.size - 1) else recordIntervalMs
+            val screenOnConfidenceThresholdMs = maxOf(300_000L, avgIntervalMs * 4L)
+            val confidenceThresholdMs = maxOf((recordIntervalMs * 30L).coerceAtLeast(30_000L), avgIntervalMs * 3L)
             var totalDurationMs = 0L
             var screenOnDurationMs = 0L
             var screenOnEnergyWh = 0.0
@@ -266,14 +269,14 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val isCurrOn = current.isScreenOn
 
                 if (isPrevOn && isCurrOn) {
-                    // 双亮屏切片：
-                    if (dt <= confidenceThresholdMs) {
+                    // 双亮屏切片：在 5 分钟合理连续门限内均视为真实连续亮屏（杜绝时间网格抽稀后的采样点被误判为大断层）
+                    if (dt <= screenOnConfidenceThresholdMs) {
                         // 高置信连续亮屏切片
                         screenOnDurationMs += dt
                         screenOnEnergyWh += segmentEnergyWh
                         screenOnConfidentEnergyWh += segmentEnergyWh
                     } else {
-                        // 亮屏长间隔大断层：在屏幕持续点亮交互状态下绝不可能连续数十秒不采样，说明中间发生了关屏深度休眠或后台服务暂停
+                        // 亮屏长间隔大断层（> 5 分钟）：中间可能发生关屏深度休眠或后台服务暂停
                         val edgeOnMs = minOf(recordIntervalMs, dt / 2)
                         val edgeOnEnergyWh = (prev.powerWatts * (edgeOnMs / 3600000.0)) + (current.powerWatts * (edgeOnMs / 3600000.0))
                         screenOnDurationMs += (edgeOnMs * 2)
@@ -286,7 +289,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                     }
                 } else if (isPrevOn && !isCurrOn) {
                     // 亮屏转息屏（灭屏过渡切片）
-                    val onMs = minOf(recordIntervalMs, dt)
+                    val onMs = if (dt <= screenOnConfidenceThresholdMs) minOf(dt / 2, maxOf(recordIntervalMs, 1000L)) else minOf(recordIntervalMs, dt)
                     val onEnergy = prev.powerWatts * (onMs / 3600000.0)
                     screenOnDurationMs += onMs
                     screenOnEnergyWh += onEnergy
@@ -305,7 +308,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                     }
                 } else if (!isPrevOn && isCurrOn) {
                     // 息屏转亮屏（唤醒过渡切片）
-                    val onMs = minOf(recordIntervalMs, dt)
+                    val onMs = if (dt <= screenOnConfidenceThresholdMs) minOf(dt / 2, maxOf(recordIntervalMs, 1000L)) else minOf(recordIntervalMs, dt)
                     val onEnergy = current.powerWatts * (onMs / 3600000.0)
                     screenOnDurationMs += onMs
                     screenOnEnergyWh += onEnergy
@@ -467,8 +470,61 @@ class PowerUsageManager private constructor(private val context: Context) {
     /**
      * 放电期间秒级瞬时采样点列表。
      * 记录放电过程中的每一个瞬时物理采样点：时间戳、电量、瞬时真实电压、瞬时真实温度、瞬时放电功耗、亮息屏状态。
+     * 仅供前端图表渲染使用，做平滑均匀抽稀。
      */
     private val dischargeRealtimeSamples = mutableListOf<PowerDischargePoint>()
+
+    /**
+     * 放电全周期物理能量常驻累加器数据类。
+     * 严格按硬件瞬时采样时间切片实时累加物理能耗，绝不参与折线图抽稀，永久保留自拔电以来的真实微积分能量。
+     *
+     * @property screenOnJoules 亮屏期间累加物理消耗总能量（单位：焦耳 J）
+     * @property screenOffJoules 息屏期间累加物理消耗总能量（单位：焦耳 J）
+     * @property screenOnDurationMs 亮屏期间累加采样实际有效时长（单位：毫秒）
+     * @property screenOffDurationMs 息屏期间累加采样实际有效时长（单位：毫秒）
+     * @property lastSampleTs 上一次采样的绝对物理时间戳（毫秒）
+     * @property lastSampleWatts 上一次采样测得的瞬时放电功率（瓦特 W）
+     * @property lastSampleScreenOn 上一次采样时的屏幕亮灭状态
+     * @property lastSampleTemp 上一次采样测得的瞬时电池温度（摄氏度 ℃）
+     */
+    data class RealtimeDischargeAccumulator(
+        var screenOnJoules: Double = 0.0,
+        var screenOffJoules: Double = 0.0,
+        var screenOnDurationMs: Long = 0L,
+        var screenOffDurationMs: Long = 0L,
+        var lastSampleTs: Long = 0L,
+        var lastSampleWatts: Float = 0f,
+        var lastSampleScreenOn: Boolean = true,
+        var lastSampleTemp: Float = 25f
+    )
+
+    /**
+     * 单应用前台独占运行即时能耗与温度累加器数据类。
+     * 在前台屏幕交互采样瞬间就地累加，杜绝事后在抽稀点表上微积分导致历史数据丢失。
+     *
+     * @property packageName 应用包名
+     * @property energyJoules 前台运行期间累加的物理能量（单位：焦耳 J）
+     * @property durationMs 前台运行期间累加的有效采样时长（单位：毫秒）
+     * @property tempWeightSum 运行期间加权温度积分总和（单位：℃ * ms）
+     * @property maxTempCelsius 运行期间测得的最高电池温度（单位：摄氏度 ℃）
+     */
+    data class AppRealtimeEnergyAccumulator(
+        val packageName: String,
+        var energyJoules: Double = 0.0,
+        var durationMs: Long = 0L,
+        var tempWeightSum: Double = 0.0,
+        var maxTempCelsius: Float = 0f
+    )
+
+    /**
+     * 放电全周期常驻物理能量累加器实例。
+     */
+    private val dischargeAccumulator = RealtimeDischargeAccumulator()
+
+    /**
+     * 各应用前台独占运行即时物理能耗与温度映射表（包名 -> 累加器）。
+     */
+    private val appRealtimeEnergyMap = mutableMapOf<String, AppRealtimeEnergyAccumulator>()
 
     /**
      * 异步后台 I/O 线程池，用于执行大采样点序列的持久化存储，杜绝主线程与轮询线程阻塞。
@@ -598,6 +654,87 @@ class PowerUsageManager private constructor(private val context: Context) {
         val roundedTemp = (Math.round(temperature * 10f) / 10f)
         val roundedWatts = (Math.round(powerWatts * 100f) / 100f).coerceAtLeast(0f)
 
+        // 核心：即时进行物理微积分累加（In-Flight 累积，绝不受折线图抽稀影响）
+        val lastTs = dischargeAccumulator.lastSampleTs
+        val lastWatts = dischargeAccumulator.lastSampleWatts
+        val lastOn = dischargeAccumulator.lastSampleScreenOn
+        val lastT = dischargeAccumulator.lastSampleTemp
+
+        if (lastTs > 0L && timestamp > lastTs) {
+            val dt = timestamp - lastTs
+            val avgWatts = ((lastWatts + roundedWatts) / 2.0).coerceAtLeast(0.0)
+
+            if (lastOn && isScreenOn) {
+                // 双亮屏切片：在合理时间步长内连续梯形积分
+                if (dt in 1L..MAX_INTEGRATION_INTERVAL_MS) {
+                    val dJoules = avgWatts * (dt / 1000.0)
+                    dischargeAccumulator.screenOnJoules += dJoules
+                    dischargeAccumulator.screenOnDurationMs += dt
+
+                    if (!packageName.isNullOrEmpty()) {
+                        val appAcc = appRealtimeEnergyMap.getOrPut(packageName) {
+                            AppRealtimeEnergyAccumulator(packageName, maxTempCelsius = roundedTemp)
+                        }
+                        appAcc.energyJoules += dJoules
+                        appAcc.durationMs += dt
+                        val avgT = (lastT + roundedTemp) / 2.0
+                        appAcc.tempWeightSum += avgT * dt
+                        appAcc.maxTempCelsius = maxOf(appAcc.maxTempCelsius, roundedTemp)
+                    }
+                }
+            } else if (!lastOn && !isScreenOn) {
+                // 纯息屏切片：即便跨越长休眠也连续归入息屏能量
+                val dJoules = avgWatts * (dt / 1000.0)
+                dischargeAccumulator.screenOffJoules += dJoules
+                dischargeAccumulator.screenOffDurationMs += dt
+            } else if (lastOn && !isScreenOn) {
+                // 亮屏转息屏过渡切片
+                val onMs = minOf(1000L, dt)
+                val offMs = dt - onMs
+                val onJoules = lastWatts * (onMs / 1000.0)
+                dischargeAccumulator.screenOnJoules += onJoules
+                dischargeAccumulator.screenOnDurationMs += onMs
+                if (offMs > 0L) {
+                    dischargeAccumulator.screenOffJoules += roundedWatts * (offMs / 1000.0)
+                    dischargeAccumulator.screenOffDurationMs += offMs
+                }
+                if (!packageName.isNullOrEmpty() && onMs > 0L) {
+                    val appAcc = appRealtimeEnergyMap.getOrPut(packageName) {
+                        AppRealtimeEnergyAccumulator(packageName, maxTempCelsius = roundedTemp)
+                    }
+                    appAcc.energyJoules += onJoules
+                    appAcc.durationMs += onMs
+                    appAcc.tempWeightSum += roundedTemp * onMs
+                    appAcc.maxTempCelsius = maxOf(appAcc.maxTempCelsius, roundedTemp)
+                }
+            } else {
+                // 息屏转亮屏过渡切片
+                val onMs = minOf(1000L, dt)
+                val offMs = dt - onMs
+                if (offMs > 0L) {
+                    dischargeAccumulator.screenOffJoules += lastWatts * (offMs / 1000.0)
+                    dischargeAccumulator.screenOffDurationMs += offMs
+                }
+                val onJoules = roundedWatts * (onMs / 1000.0)
+                dischargeAccumulator.screenOnJoules += onJoules
+                dischargeAccumulator.screenOnDurationMs += onMs
+                if (!packageName.isNullOrEmpty() && onMs > 0L) {
+                    val appAcc = appRealtimeEnergyMap.getOrPut(packageName) {
+                        AppRealtimeEnergyAccumulator(packageName, maxTempCelsius = roundedTemp)
+                    }
+                    appAcc.energyJoules += onJoules
+                    appAcc.durationMs += onMs
+                    appAcc.tempWeightSum += roundedTemp * onMs
+                    appAcc.maxTempCelsius = maxOf(appAcc.maxTempCelsius, roundedTemp)
+                }
+            }
+        }
+
+        dischargeAccumulator.lastSampleTs = timestamp
+        dischargeAccumulator.lastSampleWatts = roundedWatts
+        dischargeAccumulator.lastSampleScreenOn = isScreenOn
+        dischargeAccumulator.lastSampleTemp = roundedTemp
+
         val point = PowerDischargePoint(
             timestamp = timestamp,
             elapsedHours = elapsedHours,
@@ -611,19 +748,11 @@ class PowerUsageManager private constructor(private val context: Context) {
             packageName = packageName
         )
         dischargeRealtimeSamples.add(point)
-        // 优化：将触发阈值从 5000 降至 2000（约 33 分钟），并改为原地逆向删除，
-        // 避免创建与原列表等大的临时副本，消除抽稀时的双倍内存峰值。
-        // 逆向遍历奇数索引（1, 3, 5, ...）并删除，保留偶数索引（即保留首尾及偶数点），实现 50% 等距抽稀。
+
+        // 优化：采用全时间轴均匀时间网格抽稀至 1000 点，保留关键状态切换拐点，
+        // 彻底根除奇数索引逆向删除导致历史时间切片被几何级数归零的致命设计缺陷
         if (dischargeRealtimeSamples.size > 2000) {
-            val lastIdx = dischargeRealtimeSamples.size - 1
-            // 从倒数第 2 个点开始，逆向删除奇数索引点（跳过首点 0 和尾点 lastIdx）
-            var i = lastIdx - 1
-            while (i >= 1) {
-                if (i % 2 == 1) {
-                    dischargeRealtimeSamples.removeAt(i)
-                }
-                i--
-            }
+            downsampleDischargeSamplesUniformly()
         }
 
         // 同步记录时序温度点
@@ -637,6 +766,110 @@ class PowerUsageManager private constructor(private val context: Context) {
             unsavedDischargeSamplesCount = 0
             saveDischargeSamplesToPrefsAsync()
         }
+    }
+
+    /**
+     * 对放电瞬时采样点序列执行全时间轴均匀时间网格抽稀，将总点数控制在目标数量。
+     *
+     * 核心算法：
+     * 1. 废除原有的奇数索引逆向抽稀（原方案会导致历史前几个小时的切片被连续折半 30 多次而全部归零）；
+     * 2. 首点（拔电起始点）与尾点（最新点）绝对保留，维持完整放电时间跨度；
+     * 3. 优先保留亮灭屏状态切换拐点与前台 App 切换拐点，保留工况突变细节；
+     * 4. 在其余区间按全局均匀时间网格采样，保证整条时间线各时间段的分辨率完全均等；
+     * 5. 纯用于图表 UI 渲染，物理能量已由 [RealtimeDischargeAccumulator] 实时闭环，抽稀绝不影响物理统计精度。
+     *
+     * @param targetCount 抽稀后保留的目标采样点数量（默认 1000）
+     */
+    @Synchronized
+    fun downsampleDischargeSamplesUniformly(targetCount: Int = 1000) {
+        if (dischargeRealtimeSamples.size <= targetCount) return
+        val totalPoints = dischargeRealtimeSamples.size
+        val startPoint = dischargeRealtimeSamples.first()
+        val endPoint = dischargeRealtimeSamples.last()
+        val startTime = startPoint.timestamp
+        val endTime = endPoint.timestamp
+        val timeSpan = endTime - startTime
+
+        if (timeSpan <= 0L) {
+            val step = totalPoints.toDouble() / targetCount
+            val sampled = mutableListOf<PowerDischargePoint>()
+            for (i in 0 until targetCount) {
+                val idx = (i * step).toInt().coerceIn(0, totalPoints - 1)
+                sampled.add(dischargeRealtimeSamples[idx])
+            }
+            if (sampled.last() != endPoint) sampled.add(endPoint)
+            dischargeRealtimeSamples.clear()
+            dischargeRealtimeSamples.addAll(sampled)
+            return
+        }
+
+        val preservedSet = HashSet<Int>()
+        preservedSet.add(0)
+        preservedSet.add(totalPoints - 1)
+
+        // 标记所有状态跳变点（屏幕亮灭切换、前台 App 切换）
+        for (i in 0 until totalPoints - 1) {
+            val curr = dischargeRealtimeSamples[i]
+            val next = dischargeRealtimeSamples[i + 1]
+            if (curr.isScreenOn != next.isScreenOn || curr.packageName != next.packageName) {
+                preservedSet.add(i)
+                preservedSet.add(i + 1)
+            }
+        }
+
+        if (preservedSet.size >= targetCount) {
+            val sortedIndices = preservedSet.sorted()
+            val sampled = sortedIndices.map { dischargeRealtimeSamples[it] }
+            dischargeRealtimeSamples.clear()
+            dischargeRealtimeSamples.addAll(sampled)
+            return
+        }
+
+        val numSlots = targetCount - preservedSet.size
+        val slotDuration = timeSpan.toDouble() / (numSlots + 1)
+        var searchIdx = 0
+        for (s in 1..numSlots) {
+            val targetTs = startTime + (s * slotDuration).toLong()
+            while (searchIdx < totalPoints - 1 && dischargeRealtimeSamples[searchIdx + 1].timestamp <= targetTs) {
+                searchIdx++
+            }
+            val bestIdx = if (searchIdx < totalPoints - 1) {
+                val diff1 = Math.abs(dischargeRealtimeSamples[searchIdx].timestamp - targetTs)
+                val diff2 = Math.abs(dischargeRealtimeSamples[searchIdx + 1].timestamp - targetTs)
+                if (diff1 <= diff2) searchIdx else searchIdx + 1
+            } else {
+                searchIdx
+            }
+            preservedSet.add(bestIdx)
+        }
+
+        val finalIndices = preservedSet.sorted()
+        val finalSamples = ArrayList<PowerDischargePoint>(finalIndices.size)
+        for (idx in finalIndices) {
+            finalSamples.add(dischargeRealtimeSamples[idx])
+        }
+        dischargeRealtimeSamples.clear()
+        dischargeRealtimeSamples.addAll(finalSamples)
+    }
+
+    /**
+     * 获取放电全周期常驻物理能量累加器副本。
+     *
+     * @return 包含实时累积焦耳数与有效时长的物理累加器 [RealtimeDischargeAccumulator]
+     */
+    @Synchronized
+    fun getDischargeAccumulator(): RealtimeDischargeAccumulator {
+        return dischargeAccumulator.copy()
+    }
+
+    /**
+     * 获取各应用前台独占运行即时物理能量与温度映射表副本。
+     *
+     * @return 包含各包名即时物理累加器副本的映射表 [Map<String, AppRealtimeEnergyAccumulator>]
+     */
+    @Synchronized
+    fun getAppRealtimeEnergyMap(): Map<String, AppRealtimeEnergyAccumulator> {
+        return appRealtimeEnergyMap.toMap()
     }
 
     /**
@@ -672,6 +905,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 重置当前放电周期的秒级瞬时采样点列表，并注入初始起点数据。
+     * 同时清空并重置常驻物理能量累加器与应用即时能量映射表。
      *
      * @param timestamp 起始时间戳（毫秒）
      * @param initialLevel 起始电量百分比
@@ -691,6 +925,20 @@ class PowerUsageManager private constructor(private val context: Context) {
     ) {
         dischargeRealtimeSamples.clear()
         unsavedDischargeSamplesCount = 0
+
+        // 重置物理能量累加器
+        dischargeAccumulator.screenOnJoules = 0.0
+        dischargeAccumulator.screenOffJoules = 0.0
+        dischargeAccumulator.screenOnDurationMs = 0L
+        dischargeAccumulator.screenOffDurationMs = 0L
+        dischargeAccumulator.lastSampleTs = timestamp
+        dischargeAccumulator.lastSampleWatts = initialPower.coerceAtLeast(0f)
+        dischargeAccumulator.lastSampleScreenOn = isScreenOn
+        dischargeAccumulator.lastSampleTemp = initialTemp
+
+        // 重置应用即时物理能耗映射表
+        appRealtimeEnergyMap.clear()
+
         val firstPoint = PowerDischargePoint(
             timestamp = timestamp,
             elapsedHours = 0f,
@@ -707,7 +955,7 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 将当前放电周期的秒级瞬时采样点序列持久化保存至专属私有文件，避免膨胀主 SharedPreferences。
+     * 将当前放电周期的秒级瞬时采样点序列及物理能量累加器持久化保存至专属私有文件，避免膨胀主 SharedPreferences。
      * 采用轻量流式 [StringBuilder] 纯文本格式化输出，彻底消除高频创建数万个 [org.json.JSONObject]
      * 与哈希表节点带来的巨量堆内存分配与垃圾回收（GC）暂停开销。
      */
@@ -719,6 +967,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             if (snapshot.isEmpty()) {
                 val targetFile = java.io.File(context.filesDir, "discharge_samples.json")
                 if (targetFile.exists()) targetFile.delete()
+                val accFile = java.io.File(context.filesDir, "discharge_accumulators.json")
+                if (accFile.exists()) accFile.delete()
                 return
             }
 
@@ -748,6 +998,38 @@ class PowerUsageManager private constructor(private val context: Context) {
                 if (targetFile.exists()) targetFile.delete()
                 tempFile.renameTo(targetFile)
             }
+
+            // 持久化物理能量累加器与应用即时能量映射表
+            val accFile = java.io.File(context.filesDir, "discharge_accumulators.json")
+            val tempAccFile = java.io.File(context.filesDir, "discharge_accumulators.json.tmp")
+            val accSb = java.lang.StringBuilder(1024)
+            accSb.append("{\"onJ\":").append(dischargeAccumulator.screenOnJoules)
+                .append(",\"offJ\":").append(dischargeAccumulator.screenOffJoules)
+                .append(",\"onMs\":").append(dischargeAccumulator.screenOnDurationMs)
+                .append(",\"offMs\":").append(dischargeAccumulator.screenOffDurationMs)
+                .append(",\"lastTs\":").append(dischargeAccumulator.lastSampleTs)
+                .append(",\"lastW\":").append(dischargeAccumulator.lastSampleWatts)
+                .append(",\"lastOn\":").append(dischargeAccumulator.lastSampleScreenOn)
+                .append(",\"lastT\":").append(dischargeAccumulator.lastSampleTemp)
+                .append(",\"apps\":[")
+            var firstApp = true
+            for (app in appRealtimeEnergyMap.values) {
+                if (!firstApp) accSb.append(',')
+                firstApp = false
+                accSb.append("{\"pkg\":\"").append(app.packageName.replace("\\", "\\\\").replace("\"", "\\\"")).append("\"")
+                    .append(",\"j\":").append(app.energyJoules)
+                    .append(",\"ms\":").append(app.durationMs)
+                    .append(",\"tSum\":").append(app.tempWeightSum)
+                    .append(",\"maxT\":").append(app.maxTempCelsius)
+                    .append('}')
+            }
+            accSb.append("]}")
+            tempAccFile.writeText(accSb.toString(), Charsets.UTF_8)
+            if (tempAccFile.exists()) {
+                if (accFile.exists()) accFile.delete()
+                tempAccFile.renameTo(accFile)
+            }
+
             // 若旧 SharedPreferences 中仍残留旧超大键值，予以清理瘦身
             if (prefs.contains(PREF_KEY_REALTIME_SAMPLES_JSON)) {
                 prefs.edit().remove(PREF_KEY_REALTIME_SAMPLES_JSON).apply()
@@ -756,7 +1038,7 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 从专属私有文件（及兼容旧 SharedPreferences）恢复加载已保存的秒级瞬时放电采样点序列。
+     * 从专属私有文件（及兼容旧 SharedPreferences）恢复加载已保存的秒级瞬时放电采样点序列与物理累加器。
      */
     @Synchronized
     private fun loadDischargeSamplesFromPrefs() {
@@ -767,32 +1049,66 @@ class PowerUsageManager private constructor(private val context: Context) {
             } else {
                 val legacyStr = prefs.getString(PREF_KEY_REALTIME_SAMPLES_JSON, null)
                 if (legacyStr != null) {
-                    // 平滑迁移至私有文件并清理旧 Preference
                     try {
                         targetFile.writeText(legacyStr, Charsets.UTF_8)
                         prefs.edit().remove(PREF_KEY_REALTIME_SAMPLES_JSON).apply()
                     } catch (_: Exception) {}
                 }
                 legacyStr
-            } ?: return
+            }
 
-            val jsonArray = org.json.JSONArray(jsonStr)
-            dischargeRealtimeSamples.clear()
-            for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
-                val pkgName = obj.optString("pkg").takeIf { it.isNotEmpty() }
-                dischargeRealtimeSamples.add(
-                    PowerDischargePoint(
-                        timestamp = obj.optLong("ts", 0L),
-                        elapsedHours = obj.optDouble("elapsed", 0.0).toFloat(),
-                        batteryLevel = obj.optInt("lvl", 100),
-                        voltageVolts = obj.optDouble("volt", 3.85).toFloat(),
-                        temperature = obj.optDouble("temp", 30.0).toFloat(),
-                        powerWatts = obj.optDouble("pwr", 2.0).toFloat(),
-                        isScreenOn = obj.optBoolean("screenOn", true),
-                        packageName = pkgName
+            if (jsonStr != null) {
+                val jsonArray = org.json.JSONArray(jsonStr)
+                dischargeRealtimeSamples.clear()
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val pkgName = obj.optString("pkg").takeIf { it.isNotEmpty() }
+                    dischargeRealtimeSamples.add(
+                        PowerDischargePoint(
+                            timestamp = obj.optLong("ts", 0L),
+                            elapsedHours = obj.optDouble("elapsed", 0.0).toFloat(),
+                            batteryLevel = obj.optInt("lvl", 100),
+                            voltageVolts = obj.optDouble("volt", 3.85).toFloat(),
+                            temperature = obj.optDouble("temp", 30.0).toFloat(),
+                            powerWatts = obj.optDouble("pwr", 2.0).toFloat(),
+                            isScreenOn = obj.optBoolean("screenOn", true),
+                            packageName = pkgName
+                        )
                     )
-                )
+                }
+            }
+
+            // 恢复物理累加器
+            val accFile = java.io.File(context.filesDir, "discharge_accumulators.json")
+            if (accFile.exists() && accFile.canRead()) {
+                val accStr = accFile.readText(Charsets.UTF_8)
+                val accObj = org.json.JSONObject(accStr)
+                dischargeAccumulator.screenOnJoules = accObj.optDouble("onJ", 0.0)
+                dischargeAccumulator.screenOffJoules = accObj.optDouble("offJ", 0.0)
+                dischargeAccumulator.screenOnDurationMs = accObj.optLong("onMs", 0L)
+                dischargeAccumulator.screenOffDurationMs = accObj.optLong("offMs", 0L)
+                dischargeAccumulator.lastSampleTs = accObj.optLong("lastTs", 0L)
+                dischargeAccumulator.lastSampleWatts = accObj.optDouble("lastW", 0.0).toFloat()
+                dischargeAccumulator.lastSampleScreenOn = accObj.optBoolean("lastOn", true)
+                dischargeAccumulator.lastSampleTemp = accObj.optDouble("lastT", 25.0).toFloat()
+
+                appRealtimeEnergyMap.clear()
+                val appsArray = accObj.optJSONArray("apps")
+                if (appsArray != null) {
+                    for (i in 0 until appsArray.length()) {
+                        val aObj = appsArray.getJSONObject(i)
+                        val pkg = aObj.optString("pkg")
+                        if (pkg.isNotEmpty()) {
+                            appRealtimeEnergyMap[pkg] = AppRealtimeEnergyAccumulator(
+                                packageName = pkg,
+                                energyJoules = aObj.optDouble("j", 0.0),
+                                durationMs = aObj.optLong("ms", 0L),
+                                tempWeightSum = aObj.optDouble("tSum", 0.0),
+                                maxTempCelsius = aObj.optDouble("maxT", 0.0).toFloat()
+                            )
+                        }
+                    }
+                }
             }
         } catch (_: Exception) {}
     }
@@ -1562,18 +1878,38 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
                 val physicalTotalEnergyWh = (physicalDrainMah * nominalVoltageVolts) / 1000f
 
-                // 硬件时序切片微积分：通过底层 sysfs 采样点直接计算物理能耗与功率
-                val recentSamples = getDischargeRealtimeSamples().filter { it.timestamp in (startTs - 60_000L)..now }
-                val dischargeStats = computeDischargePowerStats(recentSamples)
-                val intTotalEnergyWh = dischargeStats?.totalDisplayEnergyWh ?: 0f
-                val intTotalPowerWatts = dischargeStats?.averagePowerWatts ?: 0f
-                val intOnEnergyWh = dischargeStats?.screenOnDisplayEnergyWh ?: 0f
-                val intOnPowerWatts = dischargeStats?.screenOnPowerWatts ?: 0f
-                val intOffEnergyWh = dischargeStats?.screenOffDisplayEnergyWh ?: 0f
-                val intOffPowerWatts = dischargeStats?.screenOffPowerWatts ?: 0f
+                // 硬件时序实时物理微积分：优先使用 In-Flight 常驻累加器（1秒级高频瞬时真实积分，不受图表抽稀影响）
+                val acc = getDischargeAccumulator()
+                val hasAccData = (acc.screenOnJoules > 0.0 || acc.screenOffJoules > 0.0) && (acc.screenOnDurationMs > 0L || acc.screenOffDurationMs > 0L)
 
-                val hasValidHardwareIntegration = dischargeStats != null &&
-                        (intTotalEnergyWh > 0f || intTotalPowerWatts > 0f || intOnPowerWatts > 0f || intOffPowerWatts > 0f)
+                val recentSamples = getDischargeRealtimeSamples().filter { it.timestamp in (startTs - 60_000L)..now }
+                val dischargeStats = if (!hasAccData) computeDischargePowerStats(recentSamples) else null
+
+                val intTotalEnergyWh: Float
+                val intTotalPowerWatts: Float
+                val intOnEnergyWh: Float
+                val intOnPowerWatts: Float
+                val intOffEnergyWh: Float
+                val intOffPowerWatts: Float
+
+                if (hasAccData) {
+                    intOnEnergyWh = (acc.screenOnJoules / 3600.0).toFloat()
+                    intOffEnergyWh = (acc.screenOffJoules / 3600.0).toFloat()
+                    intTotalEnergyWh = intOnEnergyWh + intOffEnergyWh
+                    intOnPowerWatts = if (screenOnHours > 0f) intOnEnergyWh / screenOnHours else 0f
+                    intOffPowerWatts = if (screenOffHours > 0f) intOffEnergyWh / screenOffHours else 0f
+                    intTotalPowerWatts = if (dischargeHours > 0f) intTotalEnergyWh / dischargeHours else 0f
+                } else {
+                    intTotalEnergyWh = dischargeStats?.totalDisplayEnergyWh ?: 0f
+                    intTotalPowerWatts = dischargeStats?.averagePowerWatts ?: 0f
+                    intOnEnergyWh = dischargeStats?.screenOnDisplayEnergyWh ?: 0f
+                    intOnPowerWatts = dischargeStats?.screenOnPowerWatts ?: 0f
+                    intOffEnergyWh = dischargeStats?.screenOffDisplayEnergyWh ?: 0f
+                    intOffPowerWatts = dischargeStats?.screenOffPowerWatts ?: 0f
+                }
+
+                val hasValidHardwareIntegration = hasAccData || (dischargeStats != null &&
+                        (intTotalEnergyWh > 0f || intTotalPowerWatts > 0f || intOnPowerWatts > 0f || intOffPowerWatts > 0f))
 
                 var realTotalEnergyWh: Float
                 var realDischargedMah: Float
@@ -2504,24 +2840,31 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
         }
 
+        val realtimeAccMap = synchronized(this) { appRealtimeEnergyMap.toMap() }
+
         return appItems.map { item ->
             val fgHours = if (item.foregroundTimeMs > 0L) item.foregroundTimeMs / 3600000f else 0f
             val acc = appSliceMap[item.packageName]
+            val realtimeAcc = realtimeAccMap[item.packageName]
 
             val finalFgWatts: Float
             val finalFgEnergy: Float
 
             if (item.foregroundTimeMs > 0L) {
-                if (acc != null && acc.sampledDurationMs > 0L && acc.sampledEnergyWs > 0.0) {
-                    // 1. 梯形微积分算出的真实硬件平均放电功耗：总焦耳 (W*s) / 总采样秒数 (s)
+                if (realtimeAcc != null && realtimeAcc.durationMs > 0L && realtimeAcc.energyJoules > 0.0) {
+                    // 1. 优先采用运行时即刻累加的真实硬件微积分（1秒级高频瞬时真实积分，绝不受历史图表抽稀影响）
+                    val sampledWatts = (realtimeAcc.energyJoules / (realtimeAcc.durationMs / 1000.0)).toFloat()
+                    finalFgWatts = (Math.round(sampledWatts * 100f) / 100f).coerceAtLeast(0f)
+                    finalFgEnergy = (finalFgWatts * fgHours).coerceAtLeast(0f)
+                } else if (acc != null && acc.sampledDurationMs > 0L && acc.sampledEnergyWs > 0.0) {
+                    // 2. 采样切片时间区间匹配的梯形微积分真实功率
                     val sampledWatts = (acc.sampledEnergyWs / (acc.sampledDurationMs / 1000.0)).toFloat()
                     finalFgWatts = (Math.round(sampledWatts * 100f) / 100f).coerceAtLeast(0f)
                     finalFgEnergy = (finalFgWatts * fgHours).coerceAtLeast(0f)
                 } else {
-                    // 2. 短时运行应用（如切片采样点不足）：严格在该应用活跃的时间区间内查找真实亮屏瞬时采样均值，杜绝 30 秒大窗口污染
+                    // 3. 短时运行应用：在活跃时间区间窗口内查找真实瞬时采样均值
                     val appIntervalList = intervalMap[item.packageName] ?: emptyList()
                     val windowSamples = if (appIntervalList.isNotEmpty()) {
-                        // 在应用各段活跃区间（前后仅允许 1500ms 采样时钟相位微调容差）内检索真实的放电采样点
                         sortedSamples.filter { sample ->
                             sample.isScreenOn && sample.powerWatts > 0f &&
                                 appIntervalList.any { interval ->
@@ -2529,7 +2872,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                                 }
                         }
                     } else {
-                        // 无切片记录时，严格以最近使用时间及其前台时长为窗口
                         val refTs = item.lastUsedTimeMs
                         val windowStart = refTs - item.foregroundTimeMs - 1500L
                         val windowEnd = refTs + 1500L
@@ -2551,29 +2893,24 @@ class PowerUsageManager private constructor(private val context: Context) {
                         null
                     }
 
-                    val avgSampleScreenWatts = sortedSamples.filter { it.isScreenOn && it.powerWatts > 0f }
-                        .map { it.powerWatts }.takeIf { it.isNotEmpty() }?.average()?.toFloat() ?: 0f
-                    val baselineWatts = if (screenOnWatts > 0.05f) screenOnWatts else if (avgSampleScreenWatts > 0.05f) avgSampleScreenWatts else 0f
-                    // 毫秒级极短前台应用（如 System UI 14ms、GKD 1s）硬件上无法分离独立瞬时放电，如实对齐亮屏放电基准功率
-                    val fallbackWatts = if (item.foregroundTimeMs < 2000L) {
-                        windowAvgWatts ?: baselineWatts
-                    } else {
-                        windowAvgWatts ?: selfCalcWatts ?: baselineWatts
-                    }
-
-                    finalFgWatts = (Math.round(fallbackWatts * 100f) / 100f).coerceAtLeast(0f)
+                    // 严格遵循真实物理数据原则：若无硬件采样且无底层权威指标，不人为保底成整机亮屏功耗（杜绝全员雷同 1.85W）
+                    val detectedWatts = windowAvgWatts ?: selfCalcWatts ?: 0f
+                    finalFgWatts = (Math.round(detectedWatts * 100f) / 100f).coerceAtLeast(0f)
                     finalFgEnergy = (finalFgWatts * fgHours).coerceAtLeast(0f)
                 }
             } else {
-                // 纯后台应用：功耗与能量一律置 0
                 finalFgWatts = 0f
                 finalFgEnergy = 0f
             }
 
-            // 计算真实电池温度（优先采用该应用前台切片采样加权平均温度与最高温度）
+            // 计算真实电池温度（优先采用该应用运行时实测加权平均温度与最高温度）
             val avgTemp: Float
             val maxTemp: Float
-            if (acc != null && acc.tempDurationMs > 0L) {
+            if (realtimeAcc != null && realtimeAcc.durationMs > 0L && realtimeAcc.tempWeightSum > 0.0) {
+                val rawAvg = (realtimeAcc.tempWeightSum / realtimeAcc.durationMs.toDouble()).toFloat()
+                avgTemp = (Math.round(rawAvg * 10f) / 10f)
+                maxTemp = (Math.round(realtimeAcc.maxTempCelsius * 10f) / 10f).coerceAtLeast(avgTemp)
+            } else if (acc != null && acc.tempDurationMs > 0L) {
                 val rawAvg = (acc.weightedTempSum / acc.tempDurationMs.toDouble()).toFloat()
                 avgTemp = (Math.round(rawAvg * 10f) / 10f)
                 maxTemp = (Math.round((acc.maxTempCelsius ?: avgTemp) * 10f) / 10f).coerceAtLeast(avgTemp)
@@ -2593,14 +2930,19 @@ class PowerUsageManager private constructor(private val context: Context) {
                     maxTemp = (Math.round(rawMax * 10f) / 10f).coerceAtLeast(avgTemp)
                 } else if (historyTempPoints.isNotEmpty()) {
                     val refTs = intervals.lastOrNull()?.endTs ?: item.lastUsedTimeMs
-                    val closestTemp = historyTempPoints.minByOrNull { Math.abs(it.first - refTs) }?.second ?: defaultTempCelsius
-                    val formattedTemp = (Math.round(closestTemp * 10f) / 10f)
-                    avgTemp = formattedTemp
-                    maxTemp = formattedTemp
+                    // 仅当历史温度点与应用运行时间在合理邻近范围（如 5 分钟内）时才采用，杜绝数小时前的 App 被打上当前高温
+                    val closest = historyTempPoints.minByOrNull { Math.abs(it.first - refTs) }
+                    if (closest != null && Math.abs(closest.first - refTs) <= 300_000L) {
+                        val formattedTemp = (Math.round(closest.second * 10f) / 10f)
+                        avgTemp = formattedTemp
+                        maxTemp = formattedTemp
+                    } else {
+                        avgTemp = 0f
+                        maxTemp = 0f
+                    }
                 } else {
-                    val formattedTemp = (Math.round(defaultTempCelsius * 10f) / 10f)
-                    avgTemp = formattedTemp
-                    maxTemp = formattedTemp
+                    avgTemp = 0f
+                    maxTemp = 0f
                 }
             }
 
@@ -3306,18 +3648,38 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
         val physicalTotalEnergyWh = (physicalDrainMah * nominalVoltageVolts) / 1000f
 
-        // 硬件时序切片微积分：直接对底层物理放电采样点按亮灭屏做数值微积分
-        val recentSamples = getDischargeRealtimeSamples().filter { it.timestamp in startTs..now }
-        val dischargeStats = computeDischargePowerStats(recentSamples)
-        val intTotalEnergyWh = dischargeStats?.totalDisplayEnergyWh ?: 0f
-        val intTotalPowerWatts = dischargeStats?.averagePowerWatts ?: 0f
-        val intOnEnergyWh = dischargeStats?.screenOnDisplayEnergyWh ?: 0f
-        val intOnPowerWatts = dischargeStats?.screenOnPowerWatts ?: 0f
-        val intOffEnergyWh = dischargeStats?.screenOffDisplayEnergyWh ?: 0f
-        val intOffPowerWatts = dischargeStats?.screenOffPowerWatts ?: 0f
+        // 硬件时序实时物理微积分：优先使用 In-Flight 常驻累加器（1秒级高频瞬时真实积分，不受图表抽稀影响）
+        val acc = getDischargeAccumulator()
+        val hasAccData = (acc.screenOnJoules > 0.0 || acc.screenOffJoules > 0.0) && (acc.screenOnDurationMs > 0L || acc.screenOffDurationMs > 0L)
 
-        val hasValidHardwareIntegration = dischargeStats != null &&
-                (intTotalEnergyWh > 0f || intTotalPowerWatts > 0f || intOnPowerWatts > 0f || intOffPowerWatts > 0f)
+        val recentSamples = getDischargeRealtimeSamples().filter { it.timestamp in startTs..now }
+        val dischargeStats = if (!hasAccData) computeDischargePowerStats(recentSamples) else null
+
+        val intTotalEnergyWh: Float
+        val intTotalPowerWatts: Float
+        val intOnEnergyWh: Float
+        val intOnPowerWatts: Float
+        val intOffEnergyWh: Float
+        val intOffPowerWatts: Float
+
+        if (hasAccData) {
+            intOnEnergyWh = (acc.screenOnJoules / 3600.0).toFloat()
+            intOffEnergyWh = (acc.screenOffJoules / 3600.0).toFloat()
+            intTotalEnergyWh = intOnEnergyWh + intOffEnergyWh
+            intOnPowerWatts = if (screenOnHours > 0f) intOnEnergyWh / screenOnHours else 0f
+            intOffPowerWatts = if (screenOffHours > 0f) intOffEnergyWh / screenOffHours else 0f
+            intTotalPowerWatts = if (dischargeHours > 0f) intTotalEnergyWh / dischargeHours else 0f
+        } else {
+            intTotalEnergyWh = dischargeStats?.totalDisplayEnergyWh ?: 0f
+            intTotalPowerWatts = dischargeStats?.averagePowerWatts ?: 0f
+            intOnEnergyWh = dischargeStats?.screenOnDisplayEnergyWh ?: 0f
+            intOnPowerWatts = dischargeStats?.screenOnPowerWatts ?: 0f
+            intOffEnergyWh = dischargeStats?.screenOffDisplayEnergyWh ?: 0f
+            intOffPowerWatts = dischargeStats?.screenOffPowerWatts ?: 0f
+        }
+
+        val hasValidHardwareIntegration = hasAccData || (dischargeStats != null &&
+                (intTotalEnergyWh > 0f || intTotalPowerWatts > 0f || intOnPowerWatts > 0f || intOffPowerWatts > 0f))
 
         var realTotalEnergyWh: Float
         var realDischargedMah: Float

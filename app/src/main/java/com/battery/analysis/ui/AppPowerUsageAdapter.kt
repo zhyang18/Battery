@@ -110,24 +110,24 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
             } else {
                 item.getFormattedForegroundAvgWatts()
             }
-            tvAvgInfo.text = String.format(
-                Locale.getDefault(),
-                "AVG: %s, %.1f℃",
-                pwrStr,
-                item.avgTemperature
-            )
+            val avgTempStr = if (item.avgTemperature > 0f) {
+                String.format(Locale.getDefault(), "%.1f℃", item.avgTemperature)
+            } else {
+                "--"
+            }
+            tvAvgInfo.text = "AVG: $pwrStr, $avgTempStr"
+
             val energyStr = if (showBackgroundStats) {
                 item.getFormattedCombinedEnergyWh()
             } else {
                 item.getFormattedForegroundEnergyWh()
             }
-            tvAppEnergy.text = String.format(
-                Locale.getDefault(),
-//                "%s | MAX: %.1f℃",
-                "MAX: %.1f℃ | %s",
-                item.maxTemperature,
-                energyStr,
-            )
+            val maxTempStr = if (item.maxTemperature > 0f) {
+                String.format(Locale.getDefault(), "MAX: %.1f℃", item.maxTemperature)
+            } else {
+                "MAX: --"
+            }
+            tvAppEnergy.text = "$maxTempStr | $energyStr"
             tvDuration.text = if (showBackgroundStats) {
                 item.getFormattedCombinedDuration()
             } else {

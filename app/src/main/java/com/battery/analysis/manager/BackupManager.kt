@@ -221,6 +221,8 @@ class BackupManager private constructor() {
             BackupSettings(
                 languageMode = if (settingsJson.has("language_mode")) settingsJson.getInt("language_mode") else null,
                 themeMode = if (settingsJson.has("theme_mode")) settingsJson.getInt("theme_mode") else null,
+                autoRefreshEnabled = if (settingsJson.has("auto_refresh_enabled")) settingsJson.getBoolean("auto_refresh_enabled") else null,
+                refreshIntervalMs = if (settingsJson.has("refresh_interval_ms")) settingsJson.getLong("refresh_interval_ms") else null,
                 chargeDischargeStatsEnabled = if (settingsJson.has("charge_discharge_stats_enabled")) settingsJson.getBoolean("charge_discharge_stats_enabled") else null,
                 chargingKeepScreenOn = if (settingsJson.has("charging_keep_screen_on")) settingsJson.getBoolean("charging_keep_screen_on") else null,
                 powerStatsMode = if (settingsJson.has("power_stats_mode")) settingsJson.getInt("power_stats_mode") else null,

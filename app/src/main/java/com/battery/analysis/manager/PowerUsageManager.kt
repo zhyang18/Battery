@@ -114,6 +114,60 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         /**
+         * 将 JSON 字符串反序列化为瞬时放电采样点列表。
+         *
+         * @param jsonStr 采样点 JSON 数组文本
+         * @return 反序列化生成的采样点列表
+         */
+        fun parseDischargeSamplesFromJson(jsonStr: String): List<PowerDischargePoint> {
+            if (jsonStr.isEmpty() || jsonStr == "[]") return emptyList()
+            val list = mutableListOf<PowerDischargePoint>()
+            try {
+                val array = org.json.JSONArray(jsonStr)
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val pkgName = obj.optString("pkg").takeIf { it.isNotEmpty() }
+                    list.add(
+                        PowerDischargePoint(
+                            timestamp = obj.optLong("ts", 0L),
+                            elapsedHours = obj.optDouble("elapsed", 0.0).toFloat(),
+                            batteryLevel = obj.optInt("lvl", 100),
+                            voltageVolts = obj.optDouble("volt", 3.85).toFloat(),
+                            temperature = obj.optDouble("temp", 30.0).toFloat(),
+                            powerWatts = obj.optDouble("pwr", 2.0).toFloat(),
+                            isScreenOn = obj.optBoolean("screenOn", true),
+                            packageName = pkgName
+                        )
+                    )
+                }
+            } catch (_: Throwable) {}
+            return list
+        }
+
+        /**
+         * 将 JSON 字符串反序列化为电池状态快照。
+         *
+         * @param jsonStr 电池状态 JSON 字符串
+         * @return 反序列化生成的电池状态快照，解析失败返回 null
+         */
+        fun parseBatteryStatusFromJson(jsonStr: String): BatteryStatusSnapshot? {
+            if (jsonStr.isEmpty()) return null
+            return try {
+                val obj = org.json.JSONObject(jsonStr)
+                BatteryStatusSnapshot(
+                    levelPercent = obj.optInt("levelPercent", 100),
+                    voltageVolts = obj.optDouble("voltageVolts", 4.0).toFloat(),
+                    temperature = obj.optDouble("temperature", 25.0).toFloat(),
+                    energyWh = obj.optDouble("energyWh", 0.0).toFloat(),
+                    isCharging = obj.optBoolean("isCharging", false),
+                    totalEnergyWh = if (obj.has("totalEnergyWh")) obj.optDouble("totalEnergyWh").toFloat() else null
+                )
+            } catch (_: Throwable) {
+                null
+            }
+        }
+
+        /**
          * 基于硬件放电时序采样点（时间戳、瞬时电压、瞬时电流）的时间切片数值微积分模型。
          * 遵循物理能量守恒定律与微积分定义（硬件放电积分实现）：
          * E = ∫ P(t) dt = Σ [ ((P(i) + P(i+1)) / 2) * Δt ]
@@ -708,6 +762,18 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
+     * 系统内存修剪回调接口，根据系统内存压力级别主动清空应用信息与游戏分类缓存。
+     *
+     * @param level 系统传递的内存压力等级（对应 [android.content.ComponentCallbacks2] 常量）
+     */
+    fun trimMemory(level: Int) {
+        synchronized(appInfoCache) {
+            appInfoCache.clear()
+        }
+        gameAppCache.clear()
+    }
+
+    /**
      * 查询或加载指定包名的应用信息（图标、名称、UID），优先命中进程内弱引用缓存。
      * 缓存未命中或弱引用已被 GC 回收时，向 PackageManager 发起一次 Binder IPC，
      * 并将结果重新存入缓存供后续复用。
@@ -997,6 +1063,64 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
+     * 将当前放电常驻物理微积分能量累加器序列化为 JSON 字符串，供 AIDL 跨进程传输。
+     *
+     * @return 累加器状态序列化生成的 JSON 字符串
+     */
+    @Synchronized
+    fun getDischargeAccumulatorAsJson(): String {
+        val acc = dischargeAccumulator
+        val obj = org.json.JSONObject()
+        obj.put("onJ", acc.screenOnJoules)
+        obj.put("offJ", acc.screenOffJoules)
+        obj.put("onMs", acc.screenOnDurationMs)
+        obj.put("offMs", acc.screenOffDurationMs)
+        obj.put("lastTs", acc.lastSampleTs)
+        obj.put("lastW", acc.lastSampleWatts.toDouble())
+        obj.put("lastOn", acc.lastSampleScreenOn)
+        obj.put("lastT", acc.lastSampleTemp.toDouble())
+        return obj.toString()
+    }
+
+    /**
+     * 从 JSON 字符串反序列化并更新本地放电常驻物理微积分能量累加器。
+     *
+     * @param json 放电累加器状态 JSON 字符串
+     */
+    @Synchronized
+    fun restoreDischargeAccumulatorFromJson(json: String) {
+        if (json.isEmpty() || json == "{}") return
+        try {
+            val obj = org.json.JSONObject(json)
+            dischargeAccumulator.screenOnJoules = obj.optDouble("onJ", 0.0)
+            dischargeAccumulator.screenOffJoules = obj.optDouble("offJ", 0.0)
+            dischargeAccumulator.screenOnDurationMs = obj.optLong("onMs", 0L)
+            dischargeAccumulator.screenOffDurationMs = obj.optLong("offMs", 0L)
+            dischargeAccumulator.lastSampleTs = obj.optLong("lastTs", 0L)
+            dischargeAccumulator.lastSampleWatts = obj.optDouble("lastW", 0.0).toFloat()
+            dischargeAccumulator.lastSampleScreenOn = obj.optBoolean("lastOn", true)
+            dischargeAccumulator.lastSampleTemp = obj.optDouble("lastT", 25.0).toFloat()
+        } catch (_: Throwable) {}
+    }
+
+    /**
+     * 从后台监控服务远程同步最新放电采样点集与常驻物理微积分累加器。
+     *
+     * @param samples 远端后台服务采集的放电秒级瞬时采样点列表
+     * @param accJson 远端后台服务持有的放电微积分累加器 JSON 字符串
+     */
+    @Synchronized
+    fun syncSamplesAndAccumulatorFromRemote(samples: List<PowerDischargePoint>, accJson: String) {
+        if (samples.isNotEmpty()) {
+            dischargeRealtimeSamples.clear()
+            dischargeRealtimeSamples.addAll(samples)
+        }
+        if (accJson.isNotEmpty()) {
+            restoreDischargeAccumulatorFromJson(accJson)
+        }
+    }
+
+    /**
      * 获取各应用前台独占运行即时物理能量与温度映射表副本。
      *
      * @return 包含各包名即时物理累加器副本的映射表 [Map<String, AppRealtimeEnergyAccumulator>]
@@ -1035,6 +1159,55 @@ class PowerUsageManager private constructor(private val context: Context) {
             loadDischargeSamplesFromPrefs()
         }
         return dischargeRealtimeSamples.toList()
+    }
+
+    /**
+     * 将当前放电周期的秒级瞬时采样点列表序列化为 JSON 字符串，供 AIDL 跨进程传输使用。
+     *
+     * @return 采样点列表序列化生成的 JSON 数组字符串
+     */
+    @Synchronized
+    fun getDischargeRealtimeSamplesAsJson(): String {
+        val snapshot = ArrayList(dischargeRealtimeSamples)
+        if (snapshot.isEmpty()) return "[]"
+        val sb = java.lang.StringBuilder(snapshot.size * 90)
+        sb.append('[')
+        for (i in snapshot.indices) {
+            val p = snapshot[i]
+            if (i > 0) sb.append(',')
+            sb.append("{\"ts\":").append(p.timestamp)
+                .append(",\"elapsed\":").append(p.elapsedHours)
+                .append(",\"lvl\":").append(p.batteryLevel)
+                .append(",\"volt\":").append(p.voltageVolts)
+                .append(",\"temp\":").append(p.temperature)
+                .append(",\"pwr\":").append(p.powerWatts)
+                .append(",\"screenOn\":").append(p.isScreenOn)
+            if (!p.packageName.isNullOrEmpty()) {
+                sb.append(",\"pkg\":\"").append(p.packageName.replace("\\", "\\\\").replace("\"", "\\\"")).append("\"")
+            }
+            sb.append('}')
+        }
+        sb.append(']')
+        return sb.toString()
+    }
+
+    /**
+     * 获取当前系统瞬时电池状态的 JSON 字符串表示，供 AIDL 跨进程传输使用。
+     *
+     * @return 电池状态快照序列化生成的 JSON 字符串
+     */
+    fun getCurrentBatteryStatusAsJson(): String {
+        val s = getCurrentBatteryStatus()
+        val json = org.json.JSONObject()
+        json.put("levelPercent", s.levelPercent)
+        json.put("voltageVolts", s.voltageVolts.toDouble())
+        json.put("temperature", s.temperature.toDouble())
+        json.put("energyWh", s.energyWh.toDouble())
+        json.put("isCharging", s.isCharging)
+        if (s.totalEnergyWh != null) {
+            json.put("totalEnergyWh", s.totalEnergyWh.toDouble())
+        }
+        return json.toString()
     }
 
     /**
@@ -3356,8 +3529,9 @@ class PowerUsageManager private constructor(private val context: Context) {
             appInfoMap[context.packageName] = Pair(icon, name)
         }
 
-        // 确定放电周期的前台主力应用（时长最长的主活跃应用，优先选择有桌面入口的用户三方应用）
-        val candidateApps = appItems.filter { it.foregroundTimeMs > 0 }
+        // 确定放电周期的前台主力应用（时长最长的主活跃应用，优先选择有桌面入口的用户三方应用，严禁选取系统桌面启动器）
+        val defaultHome = getDefaultHomeLauncherPackage()
+        val candidateApps = appItems.filter { it.foregroundTimeMs > 0 && !isHomeLauncher(it.packageName) && it.packageName != defaultHome }
         val userApps = candidateApps.filter { isUserInstalledApp(it.packageName) }
         val primaryPkg = (userApps.maxByOrNull { it.foregroundTimeMs }
             ?: candidateApps.maxByOrNull { it.foregroundTimeMs })?.packageName
@@ -3386,14 +3560,20 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
 
                 var matchedPkg: String? = null
-                for (interval in appIntervals) {
-                    if (pointTs in interval.startTs..interval.endTs) {
-                        matchedPkg = interval.packageName
-                        break
-                    }
+                // 1. 优先使用瞬时硬件采样记录的真实前台应用（若非桌面启动器）
+                if (!s.packageName.isNullOrEmpty() && !isHomeLauncher(s.packageName) && s.packageName != defaultHome) {
+                    matchedPkg = s.packageName
                 }
-                if (matchedPkg == null && isScreenOn) {
-                    matchedPkg = primaryPkg
+                // 2. 其次匹配系统事件高精度区间
+                if (matchedPkg == null) {
+                    for (interval in appIntervals) {
+                        if (pointTs in interval.startTs..interval.endTs) {
+                            if (!isHomeLauncher(interval.packageName) && interval.packageName != defaultHome) {
+                                matchedPkg = interval.packageName
+                                break
+                            }
+                        }
+                    }
                 }
 
                 val icons = mutableListOf<android.graphics.drawable.Drawable>()
@@ -4141,8 +4321,12 @@ class PowerUsageManager private constructor(private val context: Context) {
             emptyMap()
         }
 
+        val defaultHome = getDefaultHomeLauncherPackage()
         for (interval in appIntervals) {
             val pkg = interval.packageName
+            // 排除系统默认桌面与启动器，桌面不作为独立 App 徽章在时间轴平铺堆叠
+            if (isHomeLauncher(pkg) || pkg == defaultHome) continue
+
             val item = appMap[pkg]
             val duration = (interval.endTs - interval.startTs).coerceAtLeast(0L)
             val info = getAppInfo(pkg)
@@ -4210,12 +4394,15 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
             } else if (lastAppEvent == null || lastAppEvent.endTime < endTs - 10_000L) {
                 // 若时序末尾缺失前台事件，查询系统当前置顶应用进行对齐闭合
-                val currentPkg = ShizukuForegroundAppDetector.getForegroundPackageName(context)
-                    ?: KeepAliveAccessibilityService.currentForegroundPackage
-                    ?: context.packageName
+                val isHostFg = com.battery.analysis.service.BatteryMonitorService.isHostAppForeground()
+                val currentPkg = if (isHostFg) {
+                    context.packageName
+                } else {
+                    ShizukuForegroundAppDetector.getForegroundPackageName(context)
+                        ?: KeepAliveAccessibilityService.currentForegroundPackage
+                }
 
-                val defaultHome = getDefaultHomeLauncherPackage()
-                if (!currentPkg.isNullOrEmpty() && currentPkg != defaultHome) {
+                if (!currentPkg.isNullOrEmpty() && currentPkg != defaultHome && !isHomeLauncher(currentPkg)) {
                     val fallbackStart = maxOf(lastAppEvent?.endTime ?: startTs, endTs - 60_000L, startTs)
                     if (endTs > fallbackStart) {
                         val item = appMap[currentPkg]

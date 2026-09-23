@@ -96,37 +96,7 @@ object SysfsBatterySampler {
     @Volatile
     private var shizukuProbeUnreadableUntil: Long = 0L
 
-    /** 静态缓存的 Shizuku.newProcess 反射 Method 引用，消除每秒反射查找开销 */
-    @Volatile
-    private var cachedNewProcessMethod: java.lang.reflect.Method? = null
 
-    /** 是否已尝试查找并初始化 newProcess 反射 Method 引用 */
-    @Volatile
-    private var hasCheckedNewProcessMethod: Boolean = false
-
-    /**
-     * 获取或初始化已缓存的 Shizuku.newProcess 反射 Method 对象。
-     *
-     * @return 成功解析出的 Method 实例，若反射失败则返回 null
-     */
-    private fun getNewProcessMethod(): java.lang.reflect.Method? {
-        if (hasCheckedNewProcessMethod) return cachedNewProcessMethod
-        return synchronized(this) {
-            if (hasCheckedNewProcessMethod) return cachedNewProcessMethod
-            try {
-                cachedNewProcessMethod = Shizuku::class.java.getDeclaredMethod(
-                    "newProcess",
-                    Array<String>::class.java,
-                    Array<String>::class.java,
-                    String::class.java
-                ).apply { isAccessible = true }
-            } catch (_: Throwable) {
-                cachedNewProcessMethod = null
-            }
-            hasCheckedNewProcessMethod = true
-            cachedNewProcessMethod
-        }
-    }
 
     /** 所有已知的电流节点候选路径（按常见设备优先级排序） */
     private val CURRENT_PATHS = listOf(
@@ -424,20 +394,11 @@ object SysfsBatterySampler {
         }
 
         try {
-            val method = getNewProcessMethod() ?: return false
             // 拼接单次探查脚本，通过标准 shell 循环一次性找出首个可读的电流与电压节点（合法 break 退出）
             val curPathsStr = CURRENT_PATHS.joinToString(" ")
             val voltPathsStr = VOLTAGE_PATHS.joinToString(" ")
             val fullCmd = "for f in $curPathsStr; do [ -r \"\$f\" ] && echo \"CUR:\$f\" && break; done; for f in $voltPathsStr; do [ -r \"\$f\" ] && echo \"VOLT:\$f\" && break; done"
-            val proc = method.invoke(
-                null,
-                arrayOf("sh", "-c", fullCmd),
-                null,
-                null
-            ) as? Process ?: return false
-
-            val lines = proc.inputStream.bufferedReader().use { it.readLines() }
-            proc.waitFor()
+            val lines = ShizukuShellExecutor.executeLines(fullCmd)
 
             for (line in lines) {
                 val trimmed = line.trim()
@@ -550,7 +511,7 @@ object SysfsBatterySampler {
         context: Context,
         fallbackVoltageVolts: Float? = null,
         fallbackTempCelsius: Float? = null,
-        allowProcessFork: Boolean = false
+        allowProcessFork: Boolean = true
     ): HardwareSample? {
         return sampleHardwareBattery(context, isCharging = false, fallbackVoltageVolts, fallbackTempCelsius, allowProcessFork)
     }
@@ -568,7 +529,7 @@ object SysfsBatterySampler {
         context: Context,
         fallbackVoltageVolts: Float? = null,
         fallbackTempCelsius: Float? = null,
-        allowProcessFork: Boolean = false
+        allowProcessFork: Boolean = true
     ): HardwareSample? {
         return sampleHardwareBattery(context, isCharging = true, fallbackVoltageVolts, fallbackTempCelsius, allowProcessFork)
     }
@@ -920,11 +881,7 @@ object SysfsBatterySampler {
      */
     private fun readViaShizuku(path: String): String? {
         return try {
-            val method = getNewProcessMethod() ?: return null
-            val proc = method.invoke(null, arrayOf("cat", path), null, null) as? Process
-                ?: return null
-            val text = proc.inputStream.bufferedReader().use { it.readText().trim() }
-            proc.waitFor()
+            val text = ShizukuShellExecutor.execute("cat $path 2>/dev/null")
             if (text.isNotEmpty() &&
                 !text.contains("No such") &&
                 !text.contains("Permission denied") &&
@@ -969,25 +926,8 @@ object SysfsBatterySampler {
         val statusIndex = if (statusPath != null) { pathList.add(statusPath); pathList.size - 1 } else -1
 
         return try {
-            val method = getNewProcessMethod() ?: run {
-                lastShizukuSampleTime = now
-                shizukuFailCount++
-                return null
-            }
             val cmd = "cat ${pathList.joinToString(" ")} 2>/dev/null"
-            val proc = method.invoke(
-                null,
-                arrayOf("sh", "-c", cmd),
-                null,
-                null
-            ) as? Process ?: run {
-                lastShizukuSampleTime = now
-                shizukuFailCount++
-                return null
-            }
-
-            val lines = proc.inputStream.bufferedReader().use { it.readLines() }
-            proc.waitFor()
+            val lines = ShizukuShellExecutor.executeLines(cmd)
             if (lines.size >= 2) {
                 val rawCur = lines[0].trim().toLongOrNull() ?: run {
                     lastShizukuSampleTime = now

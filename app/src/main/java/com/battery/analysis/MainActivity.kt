@@ -12,9 +12,11 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import android.content.ComponentCallbacks2
 import com.battery.analysis.databinding.ActivityMainBinding
 import com.battery.analysis.manager.ShizukuManager
 import com.battery.analysis.receiver.BatteryUnplugReceiver
+import com.battery.analysis.service.BatteryServiceBridge
 import com.battery.analysis.ui.MainPagerAdapter
 import com.battery.analysis.viewmodel.BatteryViewModel
 import kotlinx.coroutines.Dispatchers
@@ -230,6 +232,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        binding.bottomNavigation.setOnItemReselectedListener { item ->
+            if (item.itemId == R.id.nav_power) {
+                val powerFragment = supportFragmentManager.fragments.filterIsInstance<com.battery.analysis.ui.PowerUsageFragment>().firstOrNull()
+                powerFragment?.loadData()
+            }
+        }
+
         // 默认选中：若开启则默认选中“充/耗电”页签，若关闭则默认选中“健康度”页签
         binding.bottomNavigation.selectedItemId = if (isStatsEnabled) R.id.nav_power else R.id.nav_detection
 
@@ -390,10 +399,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 界面变为可见时的生命周期回调。
+     * 界面变为可见时的生命周期回调，建立与后台独立监控服务的 AIDL 跨进程绑定并通知前台状态。
      */
     override fun onStart() {
         super.onStart()
+        BatteryServiceBridge.bindService(this)
+        BatteryServiceBridge.notifyHostAppForeground(true)
         updateShizukuStatusState()
     }
 
@@ -402,7 +413,7 @@ class MainActivity : AppCompatActivity() {
      */
     override fun onResume() {
         super.onResume()
-        com.battery.analysis.service.BatteryMonitorService.setHostAppForeground(true)
+        BatteryServiceBridge.notifyHostAppForeground(true)
         updateShizukuStatusState()
         val isStatsEnabled = com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(this)
         if (isStatsEnabled) {
@@ -418,7 +429,33 @@ class MainActivity : AppCompatActivity() {
      */
     override fun onPause() {
         super.onPause()
-        com.battery.analysis.service.BatteryMonitorService.setHostAppForeground(false)
+        BatteryServiceBridge.notifyHostAppForeground(false)
+    }
+
+    /**
+     * 界面变为完全不可见时的生命周期回调，解除与后台服务的 AIDL 跨进程绑定以节约 Binder 句柄。
+     */
+    override fun onStop() {
+        super.onStop()
+        BatteryServiceBridge.notifyHostAppForeground(false)
+        BatteryServiceBridge.unbindService(this)
+    }
+
+    /**
+     * 系统内存压力修剪回调，在 UI 退入后台或内存吃紧时主动裁剪图片缓存与元数据。
+     *
+     * @param level 系统内存级别代码，如 [ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN]
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            try {
+                com.battery.analysis.provider.ShizukuBatteryStatsParser.clearAppMetadataCache()
+            } catch (_: Throwable) {}
+            try {
+                com.battery.analysis.manager.PowerUsageManager.getInstance(this).trimMemory(level)
+            } catch (_: Throwable) {}
+        }
     }
 
     /**

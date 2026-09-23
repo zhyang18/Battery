@@ -96,6 +96,51 @@ class BatteryMonitorService : Service() {
     @Volatile
     private var isForegroundNotificationRemoved: Boolean = false
 
+    /** 息屏定时采样状态下的局部唤醒锁引用，防止 CPU 进入深度休眠（Deep Sleep）导致采样协程挂起 */
+    private var screenOffWakeLock: PowerManager.WakeLock? = null
+
+    /**
+     * 管理息屏定时采样状态下的局部唤醒锁（Partial WakeLock）。
+     * 仅在屏幕熄灭且用户配置了大于 0L 的定时采样间隔时申请持有，防止 CPU 深度睡眠冻结采样协程；
+     * 当点亮屏幕、切换至智能省电/不采样、或服务销毁时，立即释放唤醒锁，杜绝电量泄漏。
+     *
+     * @param acquire 是否申请持有唤醒锁（true 为持有，false 为释放）
+     */
+    private fun manageScreenOffWakeLock(acquire: Boolean) {
+        synchronized(this) {
+            try {
+                if (acquire) {
+                    if (screenOffWakeLock == null) {
+                        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+                        screenOffWakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "battery:screen_off_sampling")?.apply {
+                            setReferenceCounted(false)
+                        }
+                    }
+                    if (screenOffWakeLock?.isHeld == false) {
+                        screenOffWakeLock?.acquire(3600_000L)
+                    }
+                } else {
+                    if (screenOffWakeLock?.isHeld == true) {
+                        screenOffWakeLock?.release()
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+    }
+
+    /**
+     * 安全移除系统通知栏的前台通知卡片。
+     * 调用 stopForeground(STOP_FOREGROUND_REMOVE) 与 notificationManager.cancel，
+     * 并标记 isForegroundNotificationRemoved 为 true，杜绝残留与重复调用。
+     */
+    private fun stopForegroundNotification() {
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            notificationManager.cancel(NOTIFICATION_ID)
+            isForegroundNotificationRemoved = true
+        } catch (_: Throwable) {}
+    }
+
     /**
      * 缓存的通知 PendingIntent，在 onCreate 时初始化一次并复用，
      * 避免每次 buildNotification 都触发 Binder IPC（PendingIntent.getActivity）。
@@ -131,8 +176,9 @@ class BatteryMonitorService : Service() {
                     handlePowerDisconnected(appContext)
                 }
                 Intent.ACTION_SCREEN_ON -> {
-                    // 屏幕点亮瞬间：标记屏幕状态、恢复轮询协程并强制刷新一次通知
+                    // 屏幕点亮瞬间：标记屏幕状态、释放息屏唤醒锁、恢复轮询协程并强制刷新一次通知
                     cachedIsInteractive = true
+                    manageScreenOffWakeLock(false)
                     startMonitorSamplingLoop()
                     updateNotification(force = true)
                 }
@@ -174,8 +220,12 @@ class BatteryMonitorService : Service() {
                     // 3. 检查息屏待机策略：若为智能省电模式（<=0L），无论是充电还是放电，彻底停止轮询协程，完全释放 CPU 休眠
                     val screenOffInterval = getScreenOffIntervalMs(appContext)
                     if (screenOffInterval <= 0L) {
+                        manageScreenOffWakeLock(false)
                         monitorSamplingJob?.cancel()
                         monitorSamplingJob = null
+                    } else {
+                        // 用户明确配置了息屏定时采样（> 0L），持有 Partial WakeLock 保证 CPU 按时唤醒执行协程定时采样
+                        manageScreenOffWakeLock(true)
                     }
                 }
                 Intent.ACTION_BATTERY_CHANGED -> {
@@ -279,6 +329,11 @@ class BatteryMonitorService : Service() {
      */
     override fun onCreate() {
         super.onCreate()
+        try {
+            rikka.shizuku.ShizukuProvider.enableMultiProcessSupport(false)
+            rikka.shizuku.ShizukuProvider.requestBinderForNonProviderProcess(this)
+        } catch (_: Throwable) {
+        }
         isServiceActive = true
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
@@ -289,14 +344,12 @@ class BatteryMonitorService : Service() {
         val initialNotification = buildNotification(channelId)
         safeStartForeground(initialNotification)
         if (!isDisplayEnabled) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            notificationManager.cancel(NOTIFICATION_ID)
+            stopForegroundNotification()
         }
 
         // 2. 履约后检查业务守卫：若未开启充放电统计或无需运行，安全退出
         if (!shouldServiceRun(this)) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            notificationManager.cancel(NOTIFICATION_ID)
+            stopForegroundNotification()
             stopSelf()
             return
         }
@@ -323,6 +376,50 @@ class BatteryMonitorService : Service() {
     }
 
     /**
+     * 处理配置更新，同步持久化至本地进程 SharedPreferences，并实时刷新通知与采样轮询。
+     *
+     * @param statsEnabled 是否启用充放电统计
+     * @param notificationEnabled 是否在通知栏常驻显示
+     * @param screenOnIntervalMs 亮屏监控刷新间隔毫秒数（-1L 为不采样）
+     * @param screenOffIntervalMs 息屏待机采样间隔毫秒数（0L 为智能省电，-1L 为不采样）
+     */
+    private fun handleConfigUpdated(
+        statsEnabled: Boolean,
+        notificationEnabled: Boolean,
+        screenOnIntervalMs: Long,
+        screenOffIntervalMs: Long
+    ) {
+        val prefs = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean(KEY_CHARGE_DISCHARGE_STATS_ENABLED, statsEnabled)
+            .putBoolean(KEY_NOTIFICATION_DISPLAY_ENABLED, notificationEnabled)
+            .putLong(KEY_SCREEN_ON_INTERVAL_MS, screenOnIntervalMs)
+            .putLong(KEY_SCREEN_OFF_INTERVAL_MS, screenOffIntervalMs)
+            .apply()
+
+        // 检查服务是否应该运行：若充放电统计关闭或亮屏息屏均不采样，则安全终止服务
+        if (!statsEnabled || (screenOnIntervalMs == INTERVAL_NEVER && screenOffIntervalMs == INTERVAL_NEVER)) {
+            stopForegroundNotification()
+            stopSelf()
+            return
+        }
+
+        // 常驻通知显示开关响应
+        if (!notificationEnabled) {
+            stopForegroundNotification()
+        } else {
+            isForegroundNotificationRemoved = false
+            updateNotification(force = true)
+        }
+
+        // 息屏 WakeLock 受控联动：息屏且配置为定时采样（> 0L）时持有唤醒锁
+        manageScreenOffWakeLock(!cachedIsInteractive && screenOffIntervalMs > 0L)
+
+        // 立即根据最新时间间隔重启全时态采样协程
+        startMonitorSamplingLoop()
+    }
+
+    /**
      * 服务指令下发入口，处理启动意图（包括心跳 Alarm 触发）并保持前台服务常驻。
      * 每次被启动时均续期心跳 Alarm，防止 Alarm 链断裂。
      *
@@ -332,20 +429,34 @@ class BatteryMonitorService : Service() {
      * @return 保持服务常驻的返回值 [START_STICKY]
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 1. 任何通过 startForegroundService 的调用或唤醒，第一步强制调用 startForeground 续期前台状态
+        // 优先从 Intent Extra 中解析跨进程传递的最新配置并落盘本地
+        if (intent != null && intent.hasExtra(EXTRA_CONFIG_PRESENT)) {
+            val statsEnabled = intent.getBooleanExtra(EXTRA_CHARGE_DISCHARGE_STATS_ENABLED, isChargeDischargeStatsEnabled(this))
+            val notificationEnabled = intent.getBooleanExtra(EXTRA_NOTIFICATION_DISPLAY_ENABLED, isNotificationDisplayEnabled(this))
+            val screenOnIntervalMs = intent.getLongExtra(EXTRA_SCREEN_ON_INTERVAL_MS, getScreenOnIntervalMs(this))
+            val screenOffIntervalMs = intent.getLongExtra(EXTRA_SCREEN_OFF_INTERVAL_MS, getScreenOffIntervalMs(this))
+            handleConfigUpdated(statsEnabled, notificationEnabled, screenOnIntervalMs, screenOffIntervalMs)
+            return START_STICKY
+        }
+
         val isDisplayEnabled = isNotificationDisplayEnabled(this)
-        val channelId = if (isDisplayEnabled) CHANNEL_ID else CHANNEL_ID_SILENT
-        val notification = buildNotification(channelId)
-        safeStartForeground(notification)
-        if (!isDisplayEnabled) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            notificationManager.cancel(NOTIFICATION_ID)
+        if (isDisplayEnabled) {
+            val notification = buildNotification(CHANNEL_ID)
+            safeStartForeground(notification)
+            isForegroundNotificationRemoved = false
+        } else {
+            // Android 8.0+ 针对 startForegroundService 契约安全保障：
+            // 若此前尚未履行过契约，使用静默渠道短暂停留后立即移除
+            if (!isForegroundNotificationRemoved) {
+                val silentNotification = buildNotification(CHANNEL_ID_SILENT)
+                safeStartForeground(silentNotification)
+            }
+            stopForegroundNotification()
         }
 
         // 2. 检查业务守卫：若未开启充放电统计或无需运行，安全退出
         if (!shouldServiceRun(this)) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            notificationManager.cancel(NOTIFICATION_ID)
+            stopForegroundNotification()
             stopSelf()
             return START_NOT_STICKY
         }
@@ -358,14 +469,128 @@ class BatteryMonitorService : Service() {
         return START_STICKY
     }
 
+    private val binder = object : IBatteryMonitorService.Stub() {
+        /**
+         * 检测后台监控服务是否处于活跃运行与物理采样状态。
+         *
+         * @return 若处于活跃运行中返回 true，否则返回 false
+         */
+        override fun isServiceRunning(): Boolean {
+            return isServiceActive
+        }
+
+        /**
+         * 宿主应用（主 UI 进程）通知后台监控服务当前界面是否处于前台可见活跃状态。
+         *
+         * @param foreground 是否处于前台可见活跃状态
+         */
+        override fun notifyHostAppForeground(foreground: Boolean) {
+            setHostAppForeground(foreground)
+        }
+
+        /**
+         * 动态同步更新后台监控服务的配置参数。
+         *
+         * @param statsEnabled 是否启用充放电统计
+         * @param notificationEnabled 是否在通知栏常驻显示
+         * @param screenOnIntervalMs 亮屏监控刷新间隔毫秒数（-1L 为不采样）
+         * @param screenOffIntervalMs 息屏待机采样间隔毫秒数（0L 为智能省电，-1L 为不采样）
+         */
+        override fun updateConfig(
+            statsEnabled: Boolean,
+            notificationEnabled: Boolean,
+            screenOnIntervalMs: Long,
+            screenOffIntervalMs: Long
+        ) {
+            handleConfigUpdated(statsEnabled, notificationEnabled, screenOnIntervalMs, screenOffIntervalMs)
+        }
+
+        /**
+         * 获取最新瞬时电池物理运行状态 JSON 字符串。
+         *
+         * @return 电池实时快照的 JSON 字符串
+         */
+        override fun getLiveBatteryStatusJson(): String {
+            return try {
+                PowerUsageManager.getInstance(applicationContext).getCurrentBatteryStatusAsJson()
+            } catch (_: Throwable) {
+                ""
+            }
+        }
+
+        /**
+         * 获取当前放电周期内存中最新的秒级瞬时采样点列表 JSON 字符串。
+         *
+         * @return 放电瞬时采样点列表序列化的 JSON 数组字符串
+         */
+        override fun getDischargeRealtimeSamplesJson(): String {
+            return try {
+                PowerUsageManager.getInstance(applicationContext).getDischargeRealtimeSamplesAsJson()
+            } catch (_: Throwable) {
+                "[]"
+            }
+        }
+
+        /**
+         * 获取当前放电周期的常驻物理微积分能量累加器状态 JSON 字符串。
+         *
+         * @return 放电累加器状态序列化的 JSON 字符串
+         */
+        override fun getDischargeAccumulatorJson(): String {
+            return try {
+                PowerUsageManager.getInstance(applicationContext).getDischargeAccumulatorAsJson()
+            } catch (_: Throwable) {
+                "{}"
+            }
+        }
+
+        /**
+         * 获取当前充电周期的会话摘要 JSON 字符串。
+         *
+         * @return 充电会话摘要序列化的 JSON 字符串
+         */
+        override fun getChargingSessionSummaryJson(): String {
+            return try {
+                ChargingStatsManager.getInstance(applicationContext).getCurrentSummaryAsJson()
+            } catch (_: Throwable) {
+                ""
+            }
+        }
+
+        /**
+         * 获取当前充电周期的采样点列表 JSON 字符串。
+         *
+         * @return 充电物理轨迹采样点列表序列化的 JSON 数组字符串
+         */
+        override fun getChargingSamplePointsJson(): String {
+            return try {
+                ChargingStatsManager.getInstance(applicationContext).getSamplePointsAsJson()
+            } catch (_: Throwable) {
+                "[]"
+            }
+        }
+
+        /**
+         * 通知后台监控服务强制将当前内存中的瞬时放电与充电采样点及物理能量累加器立即落盘写入私有文件。
+         */
+        override fun forceFlushToDisk() {
+            try {
+                PowerUsageManager.getInstance(applicationContext).flushDischargeSamplesToDisk()
+            } catch (_: Throwable) {}
+            try {
+                ChargingStatsManager.getInstance(applicationContext).flushChargingSamplesToDisk()
+            } catch (_: Throwable) {}
+        }
+    }
+
     /**
-     * 绑定服务接口，本服务为纯后台运行服务，不支持 IPC 绑定。
+     * 绑定服务接口，返回供主 UI 进程进行跨进程通信的 AIDL Binder 实例。
      *
      * @param intent 绑定意图
-     * @return 恒定返回 null
+     * @return AIDL Binder 接口实例
      */
-    override fun onBind(intent: Intent?): IBinder? {
-        return null
+    override fun onBind(intent: Intent?): IBinder {
+        return binder
     }
 
     /**
@@ -387,6 +612,7 @@ class BatteryMonitorService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isServiceActive = false
+        manageScreenOffWakeLock(false)
         try {
             PowerUsageManager.getInstance(applicationContext).flushDischargeSamplesToDisk()
         } catch (_: Exception) {}
@@ -511,7 +737,7 @@ class BatteryMonitorService : Service() {
                             context = this@BatteryMonitorService,
                             fallbackVoltageVolts = cachedVoltageVolts,
                             fallbackTempCelsius = cachedTemperature,
-                            allowProcessFork = false // 亮屏 1 秒高频采样严格禁止 Fork 进程，杜绝拉高 CPU 频率
+                            allowProcessFork = true // 允许在 JNI/BatteryManager 未命中时受控通过 Shizuku 降级采样（具备 3 秒缓存与熔断保护）
                         )
                         // 若本次采样未能获取有效功率，严格复用对应屏幕状态的历史缓存（避免息屏错误复用亮屏高功耗）
                         val pWatts = hwSample?.powerWatts ?: if (isInteractive) {
@@ -667,13 +893,9 @@ class BatteryMonitorService : Service() {
         } catch (_: Throwable) {
         }
 
-        // 4. 亮屏持续运行状态保持：若本周期内无新切换事件，持续沿用上一已知有效前台应用；若无历史记录则回退至默认桌面
+        // 4. 亮屏持续运行状态保持：若本周期内无新切换事件且无置顶特权检测，沿用上一已知有效前台应用；若无历史记录如实返回 null
         if (lastKnownForegroundPackage != null) {
             return lastKnownForegroundPackage
-        }
-        if (!defaultHomePkg.isNullOrEmpty()) {
-            lastKnownForegroundPackage = defaultHomePkg
-            return defaultHomePkg
         }
         return null
     }
@@ -859,6 +1081,12 @@ class BatteryMonitorService : Service() {
         const val DEFAULT_SCREEN_ON_INTERVAL_MS = 1000L
         const val DEFAULT_SCREEN_OFF_INTERVAL_MS = 0L
 
+        const val EXTRA_CONFIG_PRESENT = "extra_config_present"
+        const val EXTRA_NOTIFICATION_DISPLAY_ENABLED = "extra_notification_display_enabled"
+        const val EXTRA_SCREEN_ON_INTERVAL_MS = "extra_screen_on_interval_ms"
+        const val EXTRA_SCREEN_OFF_INTERVAL_MS = "extra_screen_off_interval_ms"
+        const val EXTRA_CHARGE_DISCHARGE_STATS_ENABLED = "extra_charge_discharge_stats_enabled"
+
         /** 宿主应用（MainActivity）当前是否处于最前台可见活跃状态的全局内存指示器 */
         @Volatile
         private var isHostAppForeground: Boolean = false
@@ -892,6 +1120,48 @@ class BatteryMonitorService : Service() {
         fun isServiceActive(): Boolean = isServiceActive
 
         /**
+         * 跨进程同步最新的监控配置参数至后台服务进程。
+         * 优先通过 AIDL Binder 毫秒级直调；若 Binder 未建立则封装带有完整配置 Extras 的 Intent 发送至服务，
+         * 彻底解决多进程 SharedPreferences 内存缓存不同步问题。
+         *
+         * @param context 应用程序上下文
+         */
+        fun syncConfigToService(context: Context) {
+            val statsEnabled = isChargeDischargeStatsEnabled(context)
+            val notificationEnabled = isNotificationDisplayEnabled(context)
+            val screenOnIntervalMs = getScreenOnIntervalMs(context)
+            val screenOffIntervalMs = getScreenOffIntervalMs(context)
+
+            // 1. 优先尝试 AIDL Binder 跨进程直调
+            val bound = BatteryServiceBridge.updateConfig(
+                context = context,
+                statsEnabled = statsEnabled,
+                notificationEnabled = notificationEnabled,
+                screenOnIntervalMs = screenOnIntervalMs,
+                screenOffIntervalMs = screenOffIntervalMs
+            )
+
+            // 2. 双重保障：通过携带 Extras 的 Intent 穿透同步
+            if (!bound && shouldServiceRun(context)) {
+                val intent = Intent(context, BatteryMonitorService::class.java).apply {
+                    action = ACTION_UPDATE_NOTIFICATION_DISPLAY
+                    putExtra(EXTRA_CONFIG_PRESENT, true)
+                    putExtra(EXTRA_CHARGE_DISCHARGE_STATS_ENABLED, statsEnabled)
+                    putExtra(EXTRA_NOTIFICATION_DISPLAY_ENABLED, notificationEnabled)
+                    putExtra(EXTRA_SCREEN_ON_INTERVAL_MS, screenOnIntervalMs)
+                    putExtra(EXTRA_SCREEN_OFF_INTERVAL_MS, screenOffIntervalMs)
+                }
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(intent)
+                    } else {
+                        context.startService(intent)
+                    }
+                } catch (_: Throwable) {}
+            }
+        }
+
+        /**
          * 获取用户是否在设置中开启了充、放电统计功能（默认关闭）。
          *
          * @param context 应用程序上下文
@@ -911,6 +1181,7 @@ class BatteryMonitorService : Service() {
         fun setChargeDischargeStatsEnabled(context: Context, enabled: Boolean) {
             val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             prefs.edit().putBoolean(KEY_CHARGE_DISCHARGE_STATS_ENABLED, enabled).apply()
+            syncConfigToService(context)
         }
 
         /**
@@ -921,19 +1192,7 @@ class BatteryMonitorService : Service() {
          * @param context 应用程序上下文
          */
         fun updateNotificationVisibility(context: Context) {
-            if (!shouldServiceRun(context)) {
-                return
-            }
-            val intent = Intent(context, BatteryMonitorService::class.java).apply {
-                action = ACTION_UPDATE_NOTIFICATION_DISPLAY
-            }
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
-                }
-            } catch (_: Exception) {}
+            syncConfigToService(context)
         }
 
         /**
@@ -956,6 +1215,7 @@ class BatteryMonitorService : Service() {
         fun setNotificationDisplayEnabled(context: Context, enabled: Boolean) {
             val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             prefs.edit().putBoolean(KEY_NOTIFICATION_DISPLAY_ENABLED, enabled).apply()
+            syncConfigToService(context)
         }
 
         /**
@@ -995,6 +1255,7 @@ class BatteryMonitorService : Service() {
         fun setScreenOnIntervalMs(context: Context, intervalMs: Long) {
             val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             prefs.edit().putLong(KEY_SCREEN_ON_INTERVAL_MS, intervalMs).apply()
+            syncConfigToService(context)
         }
 
         /**
@@ -1017,6 +1278,7 @@ class BatteryMonitorService : Service() {
         fun setScreenOffIntervalMs(context: Context, intervalMs: Long) {
             val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             prefs.edit().putLong(KEY_SCREEN_OFF_INTERVAL_MS, intervalMs).apply()
+            syncConfigToService(context)
         }
 
         /**
@@ -1029,7 +1291,13 @@ class BatteryMonitorService : Service() {
             if (!isChargeDischargeStatsEnabled(context) || !shouldServiceRun(context)) {
                 return
             }
-            val intent = Intent(context, BatteryMonitorService::class.java)
+            val intent = Intent(context, BatteryMonitorService::class.java).apply {
+                putExtra(EXTRA_CONFIG_PRESENT, true)
+                putExtra(EXTRA_CHARGE_DISCHARGE_STATS_ENABLED, isChargeDischargeStatsEnabled(context))
+                putExtra(EXTRA_NOTIFICATION_DISPLAY_ENABLED, isNotificationDisplayEnabled(context))
+                putExtra(EXTRA_SCREEN_ON_INTERVAL_MS, getScreenOnIntervalMs(context))
+                putExtra(EXTRA_SCREEN_OFF_INTERVAL_MS, getScreenOffIntervalMs(context))
+            }
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(intent)

@@ -55,6 +55,16 @@ class ChargingHistoryDbHelper private constructor(context: Context) :
     }
 
     /**
+     * 配置数据库连接参数，开启预写日志（WAL）模式支持多进程并发读写。
+     *
+     * @param db 数据库实例
+     */
+    override fun onConfigure(db: SQLiteDatabase) {
+        super.onConfigure(db)
+        db.enableWriteAheadLogging()
+    }
+
+    /**
      * 数据库表初次创建时的结构定义。
      *
      * @param db 数据库实例

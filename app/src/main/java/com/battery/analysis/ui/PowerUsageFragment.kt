@@ -35,6 +35,7 @@ import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.manager.ShizukuManager
 import com.battery.analysis.model.ChargingSamplePoint
 import com.battery.analysis.model.ChargingSessionSummary
+import com.battery.analysis.service.BatteryServiceBridge
 import com.battery.analysis.ui.view.ChargingChartView
 import com.battery.analysis.timeline.presentation.AppEnergyDetailBottomSheetDialog
 import com.battery.analysis.timeline.presentation.TimelineMetric
@@ -172,6 +173,18 @@ class PowerUsageFragment : Fragment() {
         }
     }
 
+    /**
+     * 后台独立监控服务 Binder 连接就绪监听器。
+     * 当与后台服务的跨进程 Binder 异步连接建立时，若当前处于前台耗电统计界面且非快照模式，自动静默重新加载数据对齐。
+     */
+    private val serviceConnectedListener: () -> Unit = {
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.Main) {
+            if (_binding != null && isResumed && !isViewingSnapshot && currentDisplayTab == 0 && !chargingManager.isCharging()) {
+                loadData()
+            }
+        }
+    }
+
     companion object {
         private const val PREF_KEY_KEEP_SCREEN_ON = "pref_charging_keep_screen_on"
         private const val PREF_KEY_ENABLE_BACKGROUND_STATS = "enable_background_stats"
@@ -243,9 +256,10 @@ class PowerUsageFragment : Fragment() {
         currentMode = powerManager.getSelectedMode()
         tempSelectedSetupMode = currentMode
 
-        // 注册 Shizuku 监听器
+        // 注册 Shizuku 监听器与后台服务连接就绪监听器
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
         Shizuku.addBinderReceivedListenerSticky(shizukuBinderReceivedListener)
+        BatteryServiceBridge.addOnConnectedListener(serviceConnectedListener)
 
         setupRecyclerView()
         setupSwipeRefresh()
@@ -541,6 +555,7 @@ class PowerUsageFragment : Fragment() {
             updateBackgroundStatsSwitchVisibility()
             if (!isViewingSnapshot && !isCharging && currentDisplayTab == 0) {
                 loadData()
+                updateScrollLimitForShortList()
             }
             updateShizukuBannerState()
             checkNormalPermissionBanner()
@@ -577,10 +592,16 @@ class PowerUsageFragment : Fragment() {
             Shizuku.removeBinderReceivedListener(shizukuBinderReceivedListener)
         } catch (_: Exception) {
         }
+        BatteryServiceBridge.removeOnConnectedListener(serviceConnectedListener)
         // 主动释放大对象引用，让 GC 能及时回收 FullPowerDataPackage（含应用列表、时序点数组等）
         lastRenderedPackage = null
         // 清空 RecyclerView Adapter 持有的应用列表，避免 Adapter 阻止列表数据被 GC 回收
         adapter.submitList(emptyList())
+        // 重置与 View 绑定的滚动与视口测量高度缓存，保障重新创建 View 时短列表折叠限制能精准重新校准
+        lastTotalContentH = -1
+        lastCoordinatorH = -1
+        lastAppliedScrollFlags = -1
+        lastAppBarVerticalOffset = 0
         _binding = null
     }
 
@@ -1053,7 +1074,9 @@ class PowerUsageFragment : Fragment() {
      */
     fun applySmartChargingMode(isCharging: Boolean, showToast: Boolean = false) {
         if (_binding == null) return
-        currentDisplayTab = if (isCharging) 1 else 0
+        val targetDisplayTab = if (isCharging) 1 else 0
+        val isTabChanged = (currentDisplayTab != targetDisplayTab)
+        currentDisplayTab = targetDisplayTab
 
         // 智能联动更新 MainActivity 底部导航栏第一个页签的标题（充电 / 耗电）与图标
         (activity as? MainActivity)?.updateBottomNavPowerTab(isCharging)
@@ -1072,7 +1095,6 @@ class PowerUsageFragment : Fragment() {
 
         if (isCharging) {
             // 智能呈现【充电统计】界面并根据设置开启屏幕常亮
-            currentDisplayTab = 1
             applyKeepScreenOn(true)
             binding.swipeRefreshLayout.isEnabled = false
             binding.swipeRefreshLayout.isRefreshing = false
@@ -1107,7 +1129,6 @@ class PowerUsageFragment : Fragment() {
             }
         } else {
             // 智能呈现【耗电统计】界面并恢复屏幕休眠
-            currentDisplayTab = 0
             applyKeepScreenOn(false)
             binding.swipeRefreshLayout.isEnabled = true
             stopChargingPolling()
@@ -1122,16 +1143,16 @@ class PowerUsageFragment : Fragment() {
             binding.toolbarCollapsed.visibility = View.GONE
             binding.cardCollapsedMetrics.visibility = View.GONE
 
-            // 耗电模式下恢复原生联动折叠效果
-            (binding.collapsingToolbar.layoutParams as? com.google.android.material.appbar.AppBarLayout.LayoutParams)?.let { params ->
-                params.scrollFlags = com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_SCROLL or
-                        com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_EXIT_UNTIL_COLLAPSED
-                binding.collapsingToolbar.layoutParams = params
-            }
+            // 耗电模式下依据列表实际内容高度自适应校准上滑折叠边界（短列表禁止上滑折叠，超出一屏时启用原生联动折叠）
+            updateScrollLimitForShortList()
+
             binding.appbarPower.requestLayout()
             binding.coordinatorPower.requestLayout()
 
-            loadData()
+            // 仅在真实发生充放电物理模式切换时在此处主动加载数据；若未切换则由调用方统一生命周期处理
+            if (isTabChanged) {
+                loadData()
+            }
 
             if (showToast) {
 //                Toast.makeText(requireContext(), getString(R.string.toast_auto_switch_discharging), Toast.LENGTH_SHORT).show()
@@ -1194,16 +1215,24 @@ class PowerUsageFragment : Fragment() {
             }
 
             while (isActive) {
-                val serviceAlive = com.battery.analysis.service.BatteryMonitorService.isServiceActive()
+                val serviceAlive = BatteryServiceBridge.isServiceRunning(ctx)
+                val points = if (serviceAlive) {
+                    BatteryServiceBridge.getChargingSamplePoints(ctx)
+                } else {
+                    chargingManager.getSamplePoints()
+                }
                 val samplePoint = if (serviceAlive) {
-                    chargingManager.getSamplePoints().lastOrNull()
+                    points.lastOrNull()
                 } else if (shouldSample) {
                     chargingManager.sampleCurrentPoint()
                 } else {
-                    chargingManager.getSamplePoints().lastOrNull()
+                    points.lastOrNull()
                 }
-                val summary = chargingManager.getCurrentSummary()
-                val points = chargingManager.getSamplePoints()
+                val summary = if (serviceAlive) {
+                    BatteryServiceBridge.getChargingSessionSummary(ctx)
+                } else {
+                    chargingManager.getCurrentSummary()
+                }
 
                 withContext(Dispatchers.Main) {
                     if (_binding != null && currentDisplayTab == 1) {
@@ -1296,13 +1325,14 @@ class PowerUsageFragment : Fragment() {
      * @param latestPoint 最近一次采样的物理指标点，若为空则由最新点或兜底合成
      */
     private fun renderChargingData(
-        summary: ChargingSessionSummary = chargingManager.getCurrentSummary(),
-        points: List<ChargingSamplePoint> = chargingManager.getSamplePoints(),
+        summary: ChargingSessionSummary = BatteryServiceBridge.getChargingSessionSummary(requireContext()),
+        points: List<ChargingSamplePoint> = BatteryServiceBridge.getChargingSamplePoints(requireContext()),
         latestPoint: ChargingSamplePoint? = null
     ) {
         if (_binding == null) return
         val chargingView = binding.layoutChargingContent
-        val liveSnapshot = powerManager.getCurrentBatteryStatus()
+        val liveSnapshot = BatteryServiceBridge.getLiveBatteryStatus(requireContext())
+            ?: powerManager.getCurrentBatteryStatus()
         val currentPoint = latestPoint ?: points.lastOrNull() ?: ChargingSamplePoint(
             timestamp = System.currentTimeMillis(),
             powerWatts = summary.maxPowerWatts,
@@ -1527,6 +1557,17 @@ class PowerUsageFragment : Fragment() {
         val isBgStatsEnabled = statsPrefs.getBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, false)
 
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            val ctx = context ?: return@launch
+            // 跨进程连接自愈等待：若后台服务已开启但 Binder 尚未就绪，短暂挂起等待（至多 350ms）
+            if (com.battery.analysis.service.BatteryMonitorService.shouldServiceRun(ctx) && !BatteryServiceBridge.isConnected()) {
+                BatteryServiceBridge.awaitServiceConnected(350L)
+            }
+            // 跨进程数据同步：若独立后台监控进程处于采样运行状态或 Binder 已就绪，拉取最新的秒级瞬时采样点集与物理能量微积分累加器
+            if (BatteryServiceBridge.isServiceRunning(ctx) || BatteryServiceBridge.isConnected()) {
+                val remoteSamples = BatteryServiceBridge.getDischargeRealtimeSamples(ctx)
+                val remoteAccJson = BatteryServiceBridge.getDischargeAccumulatorJson(ctx)
+                powerManager.syncSamplesAndAccumulatorFromRemote(remoteSamples, remoteAccJson)
+            }
             if (currentMode == PowerUsageManager.MODE_SHIZUKU && powerManager.isShizukuAuthorized()) {
                 powerManager.grantUsageStatsPermissionViaShizuku()
             }
@@ -1824,13 +1865,6 @@ class PowerUsageFragment : Fragment() {
             val contentH = binding.layoutPowerContent.height
             val totalContentH = headerH + contentH + targetBottomGapPx
 
-            // 若物理总高度与视口高度均未发生变动，直接退出，彻底斩断每帧重复测量与布局
-            if (totalContentH == lastTotalContentH && coordinatorH == lastCoordinatorH) {
-                return@post
-            }
-            lastTotalContentH = totalContentH
-            lastCoordinatorH = coordinatorH
-
             val collapsingToolbarParams = binding.collapsingToolbar.layoutParams as? com.google.android.material.appbar.AppBarLayout.LayoutParams ?: return@post
             val targetFlags = if (totalContentH <= coordinatorH) {
                 // 1. 数据极少（一屏内完全呈现）：禁用折叠与上滑，保持完整展开且底部留白恰好协调
@@ -1841,6 +1875,16 @@ class PowerUsageFragment : Fragment() {
                         com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_EXIT_UNTIL_COLLAPSED
             }
 
+            // 若当前生效的标志位已与目标标志位完全一致，且视口与内容物理总高度未发生变动，直接退出，彻底斩断每帧重复测量与布局
+            if (collapsingToolbarParams.scrollFlags == targetFlags &&
+                totalContentH == lastTotalContentH &&
+                coordinatorH == lastCoordinatorH
+            ) {
+                return@post
+            }
+            lastTotalContentH = totalContentH
+            lastCoordinatorH = coordinatorH
+
             // 仅在目标标志位与当前生效标志位不一致时才重新赋值 LayoutParams，杜绝无谓的 requestLayout 导致 120Hz 刷新死循环
             if (collapsingToolbarParams.scrollFlags != targetFlags || lastAppliedScrollFlags != targetFlags) {
                 collapsingToolbarParams.scrollFlags = targetFlags
@@ -1848,6 +1892,7 @@ class PowerUsageFragment : Fragment() {
                 binding.collapsingToolbar.layoutParams = collapsingToolbarParams
                 if (targetFlags == 0) {
                     binding.appbarPower.setExpanded(true, false)
+                    binding.nestedScrollView.scrollTo(0, 0)
                 }
             }
         }

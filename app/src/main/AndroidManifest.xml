@@ -22,6 +22,7 @@
     </queries>
 
     <application
+        android:name=".BatteryApp"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -66,19 +67,21 @@
             android:exported="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
-        <!-- 守护进程反向穿透拉活 Provider（破除 Android 12+ 前台服务后台启动拦截） -->
+        <!-- 守护进程反向穿透拉活 Provider（破除 Android 12+ 前台服务后台启动拦截，专属于 :monitor 后台进程） -->
         <provider
             android:name=".daemon.KeepAliveProvider"
             android:authorities="com.battery.analysis.daemon.provider"
             android:enabled="true"
             android:exported="true"
-            android:multiprocess="false" />
+            android:multiprocess="false"
+            android:process=":monitor" />
 
-        <!-- 后台电池实时监控前台服务 -->
+        <!-- 后台电池实时监控前台服务（独立运行于 :monitor 低内存轻量进程） -->
         <service
             android:name=".service.BatteryMonitorService"
             android:enabled="true"
             android:exported="false"
+            android:process=":monitor"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
@@ -100,11 +103,12 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- 监听系统插电、拔电与开机广播 -->
+        <!-- 监听系统插电、拔电与开机广播（独立运行于 :monitor 后台进程） -->
         <receiver
             android:name=".receiver.BatteryUnplugReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true"
+            android:process=":monitor">
             <intent-filter>
                 <!-- 修正：正确的 action 不含 ACTION_ 前缀，否则系统广播无法匹配 -->
                 <action android:name="android.intent.action.POWER_CONNECTED" />
@@ -113,11 +117,12 @@
             </intent-filter>
         </receiver>
 
-        <!-- AlarmManager 心跳广播接收器（ 核心自愈拉活策略） -->
+        <!-- AlarmManager 心跳广播接收器（核心自愈拉活策略，运行于 :monitor 后台进程） -->
         <receiver
             android:name=".receiver.HeartbeatAlarmReceiver"
             android:enabled="true"
-            android:exported="false">
+            android:exported="false"
+            android:process=":monitor">
             <intent-filter>
                 <action android:name="com.battery.analysis.action.HEARTBEAT_ALARM" />
             </intent-filter>

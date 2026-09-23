@@ -2,6 +2,7 @@ package com.battery.analysis.daemon
 
 import android.content.Context
 import android.content.pm.PackageManager
+import com.battery.analysis.util.ShizukuShellExecutor
 import org.json.JSONObject
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
@@ -152,8 +153,12 @@ object DaemonManager {
         }
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("which", "su"))
-            val exitCode = process.waitFor()
-            exitCode == 0
+            try {
+                val exitCode = process.waitFor()
+                exitCode == 0
+            } finally {
+                try { process.destroy() } catch (_: Throwable) {}
+            }
         } catch (_: Exception) {
             false
         }
@@ -182,12 +187,16 @@ object DaemonManager {
         return try {
             val launchCmd = getLaunchShellCommand(context)
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", launchCmd))
-            val exitCode = process.waitFor()
-            if (exitCode == 0) {
-                Result.success(Unit)
-            } else {
-                val errorMsg = BufferedReader(InputStreamReader(process.errorStream)).readText()
-                Result.failure(RuntimeException("Root 启动失败 (退出码 $exitCode): $errorMsg"))
+            try {
+                val exitCode = process.waitFor()
+                if (exitCode == 0) {
+                    Result.success(Unit)
+                } else {
+                    val errorMsg = BufferedReader(InputStreamReader(process.errorStream)).readText()
+                    Result.failure(RuntimeException("Root 启动失败 (退出码 $exitCode): $errorMsg"))
+                }
+            } finally {
+                try { process.destroy() } catch (_: Throwable) {}
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -207,24 +216,7 @@ object DaemonManager {
 
         return try {
             val launchCmd = getLaunchShellCommand(context)
-            val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
-            val newProcessMethod = shizukuClass.getDeclaredMethod(
-                "newProcess",
-                Array<String>::class.java,
-                Array<String>::class.java,
-                String::class.java
-            )
-            newProcessMethod.isAccessible = true
-
-            // 通过 sh -c 运行后台守护命令
-            val process = newProcessMethod.invoke(
-                null,
-                arrayOf("sh", "-c", launchCmd),
-                null,
-                null
-            ) as? Process ?: return Result.failure(RuntimeException("通过 Shizuku 派生进程失败"))
-
-            process.waitFor()
+            ShizukuShellExecutor.execute(launchCmd)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -259,27 +251,18 @@ object DaemonManager {
             if (isRootAvailable()) {
                 try {
                     val killCmd = if (pid > 0) "kill -9 $pid" else "pkill -f com.battery.analysis.daemon.BatteryDaemonServer"
-                    Runtime.getRuntime().exec(arrayOf("su", "-c", "$killCmd; $cleanupFiles")).waitFor()
+                    val proc = Runtime.getRuntime().exec(arrayOf("su", "-c", "$killCmd; $cleanupFiles"))
+                    try {
+                        proc.waitFor()
+                    } finally {
+                        try { proc.destroy() } catch (_: Throwable) {}
+                    }
                 } catch (_: Exception) {}
             } else if (isShizukuAvailable()) {
                 // 3. 若拥有 Shizuku 权限，通过 Shizuku 执行定向 kill
                 try {
                     val killCmd = if (pid > 0) "kill -9 $pid" else "pkill -f com.battery.analysis.daemon.BatteryDaemonServer"
-                    val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
-                    val newProcessMethod = shizukuClass.getDeclaredMethod(
-                        "newProcess",
-                        Array<String>::class.java,
-                        Array<String>::class.java,
-                        String::class.java
-                    )
-                    newProcessMethod.isAccessible = true
-                    val proc = newProcessMethod.invoke(
-                        null,
-                        arrayOf("sh", "-c", "$killCmd; $cleanupFiles"),
-                        null,
-                        null
-                    ) as? Process
-                    proc?.waitFor()
+                    ShizukuShellExecutor.execute("$killCmd; $cleanupFiles")
                 } catch (_: Exception) {}
             }
 

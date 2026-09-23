@@ -72,4 +72,20 @@ class IntervalSettingsTest {
         assertEquals("0.5 秒", formatInterval(500L))
         assertEquals("2.8 秒", formatInterval(2800L))
     }
+
+    /**
+     * 验证后台电池监控服务的核心配置键名与默认采样间隔常量。
+     */
+    @Test
+    fun testBatteryMonitorServiceConfigConstants() {
+        assertEquals("extra_config_present", com.battery.analysis.service.BatteryMonitorService.EXTRA_CONFIG_PRESENT)
+        assertEquals("extra_notification_display_enabled", com.battery.analysis.service.BatteryMonitorService.EXTRA_NOTIFICATION_DISPLAY_ENABLED)
+        assertEquals("extra_screen_on_interval_ms", com.battery.analysis.service.BatteryMonitorService.EXTRA_SCREEN_ON_INTERVAL_MS)
+        assertEquals("extra_screen_off_interval_ms", com.battery.analysis.service.BatteryMonitorService.EXTRA_SCREEN_OFF_INTERVAL_MS)
+        assertEquals("extra_charge_discharge_stats_enabled", com.battery.analysis.service.BatteryMonitorService.EXTRA_CHARGE_DISCHARGE_STATS_ENABLED)
+
+        assertEquals(1000L, com.battery.analysis.service.BatteryMonitorService.DEFAULT_SCREEN_ON_INTERVAL_MS)
+        assertEquals(0L, com.battery.analysis.service.BatteryMonitorService.DEFAULT_SCREEN_OFF_INTERVAL_MS)
+        assertEquals(-1L, com.battery.analysis.service.BatteryMonitorService.INTERVAL_NEVER)
+    }
 }

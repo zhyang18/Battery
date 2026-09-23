@@ -8,6 +8,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import com.battery.analysis.model.AppPowerUsageItem
 import com.battery.analysis.util.NetworkStatsHelper
+import com.battery.analysis.util.ShizukuShellExecutor
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -1469,75 +1470,47 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * @param command 要执行的 Shell 命令字符串
      * @return 命令标准输出文本
      */
-    fun executeShizukuShellCommand(command: String): String {
-        return try {
-            if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-                return ""
-            }
-            val method = getNewProcessMethod() ?: return ""
-            val process = method.invoke(null, arrayOf("sh", "-c", command), null, null) as? Process ?: return ""
-            val reader = BufferedReader(InputStreamReader(process.inputStream), 8192)
-            val sb = StringBuilder()
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                sb.append(line).append('\n')
-            }
-            reader.close()
-            process.waitFor()
-            sb.toString()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            ""
-        }
-    }
-
     /**
-     * 获取或缓存 Shizuku.newProcess 反射 Method 引用，消除反复 Class.forName 与 getDeclaredMethod 开销。
+     * 通过 Shizuku 反射执行底层 Shell 命令并获取输出结果，内部复用 ShizukuShellExecutor 确保进程资源回收。
      *
-     * @return 可调用的 [java.lang.reflect.Method] 实例，若反射失败则返回 null
+     * @param command 要执行的 Shell 命令字符串
+     * @return 命令标准输出文本
      */
-    private fun getNewProcessMethod(): java.lang.reflect.Method? {
-        if (hasInitMethod) return newProcessMethod
-        synchronized(ShizukuBatteryStatsParser::class.java) {
-            if (hasInitMethod) return newProcessMethod
-            newProcessMethod = try {
-                val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
-                shizukuClass.getDeclaredMethod(
-                    "newProcess",
-                    Array<String>::class.java,
-                    Array<String>::class.java,
-                    String::class.java
-                ).apply { isAccessible = true }
-            } catch (e: Exception) {
-                null
-            }
-            hasInitMethod = true
-            return newProcessMethod
-        }
+    fun executeShizukuShellCommand(command: String): String {
+        return ShizukuShellExecutor.execute(command)
     }
 
     /**
      * 获取指定包名的应用名称与图标。
-     * 优先从全局内存缓存中获取，消除每次刷新与排序时高频反复执行 PackageManager 解码与 Binder IPC。
+     * 优先从全局弱引用 LRU 内存缓存中获取，消除每次刷新与排序时高频反复执行 PackageManager 解码与 Binder IPC。
      *
      * @param pkgName 目标应用包名
      * @param pm 系统的 PackageManager 实例
      * @return 包含应用名称与图标 Drawable 的二元组 [Pair<String, android.graphics.drawable.Drawable>]
      */
     private fun getAppMetadata(pkgName: String, pm: PackageManager): Pair<String, android.graphics.drawable.Drawable> {
-        val cached = appMetadataCache[pkgName]
-        if (cached != null) return cached
+        synchronized(appMetadataCache) {
+            val cached = appMetadataCache.get(pkgName)
+            if (cached != null) {
+                val icon = cached.second.get()
+                if (icon != null) {
+                    return Pair(cached.first, icon)
+                }
+                appMetadataCache.remove(pkgName)
+            }
+        }
 
-        val pair = try {
+        val (appName, icon) = try {
             val appInfo = pm.getApplicationInfo(pkgName, 0)
-            val appName = pm.getApplicationLabel(appInfo).toString()
-            val icon = pm.getApplicationIcon(appInfo)
-            Pair(appName, icon)
+            Pair(pm.getApplicationLabel(appInfo).toString(), pm.getApplicationIcon(appInfo))
         } catch (_: Exception) {
             Pair(pkgName.substringAfterLast('.'), pm.defaultActivityIcon)
         }
-        appMetadataCache[pkgName] = pair
-        return pair
+
+        synchronized(appMetadataCache) {
+            appMetadataCache.put(pkgName, Pair(appName, java.lang.ref.WeakReference(icon)))
+        }
+        return Pair(appName, icon)
     }
 
     /**
@@ -1588,23 +1561,33 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     }
 
     companion object {
-        @Volatile
-        private var newProcessMethod: java.lang.reflect.Method? = null
-
-        @Volatile
-        private var hasInitMethod = false
-
         /** 全局 UID 到包名映射内存缓存，消除下拉刷新重复执行 pm list packages -U */
         private val cachedUidPkgMap = java.util.concurrent.ConcurrentHashMap<Int, String>()
 
-        /** 全局应用名称与图标 Drawable 内存缓存，消除高频 Binder IPC 与图片解码开销 */
-        private val appMetadataCache = java.util.concurrent.ConcurrentHashMap<String, Pair<String, android.graphics.drawable.Drawable>>()
+        /** 全局应用名称与图标 Drawable 弱引用 LRU 内存缓存（上限 60 条），避免常驻过多 Native Bitmap */
+        private val appMetadataCache = androidx.collection.LruCache<String, Pair<String, java.lang.ref.WeakReference<android.graphics.drawable.Drawable>>>(60)
+
+        /**
+         * 响应系统低内存通知清空图标元数据缓存。
+         */
+        fun clearAppMetadataCache() {
+            synchronized(appMetadataCache) {
+                appMetadataCache.evictAll()
+            }
+        }
 
         /** 全局是否三方应用判定内存缓存，消除快速排序时的海量 Intent 查询 */
         private val userInstalledAppCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
-        /** 并发执行 dumpsys 命令的线程池，加速多命令并发获取 */
-        private val asyncCmdExecutor = java.util.concurrent.Executors.newCachedThreadPool()
+        /** 并发执行 dumpsys 命令的有界线程池，限制最大并发避免内存与线程栈激增 */
+        private val asyncCmdExecutor = java.util.concurrent.ThreadPoolExecutor(
+            2,
+            4,
+            30L,
+            java.util.concurrent.TimeUnit.SECONDS,
+            java.util.concurrent.LinkedBlockingQueue(64),
+            java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy()
+        )
         private val REGEX_CAP_DRAIN = Pattern.compile("Capacity:\\s*([\\d.]+).*?Computed drain:\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_COMPUTED_DRAIN_ALONE = Pattern.compile("Computed drain:\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_SCREEN_DRAIN_LINE = Pattern.compile("^\\s*Screen:\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)

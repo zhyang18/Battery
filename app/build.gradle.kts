@@ -128,6 +128,7 @@ android {
     }
     buildFeatures {
         viewBinding = true
+        aidl = true
     }
     testOptions {
         unitTests.isReturnDefaultValues = true

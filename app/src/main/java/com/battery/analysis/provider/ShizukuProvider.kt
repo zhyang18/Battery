@@ -552,64 +552,16 @@ class ShizukuProvider : BatteryDataProvider {
     }
 
     /**
-     * 通过 Shizuku 执行 Shell 命令，内部复用已缓存的反射 Method 并完整读取输出流，确保关键容量与循环指标不被截断。
+     * 通过 Shizuku 执行 Shell 命令，内部复用 ShizukuShellExecutor 确保进程资源回收。
      *
      * @param command 要执行的命令字符串
      * @return 命令执行输出的完整字符串结果
      */
     private fun executeCommand(command: String): String {
-        return try {
-            val method = getNewProcessMethod() ?: return ""
-            val process = method.invoke(null, arrayOf("sh", "-c", command), null, null) as? Process ?: return ""
-
-            val reader = BufferedReader(InputStreamReader(process.inputStream), 8192)
-            val output = StringBuilder()
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                output.append(line).append('\n')
-            }
-            reader.close()
-            process.waitFor()
-            output.toString()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            ""
-        }
-    }
-
-    /**
-     * 获取或缓存 Shizuku.newProcess 反射 Method 引用。
-     *
-     * @return 可调用的 [java.lang.reflect.Method] 实例，若反射失败则返回 null
-     */
-    private fun getNewProcessMethod(): java.lang.reflect.Method? {
-        if (hasInitMethod) return newProcessMethod
-        synchronized(ShizukuProvider::class.java) {
-            if (hasInitMethod) return newProcessMethod
-            newProcessMethod = try {
-                val shizukuClass = Class.forName("rikka.shizuku.Shizuku")
-                shizukuClass.getDeclaredMethod(
-                    "newProcess",
-                    Array<String>::class.java,
-                    Array<String>::class.java,
-                    String::class.java
-                ).apply {
-                    isAccessible = true
-                }
-            } catch (e: Exception) {
-                null
-            }
-            hasInitMethod = true
-            return newProcessMethod
-        }
+        return com.battery.analysis.util.ShizukuShellExecutor.execute(command)
     }
 
     companion object {
-        @Volatile
-        private var newProcessMethod: java.lang.reflect.Method? = null
-        @Volatile
-        private var hasInitMethod: Boolean = false
-
         /** 并发执行底层电池信息读取命令的线程池 */
         private val asyncExecutor = java.util.concurrent.Executors.newCachedThreadPool()
 

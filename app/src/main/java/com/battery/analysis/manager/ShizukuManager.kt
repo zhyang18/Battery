@@ -8,11 +8,10 @@ import com.battery.analysis.MainActivity
 import com.battery.analysis.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import rikka.shizuku.Shizuku
+import com.battery.analysis.util.ShizukuShellExecutor
 
 /**
  * Shizuku 提权服务统一状态管理器与授权生命周期控制器。
@@ -144,38 +143,8 @@ object ShizukuManager {
             var errorDetail: String? = null
 
             try {
-                if (Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-                    val newProcessMethod = try {
-                        Shizuku::class.java.getDeclaredMethod(
-                            "newProcess",
-                            Array<String>::class.java,
-                            Array<String>::class.java,
-                            String::class.java
-                        ).apply { isAccessible = true }
-                    } catch (_: Exception) {
-                        null
-                    }
-
-                    if (newProcessMethod != null) {
-                        val cmd = arrayOf("sh", "-c", "pm revoke ${activity.packageName} $SHIZUKU_PERMISSION")
-                        val process = newProcessMethod.invoke(null, cmd, null, null) as? Process
-                        if (process != null) {
-                            val inJob = async(Dispatchers.IO) {
-                                try { process.inputStream.bufferedReader().use { it.readText() } } catch (_: Throwable) { "" }
-                            }
-                            val errJob = async(Dispatchers.IO) {
-                                try { process.errorStream.bufferedReader().use { it.readText() } } catch (_: Throwable) { "" }
-                            }
-
-                            withTimeoutOrNull(2000L) {
-                                process.waitFor()
-                                inJob.await()
-                                errJob.await()
-                            } ?: run {
-                                try { process.destroy() } catch (_: Throwable) {}
-                            }
-                        }
-                    }
+                if (ShizukuShellExecutor.isAvailable()) {
+                    ShizukuShellExecutor.execute("pm revoke ${activity.packageName} $SHIZUKU_PERMISSION")
                 }
             } catch (e: Exception) {
                 revokeSuccess = false

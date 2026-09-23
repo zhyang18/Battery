@@ -83,6 +83,66 @@ class ChargingStatsManager private constructor(private val context: Context) {
                 instance ?: ChargingStatsManager(context.applicationContext).also { instance = it }
             }
         }
+
+        /**
+         * 将 JSON 字符串反序列化为充电会话摘要。
+         *
+         * @param jsonStr 摘要 JSON 字符串
+         * @return 充电会话摘要实体 [ChargingSessionSummary]
+         */
+        fun parseSummaryFromJson(jsonStr: String): ChargingSessionSummary {
+            if (jsonStr.isEmpty()) return ChargingSessionSummary()
+            return try {
+                val json = org.json.JSONObject(jsonStr)
+                ChargingSessionSummary(
+                    startTimestamp = json.optLong("startTimestamp", 0L),
+                    endTimestamp = json.optLong("endTimestamp", 0L),
+                    startLevel = json.optInt("startLevel", 0),
+                    currentLevel = json.optInt("currentLevel", 0),
+                    maxPowerWatts = json.optDouble("maxPowerWatts", 0.0).toFloat(),
+                    avgPowerWatts = json.optDouble("avgPowerWatts", 0.0).toFloat(),
+                    maxTemperature = json.optDouble("maxTemperature", 0.0).toFloat(),
+                    avgTemperature = json.optDouble("avgTemperature", 0.0).toFloat(),
+                    chargedEnergyWh = json.optDouble("chargedEnergyWh", 0.0).toFloat(),
+                    chargeType = json.optString("chargeType", "外部供电"),
+                    isCharging = json.optBoolean("isCharging", false),
+                    screenOffDurationMs = json.optLong("screenOffDurationMs", 0L),
+                    screenOffLevelGain = json.optInt("screenOffLevelGain", 0),
+                    screenOffEnergyWh = json.optDouble("screenOffEnergyWh", 0.0).toFloat()
+                )
+            } catch (_: Throwable) {
+                ChargingSessionSummary()
+            }
+        }
+
+        /**
+         * 将 JSON 字符串反序列化为充电采样点列表。
+         *
+         * @param jsonStr 采样点 JSON 数组文本
+         * @return 充电采样点列表 [List<ChargingSamplePoint>]
+         */
+        fun parseSamplePointsFromJson(jsonStr: String): List<ChargingSamplePoint> {
+            if (jsonStr.isEmpty() || jsonStr == "[]") return emptyList()
+            val list = mutableListOf<ChargingSamplePoint>()
+            try {
+                val array = org.json.JSONArray(jsonStr)
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    list.add(
+                        ChargingSamplePoint(
+                            timestamp = obj.optLong("ts"),
+                            powerWatts = obj.optDouble("pw").toFloat(),
+                            batteryLevel = obj.optInt("lv"),
+                            temperature = obj.optDouble("tp").toFloat(),
+                            voltageVolts = obj.optDouble("vt").toFloat(),
+                            currentMa = obj.optDouble("cm").toFloat(),
+                            isScreenOn = obj.optBoolean("so", true)
+                        )
+                    )
+                }
+            } catch (_: Throwable) {}
+            return list
+        }
     }
 
     /**
@@ -697,6 +757,62 @@ class ChargingStatsManager private constructor(private val context: Context) {
      */
     fun getCurrentSummary(): ChargingSessionSummary {
         return currentSummary
+    }
+
+    /**
+     * 获取当前充电会话摘要的 JSON 字符串表示，供 AIDL 跨进程传输使用。
+     *
+     * @return 序列化生成的摘要 JSON 字符串
+     */
+    fun getCurrentSummaryAsJson(): String {
+        val s = currentSummary
+        val obj = org.json.JSONObject().apply {
+            put("startTimestamp", s.startTimestamp)
+            put("endTimestamp", s.endTimestamp)
+            put("startLevel", s.startLevel)
+            put("currentLevel", s.currentLevel)
+            put("maxPowerWatts", s.maxPowerWatts.toDouble())
+            put("avgPowerWatts", s.avgPowerWatts.toDouble())
+            put("maxTemperature", s.maxTemperature.toDouble())
+            put("avgTemperature", s.avgTemperature.toDouble())
+            put("chargedEnergyWh", s.chargedEnergyWh.toDouble())
+            put("chargeType", s.chargeType)
+            put("isCharging", s.isCharging)
+            put("screenOffDurationMs", s.screenOffDurationMs)
+            put("screenOffLevelGain", s.screenOffLevelGain)
+            put("screenOffEnergyWh", s.screenOffEnergyWh.toDouble())
+        }
+        return obj.toString()
+    }
+
+    /**
+     * 获取当前充电会话采样点列表的 JSON 字符串表示，供 AIDL 跨进程传输使用。
+     *
+     * @return 序列化生成的采样点 JSON 数组字符串
+     */
+    fun getSamplePointsAsJson(): String {
+        val points = synchronized(samplePoints) { samplePoints.toList() }
+        val array = org.json.JSONArray()
+        for (p in points) {
+            val obj = org.json.JSONObject().apply {
+                put("ts", p.timestamp)
+                put("pw", p.powerWatts.toDouble())
+                put("lv", p.batteryLevel)
+                put("tp", p.temperature.toDouble())
+                put("vt", p.voltageVolts.toDouble())
+                put("cm", p.currentMa.toDouble())
+                put("so", p.isScreenOn)
+            }
+            array.put(obj)
+        }
+        return array.toString()
+    }
+
+    /**
+     * 将当前内存中的充电会话摘要与采样点立即持久化刷入磁盘存储。
+     */
+    fun flushChargingSamplesToDisk() {
+        saveChargingSessionToPrefs()
     }
 
     /**

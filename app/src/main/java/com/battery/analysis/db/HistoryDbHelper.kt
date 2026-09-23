@@ -15,6 +15,16 @@ import com.battery.analysis.model.HistoryRecord
 class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
     /**
+     * 配置数据库连接参数，开启预写日志（WAL）模式支持多进程并发读写。
+     *
+     * @param db 数据库实例
+     */
+    override fun onConfigure(db: SQLiteDatabase) {
+        super.onConfigure(db)
+        db.enableWriteAheadLogging()
+    }
+
+    /**
      * 数据库初次创建时的表结构初始化。
      *
      * @param db 数据库实例

@@ -34,6 +34,9 @@ object ShizukuForegroundAppDetector {
     /** 结果内存缓存（2000ms），避免高频重复 IPC 与反射查询，显著降低轮询 CPU 占用与电池功耗 */
     private const val CACHE_EXPIRE_MS = 2000L
 
+    /** 探测失败/未命中时的熔断冷却时长（5000ms），彻底杜绝无结果时每秒反复空转 */
+    private const val FAILED_CACHE_EXPIRE_MS = 5000L
+
     /**
      * 检查当前 Shizuku 特权通道是否可用且已授权。
      *
@@ -88,23 +91,26 @@ object ShizukuForegroundAppDetector {
     /**
      * 通过 Shizuku 特权 Binder 获取当前置顶在屏幕最前台运行的应用包名。
      *
-     * 优先通过 `activity_task` (Android 10+) 的 `getTasks(1)` 反射获取；
-     * 其次通过 `activity` (Android 9 及以下) 的 `getTasks(1)` 获取；
-     * 若均失败则安全回退至上一已知有效前台包名或默认桌面，杜绝在秒级采样循环中重复 fork 进程执行 heavy dumpsys 耗电命令。
+     * 优先通过 `activity_task` (Android 10+) 的 `getTasks` 反射获取；
+     * 其次通过 `activity` (Android 9 及以下) 的 `getTasks` 获取；
+     * 增加熔断冷却，杜绝每秒空转；高频采样循环严格禁止 fork 进程执行 dumpsys 命令。
      *
      * @param context 应用程序上下文，可选
+     * @param allowHeavyCmd 是否允许在 Binder IPC 均失败时降级执行 Shell dumpsys 命令（高频采样循环应为 false）
      * @return 当前置顶前台应用包名，若未授权或无法获取则返回 null
      */
-    fun getForegroundPackageName(context: android.content.Context? = null): String? {
+    fun getForegroundPackageName(context: android.content.Context? = null, allowHeavyCmd: Boolean = false): String? {
         if (context != null && cachedHomePackage == null) {
             getDefaultHomePackage(context)
         }
         val now = System.currentTimeMillis()
-        if (now - lastQueryTs < CACHE_EXPIRE_MS && lastForegroundPackage != null) {
+        val cooldown = if (lastForegroundPackage != null) CACHE_EXPIRE_MS else FAILED_CACHE_EXPIRE_MS
+        if (now - lastQueryTs < cooldown) {
             return lastForegroundPackage
         }
 
         if (!isAvailable()) {
+            lastQueryTs = now
             return null
         }
 
@@ -124,15 +130,17 @@ object ShizukuForegroundAppDetector {
             return amPkg
         }
 
-        // 3. 兜底尝试通过 Shizuku 轻量命令查询（在 Binder IPC 均失败时兜底，确保 OEM 深度定制系统兼容）
-        val cmdPkg = getForegroundPackageViaCmd()
-        if (!cmdPkg.isNullOrEmpty()) {
-            lastQueryTs = now
-            lastForegroundPackage = cmdPkg
-            return cmdPkg
+        // 3. 仅在显式允许重命令且非秒级轮询时，才兜底尝试通过 Shizuku 轻量命令查询
+        if (allowHeavyCmd) {
+            val cmdPkg = getForegroundPackageViaCmd()
+            if (!cmdPkg.isNullOrEmpty()) {
+                lastQueryTs = now
+                lastForegroundPackage = cmdPkg
+                return cmdPkg
+            }
         }
 
-        // 4. 最终回退：沿用上一已知前台包名或系统默认桌面
+        // 4. 最终回退：记录时间戳进入冷却期，沿用上一已知前台包名或系统默认桌面
         lastQueryTs = now
         return lastForegroundPackage ?: cachedHomePackage
     }
@@ -205,21 +213,23 @@ object ShizukuForegroundAppDetector {
             } catch (_: Throwable) {
             }
 
-            // 2. 次优先级：调用 getTasks(1, false, false) 提取当前可见顶层任务（filterOnlyVisibleRecents 必须为 false 以防过滤桌面）
-            val getTasksMethod = try {
-                atmInterface.getMethod("getTasks", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType).apply { isAccessible = true }
-            } catch (_: NoSuchMethodException) {
-                try {
-                    atmInterface.getMethod("getTasks", Int::class.javaPrimitiveType).apply { isAccessible = true }
+            // 2. 次优先级：调用 getTasks 提取当前可见顶层任务（兼容 4 参数、3 参数、1 参数签名）
+            val getTasksMethod = atmInterface.methods.firstOrNull { it.name == "getTasks" && it.parameterTypes.isNotEmpty() }
+                ?: try {
+                    atmInterface.getMethod("getTasks", Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType)
                 } catch (_: NoSuchMethodException) {
                     null
-                }
-            } ?: return null
+                } ?: return null
 
-            val tasks = when (getTasksMethod.parameterTypes.size) {
-                3 -> getTasksMethod.invoke(service, 1, false, false) as? List<*>
-                1 -> getTasksMethod.invoke(service, 1) as? List<*>
-                else -> null
+            val tasks = try {
+                when (getTasksMethod.parameterTypes.size) {
+                    4 -> getTasksMethod.invoke(service, 1, false, false, 0) as? List<*>
+                    3 -> getTasksMethod.invoke(service, 1, false, false) as? List<*>
+                    1 -> getTasksMethod.invoke(service, 1) as? List<*>
+                    else -> null
+                }
+            } catch (_: Throwable) {
+                null
             }
 
             val topTask = tasks?.firstOrNull()
@@ -356,88 +366,42 @@ object ShizukuForegroundAppDetector {
         return null
     }
 
-    @Volatile
-    private var cachedNewProcessMethod: java.lang.reflect.Method? = null
-    @Volatile
-    private var hasCheckedNewProcessMethod: Boolean = false
-
-    /**
-     * 获取并缓存 Shizuku.newProcess 反射方法实例。
-     *
-     * @return Shizuku 进程创建方法反射实例，若不存在则返回 null
-     */
-    private fun getNewProcessMethod(): java.lang.reflect.Method? {
-        if (hasCheckedNewProcessMethod) return cachedNewProcessMethod
-        return synchronized(this) {
-            if (hasCheckedNewProcessMethod) return cachedNewProcessMethod
-            try {
-                cachedNewProcessMethod = Shizuku::class.java.getDeclaredMethod(
-                    "newProcess",
-                    Array<String>::class.java,
-                    Array<String>::class.java,
-                    String::class.java
-                ).apply { isAccessible = true }
-            } catch (_: Throwable) {
-                cachedNewProcessMethod = null
-            }
-            hasCheckedNewProcessMethod = true
-            cachedNewProcessMethod
-        }
-    }
-
     /**
      * 通过 Shizuku 执行轻量特权命令获取当前聚焦前台应用。
      * 优先通过 `dumpsys activity activities` 提取最新处于 Resumed 状态的 Activity 组件；
      * 其次通过 `dumpsys window` 提取当前获得焦点的窗口组件；
-     * 并容错识别系统默认桌面 Launcher。
+     * 并在 `finally` 中严格释放进程资源，并容错识别系统默认桌面 Launcher。
      *
      * @return 前台应用包名，失败返回 null
      */
-    private fun getForegroundPackageViaCmd(): String? {
-        return try {
-            val method = getNewProcessMethod() ?: return null
-            val cmd = "dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity|topResumedActivity' | head -n 1"
-            val proc = method.invoke(
-                null,
-                arrayOf("sh", "-c", cmd),
-                null,
-                null
-            ) as? Process ?: return null
+     private fun getForegroundPackageViaCmd(): String? {
+         return try {
+             val cmd = "dumpsys activity activities 2>/dev/null | grep -E 'mResumedActivity|topResumedActivity' | head -n 1"
+             val text = ShizukuShellExecutor.execute(cmd)
+             if (text.isNotEmpty()) {
+                 val match = Regex("([a-zA-Z0-9._]+)/[a-zA-Z0-9._]+").find(text)
+                 val rawPkg = match?.groupValues?.getOrNull(1)
+                 val pkg = normalizeForegroundPackage(rawPkg)
+                 if (!pkg.isNullOrEmpty()) {
+                     return pkg
+                 }
+             }
 
-            val text = proc.inputStream.bufferedReader().use { it.readText().trim() }
-            proc.waitFor()
-            if (text.isNotEmpty()) {
-                val match = Regex("([a-zA-Z0-9._]+)/[a-zA-Z0-9._]+").find(text)
-                val rawPkg = match?.groupValues?.getOrNull(1)
-                val pkg = normalizeForegroundPackage(rawPkg)
-                if (!pkg.isNullOrEmpty()) {
-                    return pkg
-                }
-            }
+             // 次选通过 WindowManager 焦点窗口提取
+             val winCmd = "dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' | head -n 1"
+             val winText = ShizukuShellExecutor.execute(winCmd)
+             if (winText.isNotEmpty()) {
+                 val match = Regex("([a-zA-Z0-9._]+)/[a-zA-Z0-9._]+").find(winText)
+                 val rawPkg = match?.groupValues?.getOrNull(1)
+                 val pkg = normalizeForegroundPackage(rawPkg)
+                 if (!pkg.isNullOrEmpty()) {
+                     return pkg
+                 }
+             }
 
-            // 次选通过 WindowManager 焦点窗口提取
-            val winProc = method.invoke(
-                null,
-                arrayOf("sh", "-c", "dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedApp' | head -n 1"),
-                null,
-                null
-            ) as? Process
-            if (winProc != null) {
-                val winText = winProc.inputStream.bufferedReader().use { it.readText().trim() }
-                winProc.waitFor()
-                if (winText.isNotEmpty()) {
-                    val match = Regex("([a-zA-Z0-9._]+)/[a-zA-Z0-9._]+").find(winText)
-                    val rawPkg = match?.groupValues?.getOrNull(1)
-                    val pkg = normalizeForegroundPackage(rawPkg)
-                    if (!pkg.isNullOrEmpty()) {
-                        return pkg
-                    }
-                }
-            }
-
-            cachedHomePackage
-        } catch (_: Throwable) {
-            cachedHomePackage
-        }
-    }
+             cachedHomePackage
+         } catch (_: Throwable) {
+             cachedHomePackage
+         }
+     }
 }

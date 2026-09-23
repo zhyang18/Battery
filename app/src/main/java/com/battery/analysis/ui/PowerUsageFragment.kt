@@ -101,6 +101,15 @@ class PowerUsageFragment : Fragment() {
     // 记录 AppBarLayout 垂直偏移量，供 SwipeRefreshLayout 下拉判断使用
     private var lastAppBarVerticalOffset: Int = 0
 
+    /** 上次计算得到的总内容高度缓存，用于抑制冗余布局参数变更 */
+    private var lastTotalContentH: Int = -1
+
+    /** 上次视口容器高度缓存，用于抑制冗余布局参数变更 */
+    private var lastCoordinatorH: Int = -1
+
+    /** 上次应用至 CollapsingToolbarLayout 的 scrollFlags 缓存 */
+    private var lastAppliedScrollFlags: Int = -1
+
     private val SHIZUKU_POWER_REQUEST_CODE = 2001
 
     /**
@@ -167,6 +176,13 @@ class PowerUsageFragment : Fragment() {
         private const val PREF_KEY_KEEP_SCREEN_ON = "pref_charging_keep_screen_on"
         private const val PREF_KEY_ENABLE_BACKGROUND_STATS = "enable_background_stats"
         private const val PREFS_POWER_STATS = "power_stats_prefs"
+
+        /** 核心功耗指标卡片行类型：亮屏行 */
+        private const val ROW_SCREEN_ON = 0
+        /** 核心功耗指标卡片行类型：息屏行 */
+        private const val ROW_SCREEN_OFF = 1
+        /** 核心功耗指标卡片行类型：全局行 */
+        private const val ROW_GLOBAL = 2
 
         /**
          * 存储从历史快照详情页面待载入至主页展示的快照记录实体对象。
@@ -237,9 +253,13 @@ class PowerUsageFragment : Fragment() {
         setupFirstTimeGuideUI()
         setupCoordinatorScroll()
 
-        // 监听视口尺寸变化，动态更新短列表滑动折叠限制
-        binding.coordinatorPower.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            updateScrollLimitForShortList()
+        // 仅在视口真实物理尺寸（宽高）发生改变时才更新短列表折叠限制（如分屏/横竖屏切换），杜绝在普通内部重排时触发死循环
+        binding.coordinatorPower.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            val widthChanged = (right - left) != (oldRight - oldLeft)
+            val heightChanged = (bottom - top) != (oldBottom - oldTop)
+            if (oldBottom != 0 && (widthChanged || heightChanged)) {
+                updateScrollLimitForShortList()
+            }
         }
 
         checkFirstTimeConfiguration()
@@ -938,6 +958,89 @@ class PowerUsageFragment : Fragment() {
         binding.layoutChargingContent.ivChargingBulb.setOnClickListener {
             toggleKeepScreenOn()
         }
+
+        // 核心功耗指标卡片（展开与吸顶各三行：亮屏 / 息屏 / 全局）点击弹出详细数据 Toast
+        binding.layoutMetricScreenOnRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_ON) }
+        binding.layoutMetricScreenOffRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_OFF) }
+        binding.layoutMetricGlobalRow.setOnClickListener { showMetricRowDetailToast(ROW_GLOBAL) }
+
+        binding.layoutMiniScreenOnRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_ON) }
+        binding.layoutMiniScreenOffRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_OFF) }
+        binding.layoutMiniGlobalRow.setOnClickListener { showMetricRowDetailToast(ROW_GLOBAL) }
+    }
+
+    /**
+     * 弹出核心功耗指标卡片各行（亮屏、息屏、全局）的真实物理数据提示 Toast。
+     * 根据行分类动态提取已加载的瞬时/累积数据，按照“时间、平均功耗、能量焦耳、续航时间”精准格式化并呈现。
+     * 焦耳转换严格按照 1 Wh = 3600 J 物理公式无损计算，忠实反映底层硬件真实数据。
+     *
+     * @param rowType 行分类标识（[ROW_SCREEN_ON] 为亮屏行，[ROW_SCREEN_OFF] 为息屏行，[ROW_GLOBAL] 为全局行）
+     */
+    private fun showMetricRowDetailToast(rowType: Int) {
+        val overview = lastRenderedPackage?.overviewStats ?: return
+        val totalDurationMs = if (overview.totalDurationMs > 0L) overview.totalDurationMs else parseDurationTextToMs(overview.totalDurationText)
+
+        val message = when (rowType) {
+            ROW_SCREEN_ON -> {
+                val onDurationMs = if (overview.screenOnDurationMs > 0L) overview.screenOnDurationMs else parseDurationTextToMs(overview.screenOnDurationText)
+                val onDurationStr = formatCardDuration(onDurationMs, overview.screenOnDurationText)
+                val onDurationRatioStr = if (totalDurationMs > 0L) {
+                    val ratio = (onDurationMs.toDouble() / totalDurationMs.toDouble() * 100.0).coerceIn(0.0, 100.0)
+                    String.format(Locale.getDefault(), "%.1f%%", ratio)
+                } else {
+                    "0.0%"
+                }
+                val timeText = if (onDurationRatioStr != "0.0%") "$onDurationStr($onDurationRatioStr)" else onDurationStr
+                val powerText = if (overview.screenOnPowerWatts >= 0.05f) {
+                    String.format(Locale.getDefault(), "%.2fW", overview.screenOnPowerWatts)
+                } else {
+                    "--"
+                }
+                val onEnergy = overview.screenOnEnergyWh
+                val joules = onEnergy * 3600f
+                val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", onEnergy)})"
+                val remainingText = overview.remainingScreenOnText.ifBlank { "--" }
+                "亮屏：时间 $timeText、平均功耗 $powerText、能量 $energyText、续航时间 $remainingText"
+            }
+            ROW_SCREEN_OFF -> {
+                val offDurationMs = if (overview.screenOffDurationMs > 0L) overview.screenOffDurationMs else parseDurationTextToMs(overview.screenOffDurationText)
+                val offDurationStr = formatCardDuration(offDurationMs, overview.screenOffDurationText)
+                val offDurationRatioStr = if (totalDurationMs > 0L) {
+                    val ratio = (offDurationMs.toDouble() / totalDurationMs.toDouble() * 100.0).coerceIn(0.0, 100.0)
+                    String.format(Locale.getDefault(), "%.1f%%", ratio)
+                } else {
+                    "0.0%"
+                }
+                val timeText = if (offDurationRatioStr != "0.0%") "$offDurationStr($offDurationRatioStr)" else offDurationStr
+                val powerText = if (overview.screenOffPowerWatts >= 0.05f) {
+                    String.format(Locale.getDefault(), "%.2fW", overview.screenOffPowerWatts)
+                } else {
+                    "--"
+                }
+                val offEnergy = overview.screenOffEnergyWh
+                val joules = offEnergy * 3600f
+                val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", offEnergy)})"
+                val remainingText = overview.remainingScreenOffText.ifBlank { "--" }
+                "息屏：时间 $timeText、平均功耗 $powerText、能量 $energyText、续航时间 $remainingText"
+            }
+            ROW_GLOBAL -> {
+                val totalDurationStr = formatCardDuration(totalDurationMs, overview.totalDurationText)
+                val timeText = "$totalDurationStr(100%)"
+                val powerText = if (overview.avgPowerWatts >= 0.05f) {
+                    String.format(Locale.getDefault(), "%.2fW", overview.avgPowerWatts)
+                } else {
+                    "--"
+                }
+                val totalEnergyWh = overview.totalEnergyWh
+                val joules = totalEnergyWh * 3600f
+                val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", totalEnergyWh)})"
+                val remainingText = overview.remainingCompositeText.ifBlank { "--" }
+                "全局：时间 $timeText、平均功耗 $powerText、能量 $energyText、续航时间 $remainingText"
+            }
+            else -> return
+        }
+
+        Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
     }
 
     /**
@@ -1707,6 +1810,7 @@ class PowerUsageFragment : Fragment() {
      * 依据当前应用列表数据行数与实际内容总高度，自适应校准上滑最大滚动边界。
      * 当数据仅有一行或几行（内容不足一屏或超出极少）时，限制或锁定上滑折叠，
      * 确保向上滑动到底时列表卡片底部与视口底端恰好保留 10dp 空白区域，杜绝列表悬空与底部巨大空白。
+     * 具备严格的高度与标志位双重幂等校验，状态未变时绝不修改 LayoutParams，彻底粉碎布局死循环，让系统顺畅进入 LTPO 1Hz 降频节能。
      */
     private fun updateScrollLimitForShortList() {
         if (_binding == null || currentDisplayTab != 0) return
@@ -1720,17 +1824,31 @@ class PowerUsageFragment : Fragment() {
             val contentH = binding.layoutPowerContent.height
             val totalContentH = headerH + contentH + targetBottomGapPx
 
-            val collapsingToolbarParams = binding.collapsingToolbar.layoutParams as? com.google.android.material.appbar.AppBarLayout.LayoutParams
-            if (totalContentH <= coordinatorH) {
+            // 若物理总高度与视口高度均未发生变动，直接退出，彻底斩断每帧重复测量与布局
+            if (totalContentH == lastTotalContentH && coordinatorH == lastCoordinatorH) {
+                return@post
+            }
+            lastTotalContentH = totalContentH
+            lastCoordinatorH = coordinatorH
+
+            val collapsingToolbarParams = binding.collapsingToolbar.layoutParams as? com.google.android.material.appbar.AppBarLayout.LayoutParams ?: return@post
+            val targetFlags = if (totalContentH <= coordinatorH) {
                 // 1. 数据极少（一屏内完全呈现）：禁用折叠与上滑，保持完整展开且底部留白恰好协调
-                collapsingToolbarParams?.scrollFlags = 0
-                binding.collapsingToolbar.layoutParams = collapsingToolbarParams
-                binding.appbarPower.setExpanded(true, false)
+                0
             } else {
                 // 2. 超出一屏：恢复原生联动折叠能力，由联动机制自然滑动到底部（留白 10dp）
-                collapsingToolbarParams?.scrollFlags = com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_SCROLL or
+                com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_SCROLL or
                         com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_EXIT_UNTIL_COLLAPSED
+            }
+
+            // 仅在目标标志位与当前生效标志位不一致时才重新赋值 LayoutParams，杜绝无谓的 requestLayout 导致 120Hz 刷新死循环
+            if (collapsingToolbarParams.scrollFlags != targetFlags || lastAppliedScrollFlags != targetFlags) {
+                collapsingToolbarParams.scrollFlags = targetFlags
+                lastAppliedScrollFlags = targetFlags
                 binding.collapsingToolbar.layoutParams = collapsingToolbarParams
+                if (targetFlags == 0) {
+                    binding.appbarPower.setExpanded(true, false)
+                }
             }
         }
     }

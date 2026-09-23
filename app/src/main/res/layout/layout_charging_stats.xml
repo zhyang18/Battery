@@ -12,7 +12,6 @@
         android:id="@+id/card_charging_hero"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="5dp"
         app:cardBackgroundColor="#14888888"
         app:cardCornerRadius="14dp"
         app:cardElevation="0dp"
@@ -23,8 +22,8 @@
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingHorizontal="14dp"
-            android:paddingVertical="14dp">
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="10dp">
 
             <!-- 左侧：环形电量进度条 + 居中大号电量百分比文字 -->
             <FrameLayout
@@ -364,7 +363,7 @@
         android:id="@+id/card_charging_summary_strip"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="6dp"
         app:cardBackgroundColor="#14888888"
         app:cardCornerRadius="14dp"
         app:cardElevation="0dp"
@@ -542,7 +541,7 @@
         android:id="@+id/card_charging_chart"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="6dp"
         app:cardBackgroundColor="#14888888"
         app:cardCornerRadius="14dp"
         app:cardElevation="0dp"
@@ -552,8 +551,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingHorizontal="12dp"
-            android:paddingTop="12dp"
+            android:paddingHorizontal="10dp"
+            android:paddingTop="10dp"
             android:paddingBottom="10dp">
 
             <!-- 自定义三合一（功率、电量、温度）折线图（放大尺寸） -->
@@ -588,7 +587,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginStart="5dp"
                         android:text="@string/charging_legend_level"
-                        android:textColor="#757575"
+                        android:textColor="#2196F3"
                         android:textSize="12sp" />
                 </LinearLayout>
 
@@ -608,14 +607,14 @@
                     <View
                         android:layout_width="9dp"
                         android:layout_height="9dp"
-                        android:background="@drawable/bg_square_green" />
+                        android:background="@drawable/bg_square_light_blue" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="5dp"
                         android:text="@string/charging_legend_power"
-                        android:textColor="#757575"
+                        android:textColor="#90CAF9"
                         android:textSize="12sp" />
                 </LinearLayout>
 
@@ -642,7 +641,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginStart="5dp"
                         android:text="@string/charging_legend_temp"
-                        android:textColor="#757575"
+                        android:textColor="#FF5252"
                         android:textSize="12sp" />
                 </LinearLayout>
             </LinearLayout>

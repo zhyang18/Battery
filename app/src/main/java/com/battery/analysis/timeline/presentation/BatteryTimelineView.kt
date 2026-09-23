@@ -959,7 +959,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         contentLeft: Float,
         contentRight: Float
     ) {
-        val color = Color.parseColor("#B34CAF50")
+        val color = Color.parseColor("#B32196F3")
         linePaint.color = color
         metricDotPaint.color = color
         metricLabelPaint.color = color
@@ -1051,7 +1051,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         contentLeft: Float,
         contentRight: Float
     ) {
-        val color = Color.parseColor("#B3FF7043")
+        val color = Color.parseColor("#B3FF5252")
         linePaint.color = color
         metricDotPaint.color = color
         metricLabelPaint.color = color

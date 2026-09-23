@@ -552,7 +552,7 @@
     <string name="settings_daemon_btn_starting">启动中...</string>
     <string name="toast_daemon_timeout">特权守护进程启动超时，请重试或查看 ADB 指南</string>
     <!-- 无障碍秒级自愈保活 (方案一：免 Root / 免 ADB) -->
-    <string name="accessibility_service_name">电池统计秒级自愈引擎</string>
+    <string name="accessibility_service_name">电池统计</string>
     <string name="accessibility_service_description">用于提供免电脑、免 Root 的后台秒级自愈与防杀保护，确保充放电记录和通知栏指标不中断。本服务不会收集任何个人隐私或屏幕内容。</string>
     <string name="settings_accessibility_title">无障碍秒级自愈 (免 Root)</string>
     <string name="settings_accessibility_desc">免 Root / 免 ADB，应用被划杀后由系统秒级自愈拉活</string>

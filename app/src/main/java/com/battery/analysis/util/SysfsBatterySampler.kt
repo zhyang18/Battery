@@ -311,13 +311,15 @@ object SysfsBatterySampler {
      * @param isCharging 是否处于充电连接状态
      * @param fallbackVoltageVolts 广播提供的备用电压（伏特 V）
      * @param fallbackTempCelsius 广播提供的备用温度（摄氏度 ℃）
+     * @param allowProcessFork 是否允许在所有低开销通道均未命中时降级使用 Shizuku 进程 Fork（亮屏高频 1 秒循环必须为 false，杜绝拉高 CPU 频率；息屏采样为 true）
      * @return 包含电流、电压、功率与温度的硬件采样实体，若无法获取则返回 null
      */
     fun sampleHardwareBattery(
         context: Context,
         isCharging: Boolean,
         fallbackVoltageVolts: Float? = null,
-        fallbackTempCelsius: Float? = null
+        fallbackTempCelsius: Float? = null,
+        allowProcessFork: Boolean = true
     ): HardwareSample? {
         // 1. 优先尝试 JNI 原生缓存直读（微秒级，0 IPC，0 fork）
         if (jniLoaded) {
@@ -389,9 +391,9 @@ object SysfsBatterySampler {
             return bmSample
         }
 
-        // 4. Shizuku 受控批量通道（仅在前序低开销通道均无法获取且 Shizuku 授权时使用）
-        // 彻底杜绝每个采样周期逐路径循环 fork 进程，受 3000ms 采样冷却与 60 秒探查熔断双重保护
-        if (isShizukuAvailable()) {
+        // 4. Shizuku 受控批量通道（仅在前序低开销通道均无法获取、Shizuku 授权且允许进程 Fork 时使用）
+        // 亮屏秒级循环严禁使用进程 Fork（allowProcessFork=false），避免拉高 CPU 频率；息屏状态下（allowProcessFork=true）保留此通道
+        if (allowProcessFork && isShizukuAvailable()) {
             if (cachedCurrentPath == null || cachedVoltagePath == null) {
                 probeShizukuPathsOnce()
             }
@@ -541,14 +543,16 @@ object SysfsBatterySampler {
      * @param context 应用程序上下文
      * @param fallbackVoltageVolts 广播提供的备用电压（伏特 V）
      * @param fallbackTempCelsius 广播提供的备用温度（摄氏度 ℃）
+     * @param allowProcessFork 是否允许在低开销通道未命中时降级使用 Shizuku 进程 Fork（亮屏高频采样默认为 false 彻底杜绝 Fork，息屏低频采样为 true 保障数据完整性）
      * @return 包含放电电流、电压、功率与温度的硬件采样实体，若无法获取则返回 null
      */
     fun sampleHardwareDischarge(
         context: Context,
         fallbackVoltageVolts: Float? = null,
-        fallbackTempCelsius: Float? = null
+        fallbackTempCelsius: Float? = null,
+        allowProcessFork: Boolean = false
     ): HardwareSample? {
-        return sampleHardwareBattery(context, isCharging = false, fallbackVoltageVolts, fallbackTempCelsius)
+        return sampleHardwareBattery(context, isCharging = false, fallbackVoltageVolts, fallbackTempCelsius, allowProcessFork)
     }
 
     /**
@@ -557,14 +561,16 @@ object SysfsBatterySampler {
      * @param context 应用程序上下文
      * @param fallbackVoltageVolts 广播提供的备用电压（伏特 V）
      * @param fallbackTempCelsius 广播提供的备用温度（摄氏度 ℃）
+     * @param allowProcessFork 是否允许在低开销通道未命中时降级使用 Shizuku 进程 Fork
      * @return 包含充电电流、电压、功率与温度的硬件采样实体，若无法获取则返回 null
      */
     fun sampleHardwareCharging(
         context: Context,
         fallbackVoltageVolts: Float? = null,
-        fallbackTempCelsius: Float? = null
+        fallbackTempCelsius: Float? = null,
+        allowProcessFork: Boolean = false
     ): HardwareSample? {
-        return sampleHardwareBattery(context, isCharging = true, fallbackVoltageVolts, fallbackTempCelsius)
+        return sampleHardwareBattery(context, isCharging = true, fallbackVoltageVolts, fallbackTempCelsius, allowProcessFork)
     }
 
     /**

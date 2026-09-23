@@ -219,9 +219,9 @@ class MetricSelectorView @JvmOverloads constructor(
             val isSelected = selectedMetrics.contains(metric)
 
             val activeColor = when (metric) {
-                TimelineMetric.BATTERY -> Color.parseColor("#4CAF50") // 鲜绿电量
+                TimelineMetric.BATTERY -> Color.parseColor("#2196F3") // 蓝色电量（与充电统计趋势图表一致）
                 TimelineMetric.POWER -> Color.parseColor("#90CAF9") // 淡蓝功耗
-                TimelineMetric.TEMPERATURE -> Color.parseColor("#FF8A65") // 珊瑚橙温度
+                TimelineMetric.TEMPERATURE -> Color.parseColor("#FF5252") // 红色温度（与充电统计趋势图表一致）
                 TimelineMetric.VOLTAGE -> Color.parseColor("#FFD54F") // 金黄电压
                 TimelineMetric.APP -> Color.parseColor("#5F9EA0") // 应用
             }

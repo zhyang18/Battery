@@ -6,20 +6,23 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <!-- 顶部统一大标题栏：左侧健康度标题，右侧历史记录入口 -->
+    <!-- 顶部统一大标题栏：左侧健康度标题，右侧历史记录入口，统一60dp高度与16dp左边距 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:minHeight="50dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingHorizontal="20dp"
-        android:paddingTop="18dp"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="10dp"
         android:paddingBottom="8dp">
 
         <TextView
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="34dp"
             android:layout_weight="1"
+            android:gravity="center_vertical"
             android:text="@string/nav_detection_detail"
             android:textColor="?android:attr/textColorPrimary"
             android:textSize="20sp"

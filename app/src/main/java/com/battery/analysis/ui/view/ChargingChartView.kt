@@ -78,8 +78,8 @@ class ChargingChartView @JvmOverloads constructor(
     private val timeFormatter = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     private val axisTimeFormatter = SimpleDateFormat("HH:mm", Locale.getDefault())
 
-    // 颜色配置（绿色: 充电功率, 橙色: 放电功率, 蓝色: 电量, 红色: 温度）
-    val colorPowerCharge = Color.parseColor("#00C853")
+    // 颜色配置（淡蓝: 充电功率, 橙色: 放电功率, 蓝色: 电量, 红色: 温度）
+    val colorPowerCharge = Color.parseColor("#90CAF9")
     val colorPowerDischarge = Color.parseColor("#FF9800")
     val colorPower = colorPowerCharge
     val colorLevel = Color.parseColor("#2196F3")

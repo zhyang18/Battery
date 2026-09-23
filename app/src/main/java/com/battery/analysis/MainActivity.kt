@@ -213,7 +213,7 @@ class MainActivity : AppCompatActivity() {
 
         // 禁用顶级 ViewPager2 手势横滑，避免干扰内部子 Tab 横滑切换
         binding.mainViewPager.isUserInputEnabled = false
-        binding.mainViewPager.offscreenPageLimit = 2
+        binding.mainViewPager.offscreenPageLimit = 1
 
         // 动态控制充、耗电统计菜单项在底部导航栏中的显隐
         val powerMenuItem = binding.bottomNavigation.menu.findItem(R.id.nav_power)
@@ -311,12 +311,18 @@ class MainActivity : AppCompatActivity() {
             .start()
     }
 
+    /** 底部导航栏首个页签当前呈现的充放电模式缓存，防止重复赋值触发重绘 */
+    private var lastBottomNavIsCharging: Boolean? = null
+
     /**
      * 根据设备充放电状态动态更新底部导航栏首个页签的名称与图标。
+     * 具备状态缓存比对防抖机制，仅在充放电模式发生物理切换时才更新 MenuItem，避免电池广播引发无谓重绘与重排。
      *
      * @param isCharging 是否处于充电状态（true 为充电，false 为耗电）
      */
     fun updateBottomNavPowerTab(isCharging: Boolean) {
+        if (lastBottomNavIsCharging == isCharging) return
+        lastBottomNavIsCharging = isCharging
         val menuItem = binding.bottomNavigation.menu.findItem(R.id.nav_power) ?: return
         if (isCharging) {
             menuItem.title = getString(R.string.nav_charging)
@@ -392,10 +398,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 界面恢复到前台运行时的生命周期回调，同步检查并更新 Shizuku 连接与授权状态，并执行自愈校准。
+     * 界面恢复到前台运行时的生命周期回调，同步检查并更新 Shizuku 连接与授权状态，并标记宿主处于前台。
      */
     override fun onResume() {
         super.onResume()
+        com.battery.analysis.service.BatteryMonitorService.setHostAppForeground(true)
         updateShizukuStatusState()
         val isStatsEnabled = com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(this)
         if (isStatsEnabled) {
@@ -404,6 +411,14 @@ class MainActivity : AppCompatActivity() {
             val isCharging = com.battery.analysis.manager.ChargingStatsManager.getInstance(this).isCharging()
             updateBottomNavPowerTab(isCharging)
         }
+    }
+
+    /**
+     * 界面退至后台或失去焦点时的生命周期回调，标记宿主应用离开前台。
+     */
+    override fun onPause() {
+        super.onPause()
+        com.battery.analysis.service.BatteryMonitorService.setHostAppForeground(false)
     }
 
     /**

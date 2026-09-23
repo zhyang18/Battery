@@ -146,7 +146,8 @@ class BatteryMonitorService : Service() {
                         val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
                             context = this@BatteryMonitorService,
                             fallbackVoltageVolts = cachedVoltageVolts,
-                            fallbackTempCelsius = cachedTemperature
+                            fallbackTempCelsius = cachedTemperature,
+                            allowProcessFork = true
                         )
                         val pWatts = hwSample?.powerWatts ?: (cachedScreenOffDischargePowerWatts ?: 0f)
                         val curVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
@@ -219,7 +220,8 @@ class BatteryMonitorService : Service() {
                             val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
                                 context = this@BatteryMonitorService,
                                 fallbackVoltageVolts = cachedVoltageVolts,
-                                fallbackTempCelsius = cachedTemperature
+                                fallbackTempCelsius = cachedTemperature,
+                                allowProcessFork = true
                             )
                             // 息屏待机状态：严格使用息屏专属功率缓存，彻底杜绝亮屏高功耗跨状态污染
                             val pWatts = hwSample?.powerWatts ?: (cachedScreenOffDischargePowerWatts ?: 0f)
@@ -349,6 +351,7 @@ class BatteryMonitorService : Service() {
         }
 
         scheduleHeartbeatAlarm(this)
+        startMonitorSamplingLoop()
         if (isDisplayEnabled) {
             updateNotification(force = true)
         }
@@ -507,7 +510,8 @@ class BatteryMonitorService : Service() {
                         val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
                             context = this@BatteryMonitorService,
                             fallbackVoltageVolts = cachedVoltageVolts,
-                            fallbackTempCelsius = cachedTemperature
+                            fallbackTempCelsius = cachedTemperature,
+                            allowProcessFork = false // 亮屏 1 秒高频采样严格禁止 Fork 进程，杜绝拉高 CPU 频率
                         )
                         // 若本次采样未能获取有效功率，严格复用对应屏幕状态的历史缓存（避免息屏错误复用亮屏高功耗）
                         val pWatts = hwSample?.powerWatts ?: if (isInteractive) {
@@ -566,39 +570,44 @@ class BatteryMonitorService : Service() {
     @Volatile
     private var lastForegroundQueryTime: Long = 0L
 
-    /** 前台包名短效内存缓存有效时长（毫秒），延长至 8 秒避免高频发起系统跨进程 IPC 查询消耗电量 */
-    private val FOREGROUND_CACHE_EXPIRE_MS = 8_000L
+    /** 前台包名短效内存缓存有效时长（毫秒），延长至 30 秒避免高频发起系统跨进程 IPC 查询消耗电量 */
+    private val FOREGROUND_CACHE_EXPIRE_MS = 30_000L
 
     /**
      * 获取当前处于系统最前台运行的应用包名。
-     * 多级低功耗高精度探测：
-     * 1. 优先使用 8 秒短效内存缓存，杜绝高频重复触发系统跨进程 IPC 与 CPU 唤醒；
-     * 2. 其次通过 Shizuku 特权 Binder 直调 IActivityTaskManager（无需无障碍）；
-     * 3. 再次通过无障碍服务 [KeepAliveAccessibilityService] 事件驱动毫秒级读取（0 轮询开销）；
-     * 4. 兜底策略：基于 [UsageStatsManager] 提取最近 10 秒增量事件并保持状态（若无新事件发生直接沿用上一有效应用），
-     *    彻底废除过去 120 秒全量事件大遍历，兼顾极低整机能耗与前台归属准度。
+     * 全面事件驱动与低能耗架构：
+     * 1. 最高优先级：若宿主本应用正处于前台可见活跃状态（用户正在浏览本 App），直接返回当前应用包名，0 毫秒、0 任何系统查询与 Binder IPC；
+     * 2. 次优先级：采用无障碍服务事件驱动捕获的置顶应用（若用户开启了无障碍，纯事件驱动，0 轮询开销，0 跨进程 Binder）；
+     * 3. 亮屏持续静止保持：若此前已确定前台应用且在静止窗口内，直接沿用内存缓存，杜绝秒级频繁触发系统跨进程 IPC 与 CPU 唤醒；
+     * 4. 兜底策略：仅在初次无缓存或窗口超时后，通过特权 Binder 或 UsageStatsManager 增量事件探测。
      *
      * @return 当前置顶前台应用包名，若无法获取则返回 null
      */
     private fun getForegroundPackageName(): String? {
+        // 0. 宿主应用在前台：极速短路返回，彻底消除前台静止不动时的所有 Binder IPC
+        if (isHostAppForeground) {
+            lastKnownForegroundPackage = packageName
+            return packageName
+        }
+
+        // 1. 无障碍服务事件驱动：纯内存变量读取，0 Binder IPC，0 轮询
+        val accessibilityPkg = KeepAliveAccessibilityService.currentForegroundPackage
+        if (!accessibilityPkg.isNullOrEmpty()) {
+            lastKnownForegroundPackage = accessibilityPkg
+            return accessibilityPkg
+        }
+
         val now = System.currentTimeMillis()
         if (now - lastForegroundQueryTime < FOREGROUND_CACHE_EXPIRE_MS && lastKnownForegroundPackage != null) {
             return lastKnownForegroundPackage
         }
         lastForegroundQueryTime = now
 
-        // 1. 最高优先级：通过 Shizuku 特权 Binder 直调 IActivityTaskManager (无需无障碍)
+        // 2. 通过 Shizuku 特权 Binder 直调 IActivityTaskManager (无需无障碍)
         val shizukuPkg = ShizukuForegroundAppDetector.getForegroundPackageName(this)
         if (!shizukuPkg.isNullOrEmpty()) {
             lastKnownForegroundPackage = shizukuPkg
             return shizukuPkg
-        }
-
-        // 2. 次优先级：采用无障碍服务事件驱动捕获的置顶应用（若用户开启了无障碍，纯事件驱动，0 轮询开销）
-        val accessibilityPkg = KeepAliveAccessibilityService.currentForegroundPackage
-        if (!accessibilityPkg.isNullOrEmpty()) {
-            lastKnownForegroundPackage = accessibilityPkg
-            return accessibilityPkg
         }
 
         // 获取系统当前生效的默认桌面启动器包名
@@ -760,8 +769,10 @@ class BatteryMonitorService : Service() {
 
     /**
      * 刷新并推送最新的电池状态通知至系统通知栏。
+     * 无论应用处于前台还是后台运行，均严格根据用户设置的刷新时间间隔周期性更新通知栏内容；
      * 若用户关闭通知栏常驻显示，则立即调用 stopForeground 移除通知并取消系统通知栏展示；
      * 若用户开启通知栏常驻显示，则挂载合法前台 Notification 并维持前台服务优先级。
+     * 具备严格的空转短路机制与内容防抖，杜绝关闭状态下每秒重复发起系统 Binder IPC 跨进程调用。
      *
      * @param force 是否强制触发系统通知栏刷新（如点亮屏幕瞬间或切换开关配置后）
      */
@@ -769,8 +780,12 @@ class BatteryMonitorService : Service() {
         try {
             val isDisplayEnabled = isNotificationDisplayEnabled(this)
             if (!isDisplayEnabled) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                notificationManager.cancel(NOTIFICATION_ID)
+                // 仅当此前尚未移除过前台通知时单次执行卸载并取消通知，后续采样直接短路 return，杜绝每秒重复触发系统 Binder IPC
+                if (!isForegroundNotificationRemoved || force) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    notificationManager.cancel(NOTIFICATION_ID)
+                    isForegroundNotificationRemoved = true
+                }
                 return
             }
 
@@ -795,6 +810,7 @@ class BatteryMonitorService : Service() {
             val notification = buildNotification(CHANNEL_ID, singleLineInfo)
             safeStartForeground(notification)
             notificationManager.notify(NOTIFICATION_ID, notification)
+            isForegroundNotificationRemoved = false
         } catch (_: Exception) {}
     }
 
@@ -842,6 +858,26 @@ class BatteryMonitorService : Service() {
         const val INTERVAL_NEVER = -1L
         const val DEFAULT_SCREEN_ON_INTERVAL_MS = 1000L
         const val DEFAULT_SCREEN_OFF_INTERVAL_MS = 0L
+
+        /** 宿主应用（MainActivity）当前是否处于最前台可见活跃状态的全局内存指示器 */
+        @Volatile
+        private var isHostAppForeground: Boolean = false
+
+        /**
+         * 标记宿主应用（MainActivity）当前是否处于最前台可见活跃状态。
+         *
+         * @param foreground 是否处于前台活跃状态（true 为前台活跃，false 为后台或离开）
+         */
+        fun setHostAppForeground(foreground: Boolean) {
+            isHostAppForeground = foreground
+        }
+
+        /**
+         * 查询宿主应用当前是否处于最前台可见活跃状态。
+         *
+         * @return 若处于最前台返回 true，否则返回 false
+         */
+        fun isHostAppForeground(): Boolean = isHostAppForeground
 
         /** 后台电池监控服务当前是否处于活跃运行状态的全局指示器 */
         @Volatile

@@ -15,7 +15,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/power_guide_process_title"
+        android:text="@string/power_guide_process_dialog_title"
         android:textColor="?android:attr/textColorPrimary"
         android:textSize="18sp"
         android:textStyle="bold" />
@@ -41,7 +41,7 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- 卡片 1: 电量走势曲线 -->
+            <!-- 卡片 1: 时间轴多维曲线 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -63,12 +63,87 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:lineSpacingExtra="3dp"
-                    android:text="@string/power_guide_process_curve_desc"
+                    android:text="@string/power_guide_process_curve_summary"
                     android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="13sp" />
+                    android:textSize="12.5sp" />
+
+                <!-- 条目 1: 功耗曲线 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_curve_metric_power"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 2: 电量曲线 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_curve_metric_level"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 3: 温度与电压 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_curve_metric_temp_volt"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
             </LinearLayout>
 
-            <!-- 卡片 2: 高耗电应用标记 -->
+            <!-- 卡片 2: 活跃应用标记 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -86,14 +161,55 @@
                     android:textSize="14sp"
                     android:textStyle="bold" />
 
-                <TextView
+                <!-- 条目 1: 标记定位 -->
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:lineSpacingExtra="3dp"
-                    android:text="@string/power_guide_process_markers_desc"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="13sp" />
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_markers_desc1"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 2: 维度切换 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_markers_desc2"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
             </LinearLayout>
 
             <!-- 卡片 3: 实时底层状态监测 -->
@@ -114,14 +230,105 @@
                     android:textSize="14sp"
                     android:textStyle="bold" />
 
-                <TextView
+                <!-- 条目 1: 能量 -->
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:lineSpacingExtra="4dp"
-                    android:text="@string/power_guide_process_params_desc"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="13sp" />
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_process_param_energy"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 2: 温度 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_process_param_temp"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 3: 电压 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_process_param_volt"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 4: 状态 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_process_param_status"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
             </LinearLayout>
 
         </LinearLayout>

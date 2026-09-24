@@ -128,7 +128,50 @@ object SysfsBatterySampler {
         }
     }
 
-    /** 所有已知的电流节点候选路径（按常见设备优先级排序） */
+    /** 上次采样获取到的库仑计真实电荷量（微安时 uAh） */
+    @Volatile
+    private var lastCoulombChargeUah: Long = 0L
+
+    /** 上次记录库仑计真实电荷量的时间戳（SystemClock.elapsedRealtime 毫秒） */
+    @Volatile
+    private var lastCoulombTimestampMs: Long = 0L
+
+    /**
+     * 基于底层硬件库仑计真实剩余电荷量 [BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER]，
+     * 结合前后时间微元通过差分公式推算真实瞬时物理电流（毫安 mA）。
+     * 针对部分国产手机（华为/荣耀/小米/vivo等）在普通权限下 CURRENT_NOW 为 0 的情况，
+     * 通过纯硬件电荷差分算法精确换算真实瞬时电流，绝不伪造虚假数据。
+     *
+     * @param bm 系统底层 BatteryManager 服务
+     * @return 推算出的真实瞬时电流（毫安 mA），若差分条件未就绪或未发生电荷流动则返回 null
+     */
+    private fun calculateCurrentFromChargeCounter(bm: BatteryManager): Float? {
+        val chargeUah = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER).toLong()
+        if (chargeUah <= 0L) return null
+        val now = android.os.SystemClock.elapsedRealtime()
+        val prevUah = lastCoulombChargeUah
+        val prevTime = lastCoulombTimestampMs
+
+        lastCoulombChargeUah = chargeUah
+        lastCoulombTimestampMs = now
+
+        if (prevTime <= 0L || prevUah <= 0L) {
+            return null
+        }
+        val dtMs = now - prevTime
+        if (dtMs in 800L..60_000L) {
+            val deltaUah = Math.abs(chargeUah - prevUah)
+            if (deltaUah > 0L) {
+                val ma = (deltaUah * 3600f) / dtMs
+                if (ma > 0f) {
+                    return ma
+                }
+            }
+        }
+        return null
+    }
+
+    /** 所有已知的电流节点候选路径（按常见设备及国产厂商专用节点优先级排序） */
     private val CURRENT_PATHS = listOf(
         "/sys/class/power_supply/battery/current_now",
         "/sys/class/power_supply/Battery/current_now",
@@ -138,7 +181,21 @@ object SysfsBatterySampler {
         "/sys/class/power_supply/sc8545-standalone/current_now",
         "/sys/class/power_supply/qcom-battery/current_now",
         "/sys/class/power_supply/battery/current_avg",
-        "/sys/class/power_supply/Battery/current_avg"
+        "/sys/class/power_supply/Battery/current_avg",
+        "/sys/class/power_supply/battery/batt_current",
+        "/sys/class/power_supply/battery/input_current_now",
+        "/sys/class/power_supply/parallel/current_now",
+        "/sys/class/power_supply/main/current_now",
+        "/sys/class/power_supply/bk_battery/current_now",
+        "/sys/class/power_supply/mtk-gauge/current_now",
+        "/sys/class/power_supply/mtk_gauge/current_now",
+        "/sys/class/power_supply/mtk-battery/current_now",
+        "/sys/class/power_supply/mtk_battery/current_now",
+        "/sys/class/power_supply/battery/hw_current_now",
+        "/sys/class/power_supply/Battery/hw_current_now",
+        "/sys/class/power_supply/battery/fg_current",
+        "/sys/class/power_supply/battery/current_meas",
+        "/sys/class/power_supply/primary_battery/current_now"
     )
 
     /** 所有已知的电压节点候选路径 */
@@ -149,7 +206,15 @@ object SysfsBatterySampler {
         "/sys/class/power_supply/battery_gauge/voltage_now",
         "/sys/class/power_supply/bq27z561-0/voltage_now",
         "/sys/class/power_supply/sc8545-standalone/voltage_now",
-        "/sys/class/power_supply/qcom-battery/voltage_now"
+        "/sys/class/power_supply/qcom-battery/voltage_now",
+        "/sys/class/power_supply/battery/batt_vol",
+        "/sys/class/power_supply/battery/voltage_avg",
+        "/sys/class/power_supply/main/voltage_now",
+        "/sys/class/power_supply/parallel/voltage_now",
+        "/sys/class/power_supply/bk_battery/voltage_now",
+        "/sys/class/power_supply/mtk-gauge/voltage_now",
+        "/sys/class/power_supply/mtk_gauge/voltage_now",
+        "/sys/class/power_supply/primary_battery/voltage_now"
     )
 
     /** 所有已知的温度节点候选路径 */
@@ -332,12 +397,16 @@ object SysfsBatterySampler {
                 val rawTemp = nativeGetTemp()
                 val rawStatus = nativeGetStatus()
                 if (rawCur != 0L && rawVolt > 0L) {
-                    val curMa = normalizeCurrentToMa(Math.abs(rawCur))
+                    val rawCurMa = normalizeCurrentToMa(Math.abs(rawCur))
+                    val curMa = com.battery.analysis.manager.CurrentCalibrationManager.applyCalibration(rawCurMa, context)
                     val voltV = normalizeVoltageToVolts(rawVolt)
                     val tempC = if (rawTemp != 0) (if (rawTemp >= 100 || rawTemp <= -100) rawTemp / 10f else rawTemp.toFloat()) else fallbackTempCelsius
                     val pWatts = (curMa * voltV) / 1000f
                     val isDischargingStatus = rawStatus == 'D'.code || rawStatus == 'd'.code || rawStatus == 'N'.code || rawStatus == 'n'.code
-                    val isNetDischarging = isDischargingStatus || (rawCur < 0L)
+                    var isNetDischarging = isDischargingStatus || (rawCur < 0L)
+                    if (com.battery.analysis.manager.CurrentCalibrationManager.isEffectiveInvertPolarity(context)) {
+                        isNetDischarging = !isNetDischarging
+                    }
                     val signedPower = if (isCharging) {
                         if (isNetDischarging) -pWatts else pWatts
                     } else {
@@ -363,19 +432,24 @@ object SysfsBatterySampler {
         val directVolt = cachedVoltagePath?.let { tryReadVoltageFile(it) }
         if (directCur != null && directVolt != null && directCur > 0f && directVolt > 0f) {
             val directTemp = cachedTempPath?.let { tryReadTempFile(it) } ?: fallbackTempCelsius
-            val pWatts = (directCur * directVolt) / 1000f
+            val calibratedCur = com.battery.analysis.manager.CurrentCalibrationManager.applyCalibration(directCur, context)
+            val pWatts = (calibratedCur * directVolt) / 1000f
             val isDischargingStatus = cachedStatusPath?.let { tryReadStatusFile(it) }?.let {
                 it.startsWith("D", ignoreCase = true) || it.startsWith("N", ignoreCase = true)
             } ?: false
+            var isNetDischarging = isDischargingStatus
+            if (com.battery.analysis.manager.CurrentCalibrationManager.isEffectiveInvertPolarity(context)) {
+                isNetDischarging = !isNetDischarging
+            }
             val signedPower = if (isCharging) {
-                if (isDischargingStatus) -pWatts else pWatts
+                if (isNetDischarging) -pWatts else pWatts
             } else {
                 pWatts
             }
             val signedCur = if (isCharging) {
-                if (isDischargingStatus) -directCur else directCur
+                if (isNetDischarging) -calibratedCur else calibratedCur
             } else {
-                directCur
+                calibratedCur
             }
             return HardwareSample(
                 currentMa = signedCur,
@@ -398,7 +472,7 @@ object SysfsBatterySampler {
                 probeShizukuPathsOnce()
             }
             if (cachedCurrentPath != null && cachedVoltagePath != null) {
-                val batchSample = readHardwareBatchViaShizuku(fallbackVoltageVolts, fallbackTempCelsius, isCharging)
+                val batchSample = readHardwareBatchViaShizuku(context, fallbackVoltageVolts, fallbackTempCelsius, isCharging)
                 if (batchSample != null && Math.abs(batchSample.currentMa) > 0f) {
                     return batchSample
                 }
@@ -479,8 +553,32 @@ object SysfsBatterySampler {
         return try {
             val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
                 ?: return null
-            val rawCur = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
-            if (rawCur == 0 || rawCur == Int.MIN_VALUE) {
+            var rawCur = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+            var curMa = 0f
+
+            if (rawCur != 0 && rawCur != Int.MIN_VALUE) {
+                curMa = BatteryUnitNormalizer.normalizeCurrentMa(rawCur.toLong(), isCharging = isCharging)
+            }
+
+            // 1. 若 CURRENT_NOW 为 0，尝试读取硬件平均电流 CURRENT_AVERAGE
+            if (curMa <= 0f) {
+                val avgCur = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE)
+                if (avgCur != 0 && avgCur != Int.MIN_VALUE) {
+                    rawCur = avgCur
+                    curMa = BatteryUnitNormalizer.normalizeCurrentMa(avgCur.toLong(), isCharging = isCharging)
+                }
+            }
+
+            // 2. 若依然为 0 且允许库仑计差分推算，尝试通过硬件库仑计电荷差分推算真实物理电流
+            if (curMa <= 0f && com.battery.analysis.manager.CurrentCalibrationManager.isCoulombFallbackEnabled(context)) {
+                val coulombMa = calculateCurrentFromChargeCounter(bm)
+                if (coulombMa != null && coulombMa > 0f) {
+                    curMa = coulombMa
+                    rawCur = if (isCharging) 1 else -1
+                }
+            }
+
+            if (curMa <= 0f) {
                 return null
             }
 
@@ -508,22 +606,24 @@ object SysfsBatterySampler {
             val finalVoltage = resolvedVoltage ?: cachedVoltagePath?.let { tryReadVoltageFile(it) } ?: return null
             if (finalVoltage <= 0f) return null
 
-            val curMa = BatteryUnitNormalizer.normalizeCurrentMa(rawCur.toLong(), isCharging = isCharging)
-            if (curMa <= 0f) return null
-
+            val calibratedMa = com.battery.analysis.manager.CurrentCalibrationManager.applyCalibration(curMa, context)
             val finalTemp = resolvedTemp ?: cachedTempPath?.let { tryReadTempFile(it) }
 
-            val pWatts = (curMa * finalVoltage) / 1000f
-            val isNetDischarging = rawCur < 0
+            val pWatts = (calibratedMa * finalVoltage) / 1000f
+            var isNetDischarging = rawCur < 0
+            if (com.battery.analysis.manager.CurrentCalibrationManager.isEffectiveInvertPolarity(context)) {
+                isNetDischarging = !isNetDischarging
+            }
+
             val signedPower = if (isCharging) {
                 if (isNetDischarging) -pWatts else pWatts
             } else {
                 pWatts
             }
             val signedCur = if (isCharging) {
-                if (isNetDischarging) -curMa else curMa
+                if (isNetDischarging) -calibratedMa else calibratedMa
             } else {
-                curMa
+                calibratedMa
             }
 
             HardwareSample(
@@ -939,12 +1039,14 @@ object SysfsBatterySampler {
      * 通过 Shizuku 单次进程并发读取电流、电压、温度与状态节点，极大降低系统 fork 进程开销并提升采样准度。
      * 内部增加 3000ms 冷却限频机制，在冷却期内复用有效物理采样结果，杜绝高频唤醒 CPU 大小核。
      *
+     * @param context 应用程序上下文（用于读取电流校准配置）
      * @param fallbackVoltage 广播或备用电压（伏特 V）
      * @param fallbackTemp 广播或备用温度（摄氏度 ℃）
      * @param isCharging 是否处于充电连接状态
      * @return 硬件采样物理实体，若读取失败则返回 null
      */
     fun readHardwareBatchViaShizuku(
+        context: Context? = null,
         fallbackVoltage: Float?,
         fallbackTemp: Float?,
         isCharging: Boolean = false
@@ -1002,7 +1104,8 @@ object SysfsBatterySampler {
                 val rawTemp = if (tempIndex in lines.indices) lines[tempIndex].trim().toFloatOrNull() else null
                 val rawStatus = if (statusIndex in lines.indices) lines[statusIndex].trim() else null
 
-                val curMa = normalizeCurrentToMa(Math.abs(rawCur))
+                val rawCurMa = normalizeCurrentToMa(Math.abs(rawCur))
+                val curMa = if (context != null) com.battery.analysis.manager.CurrentCalibrationManager.applyCalibration(rawCurMa, context) else rawCurMa
                 val voltV = normalizeVoltageToVolts(rawVolt)
                 val tempC = if (rawTemp != null && rawTemp != 0f) {
                     if (rawTemp >= 100f || rawTemp <= -100f) rawTemp / 10f else rawTemp
@@ -1018,7 +1121,10 @@ object SysfsBatterySampler {
 
                     val pWatts = (curMa * voltV) / 1000f
                     val isDischargingStatus = rawStatus != null && (rawStatus.startsWith("D", ignoreCase = true) || rawStatus.startsWith("N", ignoreCase = true))
-                    val isNetDischarging = isDischargingStatus || (rawCur < 0L)
+                    var isNetDischarging = isDischargingStatus || (rawCur < 0L)
+                    if (context != null && com.battery.analysis.manager.CurrentCalibrationManager.isEffectiveInvertPolarity(context)) {
+                        isNetDischarging = !isNetDischarging
+                    }
                     val signedPower = if (isCharging) {
                         if (isNetDischarging) -pWatts else pWatts
                     } else {

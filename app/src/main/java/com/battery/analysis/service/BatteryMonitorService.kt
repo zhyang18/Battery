@@ -303,6 +303,9 @@ class BatteryMonitorService : Service() {
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
 
+        // 即时同步最新系统底层电池状态（电量、电压、温度、充电状态与初始硬件功耗），消除冷启动 10 秒空窗
+        syncInstantBatteryStatus()
+
         // 1. 无条件第一步调用 startForeground 履行系统前台服务契约，杜绝任何提早退出导致的超时崩溃
         val isDisplayEnabled = isNotificationDisplayEnabled(this)
         val channelId = if (isDisplayEnabled) CHANNEL_ID else CHANNEL_ID_SILENT
@@ -354,6 +357,9 @@ class BatteryMonitorService : Service() {
      * @return 保持服务常驻的返回值 [START_STICKY]
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 快速同步最新底层电池物理状态，确保首次构建并推送通知时数据准确完整
+        syncInstantBatteryStatus()
+
         // 1. 任何通过 startForegroundService 的调用或唤醒，第一步强制调用 startForeground 续期前台状态
         val isDisplayEnabled = isNotificationDisplayEnabled(this)
         val channelId = if (isDisplayEnabled) CHANNEL_ID else CHANNEL_ID_SILENT
@@ -839,6 +845,52 @@ class BatteryMonitorService : Service() {
             safeStartForeground(notification)
             notificationManager.notify(NOTIFICATION_ID, notification)
             isForegroundNotificationRemoved = false
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * 即时同步底层系统与硬件电池的最新物理状态（包含电量百分比、电压、温度、充放电状态及瞬时功率）。
+     * 解决冷启动或开关切换时需等待轮询协程周期的延迟问题，确保首帧前台通知显示时数据即时准确。
+     */
+    private fun syncInstantBatteryStatus() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            cachedIsInteractive = pm?.isInteractive ?: true
+
+            val stickyIntent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            if (stickyIntent != null) {
+                val level = stickyIntent.getIntExtra(BatteryManager.EXTRA_LEVEL, cachedLevelPercent)
+                val voltRaw = stickyIntent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1)
+                val tempRaw = stickyIntent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1)
+                val statusRaw = stickyIntent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+                val pluggedRaw = stickyIntent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
+
+                if (level > 0) cachedLevelPercent = level
+                if (voltRaw > 0) cachedVoltageVolts = com.battery.analysis.util.BatteryUnitNormalizer.normalizeVoltageVolts(voltRaw.toLong())
+                if (tempRaw > 0) cachedTemperature = tempRaw / 10f
+                cachedIsCharging = (statusRaw == BatteryManager.BATTERY_STATUS_CHARGING ||
+                        statusRaw == BatteryManager.BATTERY_STATUS_FULL ||
+                        pluggedRaw > 0)
+            }
+
+            if (!cachedIsCharging) {
+                val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
+                    context = this,
+                    fallbackVoltageVolts = cachedVoltageVolts,
+                    fallbackTempCelsius = cachedTemperature,
+                    allowProcessFork = false
+                )
+                if (hwSample?.voltageVolts != null) cachedVoltageVolts = hwSample.voltageVolts
+                if (hwSample?.temperatureCelsius != null) cachedTemperature = hwSample.temperatureCelsius
+                if (hwSample?.powerWatts != null) {
+                    cachedDischargePowerWatts = hwSample.powerWatts
+                    if (cachedIsInteractive) {
+                        cachedScreenOnDischargePowerWatts = hwSample.powerWatts
+                    } else {
+                        cachedScreenOffDischargePowerWatts = hwSample.powerWatts
+                    }
+                }
+            }
         } catch (_: Exception) {}
     }
 

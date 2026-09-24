@@ -175,19 +175,111 @@
                     android:textSize="14sp"
                     android:textStyle="bold" />
 
-                <TextView
+                <!-- 条目 1: 95% ~ 100% -->
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:lineSpacingExtra="4dp"
-                    android:text="@string/guide_eval_desc"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="13sp" />
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/guide_eval_item_1"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 2: 85% ~ 95% -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/guide_eval_item_2"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 3: 80% ~ 85% -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/guide_eval_item_3"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 4: < 80% -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/guide_eval_item_4"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
+                    android:lineSpacingExtra="2dp"
                     android:text="@string/guide_tip_temp"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="12sp" />

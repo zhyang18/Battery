@@ -41,7 +41,7 @@
     <string name="power_value_format_with_energy">%1$s (%2$s)</string>
     <string name="power_wh_format">%.1fWh</string>
     <string name="power_param_energy">当前剩余能量</string>
-    <string name="power_tooltip_energy">当前能量：%1$s，总能量：%2$s</string>
+    <string name="power_tooltip_energy">当前能量：%1$s，总能量：%2$s，拔电能量：%3$s</string>
     <string name="power_temp_format">%.1f℃</string>
     <string name="power_volt_format">%.3fV</string>
     <string name="power_status_unplugged">未充电</string>
@@ -71,12 +71,6 @@
     <string name="power_shizuku_btn_open">打开 Shizuku</string>
     <string name="power_drain_format">%1$.1fmAh (%2$.1f%%)</string>
     <string name="power_toast_cleared">耗电统计已重置</string>
-    <string name="power_guide_process_title">使用过程说明</string>
-    <string name="power_guide_process_content">“使用过程”折线图展示自本次开机或放电以来电池电量百分比随时间的变化曲线，并在高耗电阶段下方打点展示当时活跃的应用，直观呈现电池消耗历程。</string>
-    <string name="power_guide_scene_title">使用列表说明</string>
-    <string name="power_guide_scene_content">“使用列表”统计每个前台活跃应用的使用时长、平均运行功耗与运行发热温度，帮助快速定位高耗电与发热元凶。</string>
-    <string name="power_guide_overview_title">放电指标说明</string>
-    <string name="power_guide_overview_content">• 放电功耗：统计自本次放电以来的亮屏平均功耗、全周期平均功耗及息屏待机功耗（单位：W）。\n\n• 放电时间：统计自本次放电以来的亮屏使用时间、息屏待机时间及累计总放电时间。\n\n• 理论续航：基于当前电池剩余能量与不同工况下的放电功耗，测算出的亮屏可用时长、综合可用时长及息屏待机时长。</string>
 
     <!-- 耗电重置弹窗相关 -->
     <string name="dialog_power_reset_title">重置耗电统计？</string>
@@ -86,29 +80,59 @@
     <string name="dialog_power_reset_current_mode">统计模式</string>
     <string name="dialog_power_reset_recorded_time">记录时长</string>
 
-    <!-- 使用过程说明弹窗 -->
-    <string name="power_guide_process_dialog_subtitle">电量变化历程与实时底层状态数据</string>
-    <string name="power_guide_process_curve_title">电量走势曲线</string>
-    <string name="power_guide_process_curve_desc">实时记录自本次放电（或开机）以来的电量百分比随时间变化的动态曲线，直观呈现电池消耗坡度与掉电速率。</string>
-    <string name="power_guide_process_markers_title">高耗电应用标记</string>
-    <string name="power_guide_process_markers_desc">系统在电量快速下降或高负荷运行时间段自动打点，标注当时的前台活跃应用，帮助您精准锁定各耗电波段的元凶。</string>
-    <string name="power_guide_process_params_title">实时底层状态监测</string>
-    <string name="power_guide_process_params_desc">• 能量 (Wh)：当前电池剩余的总能量储备。\n• 温度 (℃)：电芯当前运行发热温度与过热预警。\n• 电压 (V)：当前电池端实时工作电压。\n• 状态：指示当前放电中或已接入充电设备。</string>
-
-    <!-- 使用场景说明弹窗 -->
-    <string name="power_guide_scene_dialog_subtitle">前台活跃应用功耗画像与能效分析</string>
-    <string name="power_guide_scene_metrics_title">核心统计指标</string>
-    <string name="power_guide_scene_metrics_desc">• 使用时长：应用在前台处于活跃交互状态的累计时间。\n• AVG 功耗：该应用运行期间的平均整机放电功率（单位：W）。\n• 发热温度：运行期间的平均温度（AVG）与最高温度（MAX）。\n• 消耗电量：实际消耗的电量（mAh）及占放电总量的百分比。</string>
-    <string name="power_guide_scene_modes_title">两种数据采集模式</string>
-    <string name="power_guide_scene_modes_desc">• ⚡ Shizuku 模式：直接读取系统底层权威 dumpsys batterystats 耗电账本，提供毫米级精确的真实耗电数据。\n• 📊 标准模式：基于 Android UsageStats 使用记录与系统标准硬件能耗模型进行科学估算。</string>
-    <string name="power_guide_scene_tips_title">排序与快捷交互技巧</string>
-    <string name="power_guide_scene_tips_desc">• 切换按钮 (⇄)：一键在“按使用时长”、“按运行功耗”与“按消耗电量”间快速循环轮转。\n• 漏斗按钮：展开菜单，支持按使用时长、功耗、消耗电量及应用名称等多维度精确排序。</string>
-
-    <!-- 统计说明综合指南弹窗 -->
+    <!-- 耗电统计综合说明弹窗 -->
     <string name="power_guide_stats_dialog_title">耗电统计与指标说明</string>
-    <string name="power_guide_stats_dialog_subtitle">全面了解电池放电模型与核心数据计算原理</string>
+    <string name="power_guide_stats_dialog_subtitle">了解放电多维指标、时间轴与统计机制</string>
+    <string name="power_guide_process_title">时间轴放电曲线</string>
+    <string name="power_guide_stats_curve_summary">动态记录放电历程，支持功耗/电量/温度/电压多维指标切换与手势缩放查看。</string>
+    <string name="power_guide_curve_metric_power">功耗曲线 (W)：整机实时放电功率，直观反映各阶段瞬时耗电负荷。</string>
+    <string name="power_guide_curve_metric_level">电量曲线 (%)：电池剩余电量走势，平缓与陡峭反映掉电快慢。</string>
+    <string name="power_guide_curve_metric_temp_volt">温度与电压：电芯实时工作温度 (℃) 与端工作电压 (V) 监测。</string>
+    <string name="power_guide_curve_metric_app">活跃应用打点：时间轴下方标注对应时段前台活跃应用。</string>
+    <string name="power_guide_overview_title">核心放电指标</string>
+    <string name="power_guide_stat_item_power">运行功耗 (W)：统计亮屏、息屏及全局平均放电功率。</string>
+    <string name="power_guide_stat_item_energy">消耗能量 (Wh/J)：统计实际消耗能量及占拔电时总能量比例。</string>
+    <string name="power_guide_stat_item_time">放电时长：记录亮屏使用、息屏待机及累计放电总时间。</string>
+    <string name="power_guide_stat_item_duration">理论续航：根据当前剩余能量与不同工况功耗测算的可用时长。</string>
+    <string name="power_guide_scene_title">应用能耗排行</string>
+    <string name="power_guide_scene_item_bg">后台统计：通过卡片开关自由开启或隐藏后台应用能耗统计。</string>
+    <string name="power_guide_scene_item_sort">灵活排序：支持按时长、功耗、消耗电量/能量及应用名称排序。</string>
+    <string name="power_guide_scene_item_detail">能耗下钻：点击应用条目可查看详细消耗指标及专属能耗时间轴。</string>
+    <string name="power_guide_scene_item_mode">采集机制：支持 Shizuku 底层精确账本与标准系统模型统计。</string>
     <string name="power_guide_stats_cycle_title">统计周期与重置机制</string>
-    <string name="power_guide_stats_cycle_desc">• 拔掉充电器时系统会自动开启新的放电统计周期并记录初始电量。\n• 您可随时点击右上角垃圾桶图标手动重置当前周期的采样数据。\n• 支持在右上角历史记录中查看或保存当前快照。</string>
+    <string name="power_guide_cycle_item_auto">自动周期：拔掉充电器时自动开启新放电周期并记录初始电量。</string>
+    <string name="power_guide_cycle_item_reset">手动重置：随时点击右上角清除图标手动重置当前采样数据。</string>
+    <string name="power_guide_cycle_item_history">历史快照：右上角可保存当前快照并查阅历史放电记录。</string>
+
+    <!-- 使用过程卡片专属说明弹窗 -->
+    <string name="power_guide_process_dialog_title">使用过程说明</string>
+    <string name="power_guide_process_dialog_subtitle">多维指标时间轴与底层状态解析</string>
+    <string name="power_guide_process_curve_title">时间轴多维曲线</string>
+    <string name="power_guide_process_curve_summary">动态记录自本次放电以来的电量与运行走势，支持单选切换指标与手势缩放拖动。</string>
+    <string name="power_guide_process_markers_title">活跃应用标记</string>
+    <string name="power_guide_markers_desc1">应用标记：在时间轴下方标注对应时段前台活跃应用，精确定位高耗电波段。</string>
+    <string name="power_guide_markers_desc2">维度切换：底部指标栏可随时切换查看功耗、电量、温度、电压与应用。</string>
+    <string name="power_guide_process_params_title">实时底层状态监测</string>
+    <string name="power_guide_process_param_energy">能量 (Wh)：当前电池剩余的总能量储备。</string>
+    <string name="power_guide_process_param_temp">温度 (℃)：电芯当前运行发热温度与过热预警。</string>
+    <string name="power_guide_process_param_volt">电压 (V)：当前电池端实时工作电压。</string>
+    <string name="power_guide_process_param_status">状态：指示当前处于放电中或已接入充电设备。</string>
+
+    <!-- 应用列表（使用场景）说明弹窗 -->
+    <string name="power_guide_scene_dialog_title">应用耗电列表说明</string>
+    <string name="power_guide_scene_dialog_subtitle">前台活跃与后台应用能耗分析指南</string>
+    <string name="power_guide_scene_metrics_title">核心统计指标</string>
+    <string name="power_guide_scene_metric_time">使用时长：应用在前台处于活跃交互状态的累计时间。</string>
+    <string name="power_guide_scene_metric_avg_power">AVG 功耗：该应用运行期间的平均整机放电功率 (W)。</string>
+    <string name="power_guide_scene_metric_energy_drain">消耗电量/能量：实际消耗的电量 (mAh) 或能量 (Wh/J) 及占比。</string>
+    <string name="power_guide_scene_metric_temp">发热温度：应用运行期间的平均温度与最高温升点。</string>
+    <string name="power_guide_scene_tips_title">交互与排序技巧</string>
+    <string name="power_guide_scene_tip_bg">后台统计开关：一键开启或隐藏后台应用能耗统计。</string>
+    <string name="power_guide_scene_tip_sort">气泡排序菜单：支持按使用时长、功耗、消耗电量及名称排序。</string>
+    <string name="power_guide_scene_tip_detail">点击查看详情：点击列表条目可展开应用专属能耗明细及时间轴。</string>
+    <string name="power_guide_scene_modes_title">两种数据采集模式</string>
+    <string name="power_guide_scene_mode_shizuku">Shizuku 模式：直接读取系统底层 dumpsys batterystats 权威账本。</string>
+    <string name="power_guide_scene_mode_standard">标准模式：基于 UsageStats 使用记录与系统硬件能耗模型科学测算。</string>
 
 
 
@@ -265,6 +289,11 @@
     <string name="tab_by_year">按年</string>
     <string name="dialog_decay_formula_title">📐 算法原理与科学建议</string>
     <string name="dialog_decay_formula_desc" formatted="false">• 日均衰减 = (首点健康度 - 末点健康度) ÷ 采样天数\n• 月均衰减 = 日均衰减 × 30.44 天；年均预估 = 日均衰减 × 365.25 天\n• 日均循环消耗 = 累计循环增量 ÷ 采样天数\n• 月均循环消耗 = 日均循环 × 30.44 天；年均预估 = 日均循环 × 365.25 天\n• 正常锂电池在 300~500 次完整充放循环后健康度衰减至 80% 左右（年均损耗约 4%~8%、日均约 0.5~1.2 次循环为常规水平）。</string>
+    <string name="dialog_decay_formula_item1">日均衰减 = (首点健康度 - 末点健康度) ÷ 采样天数</string>
+    <string name="dialog_decay_formula_item2">周期推算：月均 = 日均 × 30.44 天；年均预估 = 日均 × 365.25 天</string>
+    <string name="dialog_decay_formula_item3">循环消耗：日均循环 = 累计循环增量 ÷ 采样天数</string>
+    <string name="dialog_decay_formula_item4">周期循环：月均 = 日均 × 30.44 天；年均 = 日均 × 365.25 天</string>
+    <string name="dialog_decay_formula_item5" formatted="false">常规参考：正常锂电池在 300~500 次循环后衰减至 80% 左右（年均损耗约 4%~8% 为正常水平）。</string>
     <string name="empty_periodic_records">暂无该周期的快照记录</string>
     <string name="decay_stat_decay_format">衰减 %.2f%%</string>
     <string name="decay_stat_gain_format">上升 %.2f%%</string>
@@ -304,6 +333,21 @@
     <string name="setting_charging_keep_screen_on">充电时保持屏幕常亮</string>
     <string name="setting_power_mode">耗电统计检测模式</string>
     <string name="setting_power_mode_desc">切换 Shizuku 权威账本与标准模式</string>
+    <string name="setting_current_calibration">电流校准</string>
+    <string name="setting_current_calibration_desc">针对国产机型测出为0、双电芯倍率或极性校正</string>
+    <string name="dialog_current_calibration_title">⚡ 硬件电流校准</string>
+    <string name="current_calibration_multiplier_title">电流校准倍率</string>
+    <string name="current_calibration_multiplier_desc">适配驱动单位异常或量级偏差，可选 10 的倍数倍率</string>
+    <string name="current_calibration_positive_group">正向倍率</string>
+    <string name="current_calibration_negative_group">反向倍率</string>
+    <string name="current_calibration_dual_cell_title">开启双电芯</string>
+    <string name="current_calibration_dual_cell_desc">双电芯设备快充通常仅上报单电芯电流，开启后读数翻倍 (×2)</string>
+    <string name="current_calibration_dual_cell_badge">双电芯</string>
+    <string name="current_calibration_invert_badge">反转</string>
+    <string name="current_calibration_invert_title">反转电流极性</string>
+    <string name="current_calibration_invert_desc">当部分厂商充放电电流正负号与实际相反时开启</string>
+    <string name="current_calibration_coulomb_title">电荷库仑计差分推算</string>
+    <string name="current_calibration_coulomb_desc">当底层瞬时电流为 0 时，通过硬件库仑计电荷差分推算真实物理电流</string>
     <string name="setting_sampling_mode">曲线采样精度</string>
     <string name="setting_sampling_mode_desc">配置走势曲线前后台采样频率</string>
     <string name="sampling_mode_power_save">🍃 极限省电模式 (推荐)</string>
@@ -368,6 +412,10 @@
     <string name="guide_source_3_desc">提取自系统底层 dump 的权威 getHealthInfo 快照，包含系统电源管理框架维护的健康数据。</string>
     <string name="guide_eval_title">📊 健康度衰减评估标准</string>
     <string name="guide_eval_desc" formatted="false">• 95% ~ 100%：极佳状态，电池几乎无衰减\n• 85% ~ 95%：良好状态，正常日常使用损耗\n• 80% ~ 85%：轻度衰减，续航体验可能略有下降\n• &lt; 80%：重度衰减，建议根据实际续航考虑更换电池</string>
+    <string name="guide_eval_item_1" formatted="false">95% ~ 100%：极佳状态，电池几乎无衰减。</string>
+    <string name="guide_eval_item_2" formatted="false">85% ~ 95%：良好状态，正常日常使用损耗。</string>
+    <string name="guide_eval_item_3" formatted="false">80% ~ 85%：轻度衰减，续航体验略有下降。</string>
+    <string name="guide_eval_item_4">&lt; 80%：重度衰减，建议根据实际续航考虑更换电池。</string>
     <string name="guide_tip_temp">💡 提示：充满容量会随环境温度（低温 &lt; 15℃ 或高温 &gt; 35℃）产生微小浮动，建议在室温充满电后查看数据。</string>
 
     <!-- 历史详情标题 -->
@@ -446,6 +494,25 @@
     <string name="charging_reset_success">充电统计已重置</string>
     <string name="charging_guide_title">充电统计全景指南</string>
     <string name="charging_guide_desc">本界面支持在设备连接充电器时自动智能呈现。三合一折线图表动态绘制绿色功率曲线、蓝色电量曲线与红色温度曲线；图表正下方提供带色块标识的实时读数看板；数据每秒实时采样更新，拔电时自动存档。</string>
+
+    <!-- 充电统计与图表说明弹窗 -->
+    <string name="charging_guide_dialog_title">充电统计与图表说明</string>
+    <string name="charging_guide_dialog_subtitle">了解充电多维走势、核心参数与息屏效率</string>
+    <string name="charging_guide_chart_title">📈 充电多维走势图表</string>
+    <string name="charging_guide_chart_summary">实时绘制充电期间的核心走势曲线，时间轴横坐标自连接充电器起始点延伸，支持手势缩放。</string>
+    <string name="charging_guide_curve_power">功率曲线 (橙黄)：实时充电功率 (W)，反映快充协议握手与阶段变化。</string>
+    <string name="charging_guide_curve_level">电量曲线 (蓝色)：电池剩余电量百分比 (%) 爬升趋势。</string>
+    <string name="charging_guide_curve_temp">温度曲线 (红色)：电芯实时温度 (℃) 及温升控制走势。</string>
+    <string name="charging_guide_overview_title">⚡ 充电总览与关键指标</string>
+    <string name="charging_guide_metric_energy">充入能量 (Wh)：根据积分算法精准计算充入电芯的有效能量。</string>
+    <string name="charging_guide_metric_peak">峰值功率 (W)：记录充电阶段达到的最大瞬时充电功率。</string>
+    <string name="charging_guide_metric_avg">平均功率 (W)：充电全程平均功率，反映整段快充有效效率。</string>
+    <string name="charging_guide_metric_temp">最高温度 (℃)：充电过程中电芯达到的最高温升点。</string>
+    <string name="charging_guide_screen_off_title">🌙 息屏快充细分统计</string>
+    <string name="charging_guide_screen_off_summary">智能区分亮屏与息屏状态。息屏时温升较低且后台干扰少，快充握手功率更高。统计中独立记录息屏充电时长、充入电量及能量占比，直观呈现快充效率。</string>
+    <string name="charging_guide_archive_title">💾 采样模式与自动归档</string>
+    <string name="charging_guide_archive_mode">智能双模：插上电源自动进入充电监测，拔出电源自动生成历史记录并切回耗电统计。</string>
+    <string name="charging_guide_archive_screen">常亮选项：支持设置充电时屏幕常亮，方便实时观察快充曲线走势。</string>
 
     <!-- 充电历史与详情 -->
     <string name="clear_history">清空记录</string>

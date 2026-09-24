@@ -77,9 +77,13 @@ class NormalApiProvider : BatteryDataProvider {
         val rawCurrent = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
         val currentNow = if (rawCurrent != 0 && rawCurrent != Int.MIN_VALUE) {
             val curMa = com.battery.analysis.util.BatteryUnitNormalizer.normalizeCurrentMa(rawCurrent.toLong(), isPlugged)
+            val calibratedMa = com.battery.analysis.manager.CurrentCalibrationManager.applyCalibration(curMa, context)
             // 当 rawCurrent < 0 时表示净电流流出电池（放电，哪怕接入了充电器），忠实反映物理方向
-            val isNetDischarging = rawCurrent < 0 || rawStatus == BatteryManager.BATTERY_STATUS_DISCHARGING || rawStatus == BatteryManager.BATTERY_STATUS_NOT_CHARGING
-            if (isNetDischarging) -curMa else curMa
+            var isNetDischarging = rawCurrent < 0 || rawStatus == BatteryManager.BATTERY_STATUS_DISCHARGING || rawStatus == BatteryManager.BATTERY_STATUS_NOT_CHARGING
+            if (com.battery.analysis.manager.CurrentCalibrationManager.isEffectiveInvertPolarity(context)) {
+                isNetDischarging = !isNetDischarging
+            }
+            if (isNetDischarging) -calibratedMa else calibratedMa
         } else null
 
         // 7. 计算实时功率（单位：W，放电为负，充电为正）

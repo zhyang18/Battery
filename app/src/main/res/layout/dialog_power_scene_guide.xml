@@ -15,7 +15,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/power_guide_scene_title"
+        android:text="@string/power_guide_scene_dialog_title"
         android:textColor="?android:attr/textColorPrimary"
         android:textSize="18sp"
         android:textStyle="bold" />
@@ -58,45 +58,108 @@
                     android:textSize="14sp"
                     android:textStyle="bold" />
 
-                <TextView
+                <!-- 条目 1: 使用时长 -->
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:lineSpacingExtra="4dp"
-                    android:text="@string/power_guide_scene_metrics_desc"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="13sp" />
-            </LinearLayout>
+                    android:orientation="horizontal">
 
-            <!-- 卡片 2: 两种数据采集模式 -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:background="@drawable/bg_dialog_card"
-                android:clipToOutline="true"
-                android:orientation="vertical"
-                android:padding="14dp">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/power_guide_scene_modes_title"
-                    android:textColor="@color/nav_item_selected"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_scene_metric_time"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
 
-                <TextView
+                <!-- 条目 2: AVG 功耗 -->
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:lineSpacingExtra="4dp"
-                    android:text="@string/power_guide_scene_modes_desc"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="13sp" />
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_scene_metric_avg_power"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 3: 消耗电量/能量 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_scene_metric_energy_drain"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 4: 发热温度 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_scene_metric_temp"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
             </LinearLayout>
 
-            <!-- 卡片 3: 排序与快捷交互技巧 -->
+            <!-- 卡片 2: 交互与排序技巧 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -114,14 +177,149 @@
                     android:textSize="14sp"
                     android:textStyle="bold" />
 
-                <TextView
+                <!-- 条目 1: 后台统计开关 -->
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:lineSpacingExtra="4dp"
-                    android:text="@string/power_guide_scene_tips_desc"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="13sp" />
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_scene_tip_bg"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 2: 气泡排序菜单 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_scene_tip_sort"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 3: 点击查看详情 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_scene_tip_detail"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 卡片 3: 两种数据采集模式 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_dialog_card"
+                android:clipToOutline="true"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/power_guide_scene_modes_title"
+                    android:textColor="@color/nav_item_selected"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <!-- 条目 1: Shizuku 模式 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_scene_mode_shizuku"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 2: 标准模式 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/power_guide_scene_mode_standard"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
             </LinearLayout>
 
         </LinearLayout>

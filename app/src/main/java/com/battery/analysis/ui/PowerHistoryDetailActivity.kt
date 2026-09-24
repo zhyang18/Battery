@@ -1,13 +1,19 @@
 package com.battery.analysis.ui
 
+import android.content.Context
 import android.graphics.Color
 import android.os.Bundle
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.AbsoluteSizeSpan
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.PopupWindow
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -35,6 +41,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
     private var recordId: Long = -1L
     private var currentRecord: PowerUsageRecord? = null
     private lateinit var appAdapter: AppPowerUsageAdapter
+    private var currentSortIndex: Int = 1
 
     /**
      * 活动初始化生命周期回调，配置状态栏、获取传入快照 ID 并触发全量数据加载。
@@ -83,6 +90,9 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
      */
     private fun setupAppRecyclerView() {
         appAdapter = AppPowerUsageAdapter()
+        appAdapter.onListCountChangedListener = { count ->
+            updateUsageListTitle(count)
+        }
         appAdapter.onItemClickListener = { item ->
             val isShizuku = currentRecord?.isShizukuRealData ?: true
             val rangeStr = currentRecord?.let { record ->
@@ -95,7 +105,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
     }
 
     /**
-     * 配置返回、删除快照与载入至主页的按钮点击监听。
+     * 配置返回、删除快照与载入至主页的按钮点击监听，以及后台开关和排序菜单。
      */
     private fun setupListeners() {
         binding.btnBack.setOnClickListener {
@@ -114,6 +124,22 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             }
         }
 
+        // 场景后台统计开关：控制是否展示各应用后台数据及后台应用
+        val statsPrefs = getSharedPreferences(PowerUsageFragment.PREFS_POWER_STATS, Context.MODE_PRIVATE)
+        val isBgStatsEnabled = statsPrefs.getBoolean(PowerUsageFragment.PREF_KEY_ENABLE_BACKGROUND_STATS, false)
+        binding.switchBackgroundStats.isChecked = isBgStatsEnabled
+        appAdapter.setShowBackgroundStats(isBgStatsEnabled)
+
+        binding.switchBackgroundStats.setOnCheckedChangeListener { _, isChecked ->
+            statsPrefs.edit().putBoolean(PowerUsageFragment.PREF_KEY_ENABLE_BACKGROUND_STATS, isChecked).apply()
+            appAdapter.setShowBackgroundStats(isChecked)
+        }
+
+        // 场景排序菜单按钮（漏斗）：弹出多选排序气泡弹窗
+        binding.btnSceneSort.setOnClickListener {
+            showSortChoiceDialog()
+        }
+
         // 功耗时间轴指标多选/反选监听
         binding.metricSelectorView.setOnMetricsChangedListener { selectedMetrics ->
             binding.batteryTimelineView.setSelectedMetrics(selectedMetrics)
@@ -123,6 +149,62 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         binding.batteryTimelineView.setOnAppEventListener { event ->
             AppEnergyDetailBottomSheetDialog(this@PowerHistoryDetailActivity, event).show()
         }
+    }
+
+    /**
+     * 弹出选择排序方式下拉气泡菜单。
+     * 支持按使用时长、按功耗、按消耗电量或按名称进行排序切换，并联动刷新应用列表。
+     */
+    private fun showSortChoiceDialog() {
+        val popupView = layoutInflater.inflate(R.layout.popup_power_sort_picker, null)
+        val density = resources.displayMetrics.density
+        val popupWidth = (170 * density).toInt()
+
+        val popupWindow = PopupWindow(
+            popupView,
+            popupWidth,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            true
+        )
+
+        popupWindow.isOutsideTouchable = true
+        popupWindow.isFocusable = true
+        popupWindow.animationStyle = R.style.Animation_PopupTopRight
+
+        val sortViews = listOf(
+            popupView.findViewById<TextView>(R.id.tv_sort_duration),
+            popupView.findViewById<TextView>(R.id.tv_sort_power),
+            popupView.findViewById<TextView>(R.id.tv_sort_energy),
+            popupView.findViewById<TextView>(R.id.tv_sort_name)
+        )
+
+        val normalColor = ContextCompat.getColor(this, R.color.popup_item_text)
+        val activeColor = Color.parseColor("#2196F3")
+
+        sortViews.forEachIndexed { index, textView ->
+            textView.setTextColor(if (index == currentSortIndex) activeColor else normalColor)
+            textView.setOnClickListener {
+                currentSortIndex = index
+                appAdapter.setSortMode(index)
+                popupWindow.dismiss()
+            }
+        }
+
+        popupWindow.showAsDropDown(
+            binding.btnSceneSort,
+            0,
+            (4 * density).toInt(),
+            Gravity.END
+        )
+    }
+
+    /**
+     * 更新应用使用列表卡片标题，展示当前实际呈现的应用数量（如“使用列表(12)”）。
+     *
+     * @param count 当前列表展示的应用条目总数
+     */
+    private fun updateUsageListTitle(count: Int) {
+        binding.tvAppListTitle.text = getString(R.string.power_usage_list_format, count)
     }
 
     /**
@@ -281,8 +363,9 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             val timelineState = powerMgr.buildTimelineState(fullPackage, isHistoryRecord = true).copy(selectedMetrics = selectedMetrics)
             withContext(Dispatchers.Main) {
                 binding.batteryTimelineView.setState(timelineState)
-                binding.tvAppListTitle.text = getString(R.string.power_history_app_count_format, fullPackage.appList.size)
+                binding.layoutBackgroundStatsContainer.visibility = if (record.isShizukuRealData) android.view.View.VISIBLE else android.view.View.GONE
                 appAdapter.submitList(fullPackage.appList)
+                updateUsageListTitle(appAdapter.getDisplayItemCount())
             }
         }
     }

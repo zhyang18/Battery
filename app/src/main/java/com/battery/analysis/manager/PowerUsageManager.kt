@@ -81,6 +81,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         private const val PREF_KEY_POWER_CONFIGURED = "pref_power_mode_configured"
         const val PREF_KEY_LAST_UNPLUG_TIME = "pref_last_unplug_time"
         const val PREF_KEY_LAST_UNPLUG_LEVEL = "pref_last_unplug_level"
+        const val PREF_KEY_LAST_UNPLUG_ENERGY = "pref_last_unplug_energy"
         const val PREF_KEY_LAST_UNPLUG_CHARGE_COUNTER = "pref_last_unplug_charge_counter"
         private const val PREF_KEY_UNPLUG_USAGE_SNAPSHOT = "pref_unplug_usage_snapshot"
         private const val PREF_KEY_UNPLUG_BG_SERVICE_SNAPSHOT = "pref_unplug_bg_service_snapshot"
@@ -1341,6 +1342,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         val editor = prefs.edit()
             .putLong(PREF_KEY_LAST_UNPLUG_TIME, now)
             .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, unplugLevel.coerceIn(0, 100))
+            .putFloat(PREF_KEY_LAST_UNPLUG_ENERGY, status.energyWh)
             .putLong("pref_last_archived_unplug_time", 0L)
             .putLong("last_reset_time", now)
             .remove(PREF_KEY_UNPLUG_USAGE_SNAPSHOT)
@@ -1608,6 +1610,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                                     .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, stats.detectedUnplugLevel)
                                     .putLong(PREF_KEY_LAST_UNPLUG_TIME, detectedTime)
                                     .apply()
+                                saveUnplugEnergy(stats.detectedUnplugLevel)
                                 saveUnplugUsageSnapshot()
                                 syncedViaShizuku = true
                                 reconciled = true
@@ -1646,6 +1649,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                                     .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, stats.detectedUnplugLevel)
                                     .putLong(PREF_KEY_LAST_UNPLUG_TIME, detectedTime)
                                     .apply()
+                                saveUnplugEnergy(stats.detectedUnplugLevel)
                                 saveUnplugUsageSnapshot()
                                 syncedViaShizuku = true
                                 reconciled = true
@@ -1782,6 +1786,56 @@ class PowerUsageManager private constructor(private val context: Context) {
     fun getLastUnplugLevel(): Int {
         val saved = prefs.getInt(PREF_KEY_LAST_UNPLUG_LEVEL, -1)
         return if (saved in 1..100) saved else getCurrentBatteryStatus().levelPercent
+    }
+
+    /**
+     * 获取最近一次断开电源时的初始电池剩余能量（瓦时 Wh）。
+     * 若本地持久化记录有效则优先返回；若无记录但可获取设备基准容量与拔电初始电量，则基于标称工作电压如实折算；
+     * 若均无法获取则如实返回 null，忠实反映系统真实状态。
+     *
+     * @return 拔电时刻的初始剩余能量（Wh），若无有效数据则返回 null
+     */
+    fun getLastUnplugEnergyWh(): Float? {
+        val saved = prefs.getFloat(PREF_KEY_LAST_UNPLUG_ENERGY, -1f)
+        if (saved > 0f) {
+            return saved
+        }
+        val effCap = getEffectiveDeviceCapacityMah()
+        val unplugLvl = getLastUnplugLevel()
+        if (effCap > 0f && unplugLvl in 1..100) {
+            val calculated = BatteryEnergyCalculator.calculateRemainingEnergyWh(
+                hardwareEnergyNwh = null,
+                hardwareChargeCounterUah = null,
+                batteryPercent = unplugLvl,
+                nominalVoltageVolts = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS,
+                effectiveCapacityMah = effCap
+            )
+            if (calculated > 0f) {
+                return calculated
+            }
+        }
+        return null
+    }
+
+    /**
+     * 计算并持久化保存拔电时刻的基准能量（瓦时 Wh）。
+     *
+     * @param unplugLevel 拔电时刻的电量百分比
+     */
+    fun saveUnplugEnergy(unplugLevel: Int) {
+        val effCap = getEffectiveDeviceCapacityMah()
+        if (effCap > 0f && unplugLevel in 1..100) {
+            val wh = BatteryEnergyCalculator.calculateRemainingEnergyWh(
+                hardwareEnergyNwh = null,
+                hardwareChargeCounterUah = null,
+                batteryPercent = unplugLevel,
+                nominalVoltageVolts = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS,
+                effectiveCapacityMah = effCap
+            )
+            if (wh > 0f) {
+                prefs.edit().putFloat(PREF_KEY_LAST_UNPLUG_ENERGY, wh).apply()
+            }
+        }
     }
 
     /**
@@ -2079,6 +2133,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                             .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, effectiveUnplugLevel)
                             .putLong(PREF_KEY_LAST_UNPLUG_TIME, effectiveUnplugTime)
                             .apply()
+                        saveUnplugEnergy(effectiveUnplugLevel)
                     }
                 }
 
@@ -3480,7 +3535,7 @@ class PowerUsageManager private constructor(private val context: Context) {
      * @return 放电趋势点序列 [List<PowerDischargePoint>]
      */
     fun getDischargeTrendPoints(
-        startLevel: Int = 100,
+        startLevel: Int = -1,
         currentLevel: Int,
         appItems: List<AppPowerUsageItem>,
         durationMs: Long,
@@ -3497,7 +3552,8 @@ class PowerUsageManager private constructor(private val context: Context) {
         val steps = 40 // 40 个密集采样时间切片，实现紧凑的俄罗斯方块柱状排布效果
 
         val targetLevel = currentLevel.coerceIn(0, 100)
-        val actualStartLevel = max(startLevel.coerceIn(0, 100), targetLevel)
+        val safeStart = if (startLevel in 0..100) startLevel else targetLevel
+        val actualStartLevel = max(safeStart, targetLevel)
         val delta = (actualStartLevel - targetLevel).coerceAtLeast(0)
         val totalDischargeHours = duration / 3600000f
         val effectiveDeviceCapacity = getEffectiveDeviceCapacityMah()
@@ -3848,6 +3904,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         val editor = prefs.edit()
             .putLong(PREF_KEY_LAST_UNPLUG_TIME, now)
             .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, curStatus.levelPercent.coerceIn(0, 100))
+            .putFloat(PREF_KEY_LAST_UNPLUG_ENERGY, curStatus.energyWh)
             .putLong("pref_last_archived_unplug_time", 0L)
             .putLong("last_reset_time", now)
             .remove(PREF_KEY_UNPLUG_USAGE_SNAPSHOT)
@@ -4167,7 +4224,11 @@ class PowerUsageManager private constructor(private val context: Context) {
                 if (fullPackage.startLevelPercent in 1..100) fullPackage.startLevelPercent else firstPt.batteryLevel
             } else {
                 val unplugLvl = getLastUnplugLevel()
-                if (unplugLvl in 1..100) unplugLvl else firstPt.batteryLevel
+                if (unplugLvl in 1..100 && startTs < (firstPt.timestamp - 30_000L) && unplugLvl >= firstPt.batteryLevel) {
+                    unplugLvl
+                } else {
+                    firstPt.batteryLevel
+                }
             }
 
             // 根据整机平均功耗与当前电压估算放电电流（取代硬编码 500mA）
@@ -4578,7 +4639,7 @@ data class PowerOverviewStats(
  * @property appList 各应用耗电数据
  * @property trendPoints 放电折线图点集
  * @property isShizukuRealData 是否为 Shizuku 真实解析数据
- * @property startLevelPercent 开始记录放电时的电量百分比（默认 100）
+ * @property startLevelPercent 开始记录放电时的电量百分比（默认 -1 表示未指定）
  */
 data class FullPowerDataPackage(
     val batterySnapshot: BatteryStatusSnapshot,
@@ -4586,6 +4647,6 @@ data class FullPowerDataPackage(
     val appList: List<AppPowerUsageItem>,
     val trendPoints: List<PowerDischargePoint>,
     val isShizukuRealData: Boolean,
-    val startLevelPercent: Int = 100
+    val startLevelPercent: Int = -1
 )
 

@@ -41,7 +41,7 @@
     <string name="power_value_format_with_energy">%1$s (%2$s)</string>
     <string name="power_wh_format">%.1fWh</string>
     <string name="power_param_energy">Remaining Energy</string>
-    <string name="power_tooltip_energy">Remaining Energy: %1$s, Total Energy: %2$s</string>
+    <string name="power_tooltip_energy">Remaining Energy: %1$s, Total Energy: %2$s, Unplug Energy: %3$s</string>
     <string name="power_temp_format">%.1f℃</string>
     <string name="power_volt_format">%.3fV</string>
     <string name="power_status_unplugged">Not charging</string>
@@ -71,12 +71,6 @@
     <string name="power_shizuku_btn_open">Open Shizuku</string>
     <string name="power_drain_format">%1$.1fmAh (%2$.1f%%)</string>
     <string name="power_toast_cleared">Power stats reset</string>
-    <string name="power_guide_process_title">Discharge Process Guide</string>
-    <string name="power_guide_process_content">The discharge process chart shows the battery level curve over time since boot or last discharge, marking active apps during high-drain periods.</string>
-    <string name="power_guide_scene_title">Usage List Guide</string>
-    <string name="power_guide_scene_content">\"Usage List\" tracks foreground active app duration, average power consumption, and operating temperature for each active app.</string>
-    <string name="power_guide_overview_title">Discharge Metrics Guide</string>
-    <string name="power_guide_overview_content">• Discharge Power: Shows screen-on average power, overall average power, and standby power since discharge (Watts).\n\n• Discharge Time: Tracks screen-on duration, screen-off standby duration, and total discharge duration.\n\n• Battery Life: Estimates remaining battery life for screen-on, mixed usage, and standby based on current battery energy and measured power.</string>
 
     <!-- Power Reset Dialog -->
     <string name="dialog_power_reset_title">Reset Power Statistics?</string>
@@ -86,29 +80,59 @@
     <string name="dialog_power_reset_current_mode">Tracking Mode</string>
     <string name="dialog_power_reset_recorded_time">Recorded Time</string>
 
-    <!-- Discharge Process Guide Dialog -->
-    <string name="power_guide_process_dialog_subtitle">Discharge history curve and real-time telemetry</string>
-    <string name="power_guide_process_curve_title">Battery Level Trend Curve</string>
-    <string name="power_guide_process_curve_desc">Displays the dynamic curve of battery percentage over time since the last discharge (or boot), showing battery drain slope and drop rate.</string>
-    <string name="power_guide_process_markers_title">High-Drain App Markers</string>
-    <string name="power_guide_process_markers_desc">Automatically flags foreground active applications during rapid battery drop or high-load periods to help identify battery drain culprits.</string>
-    <string name="power_guide_process_params_title">Real-time Telemetry Metrics</string>
-    <string name="power_guide_process_params_desc">• Energy (Wh): Current remaining battery energy reserve.\n• Temperature (℃): Real-time battery cell operating temperature.\n• Voltage (V): Real-time terminal voltage of the battery.\n• Status: Indicates discharging or connected charging device.</string>
-
-    <!-- Usage Scenarios Guide Dialog -->
-    <string name="power_guide_scene_dialog_subtitle">Foreground app power profiles and efficiency analysis</string>
-    <string name="power_guide_scene_metrics_title">Core Metrics</string>
-    <string name="power_guide_scene_metrics_desc">• Duration: Cumulative foreground active time of the application.\n• AVG Power: Average total system discharge power while running (W).\n• Temperature: Average (AVG) and maximum (MAX) temperature during execution.\n• Energy Consumed: Real energy consumption (mAh) and percentage of total discharge.</string>
-    <string name="power_guide_scene_modes_title">Dual Data Collection Modes</string>
-    <string name="power_guide_scene_modes_desc">• ⚡ Shizuku Mode: Directly reads dumpsys batterystats authority log from system framework for precise data.\n• 📊 Standard Mode: Scientifically estimated via Android UsageStats and platform hardware power profile.</string>
-    <string name="power_guide_scene_tips_title">Sorting and Quick Interactions</string>
-    <string name="power_guide_scene_tips_desc">• Toggle Button (⇄): Quickly cycles through sorting by duration, power, and energy consumed.\n• Filter Button: Opens menu for precise sorting by multiple dimensions.</string>
-
-    <!-- Statistics Overview Guide Dialog -->
+    <!-- Comprehensive Power Stats Guide Dialog -->
     <string name="power_guide_stats_dialog_title">Power Statistics &amp; Metrics Guide</string>
-    <string name="power_guide_stats_dialog_subtitle">Understand battery discharge model and calculation mechanisms</string>
+    <string name="power_guide_stats_dialog_subtitle">Discharge timeline, core metrics, and tracking mechanisms</string>
+    <string name="power_guide_process_title">Discharge Timeline Curve</string>
+    <string name="power_guide_stats_curve_summary">Records discharge trend with real-time switching between power, level, temperature, and voltage.</string>
+    <string name="power_guide_curve_metric_power">Power Curve (W): Real-time system discharge rate reflecting instant power loads.</string>
+    <string name="power_guide_curve_metric_level">Level Curve (%): Battery percentage trend over time indicating discharge velocity.</string>
+    <string name="power_guide_curve_metric_temp_volt">Temperature &amp; Voltage: Real-time cell temperature (℃) and terminal voltage (V).</string>
+    <string name="power_guide_curve_metric_app">Active App Markers: Displays foreground active apps along the timeline.</string>
+    <string name="power_guide_overview_title">Core Discharge Metrics</string>
+    <string name="power_guide_stat_item_power">Discharge Power (W): Measures screen-on, screen-off, and overall average power.</string>
+    <string name="power_guide_stat_item_energy">Energy Drained (Wh/J): Measured energy consumption and ratio relative to unplugged energy.</string>
+    <string name="power_guide_stat_item_time">Discharge Time: Tracks screen-on, screen-off standby, and total elapsed duration.</string>
+    <string name="power_guide_stat_item_duration">Estimated Endurance: Remaining usable hours calculated from current energy and power draw.</string>
+    <string name="power_guide_scene_title">App Energy Rankings</string>
+    <string name="power_guide_scene_item_bg">Background Switch: Toggle display of background app consumption.</string>
+    <string name="power_guide_scene_item_sort">Flexible Sorting: Sort apps by duration, power, energy, or app name.</string>
+    <string name="power_guide_scene_item_detail">Detail Inspection: Tap any app item to view detailed stats and its energy timeline.</string>
+    <string name="power_guide_scene_item_mode">Data Sources: Powered by Shizuku dumpsys batterystats authority log or standard model.</string>
     <string name="power_guide_stats_cycle_title">Cycle &amp; Reset Mechanism</string>
-    <string name="power_guide_stats_cycle_desc">• Unplugging the charger automatically starts a new discharge cycle and captures the initial level.\n• You can manually reset current cycle sampling at any time via the top trash icon.\n• Current snapshots can be viewed or saved from the history records dialog.</string>
+    <string name="power_guide_cycle_item_auto">Automatic Cycle: Unplugging charger automatically starts a new cycle with initial level.</string>
+    <string name="power_guide_cycle_item_reset">Manual Reset: Tap the top-right trash icon to clear the current cycle data.</string>
+    <string name="power_guide_cycle_item_history">History Snapshots: Save snapshots and review historical discharge records.</string>
+
+    <!-- Discharge Process Guide Dialog -->
+    <string name="power_guide_process_dialog_title">Discharge Process Guide</string>
+    <string name="power_guide_process_dialog_subtitle">Timeline metrics and real-time telemetry breakdown</string>
+    <string name="power_guide_process_curve_title">Multi-dimensional Timeline Curves</string>
+    <string name="power_guide_process_curve_summary">Tracks battery and hardware trends with selectable metrics and pinch/pan gestures.</string>
+    <string name="power_guide_process_markers_title">High-Drain App Markers</string>
+    <string name="power_guide_markers_desc1">App Markers: Displays foreground active apps along timeline to pinpoint drain culprits.</string>
+    <string name="power_guide_markers_desc2">Metric Selector: Bottom selector lets you quickly view power, level, temp, voltage, and apps.</string>
+    <string name="power_guide_process_params_title">Real-time Telemetry Metrics</string>
+    <string name="power_guide_process_param_energy">Energy (Wh): Total remaining battery energy reserve.</string>
+    <string name="power_guide_process_param_temp">Temperature (℃): Cell operating temperature and thermal state.</string>
+    <string name="power_guide_process_param_volt">Voltage (V): Real-time terminal voltage of the battery.</string>
+    <string name="power_guide_process_param_status">Status: Indicates discharging or connected charging device.</string>
+
+    <!-- App Usage Guide Dialog -->
+    <string name="power_guide_scene_dialog_title">App Power List Guide</string>
+    <string name="power_guide_scene_dialog_subtitle">Foreground and background app energy analysis</string>
+    <string name="power_guide_scene_metrics_title">Core Metrics</string>
+    <string name="power_guide_scene_metric_time">Active Duration: Total cumulative time the app was interacting in foreground.</string>
+    <string name="power_guide_scene_metric_avg_power">AVG Power: Average device discharge rate while app was running (W).</string>
+    <string name="power_guide_scene_metric_energy_drain">Consumption: Drain amount in mAh or Wh/J and its proportion of total discharge.</string>
+    <string name="power_guide_scene_metric_temp">Temperature: Average and maximum thermal readings during app execution.</string>
+    <string name="power_guide_scene_tips_title">Interactions &amp; Sorting</string>
+    <string name="power_guide_scene_tip_bg">Background Switch: Easily toggle visibility of background app stats.</string>
+    <string name="power_guide_scene_tip_sort">Bubble Menu: Sort by usage duration, power, consumed energy, or app name.</string>
+    <string name="power_guide_scene_tip_detail">Detail Drilldown: Tap any list item to open detailed energy stats and timeline.</string>
+    <string name="power_guide_scene_modes_title">Dual Collection Modes</string>
+    <string name="power_guide_scene_mode_shizuku">Shizuku Mode: Directly reads dumpsys batterystats authority log from system.</string>
+    <string name="power_guide_scene_mode_standard">Standard Mode: Estimated using Android UsageStats and device hardware power profiles.</string>
 
 
 
@@ -265,6 +289,11 @@
     <string name="tab_by_year">Yearly</string>
     <string name="dialog_decay_formula_title">📐 Algorithms &amp; Advice</string>
     <string name="dialog_decay_formula_desc" formatted="false">• Daily Decay = (Initial Health - Latest Health) ÷ Sampling Days\n• Monthly Decay = Daily Decay × 30.44 days; Yearly Est = Daily Decay × 365.25 days\n• Daily Cycle Consumption = Total Cycle Increase ÷ Sampling Days\n• Monthly Cycle = Daily Cycle × 30.44 days; Yearly Est = Daily Cycle × 365.25 days\n• Lithium batteries typically decay to ~80% after 300~500 cycles (~4%~8% yearly decay, ~0.5~1.2 cycles/day is normal).</string>
+    <string name="dialog_decay_formula_item1">Daily Decay = (Initial SoH - Final SoH) ÷ Sampling Days</string>
+    <string name="dialog_decay_formula_item2">Periodic Extrapolation: Monthly = Daily × 30.44 days; Yearly = Daily × 365.25 days</string>
+    <string name="dialog_decay_formula_item3">Cycle Consumption: Daily Cycles = Cumulative Cycle Increase ÷ Sampling Days</string>
+    <string name="dialog_decay_formula_item4">Periodic Cycles: Monthly = Daily × 30.44 days; Yearly = Daily × 365.25 days</string>
+    <string name="dialog_decay_formula_item5" formatted="false">General Reference: Li-ion cells typically retain ~80% SoH after 300-500 cycles (~4%-8% yearly wear is standard).</string>
     <string name="empty_periodic_records">No snapshot records in this period</string>
     <string name="decay_stat_decay_format">Decay %.2f%%</string>
     <string name="decay_stat_gain_format">Gain %.2f%%</string>
@@ -303,6 +332,21 @@
     <string name="setting_refresh_interval">Refresh Interval</string>
     <string name="setting_power_mode">Power Stats Detection Mode</string>
     <string name="setting_power_mode_desc">Toggle between Shizuku and standard mode</string>
+    <string name="setting_current_calibration">Current Calibration</string>
+    <string name="setting_current_calibration_desc">Calibrate 0mA reading, dual-cell multiplier, or polarity</string>
+    <string name="dialog_current_calibration_title">⚡ Hardware Current Calibration</string>
+    <string name="current_calibration_multiplier_title">Current Multiplier</string>
+    <string name="current_calibration_multiplier_desc">Calibrate driver unit discrepancy with powers of 10</string>
+    <string name="current_calibration_positive_group">Positive</string>
+    <string name="current_calibration_negative_group">Inverted</string>
+    <string name="current_calibration_dual_cell_title">Enable Dual-Cell</string>
+    <string name="current_calibration_dual_cell_desc">Dual-cell phones often report single-cell current, doubles reading (×2)</string>
+    <string name="current_calibration_dual_cell_badge">Dual-cell</string>
+    <string name="current_calibration_invert_badge">Inverted</string>
+    <string name="current_calibration_invert_title">Invert Current Polarity</string>
+    <string name="current_calibration_invert_desc">Enable if charge/discharge signs are inverted by OEM</string>
+    <string name="current_calibration_coulomb_title">Coulomb Charge Differential</string>
+    <string name="current_calibration_coulomb_desc">Derive real current via hardware coulomb counter when current is 0</string>
     <string name="setting_sampling_mode">Sampling Rate &amp; Precision</string>
     <string name="setting_sampling_mode_desc">Configure foreground &amp; background sampling frequency for trend curves</string>
     <string name="sampling_mode_power_save">🍃 Ultra Battery Saver (Default)</string>
@@ -367,6 +411,10 @@
     <string name="guide_source_3_desc">Authoritative getHealthInfo snapshots dumped from system bugreport, containing official Android power management framework health data.</string>
     <string name="guide_eval_title">📊 Health Decay Evaluation Standard</string>
     <string name="guide_eval_desc" formatted="false">• 95% ~ 100%: Excellent state, almost no battery decay\n• 85% ~ 95%: Good state, normal daily degradation\n• 80% ~ 85%: Mild decay, slight battery life reduction\n• &lt; 80%: Heavy decay, battery replacement recommended</string>
+    <string name="guide_eval_item_1" formatted="false">95% ~ 100%: Excellent condition with virtually no battery degradation.</string>
+    <string name="guide_eval_item_2" formatted="false">85% ~ 95%: Good condition, representing standard daily wear.</string>
+    <string name="guide_eval_item_3" formatted="false">80% ~ 85%: Minor degradation, battery endurance may feel slightly reduced.</string>
+    <string name="guide_eval_item_4">&lt; 80%: Significant degradation, battery replacement recommended when practical.</string>
     <string name="guide_tip_temp">💡 Tip: Full charge capacity fluctuates slightly with ambient temperature (&lt;15°C or &gt;35°C). It is recommended to inspect at room temperature after a full charge.</string>
 
     <!-- History Detail Title -->
@@ -445,6 +493,25 @@
     <string name="charging_reset_success">Charging stats reset</string>
     <string name="charging_guide_title">Charging Statistics Guide</string>
     <string name="charging_guide_desc">Automatically shown when connected to power. Visualizes green power curve, blue level curve and red temperature curve with square legends and realtime updates.</string>
+
+    <!-- Charging Statistics & Chart Guide Dialog -->
+    <string name="charging_guide_dialog_title">Charging Statistics &amp; Chart Guide</string>
+    <string name="charging_guide_dialog_subtitle">Charging trends, core parameters, and screen-off efficiency</string>
+    <string name="charging_guide_chart_title">📈 Multi-dimensional Charging Chart</string>
+    <string name="charging_guide_chart_summary">Plots real-time charging curves since connection, supporting pinch-to-zoom.</string>
+    <string name="charging_guide_curve_power">Power Curve (Amber): Real-time charging rate (W) reflecting fast-charging protocol stages.</string>
+    <string name="charging_guide_curve_level">Level Curve (Blue): Battery percentage (%) rise curve over time.</string>
+    <string name="charging_guide_curve_temp">Temperature Curve (Red): Cell temperature (℃) and thermal management behavior.</string>
+    <string name="charging_guide_overview_title">⚡ Charging Overview &amp; Key Metrics</string>
+    <string name="charging_guide_metric_energy">Energy Delivered (Wh): Accurate energy injected into cells computed via numerical integration.</string>
+    <string name="charging_guide_metric_peak">Peak Power (W): Highest instantaneous power achieved during the charging session.</string>
+    <string name="charging_guide_metric_avg">Average Power (W): Full-session mean power reflecting true fast-charging delivery.</string>
+    <string name="charging_guide_metric_temp">Max Temperature (℃): Highest cell temperature recorded during charging.</string>
+    <string name="charging_guide_screen_off_title">🌙 Screen-Off Fast Charging</string>
+    <string name="charging_guide_screen_off_summary">Distinguishes screen-on vs screen-off charging. Screen-off maintains lower temperatures and higher charging wattage. Tracks screen-off duration, energy, and ratio.</string>
+    <string name="charging_guide_archive_title">💾 Modes &amp; Automatic Archiving</string>
+    <string name="charging_guide_archive_mode">Smart Dual Mode: Plug in to monitor charging; unplug to auto-archive and return to discharge view.</string>
+    <string name="charging_guide_archive_screen">Keep Screen On: Option to keep screen awake while charging to observe curve trends.</string>
 
     <!-- Charging History & Details -->
     <string name="clear_history">Clear History</string>

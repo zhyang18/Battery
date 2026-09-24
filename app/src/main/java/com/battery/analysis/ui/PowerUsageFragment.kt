@@ -110,6 +110,9 @@ class PowerUsageFragment : Fragment() {
     /** 上次应用至 CollapsingToolbarLayout 的 scrollFlags 缓存 */
     private var lastAppliedScrollFlags: Int = -1
 
+    /** 当前执行中的数据异步加载协程任务，用于保证单任务并发安全 */
+    private var loadDataJob: kotlinx.coroutines.Job? = null
+
     private val SHIZUKU_POWER_REQUEST_CODE = 2001
 
     /**
@@ -173,9 +176,12 @@ class PowerUsageFragment : Fragment() {
     }
 
     companion object {
+        /** 充电常亮偏好设置键名 */
         private const val PREF_KEY_KEEP_SCREEN_ON = "pref_charging_keep_screen_on"
-        private const val PREF_KEY_ENABLE_BACKGROUND_STATS = "enable_background_stats"
-        private const val PREFS_POWER_STATS = "power_stats_prefs"
+        /** 后台应用耗电统计开关偏好设置键名 */
+        const val PREF_KEY_ENABLE_BACKGROUND_STATS = "enable_background_stats"
+        /** 耗电统计偏好配置文件名称 */
+        const val PREFS_POWER_STATS = "power_stats_prefs"
 
         /** 核心功耗指标卡片行类型：亮屏行 */
         private const val ROW_SCREEN_ON = 0
@@ -543,6 +549,8 @@ class PowerUsageFragment : Fragment() {
         super.onDestroyView()
         stopChargingPolling()
         stopDischargePolling()
+        loadDataJob?.cancel()
+        loadDataJob = null
         activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         try {
             requireContext().unregisterReceiver(powerStateReceiver)
@@ -1494,7 +1502,8 @@ class PowerUsageFragment : Fragment() {
         val statsPrefs = requireContext().getSharedPreferences(PREFS_POWER_STATS, Context.MODE_PRIVATE)
         val isBgStatsEnabled = statsPrefs.getBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, false)
 
-        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+        loadDataJob?.cancel()
+        loadDataJob = viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             if (currentMode == PowerUsageManager.MODE_SHIZUKU && powerManager.isShizukuAuthorized()) {
                 powerManager.grantUsageStatsPermissionViaShizuku()
             }
@@ -1551,7 +1560,11 @@ class PowerUsageFragment : Fragment() {
         val totalEnergyText = snapshot.totalEnergyWh?.takeIf { it > 0f }?.let {
             String.format(Locale.getDefault(), getString(R.string.power_wh_format), it)
         } ?: "--"
-        val energyTooltip = getString(R.string.power_tooltip_energy, energyText, totalEnergyText)
+        val lastUnplugWh = powerManager.getLastUnplugEnergyWh()
+        val unplugEnergyText = lastUnplugWh?.takeIf { it > 0f }?.let {
+            String.format(Locale.getDefault(), getString(R.string.power_wh_format), it)
+        } ?: "--"
+        val energyTooltip = getString(R.string.power_tooltip_energy, energyText, totalEnergyText, unplugEnergyText)
         binding.llEnergyContainer.contentDescription = energyTooltip
         binding.llEnergyContainer.setOnClickListener {
             Toast.makeText(requireContext(), energyTooltip, Toast.LENGTH_SHORT).show()
@@ -1568,19 +1581,27 @@ class PowerUsageFragment : Fragment() {
         val onEnergy = overview.screenOnEnergyWh
         val offEnergy = overview.screenOffEnergyWh
         val totalEnergy = overview.totalEnergyWh
+        val baseUnplugEnergy = lastUnplugWh?.takeIf { it > 0f }
 
-        val onEnergyRatioStr = if (totalEnergy > 0f) {
-            val ratio = (onEnergy / totalEnergy * 100f).coerceIn(0f, 100f)
+        val onEnergyRatioStr = if (baseUnplugEnergy != null) {
+            val ratio = (onEnergy / baseUnplugEnergy * 100f)
             String.format(Locale.getDefault(), "%.1f%%", ratio)
         } else {
-            "0.0%"
+            "--%"
         }
 
-        val offEnergyRatioStr = if (totalEnergy > 0f) {
-            val ratio = (offEnergy / totalEnergy * 100f).coerceIn(0f, 100f)
+        val offEnergyRatioStr = if (baseUnplugEnergy != null) {
+            val ratio = (offEnergy / baseUnplugEnergy * 100f)
             String.format(Locale.getDefault(), "%.1f%%", ratio)
         } else {
-            "0.0%"
+            "--%"
+        }
+
+        val globalEnergyRatioStr = if (baseUnplugEnergy != null) {
+            val ratio = (totalEnergy / baseUnplugEnergy * 100f)
+            String.format(Locale.getDefault(), "%.1f%%", ratio)
+        } else {
+            "--%"
         }
 
         val onDurationMs = if (overview.screenOnDurationMs > 0L) overview.screenOnDurationMs else parseDurationTextToMs(overview.screenOnDurationText)
@@ -1635,7 +1656,7 @@ class PowerUsageFragment : Fragment() {
 
         // 第三行：全局数据
         binding.tvMetricGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
-        binding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", totalEnergy), "100%")
+        binding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", totalEnergy), globalEnergyRatioStr)
         binding.tvMetricGlobalPower.text = avgPowerStr
         binding.tvMetricGlobalRemaining.text = overview.remainingCompositeText
 

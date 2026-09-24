@@ -15,7 +15,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="充电统计与图表说明"
+        android:text="@string/charging_guide_dialog_title"
         android:textColor="?android:attr/textColorPrimary"
         android:textSize="18sp"
         android:textStyle="bold" />
@@ -24,7 +24,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:text="快速了解充电走势、参数指标与息屏效率"
+        android:text="@string/charging_guide_dialog_subtitle"
         android:textColor="?android:attr/textColorSecondary"
         android:textSize="13sp" />
 
@@ -41,7 +41,7 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- 卡片 1: 充电三合一走势曲线 -->
+            <!-- 卡片 1: 充电多维走势图表 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -53,7 +53,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="📈 充电多维走势图表"
+                    android:text="@string/charging_guide_chart_title"
                     android:textColor="#2196F3"
                     android:textSize="14sp"
                     android:textStyle="bold" />
@@ -63,21 +63,87 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:lineSpacingExtra="3dp"
-                    android:text="实时绘制充电期间的电量、实时功率与电池温度三条核心曲线。时间轴横坐标固定从连接充电器起始点延伸至当前时刻，支持动态缩放与自适应网格刻度。"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="13sp" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:lineSpacingExtra="3dp"
-                    android:text="• 蓝色曲线：电池剩余电量百分比 (%)\n• 橙黄色曲线：实时充电功率 (W)\n• 红色曲线：电池当前温度 (℃)"
+                    android:text="@string/charging_guide_chart_summary"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="12.5sp" />
+
+                <!-- 条目 1: 功率曲线 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/charging_guide_curve_power"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 2: 电量曲线 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/charging_guide_curve_level"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 3: 温度曲线 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/charging_guide_curve_temp"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
             </LinearLayout>
 
-            <!-- 卡片 2: 充电总览与关键指标 -->
+            <!-- 卡片 2: 充电总览关键指标 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -90,19 +156,110 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="⚡ 充电总览与关键指标"
+                    android:text="@string/charging_guide_overview_title"
                     android:textColor="@color/nav_item_selected"
                     android:textSize="14sp"
                     android:textStyle="bold" />
 
-                <TextView
+                <!-- 条目 1: 充入能量 -->
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:lineSpacingExtra="4dp"
-                    android:text="• 充入能量 (Wh)：根据充电积分算法计算实际充入电芯的有效能量。\n• 峰值功率 (W)：记录充电阶段达到的最大瞬时充电功率。\n• 平均功率 (W)：充电全程的平均充入功率，直观反映快充协议握手效率。\n• 最高温度 (℃)：充电过程中电池达到的最高温升点。"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="13sp" />
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/charging_guide_metric_energy"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 2: 峰值功率 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/charging_guide_metric_peak"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 3: 平均功率 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/charging_guide_metric_avg"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 4: 最高温度 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/charging_guide_metric_temp"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
             </LinearLayout>
 
             <!-- 卡片 3: 息屏快充细分统计 -->
@@ -118,7 +275,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="🌙 息屏快充细分统计"
+                    android:text="@string/charging_guide_screen_off_title"
                     android:textColor="#818CF8"
                     android:textSize="14sp"
                     android:textStyle="bold" />
@@ -128,9 +285,9 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:lineSpacingExtra="3dp"
-                    android:text="智能区分亮屏与息屏状态。在息屏状态下手机温升较低且后台干扰少，快充握手功率更高。统计中独立记录息屏充电时长、息屏充入电量及能量占比，帮助您掌握息屏快充效率。"
+                    android:text="@string/charging_guide_screen_off_summary"
                     android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="13sp" />
+                    android:textSize="12.5sp" />
             </LinearLayout>
 
             <!-- 卡片 4: 采样模式与自动归档 -->
@@ -146,19 +303,60 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="💾 采样模式与自动归档"
+                    android:text="@string/charging_guide_archive_title"
                     android:textColor="#10B981"
                     android:textSize="14sp"
                     android:textStyle="bold" />
 
-                <TextView
+                <!-- 条目 1: 智能双模 -->
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:lineSpacingExtra="4dp"
-                    android:text="• 智能双模：插上电源自动进入充电监测，拔出电源自动生成充电历史记录并切回耗电统计。\n• 常亮选项：支持设置充电时屏幕常亮，方便实时观察快充曲线走势。"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="13sp" />
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/charging_guide_archive_mode"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <!-- 条目 2: 常亮选项 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:text="•"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:lineSpacingExtra="2dp"
+                        android:text="@string/charging_guide_archive_screen"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
             </LinearLayout>
 
         </LinearLayout>

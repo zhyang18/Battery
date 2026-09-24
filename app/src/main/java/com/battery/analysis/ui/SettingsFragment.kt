@@ -106,6 +106,7 @@ class SettingsFragment : Fragment() {
         setupChargeDischargeStatsSettings()
         setupChargingKeepScreenOnSettings()
         setupPowerModeSettings()
+        setupCurrentCalibrationSettings()
         setupShizukuSettings()
         setupKeepAliveSettings()
         setupBackupRestoreSettings()
@@ -160,6 +161,7 @@ class SettingsFragment : Fragment() {
         (activity as? MainActivity)?.updateShizukuStatusState()
         val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(requireContext())
         updatePowerModeDisplay(powerManager.getSelectedMode())
+        updateCurrentCalibrationDisplay()
 
         val isStatsEnabled = com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(requireContext())
         if (binding.switchChargeDischargeStats.isChecked != isStatsEnabled) {
@@ -278,6 +280,166 @@ class SettingsFragment : Fragment() {
         } else {
             getString(R.string.power_mode_normal)
         }
+    }
+
+    /**
+     * 初始化硬件电流校准设置项交互逻辑。
+     * 绑定条目点击事件并弹出现代化电流校准弹窗，支持倍率配置（1.0x / 2.0x / 0.5x）、极性反转及库仑计差分推算。
+     */
+    private fun setupCurrentCalibrationSettings() {
+        updateCurrentCalibrationDisplay()
+        binding.layoutCurrentCalibrationSetting.setOnClickListener {
+            showCurrentCalibrationDialog()
+        }
+    }
+
+    /**
+     * 刷新电流校准条目的摘要文本显示（如 "1x"、"10x · 双电芯"、"-1x · 双电芯 (反转)"）。
+     */
+    private fun updateCurrentCalibrationDisplay() {
+        val ctx = context ?: return
+        val mult = com.battery.analysis.manager.CurrentCalibrationManager.getMultiplier(ctx)
+        val isDual = com.battery.analysis.manager.CurrentCalibrationManager.isDualCellEnabled(ctx)
+        val invert = com.battery.analysis.manager.CurrentCalibrationManager.isInvertPolarity(ctx)
+        val text = buildString {
+            val formattedMult = if (mult % 1f == 0f) "${mult.toInt()}x" else "${mult}x"
+            append(formattedMult)
+            if (isDual) {
+                append(" · ").append(getString(R.string.current_calibration_dual_cell_badge))
+            }
+            if (invert) {
+                append(" (").append(getString(R.string.current_calibration_invert_badge)).append(")")
+            }
+        }
+        binding.tvCurrentCalibrationSummary.text = text
+    }
+
+    /**
+     * 弹出硬件电流校准对话框，支持 10 的倍数倍率档位、独立开启双电芯开关及实时瞬时采样动态预览计算。
+     */
+    private fun showCurrentCalibrationDialog() {
+        val ctx = context ?: return
+        val dialogView = layoutInflater.inflate(R.layout.dialog_current_calibration, null)
+
+        val tvRawCurrent = dialogView.findViewById<TextView>(R.id.tv_raw_current)
+        val tvCalibratedCurrent = dialogView.findViewById<TextView>(R.id.tv_calibrated_current)
+
+        // 8 个 10 的倍数倍率单选胶囊按钮
+        val rbPos1 = dialogView.findViewById<RadioButton>(R.id.rb_mult_pos_1)
+        val rbPos10 = dialogView.findViewById<RadioButton>(R.id.rb_mult_pos_10)
+        val rbPos100 = dialogView.findViewById<RadioButton>(R.id.rb_mult_pos_100)
+        val rbPos1000 = dialogView.findViewById<RadioButton>(R.id.rb_mult_pos_1000)
+        val rbNeg1 = dialogView.findViewById<RadioButton>(R.id.rb_mult_neg_1)
+        val rbNeg10 = dialogView.findViewById<RadioButton>(R.id.rb_mult_neg_10)
+        val rbNeg100 = dialogView.findViewById<RadioButton>(R.id.rb_mult_neg_100)
+        val rbNeg1000 = dialogView.findViewById<RadioButton>(R.id.rb_mult_neg_1000)
+
+        // 开关组件
+        val switchDualCell = dialogView.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.switch_dual_cell)
+        val switchInvert = dialogView.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.switch_invert_polarity)
+        val switchCoulomb = dialogView.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.switch_coulomb_fallback)
+
+        // 底部确认与取消按钮
+        val btnCancel = dialogView.findViewById<TextView>(R.id.btn_cancel)
+        val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_confirm)
+
+        val multiplierMap = listOf(
+            rbPos1 to 1f,
+            rbPos10 to 10f,
+            rbPos100 to 100f,
+            rbPos1000 to 1000f,
+            rbNeg1 to -1f,
+            rbNeg10 to -10f,
+            rbNeg100 to -100f,
+            rbNeg1000 to -1000f
+        )
+
+        var selectedMult = com.battery.analysis.manager.CurrentCalibrationManager.getMultiplier(ctx)
+        var matched = false
+        multiplierMap.forEach { (rb, value) ->
+            val isMatch = (value == selectedMult)
+            rb.isChecked = isMatch
+            if (isMatch) matched = true
+        }
+        if (!matched) {
+            rbPos1.isChecked = true
+            selectedMult = 1f
+        }
+
+        switchDualCell.isChecked = com.battery.analysis.manager.CurrentCalibrationManager.isDualCellEnabled(ctx)
+        switchInvert.isChecked = com.battery.analysis.manager.CurrentCalibrationManager.isInvertPolarity(ctx)
+        switchCoulomb.isChecked = com.battery.analysis.manager.CurrentCalibrationManager.isCoulombFallbackEnabled(ctx)
+
+        var cachedRawCurrentMa = 0.0f
+
+        /**
+         * 根据当前选中的倍率与双电芯开关状态，动态刷新弹窗内的采样与校准电流文本。
+         */
+        fun updatePreview() {
+            val dualFactor = if (switchDualCell.isChecked) 2.0f else 1.0f
+            val calibratedMa = Math.abs(cachedRawCurrentMa * selectedMult * dualFactor)
+            tvRawCurrent.text = String.format(java.util.Locale.getDefault(), "%.1f mA", Math.abs(cachedRawCurrentMa))
+            tvCalibratedCurrent.text = String.format(java.util.Locale.getDefault(), "%.1f mA", calibratedMa)
+        }
+
+        // 单选互斥逻辑与即时刷新预览
+        multiplierMap.forEach { (rb, value) ->
+            rb.setOnClickListener {
+                selectedMult = value
+                multiplierMap.forEach { (otherRb, otherVal) ->
+                    otherRb.isChecked = (otherVal == value)
+                }
+                updatePreview()
+            }
+        }
+
+        // 切换双电芯开关时即时联动计算刷新预览
+        switchDualCell.setOnCheckedChangeListener { _, _ ->
+            updatePreview()
+        }
+
+        // 异步读取底层硬件真实电流并更新界面预览
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            val sample = com.battery.analysis.util.SysfsBatterySampler.sampleHardwareBattery(
+                context = ctx,
+                isCharging = false,
+                allowProcessFork = false
+            )
+            withContext(Dispatchers.Main) {
+                if (sample != null) {
+                    val initialMult = com.battery.analysis.manager.CurrentCalibrationManager.getMultiplier(ctx)
+                    val initialDual = if (com.battery.analysis.manager.CurrentCalibrationManager.isDualCellEnabled(ctx)) 2.0f else 1.0f
+                    val initialFactor = Math.abs(initialMult) * initialDual
+                    cachedRawCurrentMa = if (initialFactor > 0f) sample.currentMa / initialFactor else sample.currentMa
+                } else {
+                    cachedRawCurrentMa = 0f
+                }
+                updatePreview()
+            }
+        }
+
+        val dialog = AlertDialog.Builder(ctx)
+            .setView(dialogView)
+            .create()
+
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        btnCancel.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        btnConfirm.setOnClickListener {
+            com.battery.analysis.manager.CurrentCalibrationManager.setMultiplier(ctx, selectedMult)
+            com.battery.analysis.manager.CurrentCalibrationManager.setDualCellEnabled(ctx, switchDualCell.isChecked)
+            com.battery.analysis.manager.CurrentCalibrationManager.setInvertPolarity(ctx, switchInvert.isChecked)
+            com.battery.analysis.manager.CurrentCalibrationManager.setCoulombFallbackEnabled(ctx, switchCoulomb.isChecked)
+
+            updateCurrentCalibrationDisplay()
+            dialog.dismiss()
+            Toast.makeText(ctx, getString(R.string.setting_current_calibration) + "已保存", Toast.LENGTH_SHORT).show()
+        }
+
+        dialog.show()
     }
 
 
@@ -773,6 +935,9 @@ class SettingsFragment : Fragment() {
         binding.switchKeepAliveService.setOnCheckedChangeListener { _, isChecked ->
             if (com.battery.analysis.service.BatteryMonitorService.isNotificationDisplayEnabled(requireContext()) != isChecked) {
                 com.battery.analysis.service.BatteryMonitorService.setNotificationDisplayEnabled(requireContext(), isChecked)
+                if (isChecked) {
+                    com.battery.analysis.service.BatteryMonitorService.start(requireContext())
+                }
                 com.battery.analysis.service.BatteryMonitorService.updateNotificationVisibility(requireContext())
             }
         }

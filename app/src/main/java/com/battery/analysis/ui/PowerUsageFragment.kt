@@ -297,24 +297,23 @@ class PowerUsageFragment : Fragment() {
     /**
      * 配置 CoordinatorLayout、AppBarLayout 与 NestedScrollView 原生联动滑动折叠效果。
      * 监听列表滑动方向联动控制 MainActivity 底部页签栏显隐，
-     * 并平滑折叠隐藏顶部耗电统计栏与大指标卡片，在折叠后半程固定吸顶展示功率与时间两行指标；
-     * 展开状态及充电模式下彻底隐藏吸顶卡片容器（View.GONE），确保顶部标题栏所有按钮点击顺畅穿透响应。
+     * 并平滑折叠隐藏顶部标题栏，唯一的核心指标卡片 card_power_metrics 随 AppBarLayout 原生吸顶常驻展示；
+     * 充电模式下完全禁用折叠动效并常驻展开标题栏，确保页面交互与展示流畅顺畅。
      */
     private fun setupCoordinatorScroll() {
-        // 清除外层 AppBarLayout 与 Toolbar 默认背景及 Scrim，确保吸顶卡片外围无多余背景色
+        // 清除外层 AppBarLayout 默认背景及 Scrim，确保吸顶卡片外围无多余背景色
         binding.appbarPower.background = null
         binding.appbarPower.stateListAnimator = null
         binding.collapsingToolbar.background = null
         binding.collapsingToolbar.setContentScrimColor(android.graphics.Color.TRANSPARENT)
         binding.collapsingToolbar.setStatusBarScrimColor(android.graphics.Color.TRANSPARENT)
-        binding.toolbarCollapsed.background = null
 
-        // 1. 顶部 AppBarLayout 偏移联动：标题栏淡出、大指标卡片向上移动滚出屏幕、吸顶 mini 卡片在后半程淡入
+        // 1. 顶部 AppBarLayout 偏移联动：标题栏平滑淡出，核心指标卡片随 AppBarLayout 原生吸顶常驻展示
         binding.appbarPower.addOnOffsetChangedListener { appBarLayout, verticalOffset ->
             val prevOffset = lastAppBarVerticalOffset
             lastAppBarVerticalOffset = verticalOffset
             if (currentDisplayTab == 1) {
-                // 充电模式下完全禁用联动折叠动效，固定常驻完整展开标题栏，隐藏吸顶及放电卡片
+                // 充电模式下完全禁用联动折叠动效，固定常驻完整展开标题栏，隐藏放电核心指标卡片
                 binding.layoutExpandedHeader.alpha = 1f
                 binding.layoutExpandedHeader.visibility = View.VISIBLE
                 binding.layoutTitleBar.alpha = 1f
@@ -322,9 +321,6 @@ class PowerUsageFragment : Fragment() {
                 binding.cardPowerMetrics.translationY = 0f
                 binding.cardPowerMetrics.alpha = 1f
                 binding.cardPowerMetrics.visibility = View.GONE
-                binding.toolbarCollapsed.visibility = View.GONE
-                binding.cardCollapsedMetrics.visibility = View.GONE
-                binding.cardCollapsedMetrics.alpha = 0f
                 return@addOnOffsetChangedListener
             }
 
@@ -345,28 +341,14 @@ class PowerUsageFragment : Fragment() {
                 binding.layoutTitleBar.alpha = titleAlpha
                 binding.layoutTitleBar.visibility = if (titleAlpha > 0f) View.VISIBLE else View.INVISIBLE
 
-                // 2. 大指标卡片：严密贴合下方列表，不使用 translationY 避免产生空白断层；
-                // 全程跟随手势自然向上滚动滚出屏幕，前中程（fraction < 0.75）保持实体不透明（alpha = 1f），仅在折叠尾声吸顶卡片浮现时平滑过渡
+                // 2. 核心指标卡片：唯一的卡片实例常驻吸顶显示，保持完全不透明可见与原位对齐
                 binding.cardPowerMetrics.translationY = 0f
-                val cardAlpha = if (fraction < 0.75f) 1f else ((1f - fraction) / 0.25f).coerceIn(0f, 1f)
-                binding.cardPowerMetrics.alpha = cardAlpha
-                binding.cardPowerMetrics.visibility = if (cardAlpha > 0f) View.VISIBLE else View.INVISIBLE
+                binding.cardPowerMetrics.alpha = 1f
+                binding.cardPowerMetrics.visibility = View.VISIBLE
 
-                // 父容器保持完全可见且不透明
+                // 展开区域容器保持完全可见且不透明
                 binding.layoutExpandedHeader.alpha = 1f
                 binding.layoutExpandedHeader.visibility = View.VISIBLE
-
-                // 3. 折叠吸顶 mini 卡片：在折叠后半程（fraction >= 0.65）平滑淡入吸顶；在前半程及展开时彻底 GONE，杜绝遮挡标题栏按钮点击
-                val isMetricsActive = currentDisplayTab == 0
-                val collapsedAlpha = ((fraction - 0.65f) * 2.85f).coerceIn(0f, 1f)
-                binding.cardCollapsedMetrics.alpha = collapsedAlpha
-                if (collapsedAlpha > 0f && isMetricsActive) {
-                    binding.toolbarCollapsed.visibility = View.VISIBLE
-                    binding.cardCollapsedMetrics.visibility = View.VISIBLE
-                } else {
-                    binding.toolbarCollapsed.visibility = View.GONE
-                    binding.cardCollapsedMetrics.visibility = View.GONE
-                }
             } else {
                 binding.layoutExpandedHeader.alpha = 1f
                 binding.layoutExpandedHeader.visibility = View.VISIBLE
@@ -375,9 +357,6 @@ class PowerUsageFragment : Fragment() {
                 binding.cardPowerMetrics.alpha = 1f
                 binding.cardPowerMetrics.translationY = 0f
                 binding.cardPowerMetrics.visibility = if (currentDisplayTab == 0) View.VISIBLE else View.GONE
-                binding.cardCollapsedMetrics.alpha = 0f
-                binding.cardCollapsedMetrics.visibility = View.GONE
-                binding.toolbarCollapsed.visibility = View.GONE
             }
         }
 
@@ -444,7 +423,6 @@ class PowerUsageFragment : Fragment() {
             binding.layoutFirstTimeSetup.visibility = View.VISIBLE
             binding.layoutPowerContent.visibility = View.GONE
             binding.cardPowerMetrics.visibility = View.GONE
-            binding.cardCollapsedMetrics.visibility = View.GONE
             binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
             updateSetupCardSelection(tempSelectedSetupMode)
         }
@@ -969,14 +947,10 @@ class PowerUsageFragment : Fragment() {
             toggleKeepScreenOn()
         }
 
-        // 核心功耗指标卡片（展开与吸顶各三行：亮屏 / 息屏 / 全局）点击弹出详细数据 Toast
+        // 核心功耗指标卡片（唯一实例常驻吸顶，三行：亮屏 / 息屏 / 全局）点击弹出详细数据 Toast
         binding.layoutMetricScreenOnRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_ON) }
         binding.layoutMetricScreenOffRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_OFF) }
         binding.layoutMetricGlobalRow.setOnClickListener { showMetricRowDetailToast(ROW_GLOBAL) }
-
-        binding.layoutMiniScreenOnRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_ON) }
-        binding.layoutMiniScreenOffRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_OFF) }
-        binding.layoutMiniGlobalRow.setOnClickListener { showMetricRowDetailToast(ROW_GLOBAL) }
     }
 
     /**
@@ -1072,8 +1046,6 @@ class PowerUsageFragment : Fragment() {
             binding.layoutFirstTimeSetup.visibility = View.VISIBLE
             binding.layoutPowerContent.visibility = View.GONE
             binding.cardPowerMetrics.visibility = View.GONE
-            binding.cardCollapsedMetrics.visibility = View.GONE
-            binding.toolbarCollapsed.visibility = View.GONE
             binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
             return
         }
@@ -1089,9 +1061,6 @@ class PowerUsageFragment : Fragment() {
             binding.tvPowerTitle.text = getString(R.string.charging_stats_title)
             binding.layoutPowerContent.visibility = View.GONE
             binding.cardPowerMetrics.visibility = View.GONE
-            binding.cardCollapsedMetrics.visibility = View.GONE
-            binding.cardCollapsedMetrics.alpha = 0f
-            binding.toolbarCollapsed.visibility = View.GONE
             binding.layoutChargingContent.layoutChargingRoot.visibility = View.VISIBLE
 
             // 充电状态下完全禁用联动折叠：展开并锁定 AppBarLayout，恢复底部页签栏常驻展示
@@ -1129,8 +1098,6 @@ class PowerUsageFragment : Fragment() {
             binding.layoutTitleBar.alpha = 1f
             binding.layoutTitleBar.visibility = View.VISIBLE
             binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
-            binding.toolbarCollapsed.visibility = View.GONE
-            binding.cardCollapsedMetrics.visibility = View.GONE
 
             // 耗电模式下联动折叠能力交由 updateScrollLimitForShortList 自适应校准（一屏内完全禁用上滑，超出一屏时启用折叠）
             updateScrollLimitForShortList()
@@ -1283,11 +1250,6 @@ class PowerUsageFragment : Fragment() {
         binding.tvMetricScreenOnPower.text = onPowerStr
         binding.tvMetricGlobalPower.text = avgPowerStr
         binding.tvMetricScreenOffPower.text = offPowerStr
-
-        // 同步刷新折叠吸顶 mini 指标卡片数据
-        binding.tvMiniScreenOnPower.text = onPowerStr
-        binding.tvMiniGlobalPower.text = avgPowerStr
-        binding.tvMiniScreenOffPower.text = offPowerStr
 
         // 2. 刷新应用列表（DiffUtil 会自动平滑更新 AVG 和 Duration 变动的条目）
         adapter.submitList(fullPackage.appList)
@@ -1677,25 +1639,6 @@ class PowerUsageFragment : Fragment() {
         binding.tvMetricGlobalPower.text = avgPowerStr
         binding.tvMetricGlobalRemaining.text = overview.remainingCompositeText
 
-        // 同步刷新折叠吸顶 mini 指标卡片数据（与展开大卡片完全一致的三行指标：亮屏、息屏、全局）
-        // 第一行：亮屏数据
-        binding.tvMiniScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
-        binding.tvMiniScreenOnEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", onEnergy), onEnergyRatioStr)
-        binding.tvMiniScreenOnPower.text = onPowerStr
-        binding.tvMiniScreenOnRemaining.text = overview.remainingScreenOnText
-
-        // 第二行：息屏数据
-        binding.tvMiniScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
-        binding.tvMiniScreenOffEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", offEnergy), offEnergyRatioStr)
-        binding.tvMiniScreenOffPower.text = offPowerStr
-        binding.tvMiniScreenOffRemaining.text = overview.remainingScreenOffText
-
-        // 第三行：全局数据
-        binding.tvMiniGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
-        binding.tvMiniGlobalEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", totalEnergy), "100%")
-        binding.tvMiniGlobalPower.text = avgPowerStr
-        binding.tvMiniGlobalRemaining.text = overview.remainingCompositeText
-
         // 3. 刷新应用场景列表
         adapter.submitList(fullPackage.appList)
 
@@ -1837,8 +1780,9 @@ class PowerUsageFragment : Fragment() {
 
             val targetBottomGapPx = (10 * resources.displayMetrics.density).toInt()
             val headerH = binding.layoutExpandedHeader.height
+            val metricsH = if (binding.cardPowerMetrics.visibility == View.VISIBLE) binding.cardPowerMetrics.height else 0
             val contentH = binding.layoutPowerContent.height
-            val totalContentH = headerH + contentH + targetBottomGapPx
+            val totalContentH = headerH + metricsH + contentH + targetBottomGapPx
 
             val collapsingToolbarParams = binding.collapsingToolbar.layoutParams as? com.google.android.material.appbar.AppBarLayout.LayoutParams ?: return@post
             val targetFlags = if (totalContentH <= coordinatorH) {

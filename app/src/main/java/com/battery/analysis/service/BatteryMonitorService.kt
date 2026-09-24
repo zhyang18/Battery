@@ -171,7 +171,12 @@ class BatteryMonitorService : Service() {
                     // 2. 将内存采样点异步刷盘固化，防止异常退出导致轨迹丢失
                     PowerUsageManager.getInstance(appContext).flushDischargeSamplesToDisk()
 
-                    // 3. 检查息屏待机策略：若为智能省电模式（<=0L），无论是充电还是放电，彻底停止轮询协程，完全释放 CPU 休眠
+                    // 3. 屏幕熄灭瞬间请求一次 Checkpoint，确保刚刚结束的亮屏使用账本及时落盘
+                    if (!cachedIsCharging) {
+                        PowerUsageManager.getInstance(appContext).requestCheckpoint(force = false)
+                    }
+
+                    // 4. 检查息屏待机策略：若为智能省电模式（<=0L），无论是充电还是放电，彻底停止轮询协程，完全释放 CPU 休眠
                     val screenOffInterval = getScreenOffIntervalMs(appContext)
                     if (screenOffInterval <= 0L) {
                         monitorSamplingJob?.cancel()
@@ -205,6 +210,9 @@ class BatteryMonitorService : Service() {
                         }
                     } else {
                         val powerManager = PowerUsageManager.getInstance(appContext)
+
+                        // 检测电量下降，按 5% 步进阈值防抖触发放电 Checkpoint 增量持久化
+                        powerManager.requestCheckpoint(force = false, currentLevel = cachedLevelPercent)
 
                         // 同步记录放电温度点
                         if (tempRaw > 0) {
@@ -243,6 +251,18 @@ class BatteryMonitorService : Service() {
                                 isScreenOn = false
                             )
                         }
+                    }
+                }
+                Intent.ACTION_BATTERY_LOW -> {
+                    // 系统低电量预警：手机即将电量耗尽自动关机，强制触发一次紧急 Checkpoint 存盘
+                    if (!cachedIsCharging) {
+                        PowerUsageManager.getInstance(appContext).requestCheckpoint(force = true, currentLevel = cachedLevelPercent)
+                    }
+                }
+                Intent.ACTION_SHUTDOWN -> {
+                    // 系统关机广播：尽最大可能执行一次 Checkpoint 存盘（保持 RUNNING 状态，绝不标记为 COMPLETED）
+                    if (!cachedIsCharging) {
+                        PowerUsageManager.getInstance(appContext).checkpointDischargeSession(isFinal = false)
                     }
                 }
             }
@@ -311,6 +331,8 @@ class BatteryMonitorService : Service() {
             addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_BATTERY_LOW)
+            addAction(Intent.ACTION_SHUTDOWN)
         }
         registerReceiver(powerReceiver, filter)
 
@@ -352,6 +374,12 @@ class BatteryMonitorService : Service() {
 
         scheduleHeartbeatAlarm(this)
         startMonitorSamplingLoop()
+
+        // 3. 心跳触发时间兜底检查点：若处于放电且已满 15 分钟未持久化，触发一次非阻塞 Checkpoint
+        if (!cachedIsCharging) {
+            PowerUsageManager.getInstance(applicationContext).requestCheckpoint(force = false)
+        }
+
         if (isDisplayEnabled) {
             updateNotification(force = true)
         }

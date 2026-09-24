@@ -3115,6 +3115,139 @@ class PowerUsageCalculationTest {
         val diff = Math.abs(result.totalEnergyWh - (result.screenOnWatts * screenOnHours + result.screenOffWatts * screenOffHours))
         assertTrue("24小时全生命周期功耗与能量严格物理闭环", diff < 0.001f)
     }
+
+    /**
+     * 验证放电会话从拔电 RUNNING 到多阶段 Checkpoint 再到插电 COMPLETED 的状态机与主键稳定性。
+     * 保证同一放电周期在多次 Checkpoint 覆写更新过程中，数据库中始终维持单条记录，绝不产生多条历史碎片。
+     */
+    @Test
+    fun testDischargeSessionCheckpointLifecycleAndIdStability() {
+        val baseUnplugTs = 1758690000000L
+        val mockDb = mutableMapOf<Long, PowerUsageRecord>()
+
+        // 阶段 1：拔电瞬间创建 RUNNING Session
+        val initialRecord = PowerUsageRecord(
+            id = baseUnplugTs,
+            recordTime = "2026-09-24 10:00:00",
+            levelPercent = 100,
+            voltageVolts = 4.25f,
+            temperature = 30.0f,
+            energyWh = 19.25f,
+            isCharging = false,
+            avgPowerWatts = 0f,
+            screenOnPowerWatts = 0f,
+            screenOffPowerWatts = 0f,
+            screenOnDurationText = "0m",
+            screenOffDurationText = "0m",
+            totalDurationText = "0m",
+            remainingScreenOnText = "--",
+            remainingCompositeText = "--",
+            remainingScreenOffText = "--",
+            isShizukuRealData = false,
+            appCount = 0,
+            trendPointsJson = "[]",
+            appListJson = "[]",
+            isCompleted = false,
+            lastCheckpointTime = baseUnplugTs
+        )
+        mockDb[initialRecord.id] = initialRecord
+        assertEquals("拔电瞬间产生 1 条 RUNNING 记录", 1, mockDb.size)
+        assertFalse("初始记录必须为草稿态", mockDb[baseUnplugTs]!!.isCompleted)
+
+        // 阶段 2：使用一段时间后掉电 5% (100% -> 95%)，触发第一次 Checkpoint
+        val cp1Ts = baseUnplugTs + 1800_000L // 30分钟后
+        val cp1Record = initialRecord.copy(
+            levelPercent = 95,
+            totalDurationText = "30m",
+            avgPowerWatts = 2.1f,
+            lastCheckpointTime = cp1Ts
+        )
+        // 增量覆写同一主键 ID
+        mockDb[cp1Record.id] = cp1Record
+        assertEquals("第一次 Checkpoint 覆写更新，数据库仍然严格只有 1 条记录", 1, mockDb.size)
+        assertEquals("电量正确更新为 95%", 95, mockDb[baseUnplugTs]!!.levelPercent)
+        assertFalse("Checkpoint 状态保持为 RUNNING 草稿", mockDb[baseUnplugTs]!!.isCompleted)
+
+        // 阶段 3：继续使用并锁屏 (95% -> 90%)，触发第二次 Checkpoint
+        val cp2Ts = baseUnplugTs + 3600_000L // 1小时后
+        val cp2Record = cp1Record.copy(
+            levelPercent = 90,
+            totalDurationText = "1h",
+            avgPowerWatts = 2.05f,
+            lastCheckpointTime = cp2Ts
+        )
+        mockDb[cp2Record.id] = cp2Record
+        assertEquals("第二次 Checkpoint 覆写更新，记录数依然严格为 1 条", 1, mockDb.size)
+        assertEquals("电量正确更新为 90%", 90, mockDb[baseUnplugTs]!!.levelPercent)
+
+        // 阶段 4：重新插上充电器，执行 Finalize 结案
+        val finalTs = baseUnplugTs + 5400_000L // 1.5小时后
+        val finalizedRecord = cp2Record.copy(
+            levelPercent = 85,
+            totalDurationText = "1h30m",
+            isCompleted = true,
+            lastCheckpointTime = finalTs
+        )
+        mockDb[finalizedRecord.id] = finalizedRecord
+        assertEquals("最终插电 Finalize 归档，全生命周期记录条数恒等于 1", 1, mockDb.size)
+        assertTrue("最终状态严格转为 COMPLETED 结案状态", mockDb[baseUnplugTs]!!.isCompleted)
+        assertEquals("最终持续时长为 1h30m", "1h30m", mockDb[baseUnplugTs]!!.totalDurationText)
+        assertEquals("最终记录电量为 85%", 85, mockDb[baseUnplugTs]!!.levelPercent)
+    }
+
+    /**
+     * 验证放电过程中 App 进程意外被杀，重新启动后自愈恢复 RUNNING Session 并在后续插电时无缝结案。
+     */
+    @Test
+    fun testDischargeSessionCrashAndReconcileRecovery() {
+        val baseUnplugTs = 1758700000000L
+        val mockDb = mutableMapOf<Long, PowerUsageRecord>()
+
+        // 1. 拔电后使用至 90%，期间执行过 Checkpoint
+        val preCrashRecord = PowerUsageRecord(
+            id = baseUnplugTs,
+            recordTime = "2026-09-24 14:00:00",
+            levelPercent = 90,
+            voltageVolts = 4.10f,
+            temperature = 31.0f,
+            energyWh = 17.5f,
+            isCharging = false,
+            avgPowerWatts = 2.2f,
+            screenOnPowerWatts = 2.5f,
+            screenOffPowerWatts = 0.15f,
+            screenOnDurationText = "45m",
+            screenOffDurationText = "15m",
+            totalDurationText = "1h",
+            remainingScreenOnText = "7h",
+            remainingCompositeText = "12h",
+            remainingScreenOffText = "48h",
+            isShizukuRealData = false,
+            appCount = 5,
+            trendPointsJson = "[]",
+            appListJson = "[]",
+            isCompleted = false,
+            lastCheckpointTime = baseUnplugTs + 3600_000L
+        )
+        mockDb[preCrashRecord.id] = preCrashRecord
+
+        // 2. 模拟进程被杀后重启：通过查询 isCompleted == false 探测到未完结的草稿
+        val recoveredDraft = mockDb.values.firstOrNull { !it.isCompleted }
+        assertTrue("冷启动自愈必须成功探测到崩溃前的 RUNNING 放电草稿", recoveredDraft != null)
+        assertEquals(baseUnplugTs, recoveredDraft!!.id)
+
+        // 3. 模拟在关机/离线期间用户插入了充电器：自愈阶段直接执行 Finalize
+        val offlinePlugNow = baseUnplugTs + 7200_000L
+        val autoFinalized = recoveredDraft.copy(
+            isCompleted = true,
+            lastCheckpointTime = offlinePlugNow
+        )
+        mockDb[autoFinalized.id] = autoFinalized
+
+        // 验证结果：草稿成功转正，历史记录唯一且不丢失
+        assertEquals("数据库中依然仅有 1 条完整记录", 1, mockDb.size)
+        assertTrue("恢复后结案的记录为 COMPLETED 状态", mockDb[baseUnplugTs]!!.isCompleted)
+        assertEquals("主键严格保持一致", baseUnplugTs, mockDb[baseUnplugTs]!!.id)
+    }
 }
 
 

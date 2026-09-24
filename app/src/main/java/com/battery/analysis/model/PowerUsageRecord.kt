@@ -33,6 +33,15 @@ import org.json.JSONObject
  * @property appCount 记录中包含的应用数量
  * @property trendPointsJson 放电折线数据点集的 JSON 序列化字符串
  * @property appListJson 应用耗电场景列表的 JSON 序列化字符串
+ * @property backgroundPowerWatts 息屏后台常驻平均放电功耗（单位：瓦特 W）
+ * @property backgroundDurationText 后台常驻服务持续时长文本（如 "2h15m"）
+ * @property remainingBackgroundText 纯后台服务理论续航文本
+ * @property screenOnEnergyWh 亮屏使用总消耗物理能量（单位：瓦时 Wh）
+ * @property totalEnergyWh 放电周期整机总消耗物理能量（单位：瓦时 Wh）
+ * @property screenOffEnergyWh 息屏待机总消耗物理能量（单位：瓦时 Wh）
+ * @property backgroundEnergyWh 后台服务总消耗物理能量（单位：瓦时 Wh）
+ * @property isCompleted 是否已结束放电并正式归档（true 为已完成，false 为进行中 RUNNING 检查点草稿）
+ * @property lastCheckpointTime 最近一次 Checkpoint 检查点增量持久化时间戳（毫秒）
  */
 data class PowerUsageRecord(
     val id: Long = System.currentTimeMillis(),
@@ -61,7 +70,9 @@ data class PowerUsageRecord(
     val screenOnEnergyWh: Float = 0f,
     val totalEnergyWh: Float = 0f,
     val screenOffEnergyWh: Float = 0f,
-    val backgroundEnergyWh: Float = 0f
+    val backgroundEnergyWh: Float = 0f,
+    val isCompleted: Boolean = true,
+    val lastCheckpointTime: Long = 0L
 ) {
 
     /**
@@ -376,13 +387,17 @@ data class PowerUsageRecord(
          *
          * @param fullPackage 包含全量功耗指标、放电走势与应用排行的数据包
          * @param recordTime 格式化后的记录时间字符串
-         * @param id 自定义唯一记录 ID（默认采用当前时间戳）
+         * @param id 自定义唯一记录 ID（默认采用当前时间戳，在放电会话中对齐为拔电起始时间戳）
+         * @param isCompleted 放电会话是否已正式归档结案（true 为已完结，false 为进行中 RUNNING 检查点草稿）
+         * @param lastCheckpointTime 最近一次检查点持久化落盘时间戳毫秒值
          * @return 构建成功的 [PowerUsageRecord] 实例
          */
         fun fromFullPowerPackage(
             fullPackage: FullPowerDataPackage,
             recordTime: String,
-            id: Long = System.currentTimeMillis()
+            id: Long = System.currentTimeMillis(),
+            isCompleted: Boolean = true,
+            lastCheckpointTime: Long = 0L
         ): PowerUsageRecord {
             val snapshot = fullPackage.batterySnapshot
             val overview = fullPackage.overviewStats
@@ -451,7 +466,9 @@ data class PowerUsageRecord(
                 screenOnEnergyWh = overview.screenOnEnergyWh,
                 totalEnergyWh = overview.totalEnergyWh,
                 screenOffEnergyWh = overview.screenOffEnergyWh,
-                backgroundEnergyWh = overview.backgroundEnergyWh
+                backgroundEnergyWh = overview.backgroundEnergyWh,
+                isCompleted = isCompleted,
+                lastCheckpointTime = lastCheckpointTime
             )
         }
     }

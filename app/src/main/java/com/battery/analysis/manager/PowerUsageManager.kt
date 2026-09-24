@@ -89,6 +89,12 @@ class PowerUsageManager private constructor(private val context: Context) {
         /** 连续时序微积分单微元最大有效跨度门限（单位：毫秒，默认 2 分钟，杜绝息屏 Deep Sleep 断层插值放大） */
         const val MAX_INTEGRATION_INTERVAL_MS = 120_000L
 
+        /** 最小 Checkpoint 检查点写入间隔阈值（单位：毫秒，默认 30 秒，避免短时间内连续写盘与硬件能耗开销） */
+        const val MIN_CHECKPOINT_INTERVAL_MS = 30_000L
+
+        /** 自动触发放电 Checkpoint 检查点的电量下降百分比阈值（默认 5%） */
+        const val CHECKPOINT_LEVEL_DROP_THRESHOLD = 5
+
         @Volatile
         private var instance: PowerUsageManager? = null
 
@@ -676,6 +682,25 @@ class PowerUsageManager private constructor(private val context: Context) {
      */
     @Volatile
     private var lastDischargeSaveTimeMs = 0L
+
+    /**
+     * 当前正在进行的放电会话唯一标识 ID（对齐拔电时刻时间戳毫秒值）。
+     * 为 0L 表示当前不在放电状态或会话未初始化。
+     */
+    @Volatile
+    private var currentDischargeSessionId: Long = 0L
+
+    /**
+     * 上一次成功执行放电 Checkpoint 检查点落盘的时间戳（毫秒）。
+     */
+    @Volatile
+    private var lastDischargeCheckpointTime: Long = 0L
+
+    /**
+     * 上一次成功执行放电 Checkpoint 检查点落盘时的电池电量百分比。
+     */
+    @Volatile
+    private var lastDischargeCheckpointLevel: Int = -1
 
     /**
      * 游戏应用包名内存缓存，避免高频重复调用 PackageManager 进行 IPC Binder 查询。
@@ -1335,6 +1360,119 @@ class PowerUsageManager private constructor(private val context: Context) {
         if (isShizukuAuthorized()) {
             shizukuParser.resetBatteryStats()
         }
+
+        // 开启全新的 RUNNING 放电会话并立即完成首个检查点持久化入库
+        startDischargeSession(now, unplugLevel)
+    }
+
+    /**
+     * 开启全新的放电会话并建立 RUNNING 状态的快照，立即执行首次检查点持久化。
+     *
+     * @param unplugTime 拔掉充电器时刻的时间戳毫秒值
+     * @param unplugLevel 拔掉充电器时刻的初始电量百分比
+     */
+    @Synchronized
+    fun startDischargeSession(unplugTime: Long, unplugLevel: Int) {
+        currentDischargeSessionId = unplugTime
+        lastDischargeCheckpointTime = unplugTime
+        lastDischargeCheckpointLevel = unplugLevel
+        prefs.edit()
+            .putLong("pref_current_discharge_session_id", unplugTime)
+            .putInt("pref_last_discharge_checkpoint_level", unplugLevel)
+            .putLong("pref_last_discharge_checkpoint_time", unplugTime)
+            .apply()
+
+        // 异步写入首次 RUNNING 状态快照
+        diskIoExecutor.execute {
+            checkpointDischargeSession(isFinal = false)
+        }
+    }
+
+    /**
+     * 将当前内存中的放电统计数据增量持久化到当前放电 Session。
+     * 保持原地更新同一条记录（以拔电时间戳为唯一 ID），杜绝产生历史碎片。
+     *
+     * @param isFinal 是否为插电时的最终结案归档（true 为 COMPLETED，false 为 RUNNING 草稿）
+     * @return 成功持久化的 [PowerUsageRecord] 实例，若无有效会话或计算异常返回 null
+     */
+    @Synchronized
+    fun checkpointDischargeSession(isFinal: Boolean = false): PowerUsageRecord? {
+        var sessionId = currentDischargeSessionId
+        if (sessionId <= 0L) {
+            sessionId = getLastUnplugTime()
+            if (sessionId <= 0L) return null
+            currentDischargeSessionId = sessionId
+        }
+
+        val now = System.currentTimeMillis()
+        val currentLevel = getCurrentBatteryStatus().levelPercent
+
+        return try {
+            val timeStr = dateFormatter.get()!!.format(Date(now))
+            val currentMode = getSelectedMode()
+            val fullPackage = loadPowerData(currentMode)
+            val powerRecord = PowerUsageRecord.fromFullPowerPackage(
+                fullPackage = fullPackage,
+                recordTime = timeStr,
+                id = sessionId,
+                isCompleted = isFinal,
+                lastCheckpointTime = now
+            )
+            val powerDbHelper = PowerUsageDbHelper.getInstance(context)
+            powerDbHelper.insertRecord(powerRecord)
+
+            lastDischargeCheckpointTime = now
+            if (currentLevel > 0) {
+                lastDischargeCheckpointLevel = currentLevel
+            }
+            prefs.edit()
+                .putLong("pref_last_discharge_checkpoint_time", now)
+                .putInt("pref_last_discharge_checkpoint_level", lastDischargeCheckpointLevel)
+                .apply()
+
+            powerRecord
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /**
+     * 请求执行一次放电 Checkpoint 检查点增量持久化（具备严格防抖节流守卫）。
+     *
+     * @param force 是否强制跳过 30 秒最小写入间隔检查（如拔电初始、灭屏重要节点或关机广播为 true）
+     * @param currentLevel 当前最新的电量百分比（若传入则同时校验 5% 掉电阈值）
+     */
+    fun requestCheckpoint(force: Boolean = false, currentLevel: Int? = null) {
+        val sessionId = if (currentDischargeSessionId > 0L) currentDischargeSessionId else getLastUnplugTime()
+        if (sessionId <= 0L) return
+
+        val batteryStatus = getCurrentBatteryStatus()
+        // 若当前实际在充电，不执行放电会话的普通增量检查点
+        if (batteryStatus.isCharging) return
+
+        val now = System.currentTimeMillis()
+        val level = currentLevel ?: batteryStatus.levelPercent
+
+        // 1. 若非强制触发，检查 30 秒最小时间防抖窗口
+        if (!force && (now - lastDischargeCheckpointTime) < MIN_CHECKPOINT_INTERVAL_MS) {
+            return
+        }
+
+        // 2. 若传入了电量，检查是否达到 5% 掉电阈值（仅在非强制模式下检查）
+        if (!force && lastDischargeCheckpointLevel > 0 && level > 0) {
+            val drop = lastDischargeCheckpointLevel - level
+            val timeElapsed = now - lastDischargeCheckpointTime
+            // 既未掉电达到 5%，时间也未满 15 分钟（900_000L），跳过写入
+            if (drop < CHECKPOINT_LEVEL_DROP_THRESHOLD && timeElapsed < 15 * 60_000L) {
+                return
+            }
+        }
+
+        // 3. 提交至单线程后台 I/O 线程池异步执行，绝不阻塞主线程
+        diskIoExecutor.execute {
+            checkpointDischargeSession(isFinal = false)
+        }
     }
 
     /**
@@ -1345,7 +1483,7 @@ class PowerUsageManager private constructor(private val context: Context) {
      */
     @Synchronized
     fun onPowerConnected(timestamp: Long = System.currentTimeMillis()): PowerUsageRecord? {
-        // 1. 归档上一个放电周期的耗电账本快照
+        // 1. 归档上一个放电周期的耗电账本快照（将 RUNNING 更新为 COMPLETED）
         val record = archiveDischargeSession(timestamp)
 
         // 2. 彻底重置放电采样点与屏幕/应用使用基准快照，确保充电期间不污染旧放电账本
@@ -1355,41 +1493,45 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 结算并归档当前放电周期的完整耗电账本快照入库。
-     * 具备线程互斥（@Synchronized）与放电时间戳幂等防重守卫，杜绝 Service 与 Receiver 并发广播导致重复入库。
+     * 结算并最终归档当前放电周期的完整耗电账本快照（Finalize 入库）。
+     * 将 RUNNING 状态更新为 COMPLETED 状态，同时具备无效短时插拔清理与幂等防重守卫。
      *
      * @param now 触发插电或结算时刻的时间戳毫秒值
-     * @return 成功归档的 [PowerUsageRecord] 快照实体，若周期不足30秒或已归档过则返回 null
+     * @return 成功归档的 [PowerUsageRecord] 快照实体，若周期不足 30 秒或已归档过则返回 null
      */
     @Synchronized
     fun archiveDischargeSession(now: Long = System.currentTimeMillis()): PowerUsageRecord? {
         val lastUnplugTime = getLastUnplugTime()
+        val sessionId = if (currentDischargeSessionId > 0L) currentDischargeSessionId else lastUnplugTime
+
+        // 1. 无效短时拔插防护：若拔电时长不足 30 秒，清除可能已建立的草稿，杜绝碎片垃圾数据
         if (lastUnplugTime <= 0L || (now - lastUnplugTime) <= 30000L) {
+            if (sessionId > 0L) {
+                try {
+                    PowerUsageDbHelper.getInstance(context).deleteRecord(sessionId)
+                } catch (_: Exception) {}
+            }
+            currentDischargeSessionId = 0L
             return null
         }
-        // 关键幂等防重：同一拔电周期的放电账本只允许归档一次
+
+        // 2. 关键幂等防重：同一拔电周期的放电账本只允许归档一次
         if (lastArchivedUnplugTime == lastUnplugTime) {
             return null
         }
 
-        return try {
-            val timeStr = dateFormatter.get()!!.format(Date(now))
-            val currentMode = getSelectedMode()
-            val fullPackage = loadPowerData(currentMode)
-            val powerRecord = PowerUsageRecord.fromFullPowerPackage(
-                fullPackage = fullPackage,
-                recordTime = timeStr,
-                id = now
-            )
-            val powerDbHelper = PowerUsageDbHelper.getInstance(context)
-            powerDbHelper.insertRecord(powerRecord)
+        // 3. 执行最终 Checkpoint 并置为 COMPLETED 完结状态
+        currentDischargeSessionId = lastUnplugTime
+        val finalizedRecord = checkpointDischargeSession(isFinal = true)
+        if (finalizedRecord != null) {
             lastArchivedUnplugTime = lastUnplugTime
-            prefs.edit().putLong("pref_last_archived_unplug_time", lastUnplugTime).apply()
-            powerRecord
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
+            currentDischargeSessionId = 0L
+            prefs.edit()
+                .putLong("pref_last_archived_unplug_time", lastUnplugTime)
+                .putLong("pref_current_discharge_session_id", 0L)
+                .apply()
         }
+        return finalizedRecord
     }
 
     /**
@@ -1410,6 +1552,36 @@ class PowerUsageManager private constructor(private val context: Context) {
         val lastUnplugLevel = getLastUnplugLevel()
         val now = System.currentTimeMillis()
         var reconciled = false
+
+        // 优先检查并自愈本地是否存在未完结的 RUNNING 放电草稿会话
+        val dbHelper = PowerUsageDbHelper.getInstance(context)
+        val runningSession = dbHelper.getRunningDischargeRecord()
+        if (runningSession != null) {
+            if (isCharging) {
+                // 场景 B：离线/关机期间发生了插电，将上一未完成的放电草稿执行 Finalize 完结
+                dbHelper.insertRecord(
+                    runningSession.copy(
+                        isCompleted = true,
+                        lastCheckpointTime = now
+                    )
+                )
+                currentDischargeSessionId = 0L
+                lastArchivedUnplugTime = runningSession.id
+                prefs.edit()
+                    .putLong("pref_last_archived_unplug_time", runningSession.id)
+                    .putLong("pref_current_discharge_session_id", 0L)
+                    .apply()
+                reconciled = true
+            } else {
+                // 场景 A：当前仍处于放电中，恢复进行中放电会话的上下文
+                currentDischargeSessionId = runningSession.id
+                if (lastUnplugTime <= 0L) {
+                    prefs.edit()
+                        .putLong(PREF_KEY_LAST_UNPLUG_TIME, runningSession.id)
+                        .apply()
+                }
+            }
+        }
 
         if (!isCharging) {
             // 异常场景：离线期间充过电，导致当前电量高于上次记录的拔电电量

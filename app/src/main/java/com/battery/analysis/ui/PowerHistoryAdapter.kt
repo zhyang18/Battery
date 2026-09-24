@@ -170,8 +170,9 @@ class PowerHistoryAdapter(
          * @param record 待展示的耗电记录实体对象
          */
         fun bind(record: PowerUsageRecord) {
-            // 1. 左上：起止时间范围（增加结束时间显示，如 "2026/09/07 12:26 ~ 13:12"）
-            binding.tvHistoryTime.text = record.getFormattedTimeRange()
+            // 1. 左上：起止时间范围（若处于进行中放电草稿状态，展示进行中前缀）
+            val baseTimeRange = record.getFormattedTimeRange()
+            binding.tvHistoryTime.text = if (!record.isCompleted) "⚡ [放电中] $baseTimeRange" else baseTimeRange
 
             // 2. 右上：功耗数值（如 "2.48 W"）
             binding.tvHistoryPowerValue.text = String.format(
@@ -181,7 +182,8 @@ class PowerHistoryAdapter(
             )
 
             // 3. 左下：时长与电量变化区间（如 "46m · 76%~69%(-7%)"）
-            binding.tvHistorySubInfo.text = record.getFormattedDurationAndLevel()
+            val baseSubInfo = record.getFormattedDurationAndLevel()
+            binding.tvHistorySubInfo.text = if (!record.isCompleted) "$baseSubInfo · 进行中" else baseSubInfo
 
             // 4. 右下：亮屏时间数值（与右上角平均功耗值保持相同的大字粗体样式，如 "1h55m"）
             binding.tvHistoryScreenOnTime.text = record.getDisplayScreenOnDuration()

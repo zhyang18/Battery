@@ -49,7 +49,9 @@ class PowerUsageDbHelper private constructor(context: Context) :
                 $COL_SCREEN_ON_ENERGY_WH REAL DEFAULT 0,
                 $COL_TOTAL_ENERGY_WH REAL DEFAULT 0,
                 $COL_SCREEN_OFF_ENERGY_WH REAL DEFAULT 0,
-                $COL_BACKGROUND_ENERGY_WH REAL DEFAULT 0
+                $COL_BACKGROUND_ENERGY_WH REAL DEFAULT 0,
+                $COL_IS_COMPLETED INTEGER NOT NULL DEFAULT 1,
+                $COL_LAST_CHECKPOINT_TIME INTEGER DEFAULT 0
             )
         """.trimIndent()
         db.execSQL(createSql)
@@ -75,49 +77,43 @@ class PowerUsageDbHelper private constructor(context: Context) :
                 db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_BACKGROUND_ENERGY_WH REAL DEFAULT 0")
             } catch (_: Exception) {}
         }
+        if (oldVersion < 3) {
+            try {
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_IS_COMPLETED INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_LAST_CHECKPOINT_TIME INTEGER DEFAULT 0")
+            } catch (_: Exception) {}
+        }
     }
 
     /**
-     * 插入一条新的耗电历史记录。
-     * 具备防重检测机制：若数据库中已存在时间极相近（< 30 秒）且电量、总时长相同的记录，
-     * 自动更新覆写已有记录，避免并发归档生成重复数据。
+     * 检查数据库中是否存在指定主键 ID 的记录。
+     *
+     * @param db SQLite 数据库实例
+     * @param id 目标记录 ID
+     * @return 若存在返回 true，否则返回 false
+     */
+    fun checkRecordExistsById(db: SQLiteDatabase, id: Long): Boolean {
+        if (id <= 0L) return false
+        val cursor = db.rawQuery("SELECT 1 FROM $TABLE_NAME WHERE $COL_ID = ? LIMIT 1", arrayOf(id.toString()))
+        return cursor.use { it.moveToFirst() }
+    }
+
+    /**
+     * 插入一条新的耗电历史记录或增量更新已有会话草稿。
+     * 具备精确主键匹配与防重检测机制：
+     * 1. 优先匹配自身 Session ID，若已存在直接覆写更新（支持放电会话的增量 Checkpoint 原地更新，不产生历史碎片）；
+     * 2. 若自身 ID 未入库，则检测是否存在时间极相近（< 30 秒）且电量、总时长相同的相近记录并覆写；
+     * 3. 否则作为全新记录插入。
      *
      * @param record 待持久化的耗电历史实体对象
      * @return 插入或更新成功返回行 ID，失败返回 -1
      */
     fun insertRecord(record: PowerUsageRecord): Long {
         val db = writableDatabase
-        val existingId = findDuplicateRecordId(db, record)
+        val existsById = checkRecordExistsById(db, record.id)
+        val existingId = if (existsById) record.id else findDuplicateRecordId(db, record)
 
-        val values = ContentValues().apply {
-            put(COL_ID, if (existingId != null && existingId > 0L) existingId else record.id)
-            put(COL_RECORD_TIME, record.recordTime)
-            put(COL_LEVEL_PERCENT, record.levelPercent)
-            put(COL_VOLTAGE_VOLTS, record.voltageVolts)
-            put(COL_TEMPERATURE, record.temperature)
-            put(COL_ENERGY_WH, record.energyWh)
-            put(COL_IS_CHARGING, if (record.isCharging) 1 else 0)
-            put(COL_AVG_POWER_WATTS, record.avgPowerWatts)
-            put(COL_SCREEN_ON_POWER_WATTS, record.screenOnPowerWatts)
-            put(COL_SCREEN_OFF_POWER_WATTS, record.screenOffPowerWatts)
-            put(COL_SCREEN_ON_DURATION, record.screenOnDurationText)
-            put(COL_SCREEN_OFF_DURATION, record.screenOffDurationText)
-            put(COL_TOTAL_DURATION, record.totalDurationText)
-            put(COL_REM_SCREEN_ON, record.remainingScreenOnText)
-            put(COL_REM_COMPOSITE, record.remainingCompositeText)
-            put(COL_REM_SCREEN_OFF, record.remainingScreenOffText)
-            put(COL_IS_SHIZUKU_REAL_DATA, if (record.isShizukuRealData) 1 else 0)
-            put(COL_APP_COUNT, record.appCount)
-            put(COL_TREND_POINTS_JSON, record.trendPointsJson)
-            put(COL_APP_LIST_JSON, record.appListJson)
-            put(COL_BACKGROUND_POWER_WATTS, record.backgroundPowerWatts)
-            put(COL_BACKGROUND_DURATION, record.backgroundDurationText)
-            put(COL_REM_BACKGROUND, record.remainingBackgroundText)
-            put(COL_SCREEN_ON_ENERGY_WH, record.screenOnEnergyWh)
-            put(COL_TOTAL_ENERGY_WH, record.totalEnergyWh)
-            put(COL_SCREEN_OFF_ENERGY_WH, record.screenOffEnergyWh)
-            put(COL_BACKGROUND_ENERGY_WH, record.backgroundEnergyWh)
-        }
+        val values = buildContentValues(record, existingId)
 
         return if (existingId != null && existingId > 0L) {
             val updated = db.update(TABLE_NAME, values, "$COL_ID = ?", arrayOf(existingId.toString()))
@@ -163,6 +159,8 @@ class PowerUsageDbHelper private constructor(context: Context) :
             put(COL_TOTAL_ENERGY_WH, record.totalEnergyWh)
             put(COL_SCREEN_OFF_ENERGY_WH, record.screenOffEnergyWh)
             put(COL_BACKGROUND_ENERGY_WH, record.backgroundEnergyWh)
+            put(COL_IS_COMPLETED, if (record.isCompleted) 1 else 0)
+            put(COL_LAST_CHECKPOINT_TIME, record.lastCheckpointTime)
         }
     }
 
@@ -350,70 +348,137 @@ class PowerUsageDbHelper private constructor(context: Context) :
         )
         cursor.use { c ->
             if (c.moveToFirst()) {
-                val idxId = c.getColumnIndexOrThrow(COL_ID)
-                val idxTime = c.getColumnIndexOrThrow(COL_RECORD_TIME)
-                val idxLvl = c.getColumnIndexOrThrow(COL_LEVEL_PERCENT)
-                val idxVolt = c.getColumnIndexOrThrow(COL_VOLTAGE_VOLTS)
-                val idxTemp = c.getColumnIndexOrThrow(COL_TEMPERATURE)
-                val idxWh = c.getColumnIndexOrThrow(COL_ENERGY_WH)
-                val idxChg = c.getColumnIndexOrThrow(COL_IS_CHARGING)
-                val idxAvgPwr = c.getColumnIndexOrThrow(COL_AVG_POWER_WATTS)
-                val idxOnPwr = c.getColumnIndexOrThrow(COL_SCREEN_ON_POWER_WATTS)
-                val idxOffPwr = c.getColumnIndexOrThrow(COL_SCREEN_OFF_POWER_WATTS)
-                val idxOnDur = c.getColumnIndexOrThrow(COL_SCREEN_ON_DURATION)
-                val idxOffDur = c.getColumnIndexOrThrow(COL_SCREEN_OFF_DURATION)
-                val idxTotDur = c.getColumnIndexOrThrow(COL_TOTAL_DURATION)
-                val idxRemOn = c.getColumnIndexOrThrow(COL_REM_SCREEN_ON)
-                val idxRemComp = c.getColumnIndexOrThrow(COL_REM_COMPOSITE)
-                val idxRemOff = c.getColumnIndexOrThrow(COL_REM_SCREEN_OFF)
-                val idxShizuku = c.getColumnIndexOrThrow(COL_IS_SHIZUKU_REAL_DATA)
-                val idxAppCnt = c.getColumnIndexOrThrow(COL_APP_COUNT)
-                val idxPts = c.getColumnIndexOrThrow(COL_TREND_POINTS_JSON)
-                val idxApps = c.getColumnIndexOrThrow(COL_APP_LIST_JSON)
-                val idxBgPwr = c.getColumnIndex(COL_BACKGROUND_POWER_WATTS)
-                val idxBgDur = c.getColumnIndex(COL_BACKGROUND_DURATION)
-                val idxRemBg = c.getColumnIndex(COL_REM_BACKGROUND)
-                val idxOnWh = c.getColumnIndex(COL_SCREEN_ON_ENERGY_WH)
-                val idxTotWh = c.getColumnIndex(COL_TOTAL_ENERGY_WH)
-                val idxOffWh = c.getColumnIndex(COL_SCREEN_OFF_ENERGY_WH)
-                val idxBgWh = c.getColumnIndex(COL_BACKGROUND_ENERGY_WH)
-
                 do {
-                    list.add(
-                        PowerUsageRecord(
-                            id = c.getLong(idxId),
-                            recordTime = c.getString(idxTime),
-                            levelPercent = c.getInt(idxLvl),
-                            voltageVolts = c.getFloat(idxVolt),
-                            temperature = c.getFloat(idxTemp),
-                            energyWh = c.getFloat(idxWh),
-                            isCharging = c.getInt(idxChg) == 1,
-                            avgPowerWatts = c.getFloat(idxAvgPwr),
-                            screenOnPowerWatts = c.getFloat(idxOnPwr),
-                            screenOffPowerWatts = c.getFloat(idxOffPwr),
-                            screenOnDurationText = c.getString(idxOnDur) ?: "",
-                            screenOffDurationText = c.getString(idxOffDur) ?: "",
-                            totalDurationText = c.getString(idxTotDur) ?: "",
-                            remainingScreenOnText = c.getString(idxRemOn) ?: "",
-                            remainingCompositeText = c.getString(idxRemComp) ?: "",
-                            remainingScreenOffText = c.getString(idxRemOff) ?: "",
-                            isShizukuRealData = c.getInt(idxShizuku) == 1,
-                            appCount = c.getInt(idxAppCnt),
-                            trendPointsJson = c.getString(idxPts) ?: "[]",
-                            appListJson = c.getString(idxApps) ?: "[]",
-                            backgroundPowerWatts = if (idxBgPwr >= 0) c.getFloat(idxBgPwr) else 0f,
-                            backgroundDurationText = if (idxBgDur >= 0) c.getString(idxBgDur) ?: "" else "",
-                            remainingBackgroundText = if (idxRemBg >= 0) c.getString(idxRemBg) ?: "" else "",
-                            screenOnEnergyWh = if (idxOnWh >= 0) c.getFloat(idxOnWh) else 0f,
-                            totalEnergyWh = if (idxTotWh >= 0) c.getFloat(idxTotWh) else 0f,
-                            screenOffEnergyWh = if (idxOffWh >= 0) c.getFloat(idxOffWh) else 0f,
-                            backgroundEnergyWh = if (idxBgWh >= 0) c.getFloat(idxBgWh) else 0f
-                        )
-                    )
+                    list.add(parseRecordFromCursor(c))
                 } while (c.moveToNext())
             }
         }
         return list
+    }
+
+    /**
+     * 查询当前最新的一条未完成（RUNNING 状态，即 is_completed = 0）的放电会话记录。
+     *
+     * @return 未完结的放电草稿实体 [PowerUsageRecord]，若不存在返回 null
+     */
+    fun getRunningDischargeRecord(): PowerUsageRecord? {
+        val db = readableDatabase
+        val cursor = db.query(
+            TABLE_NAME,
+            null,
+            "$COL_IS_COMPLETED = 0",
+            null,
+            null,
+            null,
+            "$COL_ID DESC",
+            "1"
+        )
+        return cursor.use { c ->
+            if (c.moveToFirst()) {
+                parseRecordFromCursor(c)
+            } else {
+                null
+            }
+        }
+    }
+
+    /**
+     * 根据主键 ID 精确查询单条耗电快照记录。
+     *
+     * @param id 目标记录唯一主键 ID
+     * @return 匹配到的耗电快照实体 [PowerUsageRecord]，若未查到返回 null
+     */
+    fun getRecordById(id: Long): PowerUsageRecord? {
+        if (id <= 0L) return null
+        val db = readableDatabase
+        val cursor = db.query(
+            TABLE_NAME,
+            null,
+            "$COL_ID = ?",
+            arrayOf(id.toString()),
+            null,
+            null,
+            null,
+            "1"
+        )
+        return cursor.use { c ->
+            if (c.moveToFirst()) {
+                parseRecordFromCursor(c)
+            } else {
+                null
+            }
+        }
+    }
+
+    /**
+     * 将 Cursor 当前指向的数据行解析构建为 [PowerUsageRecord] 数据实体。
+     * 具备字段容错能力，向下平滑兼容缺省列。
+     *
+     * @param c 移动到有效行位置的数据库 [Cursor]
+     * @return 还原构建的 [PowerUsageRecord] 实例
+     */
+    private fun parseRecordFromCursor(c: android.database.Cursor): PowerUsageRecord {
+        val idxId = c.getColumnIndexOrThrow(COL_ID)
+        val idxTime = c.getColumnIndexOrThrow(COL_RECORD_TIME)
+        val idxLvl = c.getColumnIndexOrThrow(COL_LEVEL_PERCENT)
+        val idxVolt = c.getColumnIndexOrThrow(COL_VOLTAGE_VOLTS)
+        val idxTemp = c.getColumnIndexOrThrow(COL_TEMPERATURE)
+        val idxWh = c.getColumnIndexOrThrow(COL_ENERGY_WH)
+        val idxChg = c.getColumnIndexOrThrow(COL_IS_CHARGING)
+        val idxAvgPwr = c.getColumnIndexOrThrow(COL_AVG_POWER_WATTS)
+        val idxOnPwr = c.getColumnIndexOrThrow(COL_SCREEN_ON_POWER_WATTS)
+        val idxOffPwr = c.getColumnIndexOrThrow(COL_SCREEN_OFF_POWER_WATTS)
+        val idxOnDur = c.getColumnIndexOrThrow(COL_SCREEN_ON_DURATION)
+        val idxOffDur = c.getColumnIndexOrThrow(COL_SCREEN_OFF_DURATION)
+        val idxTotDur = c.getColumnIndexOrThrow(COL_TOTAL_DURATION)
+        val idxRemOn = c.getColumnIndexOrThrow(COL_REM_SCREEN_ON)
+        val idxRemComp = c.getColumnIndexOrThrow(COL_REM_COMPOSITE)
+        val idxRemOff = c.getColumnIndexOrThrow(COL_REM_SCREEN_OFF)
+        val idxShizuku = c.getColumnIndexOrThrow(COL_IS_SHIZUKU_REAL_DATA)
+        val idxAppCnt = c.getColumnIndexOrThrow(COL_APP_COUNT)
+        val idxPts = c.getColumnIndexOrThrow(COL_TREND_POINTS_JSON)
+        val idxApps = c.getColumnIndexOrThrow(COL_APP_LIST_JSON)
+        val idxBgPwr = c.getColumnIndex(COL_BACKGROUND_POWER_WATTS)
+        val idxBgDur = c.getColumnIndex(COL_BACKGROUND_DURATION)
+        val idxRemBg = c.getColumnIndex(COL_REM_BACKGROUND)
+        val idxOnWh = c.getColumnIndex(COL_SCREEN_ON_ENERGY_WH)
+        val idxTotWh = c.getColumnIndex(COL_TOTAL_ENERGY_WH)
+        val idxOffWh = c.getColumnIndex(COL_SCREEN_OFF_ENERGY_WH)
+        val idxBgWh = c.getColumnIndex(COL_BACKGROUND_ENERGY_WH)
+        val idxCompleted = c.getColumnIndex(COL_IS_COMPLETED)
+        val idxCheckpoint = c.getColumnIndex(COL_LAST_CHECKPOINT_TIME)
+
+        return PowerUsageRecord(
+            id = c.getLong(idxId),
+            recordTime = c.getString(idxTime),
+            levelPercent = c.getInt(idxLvl),
+            voltageVolts = c.getFloat(idxVolt),
+            temperature = c.getFloat(idxTemp),
+            energyWh = c.getFloat(idxWh),
+            isCharging = c.getInt(idxChg) == 1,
+            avgPowerWatts = c.getFloat(idxAvgPwr),
+            screenOnPowerWatts = c.getFloat(idxOnPwr),
+            screenOffPowerWatts = c.getFloat(idxOffPwr),
+            screenOnDurationText = c.getString(idxOnDur) ?: "",
+            screenOffDurationText = c.getString(idxOffDur) ?: "",
+            totalDurationText = c.getString(idxTotDur) ?: "",
+            remainingScreenOnText = c.getString(idxRemOn) ?: "",
+            remainingCompositeText = c.getString(idxRemComp) ?: "",
+            remainingScreenOffText = c.getString(idxRemOff) ?: "",
+            isShizukuRealData = c.getInt(idxShizuku) == 1,
+            appCount = c.getInt(idxAppCnt),
+            trendPointsJson = c.getString(idxPts) ?: "[]",
+            appListJson = c.getString(idxApps) ?: "[]",
+            backgroundPowerWatts = if (idxBgPwr >= 0) c.getFloat(idxBgPwr) else 0f,
+            backgroundDurationText = if (idxBgDur >= 0) c.getString(idxBgDur) ?: "" else "",
+            remainingBackgroundText = if (idxRemBg >= 0) c.getString(idxRemBg) ?: "" else "",
+            screenOnEnergyWh = if (idxOnWh >= 0) c.getFloat(idxOnWh) else 0f,
+            totalEnergyWh = if (idxTotWh >= 0) c.getFloat(idxTotWh) else 0f,
+            screenOffEnergyWh = if (idxOffWh >= 0) c.getFloat(idxOffWh) else 0f,
+            backgroundEnergyWh = if (idxBgWh >= 0) c.getFloat(idxBgWh) else 0f,
+            isCompleted = if (idxCompleted >= 0) c.getInt(idxCompleted) == 1 else true,
+            lastCheckpointTime = if (idxCheckpoint >= 0) c.getLong(idxCheckpoint) else 0L
+        )
     }
 
     /**
@@ -462,7 +527,7 @@ class PowerUsageDbHelper private constructor(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "power_usage_history.db"
-        private const val DATABASE_VERSION = 2
+        private const val DATABASE_VERSION = 3
         private const val TABLE_NAME = "power_usage_history"
 
         private const val COL_ID = "id"
@@ -492,6 +557,8 @@ class PowerUsageDbHelper private constructor(context: Context) :
         private const val COL_TOTAL_ENERGY_WH = "total_energy_wh"
         private const val COL_SCREEN_OFF_ENERGY_WH = "screen_off_energy_wh"
         private const val COL_BACKGROUND_ENERGY_WH = "background_energy_wh"
+        private const val COL_IS_COMPLETED = "is_completed"
+        private const val COL_LAST_CHECKPOINT_TIME = "last_checkpoint_time"
 
         @Volatile
         private var instance: PowerUsageDbHelper? = null

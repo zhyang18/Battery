@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import org.json.JSONObject
 import rikka.shizuku.Shizuku
+import com.battery.analysis.util.safeDestroy
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
@@ -224,7 +225,11 @@ object DaemonManager {
                 null
             ) as? Process ?: return Result.failure(RuntimeException("通过 Shizuku 派生进程失败"))
 
-            process.waitFor()
+            try {
+                process.waitFor()
+            } finally {
+                process.safeDestroy()
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -279,7 +284,11 @@ object DaemonManager {
                         null,
                         null
                     ) as? Process
-                    proc?.waitFor()
+                    try {
+                        proc?.waitFor()
+                    } finally {
+                        proc?.safeDestroy()
+                    }
                 } catch (_: Exception) {}
             }
 

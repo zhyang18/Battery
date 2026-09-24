@@ -56,6 +56,68 @@ class SettingsFragment : Fragment() {
     private lateinit var prefs: SharedPreferences
 
     /**
+     * 活跃对话框跟踪列表，防止退入后台或界面销毁时遗留悬挂 Window 导致内存泄漏。
+     */
+    private val activeDialogs = java.util.concurrent.CopyOnWriteArrayList<android.app.Dialog>()
+
+    /**
+     * 活跃气泡弹窗跟踪列表，防止退入后台或界面销毁时遗留悬挂 Window 导致内存泄漏。
+     */
+    private val activePopups = java.util.concurrent.CopyOnWriteArrayList<android.widget.PopupWindow>()
+
+    /**
+     * 统一跟踪并显示对话框，在生命周期结束或退出前台时集中安全关闭以根除 Window 泄漏。
+     *
+     * @param dialog 待跟踪并显示的 [android.app.Dialog] 对话框实例
+     * @return 传入的对话框实例
+     */
+    private fun <T : android.app.Dialog> showAndTrackDialog(dialog: T): T {
+        activeDialogs.add(dialog)
+        dialog.setOnDismissListener {
+            activeDialogs.remove(dialog)
+        }
+        dialog.show()
+        return dialog
+    }
+
+    /**
+     * 统一跟踪气泡弹窗，在生命周期结束或退出前台时集中安全关闭以根除 Window 泄漏。
+     *
+     * @param popup 待跟踪的 [android.widget.PopupWindow] 气泡弹窗实例
+     * @return 传入的气泡弹窗实例
+     */
+    private fun trackPopup(popup: android.widget.PopupWindow): android.widget.PopupWindow {
+        activePopups.add(popup)
+        popup.setOnDismissListener {
+            activePopups.remove(popup)
+        }
+        return popup
+    }
+
+    /**
+     * 强制安全清理所有正在展示的 Dialog 与 PopupWindow，彻底释放 ViewRootImpl 与系统 GraphicBuffer 内存。
+     */
+    private fun dismissAllActiveWindows() {
+        activePopups.forEach { popup ->
+            try {
+                if (popup.isShowing) {
+                    popup.dismiss()
+                }
+            } catch (_: Exception) {}
+        }
+        activePopups.clear()
+
+        activeDialogs.forEach { dialog ->
+            try {
+                if (dialog.isShowing) {
+                    dialog.dismiss()
+                }
+            } catch (_: Exception) {}
+        }
+        activeDialogs.clear()
+    }
+
+    /**
      * SAF 导出备份文件选择保存器 Launcher。
      */
     private val exportBackupLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
@@ -197,11 +259,13 @@ class SettingsFragment : Fragment() {
             val density = resources.displayMetrics.density
             val popupWidth = (130 * density).toInt()
 
-            val popupWindow = android.widget.PopupWindow(
-                popupView,
-                popupWidth,
-                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-                true
+            val popupWindow = trackPopup(
+                android.widget.PopupWindow(
+                    popupView,
+                    popupWidth,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    true
+                )
             )
 
             popupWindow.isOutsideTouchable = true
@@ -439,7 +503,7 @@ class SettingsFragment : Fragment() {
             Toast.makeText(ctx, getString(R.string.setting_current_calibration) + "已保存", Toast.LENGTH_SHORT).show()
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
     }
 
 
@@ -456,11 +520,13 @@ class SettingsFragment : Fragment() {
             val density = resources.displayMetrics.density
             val popupWidth = (180 * density).toInt()
 
-            val popupWindow = android.widget.PopupWindow(
-                popupView,
-                popupWidth,
-                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-                true
+            val popupWindow = trackPopup(
+                android.widget.PopupWindow(
+                    popupView,
+                    popupWidth,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    true
+                )
             )
 
             popupWindow.isOutsideTouchable = true
@@ -530,7 +596,7 @@ class SettingsFragment : Fragment() {
             dialog.dismiss()
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
     }
 
@@ -714,7 +780,7 @@ class SettingsFragment : Fragment() {
             mainActivity.openShizukuApp()
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
     }
 
@@ -864,7 +930,7 @@ class SettingsFragment : Fragment() {
             }
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
     }
 
@@ -1125,7 +1191,7 @@ class SettingsFragment : Fragment() {
             dialog.dismiss()
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
     }
 
@@ -1181,16 +1247,18 @@ class SettingsFragment : Fragment() {
             val density = resources.displayMetrics.density
             val popupWidth = (160 * density).toInt()
 
-            val popupWindow = android.widget.PopupWindow(
-                popupView,
-                popupWidth,
-                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-                true
-            ).apply {
-                isOutsideTouchable = true
-                isFocusable = true
-                animationStyle = R.style.Animation_PopupTopRight
-            }
+            val popupWindow = trackPopup(
+                android.widget.PopupWindow(
+                    popupView,
+                    popupWidth,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    true
+                ).apply {
+                    isOutsideTouchable = true
+                    isFocusable = true
+                    animationStyle = R.style.Animation_PopupTopRight
+                }
+            )
 
             val optionViews = listOf(
                 popupView.findViewById<TextView>(R.id.tv_opt_never),
@@ -1254,16 +1322,18 @@ class SettingsFragment : Fragment() {
             val density = resources.displayMetrics.density
             val popupWidth = (180 * density).toInt()
 
-            val popupWindow = android.widget.PopupWindow(
-                popupView,
-                popupWidth,
-                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-                true
-            ).apply {
-                isOutsideTouchable = true
-                isFocusable = true
-                animationStyle = R.style.Animation_PopupTopRight
-            }
+            val popupWindow = trackPopup(
+                android.widget.PopupWindow(
+                    popupView,
+                    popupWidth,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    true
+                ).apply {
+                    isOutsideTouchable = true
+                    isFocusable = true
+                    animationStyle = R.style.Animation_PopupTopRight
+                }
+            )
 
             val optionViews = listOf(
                 popupView.findViewById<TextView>(R.id.tv_opt_never),
@@ -1380,7 +1450,7 @@ class SettingsFragment : Fragment() {
             dialog.dismiss()
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
     }
 
@@ -1466,15 +1536,25 @@ class SettingsFragment : Fragment() {
             dialog.dismiss()
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
     }
 
 
     /**
-     * 视图销毁时的清理工作，释放视图绑定引用。
+     * 界面不可见生命周期回调。
+     * 强制关闭所有前台活跃对话框与气泡弹窗以释放系统 Window 与图形缓冲区。
+     */
+    override fun onStop() {
+        super.onStop()
+        dismissAllActiveWindows()
+    }
+
+    /**
+     * 视图销毁时的清理工作，释放所有活跃 Window 并清空视图绑定引用。
      */
     override fun onDestroyView() {
+        dismissAllActiveWindows()
         super.onDestroyView()
         _binding = null
     }

@@ -44,6 +44,68 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
     private var currentSortIndex: Int = 1
 
     /**
+     * 活跃对话框跟踪列表，防止退入后台或界面销毁时遗留悬挂 Window 导致内存泄漏。
+     */
+    private val activeDialogs = java.util.concurrent.CopyOnWriteArrayList<android.app.Dialog>()
+
+    /**
+     * 活跃气泡弹窗跟踪列表，防止退入后台或界面销毁时遗留悬挂 Window 导致内存泄漏。
+     */
+    private val activePopups = java.util.concurrent.CopyOnWriteArrayList<PopupWindow>()
+
+    /**
+     * 统一跟踪并显示对话框，在生命周期结束或退出前台时集中安全关闭以根除 Window 泄漏。
+     *
+     * @param dialog 待跟踪并显示的 [android.app.Dialog] 对话框实例
+     * @return 传入的对话框实例
+     */
+    private fun <T : android.app.Dialog> showAndTrackDialog(dialog: T): T {
+        activeDialogs.add(dialog)
+        dialog.setOnDismissListener {
+            activeDialogs.remove(dialog)
+        }
+        dialog.show()
+        return dialog
+    }
+
+    /**
+     * 统一跟踪气泡弹窗，在生命周期结束或退出前台时集中安全关闭以根除 Window 泄漏。
+     *
+     * @param popup 待跟踪的 [PopupWindow] 气泡弹窗实例
+     * @return 传入的气泡弹窗实例
+     */
+    private fun trackPopup(popup: PopupWindow): PopupWindow {
+        activePopups.add(popup)
+        popup.setOnDismissListener {
+            activePopups.remove(popup)
+        }
+        return popup
+    }
+
+    /**
+     * 强制安全清理所有正在展示的 Dialog 与 PopupWindow，彻底释放 ViewRootImpl 与系统 GraphicBuffer 内存。
+     */
+    private fun dismissAllActiveWindows() {
+        activePopups.forEach { popup ->
+            try {
+                if (popup.isShowing) {
+                    popup.dismiss()
+                }
+            } catch (_: Exception) {}
+        }
+        activePopups.clear()
+
+        activeDialogs.forEach { dialog ->
+            try {
+                if (dialog.isShowing) {
+                    dialog.dismiss()
+                }
+            } catch (_: Exception) {}
+        }
+        activeDialogs.clear()
+    }
+
+    /**
      * 活动初始化生命周期回调，配置状态栏、获取传入快照 ID 并触发全量数据加载。
      *
      * @param savedInstanceState 状态恢复 Bundle
@@ -98,7 +160,8 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             val rangeStr = currentRecord?.let { record ->
                 "${record.getFormattedTimeRange()} (${record.totalDurationText})"
             }
-            AppUsageDetailBottomSheetDialog(this, item, isShizuku, rangeStr).show()
+            val dialog = AppUsageDetailBottomSheetDialog(this, item, isShizuku, rangeStr)
+            showAndTrackDialog(dialog)
         }
         binding.recyclerAppUsage.layoutManager = LinearLayoutManager(this)
         binding.recyclerAppUsage.adapter = appAdapter
@@ -147,7 +210,8 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
 
         // 功耗时间轴 App 图标点击监听
         binding.batteryTimelineView.setOnAppEventListener { event ->
-            AppEnergyDetailBottomSheetDialog(this@PowerHistoryDetailActivity, event).show()
+            val dialog = AppEnergyDetailBottomSheetDialog(this@PowerHistoryDetailActivity, event)
+            showAndTrackDialog(dialog)
         }
     }
 
@@ -160,11 +224,13 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         val density = resources.displayMetrics.density
         val popupWidth = (170 * density).toInt()
 
-        val popupWindow = PopupWindow(
-            popupView,
-            popupWidth,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            true
+        val popupWindow = trackPopup(
+            PopupWindow(
+                popupView,
+                popupWidth,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                true
+            )
         )
 
         popupWindow.isOutsideTouchable = true
@@ -507,8 +573,28 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             }
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
+    }
+
+    /**
+     * 活动不可见生命周期回调。
+     * 安全关闭所有活跃弹窗并收起长列表至初始状态，释放系统图形缓冲与冗余 View。
+     */
+    override fun onStop() {
+        super.onStop()
+        dismissAllActiveWindows()
+        if (::appAdapter.isInitialized) {
+            appAdapter.collapseToInitial()
+        }
+    }
+
+    /**
+     * 活动销毁生命周期回调，强制安全关闭所有残留 Window。
+     */
+    override fun onDestroy() {
+        dismissAllActiveWindows()
+        super.onDestroy()
     }
 
     companion object {

@@ -510,16 +510,20 @@ object SysfsBatterySampler {
                 null
             ) as? Process ?: return false
 
-            val lines = proc.inputStream.bufferedReader().use { it.readLines() }
-            proc.waitFor()
+            try {
+                val lines = proc.inputStream.bufferedReader().use { it.readLines() }
+                proc.waitFor()
 
-            for (line in lines) {
-                val trimmed = line.trim()
-                if (trimmed.startsWith("CUR:")) {
-                    cachedCurrentPath = trimmed.removePrefix("CUR:")
-                } else if (trimmed.startsWith("VOLT:")) {
-                    cachedVoltagePath = trimmed.removePrefix("VOLT:")
+                for (line in lines) {
+                    val trimmed = line.trim()
+                    if (trimmed.startsWith("CUR:")) {
+                        cachedCurrentPath = trimmed.removePrefix("CUR:")
+                    } else if (trimmed.startsWith("VOLT:")) {
+                        cachedVoltagePath = trimmed.removePrefix("VOLT:")
+                    }
                 }
+            } finally {
+                proc.safeDestroy()
             }
         } catch (_: Throwable) {
         }
@@ -1023,13 +1027,17 @@ object SysfsBatterySampler {
             val method = getNewProcessMethod() ?: return null
             val proc = method.invoke(null, arrayOf("cat", path), null, null) as? Process
                 ?: return null
-            val text = proc.inputStream.bufferedReader().use { it.readText().trim() }
-            proc.waitFor()
-            if (text.isNotEmpty() &&
-                !text.contains("No such") &&
-                !text.contains("Permission denied") &&
-                !text.contains("Operation not permitted")
-            ) text else null
+            try {
+                val text = proc.inputStream.bufferedReader().use { it.readText().trim() }
+                proc.waitFor()
+                if (text.isNotEmpty() &&
+                    !text.contains("No such") &&
+                    !text.contains("Permission denied") &&
+                    !text.contains("Operation not permitted")
+                ) text else null
+            } finally {
+                proc.safeDestroy()
+            }
         } catch (_: Throwable) {
             null
         }
@@ -1088,73 +1096,77 @@ object SysfsBatterySampler {
                 return null
             }
 
-            val lines = proc.inputStream.bufferedReader().use { it.readLines() }
-            proc.waitFor()
-            if (lines.size >= 2) {
-                val rawCur = lines[0].trim().toLongOrNull() ?: run {
-                    lastShizukuSampleTime = now
-                    shizukuFailCount++
-                    return null
-                }
-                val rawVolt = lines[1].trim().toLongOrNull() ?: run {
-                    lastShizukuSampleTime = now
-                    shizukuFailCount++
-                    return null
-                }
-                val rawTemp = if (tempIndex in lines.indices) lines[tempIndex].trim().toFloatOrNull() else null
-                val rawStatus = if (statusIndex in lines.indices) lines[statusIndex].trim() else null
-
-                val rawCurMa = normalizeCurrentToMa(Math.abs(rawCur))
-                val curMa = if (context != null) com.battery.analysis.manager.CurrentCalibrationManager.applyCalibration(rawCurMa, context) else rawCurMa
-                val voltV = normalizeVoltageToVolts(rawVolt)
-                val tempC = if (rawTemp != null && rawTemp != 0f) {
-                    if (rawTemp >= 100f || rawTemp <= -100f) rawTemp / 10f else rawTemp
-                } else {
-                    fallbackTemp
-                }
-
-                if (curMa > 0f && voltV > 0f) {
-                    cachedCurrentPath = curPath
-                    cachedVoltagePath = voltPath
-                    if (rawTemp != null) cachedTempPath = tempPath
-                    if (rawStatus != null && rawStatus.isNotEmpty()) cachedStatusPath = statusPath
-
-                    val pWatts = (curMa * voltV) / 1000f
-                    val isDischargingStatus = rawStatus != null && (rawStatus.startsWith("D", ignoreCase = true) || rawStatus.startsWith("N", ignoreCase = true))
-                    var isNetDischarging = isDischargingStatus || (rawCur < 0L)
-                    if (context != null && com.battery.analysis.manager.CurrentCalibrationManager.isEffectiveInvertPolarity(context)) {
-                        isNetDischarging = !isNetDischarging
+            try {
+                val lines = proc.inputStream.bufferedReader().use { it.readLines() }
+                proc.waitFor()
+                if (lines.size >= 2) {
+                    val rawCur = lines[0].trim().toLongOrNull() ?: run {
+                        lastShizukuSampleTime = now
+                        shizukuFailCount++
+                        return null
                     }
-                    val signedPower = if (isCharging) {
-                        if (isNetDischarging) -pWatts else pWatts
+                    val rawVolt = lines[1].trim().toLongOrNull() ?: run {
+                        lastShizukuSampleTime = now
+                        shizukuFailCount++
+                        return null
+                    }
+                    val rawTemp = if (tempIndex in lines.indices) lines[tempIndex].trim().toFloatOrNull() else null
+                    val rawStatus = if (statusIndex in lines.indices) lines[statusIndex].trim() else null
+
+                    val rawCurMa = normalizeCurrentToMa(Math.abs(rawCur))
+                    val curMa = if (context != null) com.battery.analysis.manager.CurrentCalibrationManager.applyCalibration(rawCurMa, context) else rawCurMa
+                    val voltV = normalizeVoltageToVolts(rawVolt)
+                    val tempC = if (rawTemp != null && rawTemp != 0f) {
+                        if (rawTemp >= 100f || rawTemp <= -100f) rawTemp / 10f else rawTemp
                     } else {
-                        pWatts
-                    }
-                    val signedCur = if (isCharging) {
-                        if (isNetDischarging) -curMa else curMa
-                    } else {
-                        curMa
+                        fallbackTemp
                     }
 
-                    val sample = HardwareSample(
-                        currentMa = signedCur,
-                        voltageVolts = voltV,
-                        powerWatts = Math.round(signedPower * 1000f) / 1000f,
-                        temperatureCelsius = tempC
-                    )
-                    lastShizukuSampleTime = now
-                    cachedShizukuSample = sample
-                    shizukuFailCount = 0
-                    sample
+                    if (curMa > 0f && voltV > 0f) {
+                        cachedCurrentPath = curPath
+                        cachedVoltagePath = voltPath
+                        if (rawTemp != null) cachedTempPath = tempPath
+                        if (rawStatus != null && rawStatus.isNotEmpty()) cachedStatusPath = statusPath
+
+                        val pWatts = (curMa * voltV) / 1000f
+                        val isDischargingStatus = rawStatus != null && (rawStatus.startsWith("D", ignoreCase = true) || rawStatus.startsWith("N", ignoreCase = true))
+                        var isNetDischarging = isDischargingStatus || (rawCur < 0L)
+                        if (context != null && com.battery.analysis.manager.CurrentCalibrationManager.isEffectiveInvertPolarity(context)) {
+                            isNetDischarging = !isNetDischarging
+                        }
+                        val signedPower = if (isCharging) {
+                            if (isNetDischarging) -pWatts else pWatts
+                        } else {
+                            pWatts
+                        }
+                        val signedCur = if (isCharging) {
+                            if (isNetDischarging) -curMa else curMa
+                        } else {
+                            curMa
+                        }
+
+                        val sample = HardwareSample(
+                            currentMa = signedCur,
+                            voltageVolts = voltV,
+                            powerWatts = Math.round(signedPower * 1000f) / 1000f,
+                            temperatureCelsius = tempC
+                        )
+                        lastShizukuSampleTime = now
+                        cachedShizukuSample = sample
+                        shizukuFailCount = 0
+                        sample
+                    } else {
+                        lastShizukuSampleTime = now
+                        shizukuFailCount++
+                        null
+                    }
                 } else {
                     lastShizukuSampleTime = now
                     shizukuFailCount++
                     null
                 }
-            } else {
-                lastShizukuSampleTime = now
-                shizukuFailCount++
-                null
+            } finally {
+                proc.safeDestroy()
             }
         } catch (_: Throwable) {
             lastShizukuSampleTime = now

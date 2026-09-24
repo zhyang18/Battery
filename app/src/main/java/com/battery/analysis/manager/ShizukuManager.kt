@@ -12,6 +12,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import com.battery.analysis.util.safeDestroy
 import rikka.shizuku.Shizuku
 
 /**
@@ -160,19 +161,21 @@ object ShizukuManager {
                         val cmd = arrayOf("sh", "-c", "pm revoke ${activity.packageName} $SHIZUKU_PERMISSION")
                         val process = newProcessMethod.invoke(null, cmd, null, null) as? Process
                         if (process != null) {
-                            val inJob = async(Dispatchers.IO) {
-                                try { process.inputStream.bufferedReader().use { it.readText() } } catch (_: Throwable) { "" }
-                            }
-                            val errJob = async(Dispatchers.IO) {
-                                try { process.errorStream.bufferedReader().use { it.readText() } } catch (_: Throwable) { "" }
-                            }
+                            try {
+                                val inJob = async(Dispatchers.IO) {
+                                    try { process.inputStream.bufferedReader().use { it.readText() } } catch (_: Throwable) { "" }
+                                }
+                                val errJob = async(Dispatchers.IO) {
+                                    try { process.errorStream.bufferedReader().use { it.readText() } } catch (_: Throwable) { "" }
+                                }
 
-                            withTimeoutOrNull(2000L) {
-                                process.waitFor()
-                                inJob.await()
-                                errJob.await()
-                            } ?: run {
-                                try { process.destroy() } catch (_: Throwable) {}
+                                withTimeoutOrNull(2000L) {
+                                    process.waitFor()
+                                    inJob.await()
+                                    errJob.await()
+                                }
+                            } finally {
+                                process.safeDestroy()
                             }
                         }
                     }

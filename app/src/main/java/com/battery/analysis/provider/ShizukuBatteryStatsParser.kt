@@ -8,6 +8,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import com.battery.analysis.model.AppPowerUsageItem
 import com.battery.analysis.util.NetworkStatsHelper
+import com.battery.analysis.util.safeDestroy
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -1476,15 +1477,19 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             }
             val method = getNewProcessMethod() ?: return ""
             val process = method.invoke(null, arrayOf("sh", "-c", command), null, null) as? Process ?: return ""
-            val reader = BufferedReader(InputStreamReader(process.inputStream), 8192)
-            val sb = StringBuilder()
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                sb.append(line).append('\n')
+            try {
+                val reader = BufferedReader(InputStreamReader(process.inputStream), 8192)
+                val sb = StringBuilder()
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    sb.append(line).append('\n')
+                }
+                reader.close()
+                process.waitFor()
+                sb.toString()
+            } finally {
+                process.safeDestroy()
             }
-            reader.close()
-            process.waitFor()
-            sb.toString()
         } catch (e: Exception) {
             e.printStackTrace()
             ""

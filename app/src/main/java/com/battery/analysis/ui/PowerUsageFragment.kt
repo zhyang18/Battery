@@ -113,6 +113,68 @@ class PowerUsageFragment : Fragment() {
     /** 当前执行中的数据异步加载协程任务，用于保证单任务并发安全 */
     private var loadDataJob: kotlinx.coroutines.Job? = null
 
+    /**
+     * 活跃对话框跟踪列表，防止退入后台或界面销毁时遗留悬挂 Window 导致内存泄漏。
+     */
+    private val activeDialogs = java.util.concurrent.CopyOnWriteArrayList<android.app.Dialog>()
+
+    /**
+     * 活跃气泡弹窗跟踪列表，防止退入后台或界面销毁时遗留悬挂 Window 导致内存泄漏。
+     */
+    private val activePopups = java.util.concurrent.CopyOnWriteArrayList<PopupWindow>()
+
+    /**
+     * 统一跟踪并显示对话框，在生命周期结束或退出前台时集中安全关闭以根除 Window 泄漏。
+     *
+     * @param dialog 待跟踪并显示的 [android.app.Dialog] 对话框实例
+     * @return 传入的对话框实例
+     */
+    private fun <T : android.app.Dialog> showAndTrackDialog(dialog: T): T {
+        activeDialogs.add(dialog)
+        dialog.setOnDismissListener {
+            activeDialogs.remove(dialog)
+        }
+        dialog.show()
+        return dialog
+    }
+
+    /**
+     * 统一跟踪气泡弹窗，在生命周期结束或退出前台时集中安全关闭以根除 Window 泄漏。
+     *
+     * @param popup 待跟踪的 [PopupWindow] 气泡弹窗实例
+     * @return 传入的气泡弹窗实例
+     */
+    private fun trackPopup(popup: PopupWindow): PopupWindow {
+        activePopups.add(popup)
+        popup.setOnDismissListener {
+            activePopups.remove(popup)
+        }
+        return popup
+    }
+
+    /**
+     * 强制安全清理所有正在展示的 Dialog 与 PopupWindow，彻底释放 ViewRootImpl 与系统 GraphicBuffer 内存。
+     */
+    private fun dismissAllActiveWindows() {
+        activePopups.forEach { popup ->
+            try {
+                if (popup.isShowing) {
+                    popup.dismiss()
+                }
+            } catch (_: Exception) {}
+        }
+        activePopups.clear()
+
+        activeDialogs.forEach { dialog ->
+            try {
+                if (dialog.isShowing) {
+                    dialog.dismiss()
+                }
+            } catch (_: Exception) {}
+        }
+        activeDialogs.clear()
+    }
+
     private val SHIZUKU_POWER_REQUEST_CODE = 2001
 
     /**
@@ -543,9 +605,21 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
+     * 界面不可见生命周期回调。
+     * 强制关闭所有前台活跃对话框与气泡弹窗以释放系统 Window 与图形缓冲区；
+     * 同时将应用能耗列表自动收起至初始 Top 30 限制，释放超出展示范围的冗余 View 实例。
+     */
+    override fun onStop() {
+        super.onStop()
+        dismissAllActiveWindows()
+        adapter.collapseToInitial()
+    }
+
+    /**
      * 界面销毁生命周期回调，停止采样与刷新轮询、恢复屏幕休眠、注销动态广播及 Shizuku 监听并释放 ViewBinding。
      */
     override fun onDestroyView() {
+        dismissAllActiveWindows()
         super.onDestroyView()
         stopChargingPolling()
         stopDischargePolling()
@@ -718,7 +792,7 @@ class PowerUsageFragment : Fragment() {
                 } else null
             }
             val dialog = AppUsageDetailBottomSheetDialog(requireContext(), item, isShizuku, periodRange)
-            dialog.show()
+            showAndTrackDialog(dialog)
 
             // 若在 Shizuku 模式下，针对单个 App 定向异步查询放电周期内的后台相关数据（流量、CPU、持锁、GPS、常驻服务）并刷新弹窗
             if (isShizuku) {
@@ -1438,7 +1512,7 @@ class PowerUsageFragment : Fragment() {
             dialog.dismiss()
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
     }
 
@@ -1489,7 +1563,7 @@ class PowerUsageFragment : Fragment() {
             dialog.dismiss()
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
     }
 
@@ -1908,7 +1982,7 @@ class PowerUsageFragment : Fragment() {
                         }
                     }
                 }
-                delDialog.show()
+                showAndTrackDialog(delDialog)
                 applyDialogWindowStyle(delDialog)
             }
         )
@@ -1946,12 +2020,12 @@ class PowerUsageFragment : Fragment() {
                     }
                 }
             }
-            clearDialog.show()
+            showAndTrackDialog(clearDialog)
             applyDialogWindowStyle(clearDialog)
         }
 
         reloadHistoryList()
-        dialog.show()
+        showAndTrackDialog(dialog)
 
         dialog.window?.let { window ->
             window.setBackgroundDrawableResource(android.R.color.transparent)
@@ -1996,7 +2070,7 @@ class PowerUsageFragment : Fragment() {
 
         chargingHistoryAdapter = ChargingHistoryAdapter(
             onItemClick = { record ->
-                AlertDialog.Builder(requireContext())
+                val detailDialog = AlertDialog.Builder(requireContext())
                     .setTitle("充电详情 (${record.recordTime})")
                     .setMessage(
                         "充电接口：${record.chargeType}\n" +
@@ -2010,7 +2084,8 @@ class PowerUsageFragment : Fragment() {
                         "最高温度：${String.format(Locale.getDefault(), "%.1f", record.maxTemperature)} ℃"
                     )
                     .setPositiveButton(getString(R.string.understood), null)
-                    .show()
+                    .create()
+                showAndTrackDialog(detailDialog)
             },
             onDeleteClick = { record ->
                 val deleteView = layoutInflater.inflate(R.layout.dialog_custom_delete_confirm, null)
@@ -2043,7 +2118,7 @@ class PowerUsageFragment : Fragment() {
                         }
                     }
                 }
-                delDialog.show()
+                showAndTrackDialog(delDialog)
                 applyDialogWindowStyle(delDialog)
             }
         )
@@ -2081,12 +2156,12 @@ class PowerUsageFragment : Fragment() {
                     }
                 }
             }
-            clearDialog.show()
+            showAndTrackDialog(clearDialog)
             applyDialogWindowStyle(clearDialog)
         }
 
         reloadChargingHistory()
-        dialog.show()
+        showAndTrackDialog(dialog)
 
         dialog.window?.let { window ->
             window.setBackgroundDrawableResource(android.R.color.transparent)
@@ -2168,7 +2243,7 @@ class PowerUsageFragment : Fragment() {
             dialog.dismiss()
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
     }
 
@@ -2187,7 +2262,7 @@ class PowerUsageFragment : Fragment() {
             dialog.dismiss()
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
     }
 
@@ -2206,7 +2281,7 @@ class PowerUsageFragment : Fragment() {
             dialog.dismiss()
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
     }
 
@@ -2263,7 +2338,7 @@ class PowerUsageFragment : Fragment() {
             }
         }
 
-        dialog.show()
+        showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
     }
 
@@ -2276,11 +2351,13 @@ class PowerUsageFragment : Fragment() {
         val density = resources.displayMetrics.density
         val popupWidth = (170 * density).toInt()
 
-        val popupWindow = PopupWindow(
-            popupView,
-            popupWidth,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            true
+        val popupWindow = trackPopup(
+            PopupWindow(
+                popupView,
+                popupWidth,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                true
+            )
         )
 
         popupWindow.isOutsideTouchable = true
@@ -2321,11 +2398,12 @@ class PowerUsageFragment : Fragment() {
      * @param message 对话框正文说明
      */
     private fun showSimpleDialog(title: String, message: String) {
-        AlertDialog.Builder(requireContext())
+        val dialog = AlertDialog.Builder(requireContext())
             .setTitle(title)
             .setMessage(message)
             .setPositiveButton(getString(R.string.understood), null)
-            .show()
+            .create()
+        showAndTrackDialog(dialog)
     }
 }
 

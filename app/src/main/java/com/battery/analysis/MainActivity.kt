@@ -478,4 +478,13 @@ class MainActivity : AppCompatActivity() {
         binding.bottomNavigation.selectedItemId = targetNavId
     }
 
+    /**
+     * 响应系统内存修剪回调，根据内存紧张等级主动释放图标缓存以降低进程 OOM 风险。
+     *
+     * @param level 系统当前传递的内存修剪级别，参见 [android.content.ComponentCallbacks2]
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        com.battery.analysis.timeline.util.DrawableBitmapCache.trimToLevel(level)
+    }
 }

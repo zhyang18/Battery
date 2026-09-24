@@ -432,6 +432,17 @@ class BatteryMonitorService : Service() {
         } catch (_: Exception) {}
         monitorSamplingJob?.cancel()
         serviceScope.cancel()
+        com.battery.analysis.timeline.util.DrawableBitmapCache.trimToLevel(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+    }
+
+    /**
+     * 响应系统内存修剪广播，按系统内存紧缩等级主动释放进程内的图形与图片缓存。
+     *
+     * @param level 系统内存修剪级别，参见 [android.content.ComponentCallbacks2]
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        com.battery.analysis.timeline.util.DrawableBitmapCache.trimToLevel(level)
     }
 
     /**

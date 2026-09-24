@@ -325,7 +325,7 @@
 
     <string name="settings_section_refresh">Data &amp; Refresh</string>
     <string name="setting_charge_discharge_stats">Enable Charge/Discharge Stats</string>
-    <string name="setting_charge_discharge_stats_desc">Show charge and power usage tabs and enable background monitoring service</string>
+    <string name="setting_charge_discharge_stats_desc">Enable background monitoring of charging and discharging data</string>
     <string name="toast_charge_discharge_stats_enabled">Charge/Discharge stats and background monitoring enabled</string>
     <string name="toast_charge_discharge_stats_disabled">Charge/Discharge stats and background monitoring disabled</string>
     <string name="setting_auto_refresh">Auto Refresh</string>
@@ -333,7 +333,7 @@
     <string name="setting_power_mode">Power Stats Detection Mode</string>
     <string name="setting_power_mode_desc">Toggle between Shizuku and standard mode</string>
     <string name="setting_current_calibration">Current Calibration</string>
-    <string name="setting_current_calibration_desc">Calibrate 0mA reading, dual-cell multiplier, or polarity</string>
+    <string name="setting_current_calibration_desc">Zero-Current, Dual-Cell Scaling &amp; Polarity Correction</string>
     <string name="dialog_current_calibration_title">⚡ Hardware Current Calibration</string>
     <string name="current_calibration_multiplier_title">Current Multiplier</string>
     <string name="current_calibration_multiplier_desc">Calibrate driver unit discrepancy with powers of 10</string>

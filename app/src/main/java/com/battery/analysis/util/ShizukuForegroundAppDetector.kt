@@ -404,15 +404,24 @@ object ShizukuForegroundAppDetector {
                 null
             ) as? Process ?: return null
 
-            val text = proc.inputStream.bufferedReader().use { it.readText().trim() }
-            proc.waitFor()
-            if (text.isNotEmpty()) {
-                val match = Regex("([a-zA-Z0-9._]+)/[a-zA-Z0-9._]+").find(text)
-                val rawPkg = match?.groupValues?.getOrNull(1)
-                val pkg = normalizeForegroundPackage(rawPkg)
-                if (!pkg.isNullOrEmpty()) {
-                    return pkg
+            var cmdPkg: String? = null
+            try {
+                val text = proc.inputStream.bufferedReader().use { it.readText().trim() }
+                proc.waitFor()
+                if (text.isNotEmpty()) {
+                    val match = Regex("([a-zA-Z0-9._]+)/[a-zA-Z0-9._]+").find(text)
+                    val rawPkg = match?.groupValues?.getOrNull(1)
+                    val pkg = normalizeForegroundPackage(rawPkg)
+                    if (!pkg.isNullOrEmpty()) {
+                        cmdPkg = pkg
+                    }
                 }
+            } finally {
+                proc.safeDestroy()
+            }
+
+            if (!cmdPkg.isNullOrEmpty()) {
+                return cmdPkg
             }
 
             // 次选通过 WindowManager 焦点窗口提取
@@ -423,15 +432,19 @@ object ShizukuForegroundAppDetector {
                 null
             ) as? Process
             if (winProc != null) {
-                val winText = winProc.inputStream.bufferedReader().use { it.readText().trim() }
-                winProc.waitFor()
-                if (winText.isNotEmpty()) {
-                    val match = Regex("([a-zA-Z0-9._]+)/[a-zA-Z0-9._]+").find(winText)
-                    val rawPkg = match?.groupValues?.getOrNull(1)
-                    val pkg = normalizeForegroundPackage(rawPkg)
-                    if (!pkg.isNullOrEmpty()) {
-                        return pkg
+                try {
+                    val winText = winProc.inputStream.bufferedReader().use { it.readText().trim() }
+                    winProc.waitFor()
+                    if (winText.isNotEmpty()) {
+                        val match = Regex("([a-zA-Z0-9._]+)/[a-zA-Z0-9._]+").find(winText)
+                        val rawPkg = match?.groupValues?.getOrNull(1)
+                        val pkg = normalizeForegroundPackage(rawPkg)
+                        if (!pkg.isNullOrEmpty()) {
+                            return pkg
+                        }
                     }
+                } finally {
+                    winProc.safeDestroy()
                 }
             }
 

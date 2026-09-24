@@ -11,14 +11,30 @@ import com.google.android.material.shape.CornerFamily
 import com.google.android.material.shape.ShapeAppearanceModel
 import java.util.Locale
 
+import android.view.View
+import android.widget.TextView
+import com.battery.analysis.timeline.util.DrawableBitmapCache
+
 /**
  * 应用使用场景与功耗列表适配器。
  * 负责展示应用图标、运行状态、平均功耗、温度指标及前台时长，并支持按耗电、功耗及时间动态排序切换。
  *
- * 优化：使用 [DiffUtil] 替代 notifyDataSetChanged 全量刷新，
- * 仅对真正变化的条目执行增量更新，消除无意义的全量重绘开销。
+ * 优化：
+ * 1. 采用按需分批/展开呈现机制（默认展示 Top 30 核心项，超量条目通过底部操作卡片按需展开），
+ *    彻底根治 NestedScrollView 下一次性实例化上百个应用条目引发的 2000+ View 严重膨胀；
+ * 2. 引入 [DrawableBitmapCache] 将应用图标限制在 42dp 像素规范，杜绝全分辨率大图占用 Native 堆；
+ * 3. 使用 [DiffUtil] 结合增量更新，消除无意义的全量重绘开销。
  */
-class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolder>() {
+class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+
+    companion object {
+        /** 默认初始最大展示应用条目数，避免 NestedScrollView 无限高度下一口气创建千个 View 导致内存膨胀 */
+        const val INITIAL_DISPLAY_LIMIT = 30
+        /** 普通应用数据项视图类型 */
+        private const val VIEW_TYPE_ITEM = 0
+        /** 展开/收起更多应用底部操作卡片视图类型 */
+        private const val VIEW_TYPE_EXPAND_FOOTER = 1
+    }
 
     // 原始完整应用功耗数据集合
     private val allItems = mutableListOf<AppPowerUsageItem>()
@@ -31,6 +47,9 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
 
     // 是否展示后台统计数据及后台运行应用（默认开启）
     private var showBackgroundStats: Boolean = true
+
+    // 标记是否已展开全部应用列表
+    private var isExpanded: Boolean = false
 
     /**
      * 列表项点击事件回调监听器，向调用方传递被点击的应用使用场景数据实体。
@@ -65,6 +84,16 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
     }
 
     /**
+     * 收起应用列表展示至初始限制数量（前 30 项），供界面切入后台或内存修剪时主动释放非活跃 Item 视图。
+     */
+    fun collapseToInitial() {
+        if (isExpanded) {
+            isExpanded = false
+            notifyDataSetChanged()
+        }
+    }
+
+    /**
      * 视图持有者，绑定 item_app_power_usage 视图层级。
      *
      * @param binding 视图绑定对象
@@ -72,24 +101,58 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
     inner class ViewHolder(val binding: ItemAppPowerUsageBinding) : RecyclerView.ViewHolder(binding.root)
 
     /**
+     * 底部“展开/收起全部应用”操作卡片视图持有者。
+     *
+     * @param view 底部操作卡片根视图
+     */
+    inner class FooterViewHolder(view: View) : RecyclerView.ViewHolder(view)
+
+    /**
+     * 根据条目位置判断该条目的视图类型（普通应用条目还是展开/收起底部卡片）。
+     *
+     * @param position 列表项索引下标
+     * @return 视图类型枚举值（[VIEW_TYPE_ITEM] 或 [VIEW_TYPE_EXPAND_FOOTER]）
+     */
+    override fun getItemViewType(position: Int): Int {
+        val total = displayItems.size
+        if (total > INITIAL_DISPLAY_LIMIT) {
+            if (!isExpanded && position == INITIAL_DISPLAY_LIMIT) {
+                return VIEW_TYPE_EXPAND_FOOTER
+            } else if (isExpanded && position == total) {
+                return VIEW_TYPE_EXPAND_FOOTER
+            }
+        }
+        return VIEW_TYPE_ITEM
+    }
+
+    /**
      * 创建列表项视图持有者。
      *
      * @param parent 父容器视图
      * @param viewType 视图类型
-     * @return 新创建的 [ViewHolder]
+     * @return 新创建的 [RecyclerView.ViewHolder]
      */
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val binding = ItemAppPowerUsageBinding.inflate(
-            LayoutInflater.from(parent.context),
-            parent,
-            false
-        )
-        // 给应用图标应用圆角外观
-        val shapeModel = ShapeAppearanceModel.builder()
-            .setAllCorners(CornerFamily.ROUNDED, 24f)
-            .build()
-        binding.ivAppIcon.shapeAppearanceModel = shapeModel
-        return ViewHolder(binding)
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        return if (viewType == VIEW_TYPE_EXPAND_FOOTER) {
+            val view = LayoutInflater.from(parent.context).inflate(
+                R.layout.item_app_power_expand_footer,
+                parent,
+                false
+            )
+            FooterViewHolder(view)
+        } else {
+            val binding = ItemAppPowerUsageBinding.inflate(
+                LayoutInflater.from(parent.context),
+                parent,
+                false
+            )
+            // 给应用图标应用圆角外观
+            val shapeModel = ShapeAppearanceModel.builder()
+                .setAllCorners(CornerFamily.ROUNDED, 24f)
+                .build()
+            binding.ivAppIcon.shapeAppearanceModel = shapeModel
+            ViewHolder(binding)
+        }
     }
 
     /**
@@ -98,13 +161,40 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
      * @param holder 视图持有者
      * @param position 数据项索引
      */
-    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        if (holder is FooterViewHolder) {
+            val tvHint = holder.itemView.findViewById<TextView>(R.id.tv_expand_hint)
+            val total = displayItems.size
+            if (!isExpanded) {
+                val remaining = total - INITIAL_DISPLAY_LIMIT
+                tvHint?.text = "查看全部应用 (共 ${total} 个，剩余 ${remaining} 个) ▾"
+            } else {
+                tvHint?.text = "收起部分应用 (恢复前 ${INITIAL_DISPLAY_LIMIT} 个) ▴"
+            }
+            holder.itemView.setOnClickListener {
+                isExpanded = !isExpanded
+                notifyDataSetChanged()
+            }
+            return
+        }
+
+        val itemHolder = holder as? ViewHolder ?: return
+        if (position >= displayItems.size) return
         val item = displayItems[position]
-        holder.itemView.setOnClickListener {
+        itemHolder.itemView.setOnClickListener {
             onItemClickListener?.invoke(item)
         }
-        with(holder.binding) {
-            if (item.icon != null) {
+        with(itemHolder.binding) {
+            // 图标规格限制与 LRU 缓存复用：按 42dp 像素进行缩放，彻底消灭全分辨率大图占用 Native 堆
+            val targetIconPx = (itemHolder.itemView.context.resources.displayMetrics.density * 42f).toInt()
+            val cachedBitmap = DrawableBitmapCache.getOrConvertBitmap(
+                item.packageName,
+                item.icon,
+                targetIconPx
+            )
+            if (cachedBitmap != null && !cachedBitmap.isRecycled) {
+                ivAppIcon.setImageBitmap(cachedBitmap)
+            } else if (item.icon != null) {
                 ivAppIcon.setImageDrawable(item.icon)
             } else {
                 ivAppIcon.setImageResource(R.mipmap.ic_launcher)
@@ -168,11 +258,22 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
     }
 
     /**
-     * 获取数据列表总条数。
+     * 获取数据列表当前实际向 RecyclerView 报告的渲染总条数。
+     * 当总条目超出 [INITIAL_DISPLAY_LIMIT] 时：
+     * 未展开状态渲染前 30 项 + 展开按钮；已展开状态渲染全部项 + 收起按钮。
      *
-     * @return 列表大小
+     * @return 实际渲染条目大小
      */
-    override fun getItemCount(): Int = displayItems.size
+    override fun getItemCount(): Int {
+        val total = displayItems.size
+        return if (total <= INITIAL_DISPLAY_LIMIT) {
+            total
+        } else if (!isExpanded) {
+            INITIAL_DISPLAY_LIMIT + 1
+        } else {
+            total + 1
+        }
+    }
 
     /**
      * 提交并更新应用功耗列表原始数据源，并根据当前过滤规则与排序方式以差量方式刷新展示列表。
@@ -291,7 +392,11 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
                         && old.maxTemperature == new.maxTemperature
             }
         })
-        diffResult.dispatchUpdatesTo(this)
+        if (oldList.size > INITIAL_DISPLAY_LIMIT || newList.size > INITIAL_DISPLAY_LIMIT) {
+            notifyDataSetChanged()
+        } else {
+            diffResult.dispatchUpdatesTo(this)
+        }
     }
 }
 

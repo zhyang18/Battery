@@ -39,8 +39,10 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:singleLine="true"
                     android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="14.5sp"
+                    android:textSize="14sp"
                     android:textStyle="bold"
                     tools:text="2026/09/07 12:26 ~ 13:12" />
 
@@ -50,7 +52,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"
                     android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="18.5sp"
+                    android:textSize="16.5sp"
                     android:textStyle="bold"
                     tools:text="2.48 W" />
             </LinearLayout>
@@ -78,7 +80,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"
                     android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="18.5sp"
+                    android:textSize="16.5sp"
                     android:textStyle="bold"
                     tools:text="1h55m" />
             </LinearLayout>

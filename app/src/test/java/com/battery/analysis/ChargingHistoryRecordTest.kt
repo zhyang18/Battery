@@ -232,5 +232,53 @@ class ChargingHistoryRecordTest {
         assertEquals(3920000L, record2.getScreenOnDurationMs())
         assertEquals("1h5m20s", record2.getFormattedScreenOnDuration())
     }
+
+    /**
+     * 测试充电起止时间范围格式化输出（同日仅显一次日期、同年跨天省略结束年份、跨年保留双年份）。
+     */
+    @Test
+    fun testFormattedTimeRangeFormat() {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+
+        // 1. 同一天起止：yyyy/MM/dd HH:mm~HH:mm
+        val sameDayStart = sdf.parse("2026-09-24 12:02:00")!!.time
+        val sameDayEnd = sdf.parse("2026-09-24 12:10:00")!!.time
+        val recordSameDay = ChargingHistoryRecord(
+            id = sameDayEnd,
+            recordTime = "2026-09-24 12:10:00",
+            startTimestamp = sameDayStart,
+            endTimestamp = sameDayEnd,
+            durationMs = sameDayEnd - sameDayStart,
+            startLevel = 40,
+            endLevel = 50,
+            levelGain = 10,
+            chargedEnergyWh = 5f,
+            avgPowerWatts = 15f,
+            maxPowerWatts = 18f,
+            maxTemperature = 35f,
+            chargeType = "交流快充"
+        )
+        assertEquals("2026/09/24 12:02~12:10", recordSameDay.getFormattedTimeRange())
+
+        // 2. 同年跨天起止：yyyy/MM/dd HH:mm~MM/dd HH:mm（省略结束时间年份）
+        val crossDayStart = sdf.parse("2026-09-23 19:50:00")!!.time
+        val crossDayEnd = sdf.parse("2026-09-24 09:28:00")!!.time
+        val recordCrossDay = recordSameDay.copy(
+            startTimestamp = crossDayStart,
+            endTimestamp = crossDayEnd,
+            durationMs = crossDayEnd - crossDayStart
+        )
+        assertEquals("2026/09/23 19:50~09/24 09:28", recordCrossDay.getFormattedTimeRange())
+
+        // 3. 跨年起止：yyyy/MM/dd HH:mm~yyyy/MM/dd HH:mm（保留完整年份）
+        val crossYearStart = sdf.parse("2025-12-31 23:30:00")!!.time
+        val crossYearEnd = sdf.parse("2026-01-01 01:15:00")!!.time
+        val recordCrossYear = recordSameDay.copy(
+            startTimestamp = crossYearStart,
+            endTimestamp = crossYearEnd,
+            durationMs = crossYearEnd - crossYearStart
+        )
+        assertEquals("2025/12/31 23:30~2026/01/01 01:15", recordCrossYear.getFormattedTimeRange())
+    }
 }
 

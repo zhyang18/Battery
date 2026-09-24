@@ -992,7 +992,8 @@ class PowerUsageFragment : Fragment() {
                 val joules = onEnergy * 3600f
                 val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", onEnergy)})"
                 val remainingText = overview.remainingScreenOnText.ifBlank { "--" }
-                "亮屏：时间 $timeText、平均功耗 $powerText、能量 $energyText、续航时间 $remainingText"
+//                "亮屏：时间 $timeText、平均功耗 $powerText、能量 $energyText、续航时间 $remainingText"
+                "亮屏：时间、平均功耗、能量、续航时间"
             }
             ROW_SCREEN_OFF -> {
                 val offDurationMs = if (overview.screenOffDurationMs > 0L) overview.screenOffDurationMs else parseDurationTextToMs(overview.screenOffDurationText)
@@ -1013,7 +1014,8 @@ class PowerUsageFragment : Fragment() {
                 val joules = offEnergy * 3600f
                 val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", offEnergy)})"
                 val remainingText = overview.remainingScreenOffText.ifBlank { "--" }
-                "息屏：时间 $timeText、平均功耗 $powerText、能量 $energyText、续航时间 $remainingText"
+//                "息屏：时间 $timeText、平均功耗 $powerText、能量 $energyText、续航时间 $remainingText"
+                "息屏：时间、平均功耗、能量、续航时间"
             }
             ROW_GLOBAL -> {
                 val totalDurationStr = formatCardDuration(totalDurationMs, overview.totalDurationText)
@@ -1027,7 +1029,8 @@ class PowerUsageFragment : Fragment() {
                 val joules = totalEnergyWh * 3600f
                 val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", totalEnergyWh)})"
                 val remainingText = overview.remainingCompositeText.ifBlank { "--" }
-                "全局：时间 $timeText、平均功耗 $powerText、能量 $energyText、续航时间 $remainingText"
+//                "全局：时间 $timeText、平均功耗 $powerText、能量 $energyText、续航时间 $remainingText"
+                "全局：时间、平均功耗、能量、续航时间"
             }
             else -> return
         }
@@ -1840,6 +1843,7 @@ class PowerUsageFragment : Fragment() {
      */
     private fun showPowerHistoryDialog() {
         val dialogView = layoutInflater.inflate(R.layout.dialog_power_history, null)
+        val tvDialogTitle = dialogView.findViewById<TextView>(R.id.tv_dialog_title)
         val rvHistory = dialogView.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.rv_power_history)
         val layoutEmpty = dialogView.findViewById<View>(R.id.layout_empty_history)
         val btnClose = dialogView.findViewById<ImageView>(R.id.btn_dialog_close)
@@ -1856,6 +1860,7 @@ class PowerUsageFragment : Fragment() {
             viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
                 val list = historyDb.getAllRecords()
                 withContext(Dispatchers.Main) {
+                    tvDialogTitle?.text = "${getString(R.string.power_history_title)}(${list.size})"
                     if (list.isEmpty()) {
                         rvHistory.visibility = View.GONE
                         layoutEmpty.visibility = View.VISIBLE

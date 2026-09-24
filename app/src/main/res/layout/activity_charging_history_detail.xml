@@ -267,7 +267,7 @@
                         </LinearLayout>
                     </LinearLayout>
 
-                    <!-- 4. 息屏充电细分统计（无小标题，息屏充入能量靠右对齐，带专属分割线与显隐容器） -->
+                    <!-- 4. 亮/息屏充电细分统计（左侧亮屏充入电量，中间息屏充入电量，右侧息屏充入能量） -->
                     <LinearLayout
                         android:id="@+id/layout_screen_off_special"
                         android:layout_width="match_parent"
@@ -286,10 +286,37 @@
                             android:gravity="center_vertical"
                             android:orientation="horizontal">
 
+                            <!-- 左侧：亮屏充入电量 -->
                             <LinearLayout
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/charging_detail_screen_on_level"
+                                    android:textColor="?android:attr/textColorSecondary"
+                                    android:textSize="12sp" />
+
+                                <TextView
+                                    android:id="@+id/tv_screen_on_level_gain"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4dp"
+                                    android:textColor="?android:attr/textColorPrimary"
+                                    android:textSize="16sp"
+                                    android:textStyle="bold"
+                                    tools:text="+5%" />
+                            </LinearLayout>
+
+                            <!-- 中间：息屏充入电量 -->
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center_horizontal"
                                 android:orientation="vertical">
 
                                 <TextView
@@ -310,9 +337,11 @@
                                     tools:text="+50%" />
                             </LinearLayout>
 
+                            <!-- 右侧：息屏充入能量 -->
                             <LinearLayout
-                                android:layout_width="wrap_content"
+                                android:layout_width="0dp"
                                 android:layout_height="wrap_content"
+                                android:layout_weight="1"
                                 android:gravity="end"
                                 android:orientation="vertical">
 

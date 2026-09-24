@@ -41,9 +41,43 @@ class ChargingHistoryActivity : AppCompatActivity() {
     private var allRecordList: List<ChargingHistoryRecord> = emptyList()
 
     /**
-     * 当前选中的电量净增量筛选阈值（例如 20, 50, 80），若为 null 则表示展示全部。
+     * 充电历史记录电量增量筛选条件类型枚举。
+     *
+     * @property label 胶囊按钮与空状态提示文本
+     * @property isLessThan 是否为小于条件（true 为 <，false 为 ≥）
+     * @property threshold 筛选比较的增量阈值（百分比）
      */
-    private var selectedGainFilter: Int? = null
+    enum class ChargingGainFilterType(
+        val label: String,
+        val isLessThan: Boolean,
+        val threshold: Int
+    ) {
+        GTE_20("≥20%", false, 20),
+        GTE_50("≥50%", false, 50),
+        GTE_80("≥80%", false, 80),
+        LT_30("<30%", true, 30),
+        LT_20("<20%", true, 20),
+        LT_10("<10%", true, 10);
+
+        /**
+         * 判断指定充电记录的电量增量是否满足当前筛选条件。
+         *
+         * @param levelGain 待检查的电量增量百分比
+         * @return 若满足条件返回 true，否则返回 false
+         */
+        fun matches(levelGain: Int): Boolean {
+            return if (isLessThan) {
+                levelGain < threshold
+            } else {
+                levelGain >= threshold
+            }
+        }
+    }
+
+    /**
+     * 当前选中的电量净增量筛选类型，若为 null 则表示展示全部。
+     */
+    private var selectedGainFilter: ChargingGainFilterType? = null
 
     /**
      * 活动初始化生命周期回调，配置状态栏、初始化 RecyclerView、交互监听及系统返回拦截。
@@ -196,22 +230,21 @@ class ChargingHistoryActivity : AppCompatActivity() {
     }
 
     /**
-     * 初始化页面下方条件查询胶囊（≥20%、≥50%、≥80%）的点击监听。
+     * 初始化页面下方条件查询胶囊（≥20%、≥50%、≥80%、<30%、<20%、<10%）的点击监听。
      */
     private fun setupFilterChips() {
         val chips = listOf(
-            Pair(binding.btnFilterGain20, 20),
-            Pair(binding.btnFilterGain50, 50),
-            Pair(binding.btnFilterGain80, 80)
+            Pair(binding.btnFilterGain20, ChargingGainFilterType.GTE_20),
+            Pair(binding.btnFilterGain50, ChargingGainFilterType.GTE_50),
+            Pair(binding.btnFilterGain80, ChargingGainFilterType.GTE_80),
+            Pair(binding.btnFilterGainLt30, ChargingGainFilterType.LT_30),
+            Pair(binding.btnFilterGainLt20, ChargingGainFilterType.LT_20),
+            Pair(binding.btnFilterGainLt10, ChargingGainFilterType.LT_10)
         )
 
-        for ((view, threshold) in chips) {
+        for ((view, filterType) in chips) {
             view.setOnClickListener {
-                if (selectedGainFilter == threshold) {
-                    selectedGainFilter = null
-                } else {
-                    selectedGainFilter = threshold
-                }
+                selectedGainFilter = if (selectedGainFilter == filterType) null else filterType
                 updateFilterChipsUI()
                 applyFilterAndSubmit()
             }
@@ -224,16 +257,19 @@ class ChargingHistoryActivity : AppCompatActivity() {
      */
     private fun updateFilterChipsUI() {
         val chips = listOf(
-            Pair(binding.btnFilterGain20, 20),
-            Pair(binding.btnFilterGain50, 50),
-            Pair(binding.btnFilterGain80, 80)
+            Pair(binding.btnFilterGain20, ChargingGainFilterType.GTE_20),
+            Pair(binding.btnFilterGain50, ChargingGainFilterType.GTE_50),
+            Pair(binding.btnFilterGain80, ChargingGainFilterType.GTE_80),
+            Pair(binding.btnFilterGainLt30, ChargingGainFilterType.LT_30),
+            Pair(binding.btnFilterGainLt20, ChargingGainFilterType.LT_20),
+            Pair(binding.btnFilterGainLt10, ChargingGainFilterType.LT_10)
         )
 
         val highlightColor = Color.parseColor("#8AB4F8")
         val normalColor = Color.parseColor("#9CA3AF")
 
-        for ((view, threshold) in chips) {
-            if (selectedGainFilter == threshold) {
+        for ((view, filterType) in chips) {
+            if (selectedGainFilter == filterType) {
                 view.setBackgroundResource(R.drawable.bg_filter_capsule_selected)
                 view.setTextColor(highlightColor)
                 view.setTypeface(null, Typeface.BOLD)
@@ -253,7 +289,7 @@ class ChargingHistoryActivity : AppCompatActivity() {
         val filteredList = if (filter == null) {
             allRecordList
         } else {
-            allRecordList.filter { it.levelGain >= filter }
+            allRecordList.filter { filter.matches(it.levelGain) }
         }
 
         if (filteredList.isEmpty()) {
@@ -264,11 +300,15 @@ class ChargingHistoryActivity : AppCompatActivity() {
                 binding.tvEmptyDesc.text = getString(R.string.charging_history_empty_desc)
             } else {
                 binding.tvEmptyTitle.text = "未找到符合条件的充电记录"
-                binding.tvEmptyDesc.text = "暂无电量增量 ≥$filter% 的充电记录"
+                binding.tvEmptyDesc.text = "暂无电量增量 ${filter?.label} 的充电记录"
             }
         } else {
             binding.rvChargingHistory.visibility = View.VISIBLE
             binding.layoutEmptyHistory.visibility = View.GONE
+        }
+
+        if (!adapter.isSelectionMode) {
+            binding.tvTitle.text = "${getString(R.string.charging_history_title)}(${filteredList.size})"
         }
 
         adapter.submitList(filteredList) {
@@ -289,13 +329,13 @@ class ChargingHistoryActivity : AppCompatActivity() {
     }
 
     /**
-     * 退出多选删除模式，清空选中集并隐藏全选框。
+     * 退出多选删除模式，清空选中集并隐藏全选框，恢复展示充电历史记录(列表个数)。
      */
     private fun exitSelectionMode() {
         adapter.setSelectionMode(false)
         binding.layoutSelectAll.visibility = View.GONE
         binding.cbSelectAll.isChecked = false
-        binding.tvTitle.text = getString(R.string.charging_history_title)
+        binding.tvTitle.text = "${getString(R.string.charging_history_title)}(${adapter.currentList.size})"
     }
 
     /**
@@ -310,7 +350,7 @@ class ChargingHistoryActivity : AppCompatActivity() {
             val visibleIds = adapter.currentList.map { it.id }
             binding.cbSelectAll.isChecked = adapter.isAllSelected(visibleIds)
         } else {
-            binding.tvTitle.text = getString(R.string.charging_history_title)
+            binding.tvTitle.text = "${getString(R.string.charging_history_title)}($totalCount)"
         }
     }
 

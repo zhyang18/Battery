@@ -533,6 +533,7 @@
     <string name="charging_detail_peak_power">峰值功率</string>
     <string name="charging_detail_max_temp">最高温度</string>
     <string name="charging_detail_screen_off_section">息屏充电细分统计</string>
+    <string name="charging_detail_screen_on_level">亮屏充入电量</string>
     <string name="charging_detail_screen_off_level">息屏充入电量</string>
     <string name="charging_detail_screen_off_energy">息屏充入能量</string>
 

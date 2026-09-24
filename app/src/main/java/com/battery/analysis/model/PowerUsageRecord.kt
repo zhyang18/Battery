@@ -213,7 +213,9 @@ data class PowerUsageRecord(
 
     /**
      * 解析并获取本次耗电记录的起止时间范围文本（包含开始时间与结束时间）。
-     * 若起止为同一天则显示为 "yyyy/MM/dd HH:mm ~ HH:mm"；若跨天则显示为 "yyyy/MM/dd HH:mm ~ yyyy/MM/dd HH:mm"。
+     * 若起止为同一天则显示为 "yyyy/MM/dd HH:mm~HH:mm"；
+     * 若起止为同年跨天则显示为 "yyyy/MM/dd HH:mm~MM/dd HH:mm"（去掉结束时间年份）；
+     * 若跨年则显示为 "yyyy/MM/dd HH:mm~yyyy/MM/dd HH:mm"。
      *
      * @return 格式化后的起止时间范围字符串
      */
@@ -221,6 +223,8 @@ data class PowerUsageRecord(
         val dateFormat = java.text.SimpleDateFormat("yyyy/MM/dd HH:mm", java.util.Locale.getDefault())
         val timeOnlyFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
         val dayOnlyFormat = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.getDefault())
+        val yearOnlyFormat = java.text.SimpleDateFormat("yyyy", java.util.Locale.getDefault())
+        val monthDayTimeFormat = java.text.SimpleDateFormat("MM/dd HH:mm", java.util.Locale.getDefault())
 
         var startTs = 0L
         var endTs = id
@@ -257,6 +261,8 @@ data class PowerUsageRecord(
 
         return if (dayOnlyFormat.format(startDate) == dayOnlyFormat.format(endDate)) {
             "${dateFormat.format(startDate)}~${timeOnlyFormat.format(endDate)}"
+        } else if (yearOnlyFormat.format(startDate) == yearOnlyFormat.format(endDate)) {
+            "${dateFormat.format(startDate)}~${monthDayTimeFormat.format(endDate)}"
         } else {
             "${dateFormat.format(startDate)}~${dateFormat.format(endDate)}"
         }
@@ -347,25 +353,41 @@ data class PowerUsageRecord(
     /**
      * 获取本次放电记录的总持续时长（单位：毫秒）。
      *
-     * @return 转换后的持续时长毫秒数
+     * @return 转换后的总持续时长毫秒数
      */
     fun getDurationMs(): Long {
         return parseDurationToMillis(totalDurationText)
     }
 
     /**
+     * 获取本次放电记录的亮屏持续时长（单位：毫秒）。
+     *
+     * @return 转换后的亮屏持续时长毫秒数
+     */
+    fun getScreenOnDurationMs(): Long {
+        val directMs = parseDurationToMillis(screenOnDurationText)
+        if (directMs > 0L) return directMs
+        val displayDur = getDisplayScreenOnDuration()
+        return if (displayDur != "--") parseDurationToMillis(displayDur) else 0L
+    }
+
+    /**
      * 将时长文本解析还原为毫秒数。
      *
-     * @param durationText 时长字符串（如 "1h20m" 或 "46m"）
+     * @param durationText 时长字符串（如 "1d2h"、"1h20m" 或 "46m30s"）
      * @return 对应的毫秒数
      */
     private fun parseDurationToMillis(durationText: String): Long {
         if (durationText.isBlank()) return 0L
         var totalMs = 0L
         try {
+            val dRegex = "(\\d+)d".toRegex()
             val hRegex = "(\\d+)h".toRegex()
             val mRegex = "(\\d+)m".toRegex()
             val sRegex = "(\\d+)s".toRegex()
+            dRegex.find(durationText)?.groupValues?.get(1)?.toLongOrNull()?.let {
+                totalMs += it * 86400000L
+            }
             hRegex.find(durationText)?.groupValues?.get(1)?.toLongOrNull()?.let {
                 totalMs += it * 3600000L
             }

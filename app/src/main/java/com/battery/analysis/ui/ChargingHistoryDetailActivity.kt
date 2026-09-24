@@ -145,7 +145,11 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
             record.maxTemperature
         )
 
-        if (record.screenOffDurationMs > 0L) {
+        val screenOnGain = record.getScreenOnLevelGain()
+        val screenOnSign = if (screenOnGain >= 0) "+${screenOnGain}%" else "${screenOnGain}%"
+        binding.tvScreenOnLevelGain.text = screenOnSign
+
+        if (record.screenOffDurationMs > 0L || record.durationMs > 0L) {
             binding.layoutScreenOffSpecial.visibility = View.VISIBLE
             val screenOffSign = if (record.screenOffLevelGain >= 0) "+${record.screenOffLevelGain}%" else "${record.screenOffLevelGain}%"
             binding.tvScreenOffLevelGain.text = screenOffSign

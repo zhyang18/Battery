@@ -330,7 +330,34 @@ class PowerUsageDbHelper private constructor(context: Context) :
     }
 
     /**
+     * 将数据库中未完结（RUNNING 状态，即 is_completed = 0）的放电草稿批量标记为已结案（is_completed = 1）。
+     * 用于开启新会话、接入外部电源或自愈清理历史残留脏状态时，杜绝产生多个“放电中”条目。
+     *
+     * @param exceptId 允许保留未完结状态的目标会话 ID（可选，若传入该 ID 则跳过对其结案）
+     * @return 实际被更新为已完成状态的记录条数
+     */
+    fun finalizeRunningRecords(exceptId: Long? = null): Int {
+        val db = writableDatabase
+        val values = ContentValues().apply {
+            put(COL_IS_COMPLETED, 1)
+        }
+        val whereClause = if (exceptId != null && exceptId > 0L) {
+            "$COL_IS_COMPLETED = 0 AND $COL_ID != ?"
+        } else {
+            "$COL_IS_COMPLETED = 0"
+        }
+        val whereArgs = if (exceptId != null && exceptId > 0L) {
+            arrayOf(exceptId.toString())
+        } else {
+            null
+        }
+        return db.update(TABLE_NAME, values, whereClause, whereArgs)
+    }
+
+    /**
      * 查询所有已持久化的耗电历史记录，按时间从近到远倒序排列。
+     * 自动执行单会话进行中自愈守护：物理上整机在同一时刻至多只允许存在一个处于“放电中”（RUNNING）的活跃会话。
+     * 若历史数据中检测到多条未完结草稿，自动保留最新一条为进行中，其余所有旧会话均原地自愈为已完成并更新数据库。
      *
      * @return 耗电历史快照记录列表
      */
@@ -353,7 +380,34 @@ class PowerUsageDbHelper private constructor(context: Context) :
                 } while (c.moveToNext())
             }
         }
-        return list
+
+        var foundFirstRunning = false
+        var needDbFix = false
+        val fixedList = ArrayList<PowerUsageRecord>(list.size)
+        for (record in list) {
+            if (!record.isCompleted) {
+                if (!foundFirstRunning) {
+                    foundFirstRunning = true
+                    fixedList.add(record)
+                } else {
+                    fixedList.add(record.copy(isCompleted = true))
+                    needDbFix = true
+                }
+            } else {
+                fixedList.add(record)
+            }
+        }
+
+        if (needDbFix) {
+            val keepId = fixedList.firstOrNull { !it.isCompleted }?.id
+            try {
+                finalizeRunningRecords(exceptId = keepId)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        return fixedList
     }
 
     /**

@@ -405,7 +405,7 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         // 仅当图标纵向叠加层数极多超出基础高度范围时，才动态扩充高度（纵向上下间距为 0）
         val iconStackHeight = (maxRowsCount * dp11).toInt()
-        val requiredHeight = dpToPx(80f).toInt() + iconStackHeight
+        val requiredHeight = dpToPx(50f).toInt() + iconStackHeight
         val desiredHeight = maxOf(defaultBaseH, requiredHeight)
 
         val heightMode = MeasureSpec.getMode(heightMeasureSpec)

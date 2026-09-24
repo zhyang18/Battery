@@ -338,21 +338,24 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             val timeText = if (onDurationRatioStr != "0.0%") "$onDurationStr($onDurationRatioStr)" else onDurationStr
             val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", onEnergy)})"
             val remainingText = record.remainingScreenOnText.ifBlank { "--" }
-            Toast.makeText(this, "亮屏：时间 $timeText、平均功耗 $onPowerStr、能量 $energyText、续航时间 $remainingText", Toast.LENGTH_SHORT).show()
+//            Toast.makeText(this, "亮屏：时间 $timeText、平均功耗 $onPowerStr、能量 $energyText、续航时间 $remainingText", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "亮屏：时间、平均功耗、能量、续航时间", Toast.LENGTH_SHORT).show()
         }
         binding.layoutMetricScreenOffRow.setOnClickListener {
             val joules = offEnergy * 3600f
             val timeText = if (offDurationRatioStr != "0.0%") "$offDurationStr($offDurationRatioStr)" else offDurationStr
             val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", offEnergy)})"
             val remainingText = record.remainingScreenOffText.ifBlank { "--" }
-            Toast.makeText(this, "息屏：时间 $timeText、平均功耗 $offPowerStr、能量 $energyText、续航时间 $remainingText", Toast.LENGTH_SHORT).show()
+//            Toast.makeText(this, "息屏：时间 $timeText、平均功耗 $offPowerStr、能量 $energyText、续航时间 $remainingText", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "息屏：时间、平均功耗、能量、续航时间", Toast.LENGTH_SHORT).show()
         }
         binding.layoutMetricGlobalRow.setOnClickListener {
             val joules = totalEnergy * 3600f
             val timeText = "$totalDurationStr(100%)"
             val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", totalEnergy)})"
             val remainingText = record.remainingCompositeText.ifBlank { "--" }
-            Toast.makeText(this, "全局：时间 $timeText、平均功耗 $avgPowerStr、能量 $energyText、续航时间 $remainingText", Toast.LENGTH_SHORT).show()
+//            Toast.makeText(this, "全局：时间 $timeText、平均功耗 $avgPowerStr、能量 $energyText、续航时间 $remainingText", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "全局：时间、平均功耗、能量、续航时间", Toast.LENGTH_SHORT).show()
         }
 
         // 3. 卡片 3 与 4：反序列化全量数据包加载功耗时间轴与应用排行榜

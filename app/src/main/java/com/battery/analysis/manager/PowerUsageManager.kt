@@ -1375,6 +1375,13 @@ class PowerUsageManager private constructor(private val context: Context) {
      */
     @Synchronized
     fun startDischargeSession(unplugTime: Long, unplugLevel: Int) {
+        // 开启新会话前，先将数据库中所有其它未完结的放电草稿正式结案归档，杜绝生成多个“放电中”
+        try {
+            PowerUsageDbHelper.getInstance(context).finalizeRunningRecords(exceptId = unplugTime)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         currentDischargeSessionId = unplugTime
         lastDischargeCheckpointTime = unplugTime
         lastDischargeCheckpointLevel = unplugLevel
@@ -1488,7 +1495,14 @@ class PowerUsageManager private constructor(private val context: Context) {
         // 1. 归档上一个放电周期的耗电账本快照（将 RUNNING 更新为 COMPLETED）
         val record = archiveDischargeSession(timestamp)
 
-        // 2. 彻底重置放电采样点与屏幕/应用使用基准快照，确保充电期间不污染旧放电账本
+        // 2. 彻底扫清数据库中所有可能残留的放电中草稿（接入外部电源时必然已结束放电）
+        try {
+            PowerUsageDbHelper.getInstance(context).finalizeRunningRecords()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 3. 彻底重置放电采样点与屏幕/应用使用基准快照，确保充电期间不污染旧放电账本
         resetPowerStats()
 
         return record
@@ -1514,11 +1528,17 @@ class PowerUsageManager private constructor(private val context: Context) {
                 } catch (_: Exception) {}
             }
             currentDischargeSessionId = 0L
+            try {
+                PowerUsageDbHelper.getInstance(context).finalizeRunningRecords()
+            } catch (_: Exception) {}
             return null
         }
 
         // 2. 关键幂等防重：同一拔电周期的放电账本只允许归档一次
         if (lastArchivedUnplugTime == lastUnplugTime) {
+            try {
+                PowerUsageDbHelper.getInstance(context).finalizeRunningRecords()
+            } catch (_: Exception) {}
             return null
         }
 
@@ -1533,6 +1553,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                 .putLong("pref_current_discharge_session_id", 0L)
                 .apply()
         }
+        try {
+            PowerUsageDbHelper.getInstance(context).finalizeRunningRecords()
+        } catch (_: Exception) {}
         return finalizedRecord
     }
 
@@ -1567,6 +1590,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                         lastCheckpointTime = now
                     )
                 )
+                dbHelper.finalizeRunningRecords()
                 currentDischargeSessionId = 0L
                 lastArchivedUnplugTime = runningSession.id
                 prefs.edit()
@@ -1575,7 +1599,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                     .apply()
                 reconciled = true
             } else {
-                // 场景 A：当前仍处于放电中，恢复进行中放电会话的上下文
+                // 场景 A：当前仍处于放电中，恢复进行中放电会话的上下文，并清理其它残留的旧草稿
+                dbHelper.finalizeRunningRecords(exceptId = runningSession.id)
                 currentDischargeSessionId = runningSession.id
                 if (lastUnplugTime <= 0L) {
                     prefs.edit()
@@ -1583,6 +1608,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                         .apply()
                 }
             }
+        } else if (isCharging) {
+            dbHelper.finalizeRunningRecords()
         }
 
         if (!isCharging) {

@@ -89,6 +89,16 @@ data class ChargingHistoryRecord(
     }
 
     /**
+     * 计算亮屏充电充入电量百分比。
+     * 由总充入电量增量与息屏充入电量增量的差值计算得出。
+     *
+     * @return 亮屏充电充入电量增量百分比
+     */
+    fun getScreenOnLevelGain(): Int {
+        return levelGain - screenOffLevelGain
+    }
+
+    /**
      * 格式化输出息屏充电时长的友好文本（如 "10m15s"）。
      *
      * @return 格式化后的息屏持续时长字符串
@@ -107,7 +117,9 @@ data class ChargingHistoryRecord(
 
     /**
      * 解析并获取本次充电记录的起止时间范围文本（包含开始时间与结束时间）。
-     * 若起止为同一天则显示为 "yyyy/MM/dd HH:mm ~ HH:mm"；若跨天则显示为 "yyyy/MM/dd HH:mm ~ yyyy/MM/dd HH:mm"。
+     * 若起止为同一天则显示为 "yyyy/MM/dd HH:mm~HH:mm"；
+     * 若起止为同年跨天则显示为 "yyyy/MM/dd HH:mm~MM/dd HH:mm"（去掉结束时间年份）；
+     * 若跨年则显示为 "yyyy/MM/dd HH:mm~yyyy/MM/dd HH:mm"。
      *
      * @return 格式化后的起止时间范围字符串
      */
@@ -115,6 +127,8 @@ data class ChargingHistoryRecord(
         val dateFormat = java.text.SimpleDateFormat("yyyy/MM/dd HH:mm", java.util.Locale.getDefault())
         val timeOnlyFormat = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
         val dayOnlyFormat = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.getDefault())
+        val yearOnlyFormat = java.text.SimpleDateFormat("yyyy", java.util.Locale.getDefault())
+        val monthDayTimeFormat = java.text.SimpleDateFormat("MM/dd HH:mm", java.util.Locale.getDefault())
 
         val startTs = if (startTimestamp > 0L) startTimestamp else (endTimestamp - durationMs).coerceAtLeast(0L)
         val endTs = if (endTimestamp > 0L) endTimestamp else id
@@ -124,6 +138,8 @@ data class ChargingHistoryRecord(
 
         return if (dayOnlyFormat.format(startDate) == dayOnlyFormat.format(endDate)) {
             "${dateFormat.format(startDate)}~${timeOnlyFormat.format(endDate)}"
+        } else if (yearOnlyFormat.format(startDate) == yearOnlyFormat.format(endDate)) {
+            "${dateFormat.format(startDate)}~${monthDayTimeFormat.format(endDate)}"
         } else {
             "${dateFormat.format(startDate)}~${dateFormat.format(endDate)}"
         }

@@ -41,9 +41,44 @@ class PowerHistoryActivity : AppCompatActivity() {
     private var allRecordList: List<PowerUsageRecord> = emptyList()
 
     /**
-     * 当前选中的放电持续时长筛选阈值（毫秒数，如 1H, 3H, 5H, 8H），若为 null 则表示展示全部。
+     * 耗电历史记录放电持续时长筛选条件枚举。
+     *
+     * @property label 胶囊按钮与空状态提示文本
+     * @property isLessThan 是否为小于（true 为 <，false 为 ≥）
+     * @property thresholdMs 比较判断的时长阈值（毫秒数）
      */
-    private var selectedDurationFilterMs: Long? = null
+    enum class DurationFilterType(
+        val label: String,
+        val isLessThan: Boolean,
+        val thresholdMs: Long
+    ) {
+        GTE_1H("≥1h", false, 1 * 3600 * 1000L),
+        GTE_3H("≥3h", false, 3 * 3600 * 1000L),
+        GTE_5H("≥5h", false, 5 * 3600 * 1000L),
+        GTE_8H("≥8h", false, 8 * 3600 * 1000L),
+        LT_3H("<3h", true, 3 * 3600 * 1000L),
+        LT_1H("<1h", true, 1 * 3600 * 1000L),
+        LT_30M("<30m", true, 30 * 60 * 1000L);
+
+        /**
+         * 判定指定放电记录的持续时长是否命中当前筛选规则。
+         *
+         * @param durationMs 待检查的持续时长（毫秒）
+         * @return 若命中条件返回 true，否则返回 false
+         */
+        fun matches(durationMs: Long): Boolean {
+            return if (isLessThan) {
+                durationMs < thresholdMs
+            } else {
+                durationMs >= thresholdMs
+            }
+        }
+    }
+
+    /**
+     * 当前选中的放电持续时长筛选类型，若为 null 则表示展示全部记录。
+     */
+    private var selectedDurationFilter: DurationFilterType? = null
 
     private val detailLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == PowerHistoryDetailActivity.RESULT_LOAD_TO_MAIN) {
@@ -203,23 +238,22 @@ class PowerHistoryActivity : AppCompatActivity() {
     }
 
     /**
-     * 初始化页面下方条件查询胶囊（≥1H、≥3H、≥5H、≥8H）的点击监听。
+     * 初始化页面下方条件查询胶囊（≥1H、≥3H、≥5H、≥8H、<3H、<1H、<30M）的点击监听。
      */
     private fun setupFilterChips() {
         val chips = listOf(
-            Pair(binding.btnFilterDur1h, 1 * 3600 * 1000L),
-            Pair(binding.btnFilterDur3h, 3 * 3600 * 1000L),
-            Pair(binding.btnFilterDur5h, 5 * 3600 * 1000L),
-            Pair(binding.btnFilterDur8h, 8 * 3600 * 1000L)
+            Pair(binding.btnFilterDur1h, DurationFilterType.GTE_1H),
+            Pair(binding.btnFilterDur3h, DurationFilterType.GTE_3H),
+            Pair(binding.btnFilterDur5h, DurationFilterType.GTE_5H),
+            Pair(binding.btnFilterDur8h, DurationFilterType.GTE_8H),
+            Pair(binding.btnFilterDurLt3h, DurationFilterType.LT_3H),
+            Pair(binding.btnFilterDurLt1h, DurationFilterType.LT_1H),
+            Pair(binding.btnFilterDurLt30m, DurationFilterType.LT_30M)
         )
 
-        for ((view, thresholdMs) in chips) {
+        for ((view, filterType) in chips) {
             view.setOnClickListener {
-                if (selectedDurationFilterMs == thresholdMs) {
-                    selectedDurationFilterMs = null
-                } else {
-                    selectedDurationFilterMs = thresholdMs
-                }
+                selectedDurationFilter = if (selectedDurationFilter == filterType) null else filterType
                 updateFilterChipsUI()
                 applyFilterAndSubmit()
             }
@@ -232,17 +266,20 @@ class PowerHistoryActivity : AppCompatActivity() {
      */
     private fun updateFilterChipsUI() {
         val chips = listOf(
-            Pair(binding.btnFilterDur1h, 1 * 3600 * 1000L),
-            Pair(binding.btnFilterDur3h, 3 * 3600 * 1000L),
-            Pair(binding.btnFilterDur5h, 5 * 3600 * 1000L),
-            Pair(binding.btnFilterDur8h, 8 * 3600 * 1000L)
+            Pair(binding.btnFilterDur1h, DurationFilterType.GTE_1H),
+            Pair(binding.btnFilterDur3h, DurationFilterType.GTE_3H),
+            Pair(binding.btnFilterDur5h, DurationFilterType.GTE_5H),
+            Pair(binding.btnFilterDur8h, DurationFilterType.GTE_8H),
+            Pair(binding.btnFilterDurLt3h, DurationFilterType.LT_3H),
+            Pair(binding.btnFilterDurLt1h, DurationFilterType.LT_1H),
+            Pair(binding.btnFilterDurLt30m, DurationFilterType.LT_30M)
         )
 
         val highlightColor = Color.parseColor("#8AB4F8")
         val normalColor = Color.parseColor("#9CA3AF")
 
-        for ((view, thresholdMs) in chips) {
-            if (selectedDurationFilterMs == thresholdMs) {
+        for ((view, filterType) in chips) {
+            if (selectedDurationFilter == filterType) {
                 view.setBackgroundResource(R.drawable.bg_filter_capsule_selected)
                 view.setTextColor(highlightColor)
                 view.setTypeface(null, Typeface.BOLD)
@@ -258,11 +295,11 @@ class PowerHistoryActivity : AppCompatActivity() {
      * 根据当前的筛选条件对全量数据进行过滤，并刷新 RecyclerView 与空状态展示。
      */
     private fun applyFilterAndSubmit() {
-        val filterMs = selectedDurationFilterMs
-        val filteredList = if (filterMs == null) {
+        val filter = selectedDurationFilter
+        val filteredList = if (filter == null) {
             allRecordList
         } else {
-            allRecordList.filter { it.getDurationMs() >= filterMs }
+            allRecordList.filter { filter.matches(it.getScreenOnDurationMs()) }
         }
 
         if (filteredList.isEmpty()) {
@@ -272,13 +309,16 @@ class PowerHistoryActivity : AppCompatActivity() {
                 binding.tvEmptyTitle.text = getString(R.string.power_history_empty_title)
                 binding.tvEmptyDesc.text = getString(R.string.power_history_empty_desc)
             } else {
-                val hours = (filterMs ?: 0L) / 3600000L
                 binding.tvEmptyTitle.text = "未找到符合条件的放电记录"
-                binding.tvEmptyDesc.text = "暂无放电持续时长 ≥${hours}H 的记录"
+                binding.tvEmptyDesc.text = "暂无亮屏时长 ${filter?.label} 的记录"
             }
         } else {
             binding.rvPowerHistory.visibility = View.VISIBLE
             binding.layoutEmptyHistory.visibility = View.GONE
+        }
+
+        if (!adapter.isSelectionMode) {
+            binding.tvTitle.text = "${getString(R.string.power_history_title)}(${filteredList.size})"
         }
 
         adapter.submitList(filteredList) {
@@ -299,13 +339,13 @@ class PowerHistoryActivity : AppCompatActivity() {
     }
 
     /**
-     * 退出多选删除模式，清空选中集并隐藏全选框。
+     * 退出多选删除模式，清空选中集并隐藏全选框，恢复展示耗电记录历史(列表个数)。
      */
     private fun exitSelectionMode() {
         adapter.setSelectionMode(false)
         binding.layoutSelectAll.visibility = View.GONE
         binding.cbSelectAll.isChecked = false
-        binding.tvTitle.text = getString(R.string.power_history_title)
+        binding.tvTitle.text = "${getString(R.string.power_history_title)}(${adapter.currentList.size})"
     }
 
     /**
@@ -320,7 +360,7 @@ class PowerHistoryActivity : AppCompatActivity() {
             val visibleIds = adapter.currentList.map { it.id }
             binding.cbSelectAll.isChecked = adapter.isAllSelected(visibleIds)
         } else {
-            binding.tvTitle.text = getString(R.string.power_history_title)
+            binding.tvTitle.text = "${getString(R.string.power_history_title)}($totalCount)"
         }
     }
 

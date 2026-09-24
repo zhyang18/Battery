@@ -532,6 +532,7 @@
     <string name="charging_detail_peak_power">Peak Power</string>
     <string name="charging_detail_max_temp">Max Temperature</string>
     <string name="charging_detail_screen_off_section">Screen-off Details</string>
+    <string name="charging_detail_screen_on_level">Screen-on Level Gain</string>
     <string name="charging_detail_screen_off_level">Screen-off Level Gain</string>
     <string name="charging_detail_screen_off_energy">Screen-off Energy</string>
 

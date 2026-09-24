@@ -14,7 +14,8 @@
     <!-- Power Usage Page -->
     <string name="power_stats_title">Power Usage</string>
     <string name="power_usage_process">Discharge Process</string>
-    <string name="power_usage_scene">Usage Scenarios</string>
+    <string name="power_usage_scene">Usage List</string>
+    <string name="power_usage_list_format">Usage List (%d)</string>
     <string name="power_avg_power">Discharge Power</string>
     <string name="power_used_time">Discharge Time</string>
     <string name="power_remaining_time">Est. Battery Life</string>
@@ -72,8 +73,8 @@
     <string name="power_toast_cleared">Power stats reset</string>
     <string name="power_guide_process_title">Discharge Process Guide</string>
     <string name="power_guide_process_content">The discharge process chart shows the battery level curve over time since boot or last discharge, marking active apps during high-drain periods.</string>
-    <string name="power_guide_scene_title">Usage Scenarios Guide</string>
-    <string name="power_guide_scene_content">Usage scenarios breakdown displays foreground runtime, average power consumption, and operating temperature for each active app.</string>
+    <string name="power_guide_scene_title">Usage List Guide</string>
+    <string name="power_guide_scene_content">\"Usage List\" tracks foreground active app duration, average power consumption, and operating temperature for each active app.</string>
     <string name="power_guide_overview_title">Discharge Metrics Guide</string>
     <string name="power_guide_overview_content">• Discharge Power: Shows screen-on average power, overall average power, and standby power since discharge (Watts).\n\n• Discharge Time: Tracks screen-on duration, screen-off standby duration, and total discharge duration.\n\n• Battery Life: Estimates remaining battery life for screen-on, mixed usage, and standby based on current battery energy and measured power.</string>
 

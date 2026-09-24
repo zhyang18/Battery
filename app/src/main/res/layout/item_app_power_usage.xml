@@ -73,15 +73,65 @@
         android:gravity="end"
         android:orientation="vertical">
 
-        <!-- 前台时长 | 后台时长 -->
-        <TextView
-            android:id="@+id/tv_duration"
+        <!-- 前台时长 与 后台时长 容器 -->
+        <LinearLayout
+            android:id="@+id/layout_duration_container"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="?android:attr/textColorPrimary"
-            android:textSize="12sp"
-            android:maxLines="1"
-            tools:text="6h7m | 1h20m" />
+            android:gravity="center_vertical|end"
+            android:orientation="horizontal">
+
+            <!-- 前台时长组：绿色小圆点 + 前台时间 -->
+            <LinearLayout
+                android:id="@+id/layout_fg_duration"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <View
+                    android:id="@+id/view_fg_dot"
+                    android:layout_width="6dp"
+                    android:layout_height="6dp"
+                    android:layout_marginEnd="4dp"
+                    android:background="@drawable/bg_dot_green" />
+
+                <TextView
+                    android:id="@+id/tv_fg_duration"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    android:maxLines="1"
+                    tools:text="6h7m" />
+            </LinearLayout>
+
+            <!-- 后台时长组：蓝色小圆点 + 后台时间 -->
+            <LinearLayout
+                android:id="@+id/layout_bg_duration"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <View
+                    android:id="@+id/view_bg_dot"
+                    android:layout_width="6dp"
+                    android:layout_height="6dp"
+                    android:layout_marginEnd="4dp"
+                    android:background="@drawable/bg_dot_blue" />
+
+                <TextView
+                    android:id="@+id/tv_bg_duration"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="12sp"
+                    android:maxLines="1"
+                    tools:text="1h20m" />
+            </LinearLayout>
+        </LinearLayout>
 
         <!-- 移动到时间下方的 消耗能量 | MAX 最高运行温度 -->
         <TextView

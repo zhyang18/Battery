@@ -544,6 +544,7 @@ class PowerUsageFragment : Fragment() {
             }
             updateShizukuBannerState()
             checkNormalPermissionBanner()
+            updateScrollLimitForShortList()
         }
     }
 
@@ -579,6 +580,11 @@ class PowerUsageFragment : Fragment() {
         }
         // 主动释放大对象引用，让 GC 能及时回收 FullPowerDataPackage（含应用列表、时序点数组等）
         lastRenderedPackage = null
+        // 重置高度缓存与折叠标志位，确保切回或重建视图时重新计算短列表折叠边界
+        lastTotalContentH = -1
+        lastCoordinatorH = -1
+        lastAppliedScrollFlags = -1
+        lastAppBarVerticalOffset = 0
         // 清空 RecyclerView Adapter 持有的应用列表，避免 Adapter 阻止列表数据被 GC 回收
         adapter.submitList(emptyList())
         _binding = null
@@ -709,6 +715,10 @@ class PowerUsageFragment : Fragment() {
     private fun setupRecyclerView() {
         binding.recyclerAppUsage.layoutManager = LinearLayoutManager(requireContext())
         binding.recyclerAppUsage.adapter = adapter
+        adapter.onListCountChangedListener = { count ->
+            updateUsageListTitle(count)
+        }
+        updateUsageListTitle(adapter.getDisplayItemCount())
         adapter.onItemClickListener = { item ->
             val isShizuku = currentMode == PowerUsageManager.MODE_SHIZUKU && powerManager.isShizukuAuthorized()
             val timeFormatter = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
@@ -1122,12 +1132,8 @@ class PowerUsageFragment : Fragment() {
             binding.toolbarCollapsed.visibility = View.GONE
             binding.cardCollapsedMetrics.visibility = View.GONE
 
-            // 耗电模式下恢复原生联动折叠效果
-            (binding.collapsingToolbar.layoutParams as? com.google.android.material.appbar.AppBarLayout.LayoutParams)?.let { params ->
-                params.scrollFlags = com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_SCROLL or
-                        com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_EXIT_UNTIL_COLLAPSED
-                binding.collapsingToolbar.layoutParams = params
-            }
+            // 耗电模式下联动折叠能力交由 updateScrollLimitForShortList 自适应校准（一屏内完全禁用上滑，超出一屏时启用折叠）
+            updateScrollLimitForShortList()
             binding.appbarPower.requestLayout()
             binding.coordinatorPower.requestLayout()
 
@@ -1807,6 +1813,16 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
+     * 更新应用使用列表卡片标题，展示当前实际呈现的应用数量（如“使用列表(12)”）。
+     *
+     * @param count 当前列表展示的应用条目总数
+     */
+    private fun updateUsageListTitle(count: Int) {
+        if (_binding == null) return
+        binding.tvSceneTitle.text = getString(R.string.power_usage_list_format, count)
+    }
+
+    /**
      * 依据当前应用列表数据行数与实际内容总高度，自适应校准上滑最大滚动边界。
      * 当数据仅有一行或几行（内容不足一屏或超出极少）时，限制或锁定上滑折叠，
      * 确保向上滑动到底时列表卡片底部与视口底端恰好保留 10dp 空白区域，杜绝列表悬空与底部巨大空白。
@@ -1824,13 +1840,6 @@ class PowerUsageFragment : Fragment() {
             val contentH = binding.layoutPowerContent.height
             val totalContentH = headerH + contentH + targetBottomGapPx
 
-            // 若物理总高度与视口高度均未发生变动，直接退出，彻底斩断每帧重复测量与布局
-            if (totalContentH == lastTotalContentH && coordinatorH == lastCoordinatorH) {
-                return@post
-            }
-            lastTotalContentH = totalContentH
-            lastCoordinatorH = coordinatorH
-
             val collapsingToolbarParams = binding.collapsingToolbar.layoutParams as? com.google.android.material.appbar.AppBarLayout.LayoutParams ?: return@post
             val targetFlags = if (totalContentH <= coordinatorH) {
                 // 1. 数据极少（一屏内完全呈现）：禁用折叠与上滑，保持完整展开且底部留白恰好协调
@@ -1841,6 +1850,13 @@ class PowerUsageFragment : Fragment() {
                         com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_EXIT_UNTIL_COLLAPSED
             }
 
+            // 若物理总高度与视口高度均未发生变动，且实际生效的 scrollFlags 已经等于期望的目标值，直接退出，彻底斩断每帧重复测量与布局
+            if (totalContentH == lastTotalContentH && coordinatorH == lastCoordinatorH && collapsingToolbarParams.scrollFlags == targetFlags && lastAppliedScrollFlags == targetFlags) {
+                return@post
+            }
+            lastTotalContentH = totalContentH
+            lastCoordinatorH = coordinatorH
+
             // 仅在目标标志位与当前生效标志位不一致时才重新赋值 LayoutParams，杜绝无谓的 requestLayout 导致 120Hz 刷新死循环
             if (collapsingToolbarParams.scrollFlags != targetFlags || lastAppliedScrollFlags != targetFlags) {
                 collapsingToolbarParams.scrollFlags = targetFlags
@@ -1848,6 +1864,7 @@ class PowerUsageFragment : Fragment() {
                 binding.collapsingToolbar.layoutParams = collapsingToolbarParams
                 if (targetFlags == 0) {
                     binding.appbarPower.setExpanded(true, false)
+                    binding.nestedScrollView.scrollTo(0, 0)
                 }
             }
         }

@@ -38,6 +38,19 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
     var onItemClickListener: ((AppPowerUsageItem) -> Unit)? = null
 
     /**
+     * 当前展示列表数据集发生更新（数据提交、过滤、排序切换）时的回调监听器。
+     * 向外传递当前经筛选排序后实际渲染在列表中的条目总数。
+     */
+    var onListCountChangedListener: ((Int) -> Unit)? = null
+
+    /**
+     * 获取当前过滤与排序后在列表中实际展示的数据项总数。
+     *
+     * @return 当前展示的应用项总数
+     */
+    fun getDisplayItemCount(): Int = displayItems.size
+
+    /**
      * 设置是否展示后台统计数据及后台运行应用，并刷新列表视图。
      * 当开启时，显示全部应用（包含后台运行应用）及各应用的后台统计指标；
      * 当关闭时，过滤掉纯后台运行应用，仅显示前台运行应用（foregroundTimeMs > 0L）。
@@ -128,10 +141,25 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
                 "MAX: --"
             }
             tvAppEnergy.text = "$maxTempStr | $energyStr"
-            tvDuration.text = if (showBackgroundStats) {
-                item.getFormattedCombinedDuration()
+
+            val hasFg = item.foregroundTimeMs > 0L
+            val hasBg = showBackgroundStats && item.backgroundTimeMs > 0L
+
+            if (hasFg) {
+                layoutFgDuration.visibility = android.view.View.VISIBLE
+                tvFgDuration.text = item.getFormattedDuration()
+            } else if (!hasBg) {
+                layoutFgDuration.visibility = android.view.View.VISIBLE
+                tvFgDuration.text = "0s"
             } else {
-                item.getFormattedDuration()
+                layoutFgDuration.visibility = android.view.View.GONE
+            }
+
+            if (hasBg) {
+                layoutBgDuration.visibility = android.view.View.VISIBLE
+                tvBgDuration.text = item.getFormattedBackgroundDuration()
+            } else {
+                layoutBgDuration.visibility = android.view.View.GONE
             }
         }
     }
@@ -203,6 +231,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
         displayItems.clear()
         displayItems.addAll(fgList)
         displayItems.addAll(bgList)
+        onListCountChangedListener?.invoke(displayItems.size)
     }
 
     /**

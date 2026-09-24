@@ -14,7 +14,8 @@
     <!-- 耗电统计页面 -->
     <string name="power_stats_title">耗电统计</string>
     <string name="power_usage_process">使用过程</string>
-    <string name="power_usage_scene">使用场景</string>
+    <string name="power_usage_scene">使用列表</string>
+    <string name="power_usage_list_format">使用列表(%d)</string>
     <string name="power_avg_power">放电功耗</string>
     <string name="power_used_time">放电时间</string>
     <string name="power_remaining_time">理论续航</string>
@@ -72,8 +73,8 @@
     <string name="power_toast_cleared">耗电统计已重置</string>
     <string name="power_guide_process_title">使用过程说明</string>
     <string name="power_guide_process_content">“使用过程”折线图展示自本次开机或放电以来电池电量百分比随时间的变化曲线，并在高耗电阶段下方打点展示当时活跃的应用，直观呈现电池消耗历程。</string>
-    <string name="power_guide_scene_title">使用场景说明</string>
-    <string name="power_guide_scene_content">“使用场景”统计每个前台活跃应用的使用时长、平均运行功耗与运行发热温度，帮助快速定位高耗电与发热元凶。</string>
+    <string name="power_guide_scene_title">使用列表说明</string>
+    <string name="power_guide_scene_content">“使用列表”统计每个前台活跃应用的使用时长、平均运行功耗与运行发热温度，帮助快速定位高耗电与发热元凶。</string>
     <string name="power_guide_overview_title">放电指标说明</string>
     <string name="power_guide_overview_content">• 放电功耗：统计自本次放电以来的亮屏平均功耗、全周期平均功耗及息屏待机功耗（单位：W）。\n\n• 放电时间：统计自本次放电以来的亮屏使用时间、息屏待机时间及累计总放电时间。\n\n• 理论续航：基于当前电池剩余能量与不同工况下的放电功耗，测算出的亮屏可用时长、综合可用时长及息屏待机时长。</string>
 

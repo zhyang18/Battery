@@ -106,12 +106,23 @@
                     tools:text="6h7m" />
             </LinearLayout>
 
+            <!-- 中间竖线分隔符：仅在前后台时长同时显示时呈现 -->
+            <TextView
+                android:id="@+id/tv_duration_divider"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginHorizontal="6dp"
+                android:text="|"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="12sp"
+                android:visibility="gone"
+                tools:visibility="visible" />
+
             <!-- 后台时长组：蓝色小圆点 + 后台时间 -->
             <LinearLayout
                 android:id="@+id/layout_bg_duration"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 

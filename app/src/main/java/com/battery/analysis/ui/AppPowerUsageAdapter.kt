@@ -155,6 +155,9 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<AppPowerUsageAdapter.ViewHolde
                 layoutFgDuration.visibility = android.view.View.GONE
             }
 
+            // 中间竖线分隔符：仅在前后台时长同时显示时呈现
+            tvDurationDivider.visibility = if (hasFg && hasBg) android.view.View.VISIBLE else android.view.View.GONE
+
             if (hasBg) {
                 layoutBgDuration.visibility = android.view.View.VISIBLE
                 tvBgDuration.text = item.getFormattedBackgroundDuration()

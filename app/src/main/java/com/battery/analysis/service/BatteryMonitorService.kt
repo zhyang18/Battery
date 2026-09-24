@@ -339,13 +339,12 @@ class BatteryMonitorService : Service() {
         createNotificationChannel()
 
         // 1. 无条件第一步调用 startForeground 履行系统前台服务契约，杜绝任何提早退出导致的超时崩溃
+        // 若未开启通知栏显示，使用系统级静默渠道维持合规前台服务优先级，绝不调用 stopForeground 降级为易杀后台服务
         val isDisplayEnabled = isNotificationDisplayEnabled(this)
         val channelId = if (isDisplayEnabled) CHANNEL_ID else CHANNEL_ID_SILENT
         val initialNotification = buildNotification(channelId)
         safeStartForeground(initialNotification)
-        if (!isDisplayEnabled) {
-            stopForegroundNotification()
-        }
+        isForegroundNotificationRemoved = false
 
         // 2. 履约后检查业务守卫：若未开启充放电统计或无需运行，安全退出
         if (!shouldServiceRun(this)) {
@@ -440,19 +439,10 @@ class BatteryMonitorService : Service() {
         }
 
         val isDisplayEnabled = isNotificationDisplayEnabled(this)
-        if (isDisplayEnabled) {
-            val notification = buildNotification(CHANNEL_ID)
-            safeStartForeground(notification)
-            isForegroundNotificationRemoved = false
-        } else {
-            // Android 8.0+ 针对 startForegroundService 契约安全保障：
-            // 若此前尚未履行过契约，使用静默渠道短暂停留后立即移除
-            if (!isForegroundNotificationRemoved) {
-                val silentNotification = buildNotification(CHANNEL_ID_SILENT)
-                safeStartForeground(silentNotification)
-            }
-            stopForegroundNotification()
-        }
+        val channelId = if (isDisplayEnabled) CHANNEL_ID else CHANNEL_ID_SILENT
+        val notification = buildNotification(channelId)
+        safeStartForeground(notification)
+        isForegroundNotificationRemoved = false
 
         // 2. 检查业务守卫：若未开启充放电统计或无需运行，安全退出
         if (!shouldServiceRun(this)) {
@@ -1002,10 +992,11 @@ class BatteryMonitorService : Service() {
         try {
             val isDisplayEnabled = isNotificationDisplayEnabled(this)
             if (!isDisplayEnabled) {
-                // 仅当此前尚未移除过前台通知时单次执行卸载并取消通知，后续采样直接短路 return，杜绝每秒重复触发系统 Binder IPC
+                // 用户关闭通知栏常驻显示时：使用系统级静默渠道维持前台服务最高优先级，避免被系统 LMK 强杀，
+                // 仅在首次或配置切换时挂载静默通知，后续采样直接短路 return，杜绝任何多余 IPC 消耗
                 if (!isForegroundNotificationRemoved || force) {
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    notificationManager.cancel(NOTIFICATION_ID)
+                    val silentNotification = buildNotification(CHANNEL_ID_SILENT)
+                    safeStartForeground(silentNotification)
                     isForegroundNotificationRemoved = true
                 }
                 return

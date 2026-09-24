@@ -529,6 +529,11 @@ class PowerUsageFragment : Fragment() {
         chargingManager.checkAndReconcileChargingState()
         powerManager.checkAndReconcileDischargeState()
 
+        val resumeCtx = context
+        if (resumeCtx != null && com.battery.analysis.service.BatteryMonitorService.shouldServiceRun(resumeCtx) && !BatteryServiceBridge.isConnected()) {
+            BatteryServiceBridge.ensureServiceRunningAndBound(resumeCtx)
+        }
+
         val pending = pendingSnapshotRecord
         if (pending != null) {
             pendingSnapshotRecord = null
@@ -1558,8 +1563,9 @@ class PowerUsageFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             val ctx = context ?: return@launch
-            // 跨进程连接自愈等待：若后台服务已开启但 Binder 尚未就绪，短暂挂起等待（至多 350ms）
+            // 跨进程连接自愈与等待：若后台服务应该运行但未连接，主动拉起并建立绑定，短暂挂起等待（至多 350ms）
             if (com.battery.analysis.service.BatteryMonitorService.shouldServiceRun(ctx) && !BatteryServiceBridge.isConnected()) {
+                BatteryServiceBridge.ensureServiceRunningAndBound(ctx)
                 BatteryServiceBridge.awaitServiceConnected(350L)
             }
             // 跨进程数据同步：若独立后台监控进程处于采样运行状态或 Binder 已就绪，拉取最新的秒级瞬时采样点集与物理能量微积分累加器

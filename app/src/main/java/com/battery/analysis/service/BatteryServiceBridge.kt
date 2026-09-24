@@ -11,6 +11,7 @@ import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.ChargingSamplePoint
 import com.battery.analysis.model.ChargingSessionSummary
 import com.battery.analysis.model.PowerDischargePoint
+import kotlinx.coroutines.launch
 
 /**
  * 电池后台监控服务跨进程通信桥梁（客户端 IPC 代理）。
@@ -32,13 +33,41 @@ object BatteryServiceBridge {
     @Volatile
     private var isBound: Boolean = false
 
+    @Volatile
+    private var lastAppContext: Context? = null
+
+    private val rebindScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+
+    /**
+     * 远端服务死亡通知接收器，在后台进程被系统强制终止（如 OOM / LMK）时触发，
+     * 负责重置连接状态并调度自愈重连。
+     */
     private val deathRecipient = IBinder.DeathRecipient {
         synchronized(this) {
             serviceBinder = null
+            isBound = false
         }
+        triggerAutoRebind()
     }
 
     private val connectionListeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+
+    /**
+     * 当远端服务异常断开时触发的自愈重连调度方法。
+     * 若检测到系统配置仍要求服务处于开启运行状态，则在后台协程中重新拉起服务并重建 Binder 绑定。
+     */
+    private fun triggerAutoRebind() {
+        val ctx = lastAppContext ?: return
+        if (BatteryMonitorService.shouldServiceRun(ctx)) {
+            rebindScope.launch {
+                kotlinx.coroutines.delay(1000L)
+                if (!isConnected()) {
+                    BatteryMonitorService.start(ctx)
+                    bindService(ctx)
+                }
+            }
+        }
+    }
 
     private val serviceConnection = object : ServiceConnection {
         /**
@@ -54,9 +83,11 @@ object BatteryServiceBridge {
                     try {
                         service.linkToDeath(deathRecipient, 0)
                         serviceBinder = IBatteryMonitorService.Stub.asInterface(service)
+                        isBound = true
                         connected = true
                     } catch (_: Throwable) {
                         serviceBinder = null
+                        isBound = false
                     }
                 }
             }
@@ -77,7 +108,9 @@ object BatteryServiceBridge {
         override fun onServiceDisconnected(name: ComponentName?) {
             synchronized(this@BatteryServiceBridge) {
                 serviceBinder = null
+                isBound = false
             }
+            triggerAutoRebind()
         }
     }
 
@@ -126,11 +159,12 @@ object BatteryServiceBridge {
      * 在主 UI 进程中发起与独立后台监控服务的异步 AIDL 绑定。
      *
      * @param context 应用程序上下文
-     * @return 发起绑定是否成功（返回 true 表示系统已受理绑定请求）
+     * @return 发起绑定是否成功（返回 true 表示系统已受理绑定请求或当前已就绪）
      */
     fun bindService(context: Context): Boolean {
-        if (isBound) return true
         val appContext = context.applicationContext
+        lastAppContext = appContext
+        if (isConnected()) return true
         val intent = Intent(appContext, BatteryMonitorService::class.java)
         return try {
             val bound = appContext.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
@@ -139,6 +173,27 @@ object BatteryServiceBridge {
         } catch (_: Throwable) {
             false
         }
+    }
+
+    /**
+     * 确保后台电池监控服务处于活跃运行状态并在主进程建立 Binder 绑定连接。
+     * 适合在主 UI 界面处于前台活跃状态（如 onResume、下拉刷新等看门狗生命周期）时调用。
+     * 若用户配置了开启监控，但当前未连接或未运行，则立即拉起服务并触发异步绑定。
+     *
+     * @param context 应用程序上下文
+     * @return 若当前已连接就绪或已成功发起拉起绑定返回 true，否则返回 false
+     */
+    fun ensureServiceRunningAndBound(context: Context): Boolean {
+        val appContext = context.applicationContext
+        lastAppContext = appContext
+        if (!BatteryMonitorService.shouldServiceRun(appContext)) {
+            return false
+        }
+        if (isConnected()) {
+            return true
+        }
+        BatteryMonitorService.start(appContext)
+        return bindService(appContext)
     }
 
     /**
@@ -173,19 +228,20 @@ object BatteryServiceBridge {
 
     /**
      * 查询后台监控服务自身是否处于物理采样活跃运行状态。
-     * 优先通过 AIDL 从后台服务进程查询；若 AIDL 尚未建立连接，则依据宿主绑定状态与系统配置综合判定。
+     * 严格通过 AIDL 从后台服务进程查询真实物理采样状态，未连接时如实返回 false，绝不虚假保底。
      *
      * @param context 应用程序上下文
      * @return 若处于活跃运行中返回 true，否则返回 false
      */
     fun isServiceRunning(context: Context): Boolean {
+        lastAppContext = context.applicationContext
         val proxy = serviceBinder
         if (proxy != null && proxy.asBinder().isBinderAlive) {
             try {
                 return proxy.isServiceRunning
             } catch (_: Throwable) {}
         }
-        return isBound || BatteryMonitorService.shouldServiceRun(context)
+        return false
     }
 
     /**

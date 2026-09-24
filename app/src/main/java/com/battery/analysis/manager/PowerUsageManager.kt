@@ -958,11 +958,12 @@ class PowerUsageManager private constructor(private val context: Context) {
         // 同步记录时序温度点
         recordDischargeTempSample(timestamp, temperature)
 
-        // 极致低功耗设计：日常采样纯内存追加，当积累达到 600 个点或超过 10 分钟且有新数据时才在后台异步持久化一次，
-        // 彻底杜绝每百点频繁全量序列化造成的 CPU 占用与 GC 抖动。关键生命周期节点（息屏、插拔、退出）由外部主动 flush
+        // 高可靠持久化机制：日常采样在内存中追加，每当累积满 30 个点（亮屏约 30 秒）或超过 30 秒且有未保存采样时，
+        // 立即在后台异步原子持久化一次至磁盘私有文件，确保即使后台进程被系统 LMK 强行终止，丢失的数据窗口最大不超过 30 秒。
+        // 关键生命周期节点（息屏、插拔电源、退入后台）由外部主动调用 flushDischargeSamplesToDisk 立即落盘。
         unsavedDischargeSamplesCount++
         val now = System.currentTimeMillis()
-        if (unsavedDischargeSamplesCount >= 600 || (now - lastDischargeSaveTimeMs >= 600_000L && unsavedDischargeSamplesCount >= 60)) {
+        if (unsavedDischargeSamplesCount >= 30 || (now - lastDischargeSaveTimeMs >= 30_000L && unsavedDischargeSamplesCount >= 5)) {
             unsavedDischargeSamplesCount = 0
             saveDischargeSamplesToPrefsAsync()
         }
@@ -2200,11 +2201,47 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val intOffPowerWatts: Float
 
                 if (hasAccData) {
-                    intOnEnergyWh = (acc.screenOnJoules / 3600.0).toFloat()
-                    intOffEnergyWh = (acc.screenOffJoules / 3600.0).toFloat()
+                    val rawAccOnWh = (acc.screenOnJoules / 3600.0).toFloat()
+                    val rawAccOffWh = (acc.screenOffJoules / 3600.0).toFloat()
+                    val accOnHours = (acc.screenOnDurationMs / 3600000.0).toFloat()
+                    val accOffHours = (acc.screenOffDurationMs / 3600000.0).toFloat()
+
+                    // 1. 真实瞬时平均功率：必须基于累加器有效记录的时长计算，严禁使用未经采样的宏观放电时长
+                    val accOnWatts = if (accOnHours > 0f) rawAccOnWh / accOnHours else 0f
+                    val accOffWatts = if (accOffHours > 0f) rawAccOffWh / accOffHours else 0f
+
+                    // 2. 检测采样覆盖率：比对累加器有效记录时长与当前周期系统真实亮屏时长
+                    val onCoverage = if (screenOnMs > 0L) {
+                        (acc.screenOnDurationMs.toDouble() / screenOnMs.toDouble()).coerceIn(0.0, 1.0)
+                    } else {
+                        1.0
+                    }
+
+                    intOnPowerWatts = if (accOnWatts > 0f) {
+                        accOnWatts
+                    } else if (screenOnHours > 0f) {
+                        rawAccOnWh / screenOnHours
+                    } else {
+                        0f
+                    }
+                    intOffPowerWatts = if (accOffWatts > 0f) {
+                        accOffWatts
+                    } else if (screenOffHours > 0f) {
+                        rawAccOffWh / screenOffHours
+                    } else {
+                        0f
+                    }
+
+                    // 3. 断层能耗校准：若亮屏采样覆盖率明显偏低（如服务被系统强杀后断采），
+                    // 按真实采样功率结合亮屏总时长进行物理推算，避免残缺微小分子除以宏观大分母得出 0.10W
+                    if (onCoverage < 0.85 && screenOnHours > 0f && intOnPowerWatts > 0f) {
+                        val extrapolatedOnWh = screenOnHours * intOnPowerWatts
+                        intOnEnergyWh = maxOf(rawAccOnWh, extrapolatedOnWh)
+                    } else {
+                        intOnEnergyWh = rawAccOnWh
+                    }
+                    intOffEnergyWh = rawAccOffWh
                     intTotalEnergyWh = intOnEnergyWh + intOffEnergyWh
-                    intOnPowerWatts = if (screenOnHours > 0f) intOnEnergyWh / screenOnHours else 0f
-                    intOffPowerWatts = if (screenOffHours > 0f) intOffEnergyWh / screenOffHours else 0f
                     intTotalPowerWatts = if (dischargeHours > 0f) intTotalEnergyWh / dischargeHours else 0f
                 } else {
                     intTotalEnergyWh = dischargeStats?.totalDisplayEnergyWh ?: 0f
@@ -3586,6 +3623,47 @@ class PowerUsageManager private constructor(private val context: Context) {
                     if (info.first != null) {
                         icons.add(info.first!!)
                         names.add(info.second)
+                    }
+                }
+
+                // 采样断层自愈处理：若相邻两采样点之间时间跨度超过 2 分钟（如后台服务中途被系统强杀），
+                // 依据系统底层记录的亮灭屏事件与平均工况合理衔接过渡，杜绝首尾跨越数十分钟连成 13.8W 虚假长平线
+                if (points.isNotEmpty()) {
+                    val prevPt = points.last()
+                    val gapMs = pointTs - prevPt.timestamp
+                    if (gapMs > 120_000L) {
+                        val numGapSteps = (gapMs / 60_000L).toInt().coerceIn(1, 60)
+                        val stepDuration = gapMs.toDouble() / (numGapSteps + 1)
+                        for (g in 1..numGapSteps) {
+                            val gapTs = prevPt.timestamp + (g * stepDuration).toLong()
+                            val gapElapsed = (gapTs - startTs).coerceAtLeast(0L) / 3600000f
+                            var gapScreenOn = false
+                            for (screenInt in screenIntervals) {
+                                if (gapTs in screenInt.startTs..screenInt.endTs) {
+                                    gapScreenOn = true
+                                    break
+                                }
+                            }
+                            val gapWatts = if (gapScreenOn) effectiveOnWatts else effectiveOffWatts
+                            val tRatio = g.toFloat() / (numGapSteps + 1).toFloat()
+                            val gapTemp = prevPt.temperature + (s.temperature - prevPt.temperature) * tRatio
+                            val gapVolt = prevPt.voltageVolts + (s.voltageVolts - prevPt.voltageVolts) * tRatio
+                            val gapLevel = Math.round(prevPt.batteryLevel + (s.batteryLevel - prevPt.batteryLevel) * tRatio).toInt()
+
+                            points.add(
+                                PowerDischargePoint(
+                                    timestamp = gapTs,
+                                    elapsedHours = gapElapsed,
+                                    batteryLevel = gapLevel,
+                                    voltageVolts = gapVolt,
+                                    temperature = gapTemp,
+                                    powerWatts = gapWatts,
+                                    activeAppIcons = emptyList(),
+                                    isScreenOn = gapScreenOn,
+                                    activeAppNames = emptyList()
+                                )
+                            )
+                        }
                     }
                 }
 

@@ -403,7 +403,7 @@ class MainActivity : AppCompatActivity() {
      */
     override fun onStart() {
         super.onStart()
-        BatteryServiceBridge.bindService(this)
+        BatteryServiceBridge.ensureServiceRunningAndBound(this)
         BatteryServiceBridge.notifyHostAppForeground(true)
         updateShizukuStatusState()
     }
@@ -413,6 +413,7 @@ class MainActivity : AppCompatActivity() {
      */
     override fun onResume() {
         super.onResume()
+        BatteryServiceBridge.ensureServiceRunningAndBound(this)
         BatteryServiceBridge.notifyHostAppForeground(true)
         updateShizukuStatusState()
         val isStatsEnabled = com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(this)

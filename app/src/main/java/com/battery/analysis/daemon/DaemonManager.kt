@@ -153,8 +153,12 @@ object DaemonManager {
         }
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("which", "su"))
-            val exitCode = process.waitFor()
-            exitCode == 0
+            try {
+                val exitCode = process.waitFor()
+                exitCode == 0
+            } finally {
+                process.safeDestroy()
+            }
         } catch (_: Exception) {
             false
         }
@@ -183,12 +187,16 @@ object DaemonManager {
         return try {
             val launchCmd = getLaunchShellCommand(context)
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", launchCmd))
-            val exitCode = process.waitFor()
-            if (exitCode == 0) {
-                Result.success(Unit)
-            } else {
-                val errorMsg = BufferedReader(InputStreamReader(process.errorStream)).readText()
-                Result.failure(RuntimeException("Root 启动失败 (退出码 $exitCode): $errorMsg"))
+            try {
+                val exitCode = process.waitFor()
+                if (exitCode == 0) {
+                    Result.success(Unit)
+                } else {
+                    val errorMsg = BufferedReader(InputStreamReader(process.errorStream)).readText()
+                    Result.failure(RuntimeException("Root 启动失败 (退出码 $exitCode): $errorMsg"))
+                }
+            } finally {
+                process.safeDestroy()
             }
         } catch (e: Exception) {
             Result.failure(e)

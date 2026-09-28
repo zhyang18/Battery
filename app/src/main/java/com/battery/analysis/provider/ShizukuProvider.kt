@@ -6,6 +6,7 @@ import android.content.IntentFilter
 import android.os.BatteryManager
 import com.battery.analysis.manager.ShizukuManager
 import com.battery.analysis.model.BatteryInfo
+import com.battery.analysis.util.safeDestroy
 import rikka.shizuku.Shizuku
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -553,15 +554,21 @@ class ShizukuProvider : BatteryDataProvider {
 
     /**
      * 通过 Shizuku 执行 Shell 命令，内部复用已缓存的反射 Method 并完整读取输出流，确保关键容量与循环指标不被截断。
+     * 执行完毕后统一在 finally 块中调用 [safeDestroy] 关闭所有管道流并强制销毁进程，杜绝 Binder 死亡监听器（DeathRecipient）泄漏。
      *
      * @param command 要执行的命令字符串
      * @return 命令执行输出的完整字符串结果
      */
     private fun executeCommand(command: String): String {
-        return try {
-            val method = getNewProcessMethod() ?: return ""
-            val process = method.invoke(null, arrayOf("sh", "-c", command), null, null) as? Process ?: return ""
+        val method = getNewProcessMethod() ?: return ""
+        val process = try {
+            method.invoke(null, arrayOf("sh", "-c", command), null, null) as? Process
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        } ?: return ""
 
+        return try {
             val reader = BufferedReader(InputStreamReader(process.inputStream), 8192)
             val output = StringBuilder()
             var line: String?
@@ -574,6 +581,8 @@ class ShizukuProvider : BatteryDataProvider {
         } catch (e: Exception) {
             e.printStackTrace()
             ""
+        } finally {
+            process.safeDestroy()
         }
     }
 

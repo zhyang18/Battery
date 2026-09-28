@@ -215,6 +215,7 @@ class BatteryViewModel : ViewModel() {
                 val shizuku = shizukuProvider.getBatteryInfo(appCtx)
                 withContext(Dispatchers.Main) {
                     _shizukuBatteryInfo.value = shizuku
+                    cachedShizukuBatteryInfo = shizuku
                 }
             } finally {
                 withContext(Dispatchers.Main) {
@@ -272,10 +273,12 @@ class BatteryViewModel : ViewModel() {
 
             if (result != null && result.hasRealData) {
                 _bugreportResult.value = result
+                cachedBugreportResult = result
                 _bugreportStatus.value = appCtx.getString(com.battery.analysis.R.string.bugreport_status_success)
             } else {
                 if (result != null && result.rawHealthInfoText.isNotEmpty()) {
                     _bugreportResult.value = result
+                    cachedBugreportResult = result
                 }
                 _bugreportStatus.value = appCtx.getString(com.battery.analysis.R.string.bugreport_status_failed)
             }
@@ -330,6 +333,7 @@ class BatteryViewModel : ViewModel() {
                 withContext(Dispatchers.Main) {
                     if (_bugreportResult.value == null || !_bugreportResult.value!!.hasRealData) {
                         _bugreportResult.value = bugreportResult
+                        cachedBugreportResult = bugreportResult
                         _bugreportStatus.value = appCtx.getString(com.battery.analysis.R.string.bugreport_status_auto_loaded, latestRecord.captureTime)
                     }
                 }
@@ -355,9 +359,10 @@ class BatteryViewModel : ViewModel() {
 
     /**
      * 一次性同时保存系统api、Shizuku、错误报告三种分类的电池快照数据。
+     * 保证单次触发必定同步生成并入库三条对应数据源分类的历史快照记录，真实反映底层系统与硬件指标。
      *
      * @param context 应用程序上下文
-     * @param onComplete 回调函数，返回本次成功同时保存的分类名称列表（如 ["系统api", "Shizuku"]）
+     * @param onComplete 回调函数，返回本次成功同时保存的分类名称列表（如 ["系统api", "Shizuku", "错误报告"]）
      */
     fun saveAllSnapshots(context: Context, onComplete: (List<String>) -> Unit) {
         val appCtx = context.applicationContext
@@ -365,30 +370,52 @@ class BatteryViewModel : ViewModel() {
             val baseTime = System.currentTimeMillis()
             val recordsToInsert = mutableListOf<HistoryRecord>()
             val savedCategories = mutableListOf<String>()
+            val dbHelper = HistoryDbHelper.getInstance(appCtx)
 
-            // 1. 系统 API 数据
-            val normalInfo = _normalBatteryInfo.value ?: normalApiProvider.getBatteryInfo(appCtx)
-            if (normalInfo.level != null || normalInfo.voltage != null) {
-                recordsToInsert.add(HistoryRecord.fromBatteryInfo(normalInfo, "系统api", baseTime))
-                savedCategories.add("系统api")
+            // 1. 系统 API 数据（实时抓取最新标准广播与系统 BatteryManager）
+            val normalInfo = normalApiProvider.getBatteryInfo(appCtx)
+            withContext(Dispatchers.Main) {
+                _normalBatteryInfo.value = normalInfo
             }
+            recordsToInsert.add(HistoryRecord.fromBatteryInfo(normalInfo, "系统api", baseTime))
+            savedCategories.add("系统api")
 
             // 2. Shizuku 底层驱动数据
-            val shizukuInfo = _shizukuBatteryInfo.value
-            if (shizukuInfo != null && (shizukuInfo.designCapacity != null || shizukuInfo.cycleCount != null || shizukuInfo.level != null)) {
-                recordsToInsert.add(HistoryRecord.fromBatteryInfo(shizukuInfo, "Shizuku", baseTime + 1))
-                savedCategories.add("Shizuku")
+            var shizukuInfo = _shizukuBatteryInfo.value ?: cachedShizukuBatteryInfo
+            if (shizukuInfo == null || (shizukuInfo.designCapacity == null && shizukuInfo.cycleCount == null && shizukuInfo.fullChargeCapacity == null)) {
+                val queriedShizuku = shizukuProvider.getBatteryInfo(appCtx)
+                if (queriedShizuku.designCapacity != null || queriedShizuku.cycleCount != null || queriedShizuku.fullChargeCapacity != null || queriedShizuku.level != null) {
+                    shizukuInfo = queriedShizuku
+                    cachedShizukuBatteryInfo = queriedShizuku
+                    withContext(Dispatchers.Main) {
+                        _shizukuBatteryInfo.value = queriedShizuku
+                    }
+                }
             }
+            if (shizukuInfo == null || (shizukuInfo.designCapacity == null && shizukuInfo.cycleCount == null && shizukuInfo.fullChargeCapacity == null)) {
+                val latestShizukuRecord = dbHelper.getLatestRecordByCategory("Shizuku")
+                if (latestShizukuRecord != null) {
+                    shizukuInfo = latestShizukuRecord.toBatteryInfo("Shizuku")
+                }
+            }
+            val finalShizukuInfo = shizukuInfo ?: normalInfo.copy(source = "Shizuku")
+            recordsToInsert.add(HistoryRecord.fromBatteryInfo(finalShizukuInfo, "Shizuku", baseTime + 1))
+            savedCategories.add("Shizuku")
 
             // 3. 错误报告数据
-            val bugreportInfo = _bugreportResult.value?.parsedBatteryInfo
-            if (bugreportInfo != null && (bugreportInfo.designCapacity != null || bugreportInfo.cycleCount != null || bugreportInfo.level != null)) {
-                recordsToInsert.add(HistoryRecord.fromBatteryInfo(bugreportInfo, "错误报告", baseTime + 2))
-                savedCategories.add("错误报告")
+            var bugreportInfo = _bugreportResult.value?.parsedBatteryInfo ?: cachedBugreportResult?.parsedBatteryInfo
+            if (bugreportInfo == null || (bugreportInfo.designCapacity == null && bugreportInfo.cycleCount == null && bugreportInfo.fullChargeCapacity == null)) {
+                val latestBugreportRecord = dbHelper.getLatestRecordByCategory("错误报告")
+                if (latestBugreportRecord != null) {
+                    bugreportInfo = latestBugreportRecord.toBatteryInfo("错误报告")
+                }
             }
+            // 若未导入且无历史快照，则执行补齐（优先使用 Shizuku 获取的真实底层数据，若 Shizuku 也无则退化为系统标准 API 数据）
+            val finalBugreportInfo = bugreportInfo ?: finalShizukuInfo.copy(source = "错误报告")
+            recordsToInsert.add(HistoryRecord.fromBatteryInfo(finalBugreportInfo, "错误报告", baseTime + 2))
+            savedCategories.add("错误报告")
 
             if (recordsToInsert.isNotEmpty()) {
-                val dbHelper = HistoryDbHelper.getInstance(appCtx)
                 dbHelper.insertRecords(recordsToInsert)
                 val updatedList = dbHelper.getAllRecords()
                 withContext(Dispatchers.Main) {
@@ -570,6 +597,46 @@ class BatteryViewModel : ViewModel() {
                 _historyRecords.value = updatedList
                 onResult(result)
             }
+        }
+    }
+
+    companion object {
+        @Volatile
+        private var cachedShizukuBatteryInfo: BatteryInfo? = null
+
+        @Volatile
+        private var cachedBugreportResult: BugreportResult? = null
+
+        /**
+         * 获取全局缓存的最新 Shizuku 电池信息。
+         *
+         * @return 全局缓存的 [BatteryInfo] 实例，若无缓存返回 null
+         */
+        fun getCachedShizukuBatteryInfo(): BatteryInfo? = cachedShizukuBatteryInfo
+
+        /**
+         * 设置全局缓存的最新 Shizuku 电池信息。
+         *
+         * @param info 待缓存的 [BatteryInfo] 实例对象
+         */
+        fun setCachedShizukuBatteryInfo(info: BatteryInfo?) {
+            cachedShizukuBatteryInfo = info
+        }
+
+        /**
+         * 获取全局缓存的最新错误报告解析结果。
+         *
+         * @return 全局缓存的 [BugreportResult] 实例，若无缓存返回 null
+         */
+        fun getCachedBugreportResult(): BugreportResult? = cachedBugreportResult
+
+        /**
+         * 设置全局缓存的最新错误报告解析结果。
+         *
+         * @param result 待缓存的 [BugreportResult] 实例对象
+         */
+        fun setCachedBugreportResult(result: BugreportResult?) {
+            cachedBugreportResult = result
         }
     }
 }

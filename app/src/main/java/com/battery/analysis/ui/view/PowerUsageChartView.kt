@@ -85,7 +85,7 @@ class PowerUsageChartView @JvmOverloads constructor(
         strokeWidth = dp1_5
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
-        color = Color.parseColor("#B31E88E5")
+        color = Color.parseColor("#B33A7FF0")
     }
 
     // 图标方块胶囊背景画笔（深色微圆角底衬，使方块堆叠整齐美观）
@@ -450,8 +450,8 @@ class PowerUsageChartView @JvmOverloads constructor(
             fillPaint.shader = LinearGradient(
                 0f, minY,
                 0f, bottomY,
-                Color.parseColor("#381E88E5"),
-                Color.parseColor("#041E88E5"),
+                Color.parseColor("#383A7FF0"),
+                Color.parseColor("#043A7FF0"),
                 Shader.TileMode.CLAMP
             )
         }

@@ -41,17 +41,24 @@ class MetricSelectorView @JvmOverloads constructor(
         private const val KEY_SAVED_METRICS = "saved_timeline_metrics"
     }
 
+    private var currentPrefsName = PREFS_NAME
+    private var currentKeySavedMetrics = KEY_SAVED_METRICS
+    private var defaultMetrics = setOf(TimelineMetric.POWER, TimelineMetric.APP)
+    private var powerLabel = "功耗"
+
     // 默认通过本地持久化恢复用户上次选择（若首次进入则默认勾选“功耗”与“应用”）
     private val selectedMetrics = mutableSetOf<TimelineMetric>()
     private var listener: OnMetricsChangedListener? = null
 
-    private val metricItems = listOf(
-        Pair(TimelineMetric.BATTERY, "电量"),
-        Pair(TimelineMetric.POWER, "功耗"),
-        Pair(TimelineMetric.TEMPERATURE, "温度"),
-        Pair(TimelineMetric.VOLTAGE, "电压"),
-        Pair(TimelineMetric.APP, "应用")
-    )
+    private fun buildMetricItems(): List<Pair<TimelineMetric, String>> {
+        return listOf(
+            Pair(TimelineMetric.BATTERY, "电量"),
+            Pair(TimelineMetric.POWER, powerLabel),
+            Pair(TimelineMetric.TEMPERATURE, "温度"),
+            Pair(TimelineMetric.VOLTAGE, "电压"),
+            Pair(TimelineMetric.APP, "应用")
+        )
+    }
 
     private val itemLayouts = mutableListOf<LinearLayout>()
     private val dotViews = mutableListOf<View>()
@@ -65,13 +72,46 @@ class MetricSelectorView @JvmOverloads constructor(
     }
 
     /**
+     * 配置专属的持久化配置键与默认选中指标集合。
+     *
+     * @param prefsKey 本地持久化保存使用的 Key 标识
+     * @param defaultMetrics 首次进入未持久化时的默认选中指标集合 [Set<TimelineMetric>]
+     * @param prefsName SharedPreferences 文件名（可选，默认复用全局时间轴配置库）
+     */
+    fun configurePrefs(
+        prefsKey: String,
+        defaultMetrics: Set<TimelineMetric>,
+        prefsName: String = PREFS_NAME
+    ) {
+        this.currentPrefsName = prefsName
+        this.currentKeySavedMetrics = prefsKey
+        this.defaultMetrics = defaultMetrics
+        selectedMetrics.clear()
+        selectedMetrics.addAll(loadSavedMetrics())
+        updateSelectionVisuals()
+        listener?.onMetricsChanged(selectedMetrics.toSet())
+    }
+
+    /**
+     * 设置功率/功耗维度的展示标签文本（例如在充电场景下定制显示为“功率”，放电场景下显示为“功耗”）。
+     *
+     * @param label 待展示的文本名称（如 "功率" 或 "功耗"）
+     */
+    fun setPowerLabelText(label: String) {
+        if (powerLabel != label) {
+            powerLabel = label
+            initViews()
+        }
+    }
+
+    /**
      * 从本地持久化存储加载保存的指标集合。
      *
      * @return 还原出的指标集合 [Set<TimelineMetric>]
      */
     private fun loadSavedMetrics(): Set<TimelineMetric> {
-        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val saved = sp.getStringSet(KEY_SAVED_METRICS, null)
+        val sp = context.getSharedPreferences(currentPrefsName, Context.MODE_PRIVATE)
+        val saved = sp.getStringSet(currentKeySavedMetrics, null)
         if (saved != null && saved.isNotEmpty()) {
             val result = mutableSetOf<TimelineMetric>()
             for (name in saved) {
@@ -83,7 +123,7 @@ class MetricSelectorView @JvmOverloads constructor(
                 return result
             }
         }
-        return setOf(TimelineMetric.POWER, TimelineMetric.APP)
+        return defaultMetrics
     }
 
     /**
@@ -92,9 +132,9 @@ class MetricSelectorView @JvmOverloads constructor(
      * @param metrics 待保存的指标集合 [Set<TimelineMetric>]
      */
     private fun saveMetrics(metrics: Set<TimelineMetric>) {
-        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val sp = context.getSharedPreferences(currentPrefsName, Context.MODE_PRIVATE)
         val nameSet = metrics.map { it.name }.toSet()
-        sp.edit().putStringSet(KEY_SAVED_METRICS, nameSet).apply()
+        sp.edit().putStringSet(currentKeySavedMetrics, nameSet).apply()
     }
 
     /**
@@ -111,7 +151,7 @@ class MetricSelectorView @JvmOverloads constructor(
         val dp5 = dpToPx(5f)
         val dp9 = dpToPx(9f)
 
-        for (item in metricItems) {
+        for (item in buildMetricItems()) {
             val (metric, title) = item
             val itemContainer = LinearLayout(context).apply {
                 orientation = HORIZONTAL
@@ -211,7 +251,7 @@ class MetricSelectorView @JvmOverloads constructor(
      */
     private fun updateSelectionVisuals() {
         val dp2_5 = dpToPx(2.5f).toFloat()
-        for ((index, item) in metricItems.withIndex()) {
+        for ((index, item) in buildMetricItems().withIndex()) {
             val (metric, _) = item
             val itemContainer = itemLayouts.getOrNull(index) ?: continue
             val dotView = dotViews.getOrNull(index) ?: continue
@@ -219,7 +259,7 @@ class MetricSelectorView @JvmOverloads constructor(
             val isSelected = selectedMetrics.contains(metric)
 
             val activeColor = when (metric) {
-                TimelineMetric.BATTERY -> Color.parseColor("#2196F3") // 蓝色电量（与充电统计趋势图表一致）
+                TimelineMetric.BATTERY -> Color.parseColor("#3A7FF0") // 蓝色电量（统一为 3A7FF0）
                 TimelineMetric.POWER -> Color.parseColor("#90CAF9") // 淡蓝功耗
                 TimelineMetric.TEMPERATURE -> Color.parseColor("#FF5252") // 红色温度（与充电统计趋势图表一致）
                 TimelineMetric.VOLTAGE -> Color.parseColor("#FFD54F") // 金黄电压

@@ -579,6 +579,11 @@ class PowerUsageFragment : Fragment() {
         applySmartChargingMode(isCharging = isCharging, showToast = false)
         applyKeepScreenOn(isCharging)
 
+        // 若当前处于充电状态或充电页签，从后台启动或切回前台时无条件强制刷新应用小图标
+        if (isCharging || currentDisplayTab == 1) {
+            refreshChargingAppEvents(force = true)
+        }
+
         if (powerManager.isPowerModeConfigured()) {
             val latestMode = powerManager.getSelectedMode()
             if (latestMode != currentMode) {
@@ -586,7 +591,9 @@ class PowerUsageFragment : Fragment() {
             }
             updateBackgroundStatsSwitchVisibility()
             if (!isViewingSnapshot && !isCharging && currentDisplayTab == 0) {
-                loadData()
+                if (com.battery.analysis.manager.AppLifecycleTracker.shouldRefreshPowerStats(lastRenderedPackage != null)) {
+                    loadData()
+                }
             }
             updateShizukuBannerState()
             checkNormalPermissionBanner()
@@ -1024,6 +1031,25 @@ class PowerUsageFragment : Fragment() {
             binding.batteryTimelineView.setSelectedMetrics(selectedMetrics)
         }
 
+        // 充电趋势图底部指标多选/反选监听（电量 / 功率 / 温度 / 电压 / 应用）
+        binding.layoutChargingContent.chargingMetricSelectorView.setPowerLabelText("功率")
+        binding.layoutChargingContent.chargingMetricSelectorView.configurePrefs(
+            prefsKey = "saved_charging_timeline_metrics",
+            defaultMetrics = setOf(
+                com.battery.analysis.timeline.presentation.TimelineMetric.BATTERY,
+                com.battery.analysis.timeline.presentation.TimelineMetric.POWER,
+                com.battery.analysis.timeline.presentation.TimelineMetric.TEMPERATURE,
+                com.battery.analysis.timeline.presentation.TimelineMetric.VOLTAGE,
+                com.battery.analysis.timeline.presentation.TimelineMetric.APP
+            )
+        )
+        binding.layoutChargingContent.chargingChartView.setSelectedMetrics(
+            binding.layoutChargingContent.chargingMetricSelectorView.getSelectedMetrics()
+        )
+        binding.layoutChargingContent.chargingMetricSelectorView.setOnMetricsChangedListener { selectedMetrics ->
+            binding.layoutChargingContent.chargingChartView.setSelectedMetrics(selectedMetrics)
+        }
+
         // 充电大卡片右上角屏幕常亮灯泡点击监听
         binding.layoutChargingContent.ivChargingBulb.setOnClickListener {
             toggleKeepScreenOn()
@@ -1371,10 +1397,13 @@ class PowerUsageFragment : Fragment() {
             chargingView.chargingChartView.setData(points)
             lastRenderedPointsCount = points.size
             lastRenderedSessionStart = summary.startTimestamp
+
+            refreshChargingAppEvents(force = true)
         } else if (points.size > lastRenderedPointsCount) {
             val newPoints = points.subList(lastRenderedPointsCount, points.size)
             chargingView.chargingChartView.appendPoints(newPoints)
             lastRenderedPointsCount = points.size
+            refreshChargingAppEvents(force = false)
         }
 
         // 2. 填充整合版大卡片：环形进度条与中心大字
@@ -1452,6 +1481,36 @@ class PowerUsageFragment : Fragment() {
         chargingView.tvChargingScreenOffDuration.text = formatDurationColon(summary.screenOffDurationMs)
         chargingView.tvChargingScreenOffLevelGain.text = "+${summary.screenOffLevelGain}%"
         chargingView.tvChargingScreenOffEnergyGain.text = String.format(Locale.getDefault(), "+%.1fWh", summary.screenOffEnergyWh)
+    }
+
+    private var lastQueryAppEventsTime = 0L
+
+    /**
+     * 异步查询并刷新充电期间的前台活跃应用事件列表到充电趋势图表中。
+     * 支持防抖与强制刷新：从后台切回前台或新会话时无条件强制刷新。
+     *
+     * @param force 是否强制跳过时间防抖检查
+     */
+    private fun refreshChargingAppEvents(force: Boolean = false) {
+        if (_binding == null) return
+        val now = System.currentTimeMillis()
+        if (!force && (now - lastQueryAppEventsTime) < 5000L) {
+            return
+        }
+        val summary = chargingManager.getCurrentSummary()
+        val startTs = summary.startTimestamp
+        if (startTs <= 0L) return
+        val endTs = if (summary.endTimestamp > startTs) summary.endTimestamp else now
+        lastQueryAppEventsTime = now
+
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            val appEvents = powerManager.queryChargingAppTimelineEvents(startTs, endTs)
+            withContext(Dispatchers.Main) {
+                if (_binding != null) {
+                    binding.layoutChargingContent.chargingChartView.setAppEvents(appEvents)
+                }
+            }
+        }
     }
 
     /**
@@ -1623,6 +1682,7 @@ class PowerUsageFragment : Fragment() {
         prebuiltTimelineState: com.battery.analysis.timeline.presentation.BatteryTimelineState? = null
     ) {
         lastRenderedPackage = fullPackage
+        com.battery.analysis.manager.AppLifecycleTracker.markDischargeRefreshed()
         val snapshot = fullPackage.batterySnapshot
         val overview = fullPackage.overviewStats
 

@@ -105,6 +105,9 @@ class MainActivity : AppCompatActivity() {
 
         prefs = getSharedPreferences("battery_app_settings", Context.MODE_PRIVATE)
 
+        // 注册全局应用生命周期追踪器
+        com.battery.analysis.manager.AppLifecycleTracker.init(application)
+
         // 0. 初始化并应用保存的语言配置
         com.battery.analysis.manager.LanguageManager.initLanguage(this)
 

@@ -561,90 +561,12 @@
                 android:layout_width="match_parent"
                 android:layout_height="245dp" />
 
-            <!-- 图表正下方图例标识：三色方块 + 标签（不显示实时数值） -->
-            <LinearLayout
+            <!-- 底部指标切换选择器（电量 / 功率 / 温度 / 电压 / 应用） -->
+            <com.battery.analysis.timeline.presentation.MetricSelectorView
+                android:id="@+id/charging_metric_selector_view"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <!-- 1. 电量图例方块 -->
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:gravity="center"
-                    android:orientation="horizontal">
-
-                    <View
-                        android:layout_width="9dp"
-                        android:layout_height="9dp"
-                        android:background="@drawable/bg_square_blue" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="5dp"
-                        android:text="@string/charging_legend_level"
-                        android:textColor="#2196F3"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
-                <View
-                    android:layout_width="1dp"
-                    android:layout_height="12dp"
-                    android:background="#15888888" />
-
-                <!-- 2. 功率图例方块 -->
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:gravity="center"
-                    android:orientation="horizontal">
-
-                    <View
-                        android:layout_width="9dp"
-                        android:layout_height="9dp"
-                        android:background="@drawable/bg_square_light_blue" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="5dp"
-                        android:text="@string/charging_legend_power"
-                        android:textColor="#90CAF9"
-                        android:textSize="12sp" />
-                </LinearLayout>
-
-                <View
-                    android:layout_width="1dp"
-                    android:layout_height="12dp"
-                    android:background="#15888888" />
-
-                <!-- 3. 温度图例方块 -->
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:gravity="center"
-                    android:orientation="horizontal">
-
-                    <View
-                        android:layout_width="9dp"
-                        android:layout_height="9dp"
-                        android:background="@drawable/bg_square_red" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginStart="5dp"
-                        android:text="@string/charging_legend_temp"
-                        android:textColor="#FF5252"
-                        android:textSize="12sp" />
-                </LinearLayout>
-            </LinearLayout>
+                android:layout_marginTop="8dp" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 </LinearLayout>

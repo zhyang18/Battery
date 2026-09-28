@@ -471,6 +471,7 @@
     <string name="charging_legend_power">功率</string>
     <string name="charging_legend_level">电量</string>
     <string name="charging_legend_temp">温度</string>
+    <string name="charging_legend_voltage">电压</string>
     <string name="charging_metric_power">实时功率</string>
     <string name="charging_metric_level">当前电量</string>
     <string name="charging_metric_temp">电池温度</string>

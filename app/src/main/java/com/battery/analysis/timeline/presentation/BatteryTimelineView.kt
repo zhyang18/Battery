@@ -114,10 +114,10 @@ class BatteryTimelineView @JvmOverloads constructor(
     private val sp9_5 = spToPx(9.5f)
     private val sp10_5 = spToPx(10.5f)
 
-    // 画笔体系（趋势折线改小一号为 dp1）
+    // 画笔体系（趋势折线统一设置为 1.5dp）
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = dp1
+        strokeWidth = dp1_5
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
@@ -794,16 +794,14 @@ class BatteryTimelineView @JvmOverloads constructor(
             val y = calcPowerY(pW)
 
             if (x > lastX) {
-                val cX = (lastX + x) / 2f
-                cache.path.cubicTo(cX, lastY, cX, y, x, y)
+                cache.path.lineTo(x, y)
                 lastX = x
                 lastY = y
             }
         }
 
         if (lastX < contentRight) {
-            val cX = (lastX + contentRight) / 2f
-            cache.path.cubicTo(cX, lastY, cX, lastY, contentRight, lastY)
+            cache.path.lineTo(contentRight, lastY)
         }
 
         val maxSample = downsampled.maxByOrNull { abs(it.powerMw) }
@@ -959,9 +957,9 @@ class BatteryTimelineView @JvmOverloads constructor(
         contentLeft: Float,
         contentRight: Float
     ) {
-        val color = Color.parseColor("#B32196F3")
+        val color = Color.parseColor("#B33A7FF0")
         linePaint.color = color
-        metricDotPaint.color = color
+        metricDotPaint.color = Color.parseColor("#3A7FF0")
         metricLabelPaint.color = color
 
         canvas.drawPath(cache.path, linePaint)

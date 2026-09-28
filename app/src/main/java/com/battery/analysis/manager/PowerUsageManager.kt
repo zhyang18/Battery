@@ -1326,12 +1326,18 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 当外部电源断开（拔掉充电器）或用户手动重置时触发，重置当前放电统计周期基准。
+     * 具备充电状态守卫：若当前底层硬件仍处于充电状态，严禁开启放电统计周期。
      *
      * @param unplugLevel 断开电源时刻的电池电量百分比
      */
     fun onPowerDisconnected(unplugLevel: Int) {
-        val now = System.currentTimeMillis()
         val status = getCurrentBatteryStatus()
+        // 严格守卫：若当前底层硬件仍处于充电状态，严禁开启放电统计周期
+        if (status.isCharging) {
+            return
+        }
+
+        val now = System.currentTimeMillis()
         resetDischargeTempPoints(now, status.temperature)
         val initHwSample = SysfsBatterySampler.sampleHardwareDischarge(context, status.voltageVolts, status.temperature)
         val initPower = initHwSample?.powerWatts ?: 0f
@@ -1369,12 +1375,19 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 开启全新的放电会话并建立 RUNNING 状态的快照，立即执行首次检查点持久化。
+     * 具备充电状态守卫：若当前实际处于充电状态，严禁开启放电会话并保存快照。
      *
      * @param unplugTime 拔掉充电器时刻的时间戳毫秒值
      * @param unplugLevel 拔掉充电器时刻的初始电量百分比
      */
     @Synchronized
     fun startDischargeSession(unplugTime: Long, unplugLevel: Int) {
+        val status = getCurrentBatteryStatus()
+        // 严格守卫：若当前为充电状态，严禁开启放电会话并保存快照
+        if (status.isCharging) {
+            return
+        }
+
         // 开启新会话前，先将数据库中所有其它未完结的放电草稿正式结案归档，杜绝生成多个“放电中”
         try {
             PowerUsageDbHelper.getInstance(context).finalizeRunningRecords(exceptId = unplugTime)
@@ -1400,12 +1413,20 @@ class PowerUsageManager private constructor(private val context: Context) {
     /**
      * 将当前内存中的放电统计数据增量持久化到当前放电 Session。
      * 保持原地更新同一条记录（以拔电时间戳为唯一 ID），杜绝产生历史碎片。
+     * 具备充电状态守卫：如果是日常增量检查点且设备当前处于充电状态，严禁保存为耗电记录。
+     * 且耗电历史记录属于放电历史账本，强制其 isCharging 属性为 false。
      *
      * @param isFinal 是否为插电时的最终结案归档（true 为 COMPLETED，false 为 RUNNING 草稿）
-     * @return 成功持久化的 [PowerUsageRecord] 实例，若无有效会话或计算异常返回 null
+     * @return 成功持久化的 [PowerUsageRecord] 实例，若无有效会话、充电状态中或计算异常返回 null
      */
     @Synchronized
     fun checkpointDischargeSession(isFinal: Boolean = false): PowerUsageRecord? {
+        val batteryStatus = getCurrentBatteryStatus()
+        // 严格守卫：如果是日常增量检查点且设备当前处于充电状态，严禁保存为耗电记录
+        if (!isFinal && batteryStatus.isCharging) {
+            return null
+        }
+
         var sessionId = currentDischargeSessionId
         if (sessionId <= 0L) {
             sessionId = getLastUnplugTime()
@@ -1414,19 +1435,20 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         val now = System.currentTimeMillis()
-        val currentLevel = getCurrentBatteryStatus().levelPercent
+        val currentLevel = batteryStatus.levelPercent
 
         return try {
             val timeStr = dateFormatter.get()!!.format(Date(now))
             val currentMode = getSelectedMode()
             val fullPackage = loadPowerData(currentMode)
+            // 耗电历史快照是记录放电周期的历史账本，强制其 isCharging 属性为 false，严禁保存为充电记录
             val powerRecord = PowerUsageRecord.fromFullPowerPackage(
                 fullPackage = fullPackage,
                 recordTime = timeStr,
                 id = sessionId,
                 isCompleted = isFinal,
                 lastCheckpointTime = now
-            )
+            ).copy(isCharging = false)
             val powerDbHelper = PowerUsageDbHelper.getInstance(context)
             powerDbHelper.insertRecord(powerRecord)
 
@@ -1511,13 +1533,16 @@ class PowerUsageManager private constructor(private val context: Context) {
     /**
      * 结算并最终归档当前放电周期的完整耗电账本快照（Finalize 入库）。
      * 将 RUNNING 状态更新为 COMPLETED 状态，同时具备无效短时插拔清理与幂等防重守卫。
+     * 若在放电周期内电量反而上升（实际在充电），严禁保存为耗电记录并清理已有草稿。
      *
      * @param now 触发插电或结算时刻的时间戳毫秒值
-     * @return 成功归档的 [PowerUsageRecord] 快照实体，若周期不足 30 秒或已归档过则返回 null
+     * @return 成功归档的 [PowerUsageRecord] 快照实体，若周期不足 30 秒、充电异常或已归档过则返回 null
      */
     @Synchronized
     fun archiveDischargeSession(now: Long = System.currentTimeMillis()): PowerUsageRecord? {
         val lastUnplugTime = getLastUnplugTime()
+        val lastUnplugLevel = getLastUnplugLevel()
+        val currentLevel = getCurrentBatteryStatus().levelPercent
         val sessionId = if (currentDischargeSessionId > 0L) currentDischargeSessionId else lastUnplugTime
 
         // 1. 无效短时拔插防护：若拔电时长不足 30 秒，清除可能已建立的草稿，杜绝碎片垃圾数据
@@ -1534,7 +1559,21 @@ class PowerUsageManager private constructor(private val context: Context) {
             return null
         }
 
-        // 2. 关键幂等防重：同一拔电周期的放电账本只允许归档一次
+        // 2. 充电状态与电量倒挂防御：若拔电期间电量反而上涨（实际处于充电中），严禁保存为耗电记录
+        if (lastUnplugLevel > 0 && currentLevel > lastUnplugLevel) {
+            if (sessionId > 0L) {
+                try {
+                    PowerUsageDbHelper.getInstance(context).deleteRecord(sessionId)
+                } catch (_: Exception) {}
+            }
+            currentDischargeSessionId = 0L
+            try {
+                PowerUsageDbHelper.getInstance(context).finalizeRunningRecords()
+            } catch (_: Exception) {}
+            return null
+        }
+
+        // 3. 关键幂等防重：同一拔电周期的放电账本只允许归档一次
         if (lastArchivedUnplugTime == lastUnplugTime) {
             try {
                 PowerUsageDbHelper.getInstance(context).finalizeRunningRecords()
@@ -1542,7 +1581,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             return null
         }
 
-        // 3. 执行最终 Checkpoint 并置为 COMPLETED 完结状态
+        // 4. 执行最终 Checkpoint 并置为 COMPLETED 完结状态
         currentDischargeSessionId = lastUnplugTime
         val finalizedRecord = checkpointDischargeSession(isFinal = true)
         if (finalizedRecord != null) {
@@ -1583,13 +1622,18 @@ class PowerUsageManager private constructor(private val context: Context) {
         val runningSession = dbHelper.getRunningDischargeRecord()
         if (runningSession != null) {
             if (isCharging) {
-                // 场景 B：离线/关机期间发生了插电，将上一未完成的放电草稿执行 Finalize 完结
-                dbHelper.insertRecord(
-                    runningSession.copy(
-                        isCompleted = true,
-                        lastCheckpointTime = now
+                // 场景 B：离线/关机期间发生了插电，若草稿本身是充电状态或电量上升，直接删除草稿，严禁保存为耗电记录
+                if (runningSession.isCharging || (lastUnplugLevel > 0 && currentLevel > lastUnplugLevel)) {
+                    dbHelper.deleteRecord(runningSession.id)
+                } else {
+                    dbHelper.insertRecord(
+                        runningSession.copy(
+                            isCompleted = true,
+                            isCharging = false,
+                            lastCheckpointTime = now
+                        )
                     )
-                )
+                }
                 dbHelper.finalizeRunningRecords()
                 currentDischargeSessionId = 0L
                 lastArchivedUnplugTime = runningSession.id
@@ -3502,6 +3546,44 @@ class PowerUsageManager private constructor(private val context: Context) {
             cachedUsageIntervalsResult = result
         }
         return result
+    }
+
+    /**
+     * 查询指定起止时间范围内系统前台活跃应用时间轴事件集合。
+     * 用于在充电走势图（ChargingChartView）底部状态指示条上方紧凑打点堆叠展示前台应用小图标。
+     *
+     * @param startTime 查询起始时间戳（毫秒）
+     * @param endTime 查询终止时间戳（毫秒）
+     * @return 前台活跃应用时间轴事件列表 [List<AppTimelineEvent>]
+     */
+    fun queryChargingAppTimelineEvents(startTime: Long, endTime: Long): List<AppTimelineEvent> {
+        if (startTime <= 0L || endTime <= startTime) return emptyList()
+        val (appIntervals, _) = queryUsageIntervals(startTime, endTime)
+        if (appIntervals.isEmpty()) return emptyList()
+
+        val events = mutableListOf<AppTimelineEvent>()
+        for (interval in appIntervals) {
+            val pkg = interval.packageName
+            val duration = (interval.endTs - interval.startTs).coerceAtLeast(0L)
+            val info = getAppInfo(pkg)
+            val icon = info.first
+            val appName = info.second
+            val uid = info.third
+
+            events.add(
+                AppTimelineEvent(
+                    packageName = pkg,
+                    uid = uid,
+                    appName = appName,
+                    icon = icon,
+                    startTime = interval.startTs,
+                    endTime = interval.endTs,
+                    durationMs = duration,
+                    screenOn = true
+                )
+            )
+        }
+        return events
     }
 
     /**

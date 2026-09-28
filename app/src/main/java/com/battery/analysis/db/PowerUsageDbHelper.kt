@@ -101,14 +101,20 @@ class PowerUsageDbHelper private constructor(context: Context) :
     /**
      * 插入一条新的耗电历史记录或增量更新已有会话草稿。
      * 具备精确主键匹配与防重检测机制：
-     * 1. 优先匹配自身 Session ID，若已存在直接覆写更新（支持放电会话的增量 Checkpoint 原地更新，不产生历史碎片）；
-     * 2. 若自身 ID 未入库，则检测是否存在时间极相近（< 30 秒）且电量、总时长相同的相近记录并覆写；
-     * 3. 否则作为全新记录插入。
+     * 1. 严格守卫：若记录处于充电状态，严禁保存为耗电历史记录，直接返回 -1；
+     * 2. 优先匹配自身 Session ID，若已存在直接覆写更新（支持放电会话的增量 Checkpoint 原地更新，不产生历史碎片）；
+     * 3. 若自身 ID 未入库，则检测是否存在时间极相近（< 30 秒）且电量、总时长相同的相近记录并覆写；
+     * 4. 否则作为全新记录插入。
      *
      * @param record 待持久化的耗电历史实体对象
-     * @return 插入或更新成功返回行 ID，失败返回 -1
+     * @return 插入或更新成功返回行 ID，若处于充电状态或失败返回 -1
      */
     fun insertRecord(record: PowerUsageRecord): Long {
+        // 核心守卫：若记录处于充电状态，严禁保存为耗电历史记录
+        if (record.isCharging) {
+            return -1L
+        }
+
         val db = writableDatabase
         val existsById = checkRecordExistsById(db, record.id)
         val existingId = if (existsById) record.id else findDuplicateRecordId(db, record)
@@ -166,17 +172,20 @@ class PowerUsageDbHelper private constructor(context: Context) :
 
     /**
      * 事务批量插入耗电历史记录列表（用于合并去重恢复）。
+     * 自动过滤剔除任何处于充电状态的异常记录。
      *
      * @param records 待插入的耗电历史记录列表
-     * @return 实际成功写入或更新的记录条数
+     * @return 实际成功写入或更新的有效非充电记录条数
      */
     fun insertRecords(records: List<PowerUsageRecord>): Int {
-        if (records.isEmpty()) return 0
+        val validRecords = records.filter { !it.isCharging }
+        if (validRecords.isEmpty()) return 0
+
         val db = writableDatabase
         var insertedCount = 0
         db.beginTransaction()
         try {
-            for (record in records) {
+            for (record in validRecords) {
                 val existingId = findDuplicateRecordId(db, record)
                 val values = buildContentValues(record, existingId)
                 val rowId = if (existingId != null && existingId > 0L) {
@@ -198,17 +207,19 @@ class PowerUsageDbHelper private constructor(context: Context) :
 
     /**
      * 在单个事务中清空现有耗电历史记录并写入新的记录列表（用于覆盖式数据恢复）。
+     * 自动过滤剔除任何处于充电状态的异常记录。
      *
      * @param records 待恢复的耗电历史记录列表
-     * @return 实际成功写入的记录条数
+     * @return 实际成功写入的有效非充电记录条数
      */
     fun replaceRecords(records: List<PowerUsageRecord>): Int {
+        val validRecords = records.filter { !it.isCharging }
         val db = writableDatabase
         var insertedCount = 0
         db.beginTransaction()
         try {
             db.delete(TABLE_NAME, null, null)
-            for (record in records) {
+            for (record in validRecords) {
                 val values = buildContentValues(record, null)
                 val rowId = db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE)
                 if (rowId != -1L) {
@@ -358,16 +369,23 @@ class PowerUsageDbHelper private constructor(context: Context) :
      * 查询所有已持久化的耗电历史记录，按时间从近到远倒序排列。
      * 自动执行单会话进行中自愈守护：物理上整机在同一时刻至多只允许存在一个处于“放电中”（RUNNING）的活跃会话。
      * 若历史数据中检测到多条未完结草稿，自动保留最新一条为进行中，其余所有旧会话均原地自愈为已完成并更新数据库。
+     * 自动过滤剔除并清理任何处于充电状态（is_charging = 1）的异常脏记录，保证耗电历史绝对纯净。
      *
-     * @return 耗电历史快照记录列表
+     * @return 纯净有效的耗电历史快照记录列表
      */
     fun getAllRecords(): List<PowerUsageRecord> {
         val list = mutableListOf<PowerUsageRecord>()
-        val db = readableDatabase
+        val db = writableDatabase
+
+        // 自动清理历史累积遗留的充电异常脏记录，保证耗电历史绝对纯净
+        try {
+            db.delete(TABLE_NAME, "$COL_IS_CHARGING = 1", null)
+        } catch (_: Exception) {}
+
         val cursor = db.query(
             TABLE_NAME,
             null,
-            null,
+            "$COL_IS_CHARGING = 0",
             null,
             null,
             null,
@@ -412,15 +430,16 @@ class PowerUsageDbHelper private constructor(context: Context) :
 
     /**
      * 查询当前最新的一条未完成（RUNNING 状态，即 is_completed = 0）的放电会话记录。
+     * 严格排除处于充电状态的异常记录。
      *
-     * @return 未完结的放电草稿实体 [PowerUsageRecord]，若不存在返回 null
+     * @return 未完结且处于非充电状态的放电草稿实体 [PowerUsageRecord]，若不存在返回 null
      */
     fun getRunningDischargeRecord(): PowerUsageRecord? {
         val db = readableDatabase
         val cursor = db.query(
             TABLE_NAME,
             null,
-            "$COL_IS_COMPLETED = 0",
+            "$COL_IS_COMPLETED = 0 AND $COL_IS_CHARGING = 0",
             null,
             null,
             null,
@@ -438,9 +457,10 @@ class PowerUsageDbHelper private constructor(context: Context) :
 
     /**
      * 根据主键 ID 精确查询单条耗电快照记录。
+     * 严格排除处于充电状态的记录。
      *
      * @param id 目标记录唯一主键 ID
-     * @return 匹配到的耗电快照实体 [PowerUsageRecord]，若未查到返回 null
+     * @return 匹配到的非充电耗电快照实体 [PowerUsageRecord]，若未查到或属于充电状态返回 null
      */
     fun getRecordById(id: Long): PowerUsageRecord? {
         if (id <= 0L) return null
@@ -448,7 +468,7 @@ class PowerUsageDbHelper private constructor(context: Context) :
         val cursor = db.query(
             TABLE_NAME,
             null,
-            "$COL_ID = ?",
+            "$COL_ID = ? AND $COL_IS_CHARGING = 0",
             arrayOf(id.toString()),
             null,
             null,

@@ -11,6 +11,7 @@ import androidx.lifecycle.lifecycleScope
 import com.battery.analysis.R
 import com.battery.analysis.databinding.ActivityChargingHistoryDetailBinding
 import com.battery.analysis.db.ChargingHistoryDbHelper
+import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.ChargingHistoryRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -77,6 +78,25 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
 
         binding.btnDelete.setOnClickListener {
             showDeleteConfirmDialog()
+        }
+
+        // 充电趋势图底部指标多选/反选监听（电量 / 功率 / 温度 / 电压 / 应用）
+        binding.chargingMetricSelectorView.setPowerLabelText("功率")
+        binding.chargingMetricSelectorView.configurePrefs(
+            prefsKey = "saved_charging_timeline_metrics",
+            defaultMetrics = setOf(
+                com.battery.analysis.timeline.presentation.TimelineMetric.BATTERY,
+                com.battery.analysis.timeline.presentation.TimelineMetric.POWER,
+                com.battery.analysis.timeline.presentation.TimelineMetric.TEMPERATURE,
+                com.battery.analysis.timeline.presentation.TimelineMetric.VOLTAGE,
+                com.battery.analysis.timeline.presentation.TimelineMetric.APP
+            )
+        )
+        binding.chargingChartView.setSelectedMetrics(
+            binding.chargingMetricSelectorView.getSelectedMetrics()
+        )
+        binding.chargingMetricSelectorView.setOnMetricsChangedListener { selectedMetrics ->
+            binding.chargingChartView.setSelectedMetrics(selectedMetrics)
         }
     }
 
@@ -162,9 +182,20 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
             binding.layoutScreenOffSpecial.visibility = View.GONE
         }
 
-        // 绑定三合一走势折线图数据（电量、功率、温度），支持手势标尺交互
+        // 绑定走势折线图数据（电量、功率、温度、电压），支持手势标尺交互
         val samplePoints = record.getSamplePoints()
         binding.chargingChartView.setData(samplePoints)
+
+        // 异步查询该充电历史时间段内的前台应用事件，在走势图上展示应用小图标
+        if (record.startTimestamp > 0L && record.endTimestamp > record.startTimestamp) {
+            lifecycleScope.launch(Dispatchers.IO) {
+                val powerManager = PowerUsageManager.getInstance(applicationContext)
+                val events = powerManager.queryChargingAppTimelineEvents(record.startTimestamp, record.endTimestamp)
+                withContext(Dispatchers.Main) {
+                    binding.chargingChartView.setAppEvents(events)
+                }
+            }
+        }
     }
 
     /**

@@ -470,6 +470,7 @@
     <string name="charging_legend_power">Power</string>
     <string name="charging_legend_level">Level</string>
     <string name="charging_legend_temp">Temp</string>
+    <string name="charging_legend_voltage">Voltage</string>
     <string name="charging_metric_power">Power</string>
     <string name="charging_metric_level">Battery Level</string>
     <string name="charging_metric_temp">Battery Temp</string>

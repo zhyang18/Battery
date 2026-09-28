@@ -92,6 +92,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     private val dp3 = dpToPx(3f)
     private val dp3_5 = dpToPx(3.5f)
     private val dp4 = dpToPx(4f)
+    private val dp5 = dpToPx(5f)
     private val dp6 = dpToPx(6f)
     private val dp8 = dpToPx(8f)
     private val dp10 = dpToPx(10f)
@@ -231,6 +232,23 @@ class BatteryTimelineView @JvmOverloads constructor(
     private val tooltipTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = sp9_5
         color = Color.parseColor("#E0E0E0")
+    }
+
+    // 各指标折线主题颜色（与充电趋势图规范完全统一）
+    private val colorPower = Color.parseColor("#90CAF9")
+    private val colorBattery = Color.parseColor("#3A7FF0")
+    private val colorTemp = Color.parseColor("#FF5252")
+    private val colorVoltage = Color.parseColor("#FFD54F")
+
+    // 探查游标折线交点彩色外圈画笔
+    private val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+
+    // 探查游标折线交点白色内圈圆心画笔
+    private val dotInnerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.WHITE
     }
 
     // 绘制复用 Path 与 Rect
@@ -584,7 +602,7 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         // 6. 若长按处于活跃状态，绘制垂直游标并将信息固定在图表顶部展示（无遮挡弹框）
         if (isCursorActive) {
-            drawCursorAndHeaderInfo(canvas, contentLeft, contentRight, contentWidth, screenBarTop, visibleStart, visibleEnd)
+            drawCursorAndHeaderInfo(canvas, contentLeft, contentRight, contentWidth, screenBarTop, visibleStart, visibleEnd, topPadding, availableH)
         }
     }
 
@@ -1391,14 +1409,17 @@ class BatteryTimelineView @JvmOverloads constructor(
      * 绘制手势长按或触控滑动时的垂直虚线游标，以及顶部单行读数指示看板（与充电趋势图触摸看板样式保持一致）。
      * 单行紧凑展示当前时刻指标，中间以 " | " 分隔，去除指标名称标签。
      * 格式形如：10:10:02 :  60% | -1.35W | 38.5℃ | 3.941V | 电池统计
+     * 并在各激活折线交点处绘制高亮圆点（双层圆点：外圈彩色主题色，内圈白色圆心）。
      *
-     * @param canvas 绘制画布
-     * @param contentLeft 图表内容左边界
-     * @param contentRight 图表内容右边界
+     * @param canvas 绘制画布 [Canvas]
+     * @param contentLeft 图表内容左边界 X 坐标
+     * @param contentRight 图表内容右边界 X 坐标
      * @param contentWidth 图表内容有效宽度
      * @param mainHeight 曲线区域高度
      * @param visibleStart 视窗起始时间戳
      * @param visibleEnd 视窗结束时间戳
+     * @param topPadding 曲线绘制区域顶部安全间距
+     * @param availableH 曲线有效可用绘制高度
      */
     private fun drawCursorAndHeaderInfo(
         canvas: Canvas,
@@ -1407,7 +1428,9 @@ class BatteryTimelineView @JvmOverloads constructor(
         contentWidth: Float,
         mainHeight: Float,
         visibleStart: Long,
-        visibleEnd: Long
+        visibleEnd: Long,
+        topPadding: Float,
+        availableH: Float
     ) {
         val clampedX = cursorX.coerceIn(contentLeft, contentRight)
 
@@ -1448,6 +1471,55 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         // 4. 垂直虚线游标从顶部悬浮卡片下方引出延伸至图表底部
         canvas.drawLine(clampedX, headerBottom, clampedX, mainHeight + dp6, cursorPaint)
+
+        // 5. 各曲线上高亮圆圈打点（外层彩色光环 + 内层白色圆心，与充电趋势图规范完全统一）
+        if (curSample != null) {
+            val selected = timelineState.selectedMetrics
+
+            // 功率指标高亮点
+            if (selected.contains(TimelineMetric.POWER)) {
+                val pW = (abs(curSample.powerMw) / 1000.0).toFloat().coerceIn(0f, cachedMaxScaleW.toFloat())
+                val powerRatio = (pW / cachedMaxScaleW.toFloat()).coerceIn(0f, 1f)
+                val powerY = topPadding + (1f - powerRatio * 0.85f) * availableH
+                drawHighLightDot(canvas, clampedX, powerY, colorPower)
+            }
+
+            // 电量指标高亮点
+            if (selected.contains(TimelineMetric.BATTERY)) {
+                val batteryNorm = (curSample.batteryLevel / 100f).coerceIn(0f, 1f) * 0.45f + 0.50f
+                val batteryY = topPadding + (1f - batteryNorm) * availableH
+                drawHighLightDot(canvas, clampedX, batteryY, colorBattery)
+            }
+
+            // 温度指标高亮点
+            if (selected.contains(TimelineMetric.TEMPERATURE)) {
+                val tempNorm = (((curSample.temperatureC - 15.0) / 30.0).coerceIn(0.0, 1.0) * 0.40 + 0.45).toFloat()
+                val tempY = topPadding + (1f - tempNorm) * availableH
+                drawHighLightDot(canvas, clampedX, tempY, colorTemp)
+            }
+
+            // 电压指标高亮点
+            if (selected.contains(TimelineMetric.VOLTAGE)) {
+                val voltV = curSample.voltageMv / 1000f
+                val voltNorm = (((voltV - 3.4f) / 1.0f).coerceIn(0f, 1f) * 0.35f + 0.35f)
+                val voltY = topPadding + (1f - voltNorm) * availableH
+                drawHighLightDot(canvas, clampedX, voltY, colorVoltage)
+            }
+        }
+    }
+
+    /**
+     * 在指定坐标点绘制高亮光环指示圆点（外层彩色光环 + 内层白色圆心，与充电趋势图规范完全统一）。
+     *
+     * @param canvas 绘制画布 [Canvas]
+     * @param x 圆心 X 坐标
+     * @param y 圆心 Y 坐标
+     * @param color 外圈彩色主题色
+     */
+    private fun drawHighLightDot(canvas: Canvas, x: Float, y: Float, color: Int) {
+        dotPaint.color = color
+        canvas.drawCircle(x, y, dp5, dotPaint)
+        canvas.drawCircle(x, y, dp2, dotInnerPaint)
     }
 
     /**

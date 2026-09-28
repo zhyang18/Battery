@@ -7,6 +7,7 @@ import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.AbsoluteSizeSpan
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.PopupWindow
 import android.widget.TextView
@@ -18,13 +19,16 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.battery.analysis.R
 import com.battery.analysis.databinding.ActivityPowerHistoryDetailBinding
+import com.battery.analysis.databinding.ItemHistoryDetailHeaderBinding
 import com.battery.analysis.db.PowerUsageDbHelper
 import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.PowerUsageRecord
 import com.battery.analysis.timeline.presentation.AppEnergyDetailBottomSheetDialog
+import com.battery.analysis.timeline.presentation.BatteryTimelineState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -33,14 +37,20 @@ import java.util.Locale
 /**
  * 耗电历史快照详情展示 Activity。
  * 完整呈现单次拔电放电会话的四维数据卡片：起止时段与电池状态、三维核心功耗与理论续航看板、放电折线轨迹图表以及各应用前台耗电排行榜列表。
+ * 采用全局单一主 RecyclerView 与 ConcatAdapter 扁平化架构，彻底实现应用 ViewHolder 原生虚拟化与视图复用。
  * 提供单条快照删除以及一键载入至主页查看功能。
  */
 class PowerHistoryDetailActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityPowerHistoryDetailBinding
+    private var headerBinding: ItemHistoryDetailHeaderBinding? = null
+    private lateinit var headerAdapter: HistoryDetailHeaderAdapter
+    private lateinit var appAdapter: AppPowerUsageAdapter
+
     private var recordId: Long = -1L
     private var currentRecord: PowerUsageRecord? = null
-    private lateinit var appAdapter: AppPowerUsageAdapter
+    private var cachedTimelineState: BatteryTimelineState? = null
+    private var cachedDisplayAppCount: Int = 0
     private var currentSortIndex: Int = 1
 
     /**
@@ -148,10 +158,24 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
     }
 
     /**
-     * 初始化应用耗电排行榜列表控件与适配器，并注册列表项点击弹出前后台深度能耗详情 BottomSheet 弹窗监听。
+     * 初始化主列表控件与 ConcatAdapter，将头部各卡片与纯应用列表串联，彻底恢复 ViewHolder 虚拟化与视图复用。
      */
     private fun setupAppRecyclerView() {
-        appAdapter = AppPowerUsageAdapter()
+        headerAdapter = HistoryDetailHeaderAdapter(
+            onBindingReady = { hBinding ->
+                headerBinding = hBinding
+                setupHeaderListeners(hBinding)
+                bindHeaderAll(hBinding)
+            },
+            onBind = { hBinding ->
+                headerBinding = hBinding
+                bindHeaderAll(hBinding)
+            }
+        )
+
+        appAdapter = AppPowerUsageAdapter().apply {
+            isPureAppListMode = true
+        }
         appAdapter.onListCountChangedListener = { count ->
             updateUsageListTitle(count)
         }
@@ -163,12 +187,14 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             val dialog = AppUsageDetailBottomSheetDialog(this, item, isShizuku, rangeStr)
             showAndTrackDialog(dialog)
         }
-        binding.recyclerAppUsage.layoutManager = LinearLayoutManager(this)
-        binding.recyclerAppUsage.adapter = appAdapter
+
+        val concatAdapter = ConcatAdapter(headerAdapter, appAdapter)
+        binding.recyclerHistoryDetail.layoutManager = LinearLayoutManager(this)
+        binding.recyclerHistoryDetail.adapter = concatAdapter
     }
 
     /**
-     * 配置返回、删除快照与载入至主页的按钮点击监听，以及后台开关和排序菜单。
+     * 配置顶部导航栏（返回、删除快照与载入至主页）按钮点击监听。
      */
     private fun setupListeners() {
         binding.btnBack.setOnClickListener {
@@ -186,30 +212,38 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
                 finish()
             }
         }
+    }
 
-        // 场景后台统计开关：控制是否展示各应用后台数据及后台应用
+    /**
+     * 配置头部卡片内部的交互监听（后台统计开关、排序漏斗、图表指标与事件）。
+     *
+     * @param hBinding 头部视图绑定对象
+     */
+    private fun setupHeaderListeners(hBinding: ItemHistoryDetailHeaderBinding) {
         val statsPrefs = getSharedPreferences(PowerUsageFragment.PREFS_POWER_STATS, Context.MODE_PRIVATE)
         val isBgStatsEnabled = statsPrefs.getBoolean(PowerUsageFragment.PREF_KEY_ENABLE_BACKGROUND_STATS, false)
-        binding.switchBackgroundStats.isChecked = isBgStatsEnabled
+
+        hBinding.switchBackgroundStats.setOnCheckedChangeListener(null)
+        hBinding.switchBackgroundStats.isChecked = isBgStatsEnabled
         appAdapter.setShowBackgroundStats(isBgStatsEnabled)
 
-        binding.switchBackgroundStats.setOnCheckedChangeListener { _, isChecked ->
-            statsPrefs.edit().putBoolean(PowerUsageFragment.PREF_KEY_ENABLE_BACKGROUND_STATS, isChecked).apply()
-            appAdapter.setShowBackgroundStats(isChecked)
+        hBinding.switchBackgroundStats.setOnCheckedChangeListener { buttonView, isChecked ->
+            if (buttonView.isPressed) {
+                statsPrefs.edit().putBoolean(PowerUsageFragment.PREF_KEY_ENABLE_BACKGROUND_STATS, isChecked).apply()
+                appAdapter.setShowBackgroundStats(isChecked)
+            }
         }
 
-        // 场景排序菜单按钮（漏斗）：弹出多选排序气泡弹窗
-        binding.btnSceneSort.setOnClickListener {
-            showSortChoiceDialog()
+        hBinding.btnSceneSort.setOnClickListener { v ->
+            showSortChoiceDialog(v)
         }
 
-        // 功耗时间轴指标多选/反选监听
-        binding.metricSelectorView.setOnMetricsChangedListener { selectedMetrics ->
-            binding.batteryTimelineView.setSelectedMetrics(selectedMetrics)
+        hBinding.metricSelectorView.setOnMetricsChangedListener { selectedMetrics ->
+            cachedTimelineState = cachedTimelineState?.copy(selectedMetrics = selectedMetrics)
+            hBinding.batteryTimelineView.setSelectedMetrics(selectedMetrics)
         }
 
-        // 功耗时间轴 App 图标点击监听
-        binding.batteryTimelineView.setOnAppEventListener { event ->
+        hBinding.batteryTimelineView.setOnAppEventListener { event ->
             val dialog = AppEnergyDetailBottomSheetDialog(this@PowerHistoryDetailActivity, event)
             showAndTrackDialog(dialog)
         }
@@ -218,8 +252,10 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
     /**
      * 弹出选择排序方式下拉气泡菜单。
      * 支持按使用时长、按功耗、按消耗电量或按名称进行排序切换，并联动刷新应用列表。
+     *
+     * @param anchor 触发下拉菜单的目标锚点视图，为空时使用头部排序按钮或根视图兜底
      */
-    private fun showSortChoiceDialog() {
+    private fun showSortChoiceDialog(anchor: View? = null) {
         val popupView = layoutInflater.inflate(R.layout.popup_power_sort_picker, null)
         val density = resources.displayMetrics.density
         val popupWidth = (170 * density).toInt()
@@ -256,8 +292,9 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             }
         }
 
+        val targetAnchor = anchor ?: headerBinding?.btnSceneSort ?: binding.root
         popupWindow.showAsDropDown(
-            binding.btnSceneSort,
+            targetAnchor,
             0,
             (4 * density).toInt(),
             Gravity.END
@@ -270,7 +307,8 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
      * @param count 当前列表展示的应用条目总数
      */
     private fun updateUsageListTitle(count: Int) {
-        binding.tvAppListTitle.text = getString(R.string.power_usage_list_format, count)
+        cachedDisplayAppCount = count
+        headerBinding?.tvAppListTitle?.text = getString(R.string.power_usage_list_format, count)
     }
 
     /**
@@ -298,32 +336,32 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         }
     }
 
-
     /**
-     * 将解析后的完整耗电数据包绑定并渲染至卡片、图表与列表中。
+     * 将快照数据实体的时段状态与三维核心功耗看板渲染至头部绑定视图中。
      *
      * @param record 耗电历史快照数据实体
+     * @param hBinding 头部视图绑定对象
      */
-    private fun renderRecordDetails(record: PowerUsageRecord) {
+    private fun renderHeaderDetails(record: PowerUsageRecord, hBinding: ItemHistoryDetailHeaderBinding) {
         // 1. 卡片 1：时段、徽章与电池状态
-        binding.tvDetailTimeRange.text = record.getFormattedTimeRange()
+        hBinding.tvDetailTimeRange.text = record.getFormattedTimeRange()
 
         if (record.isShizukuRealData) {
-            binding.tvModeBadge.text = "Shizuku"
-            binding.tvModeBadge.setTextColor(Color.parseColor("#2196F3"))
-            binding.tvModeBadge.setBackgroundResource(R.drawable.bg_history_badge)
+            hBinding.tvModeBadge.text = "Shizuku"
+            hBinding.tvModeBadge.setTextColor(Color.parseColor("#2196F3"))
+            hBinding.tvModeBadge.setBackgroundResource(R.drawable.bg_history_badge)
         } else {
-            binding.tvModeBadge.text = getString(R.string.power_mode_normal)
-            binding.tvModeBadge.setTextColor(Color.parseColor("#9CA3AF"))
-            binding.tvModeBadge.setBackgroundResource(R.drawable.bg_dialog_btn_cancel)
+            hBinding.tvModeBadge.text = getString(R.string.power_mode_normal)
+            hBinding.tvModeBadge.setTextColor(Color.parseColor("#9CA3AF"))
+            hBinding.tvModeBadge.setBackgroundResource(R.drawable.bg_dialog_btn_cancel)
         }
 
-        binding.tvDetailLevel.text = "${record.levelPercent}%"
-        binding.tvDetailTemp.text = String.format(Locale.getDefault(), "%.1f ℃", record.temperature)
-        binding.tvDetailVoltage.text = String.format(Locale.getDefault(), "%.2f V", record.voltageVolts)
-        binding.tvDetailEnergy.text = String.format(Locale.getDefault(), "%.1f Wh", record.energyWh)
+        hBinding.tvDetailLevel.text = "${record.levelPercent}%"
+        hBinding.tvDetailTemp.text = String.format(Locale.getDefault(), "%.1f ℃", record.temperature)
+        hBinding.tvDetailVoltage.text = String.format(Locale.getDefault(), "%.2f V", record.voltageVolts)
+        hBinding.tvDetailEnergy.text = String.format(Locale.getDefault(), "%.1f Wh", record.energyWh)
 
-        // 2. 卡片 2：三维核心功耗与续航指标（与耗电页顶部卡片一致，按亮屏 / 息屏 / 全局三行呈现）
+        // 2. 卡片 2：三维核心功耗与续航指标（按亮屏 / 息屏 / 全局三行呈现）
         val onEnergy = record.screenOnEnergyWh
         val offEnergy = record.screenOffEnergyWh
         val totalEnergy = record.totalEnergyWh
@@ -381,60 +419,84 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         }
 
         // 第一行：亮屏数据（前置亮色太阳图标，时长占比 / 能量占比 / 功耗 / 续航）
-        binding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
-        binding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", onEnergy), onEnergyRatioStr)
-        binding.tvMetricScreenOnPower.text = onPowerStr
-        binding.tvMetricScreenOnRemaining.text = record.remainingScreenOnText
+        hBinding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
+        hBinding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", onEnergy), onEnergyRatioStr)
+        hBinding.tvMetricScreenOnPower.text = onPowerStr
+        hBinding.tvMetricScreenOnRemaining.text = record.remainingScreenOnText
 
         // 第二行：息屏数据（前置暗色太阳图标，时长占比 / 能量占比 / 功耗 / 续航）
-        binding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
-        binding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", offEnergy), offEnergyRatioStr)
-        binding.tvMetricScreenOffPower.text = offPowerStr
-        binding.tvMetricScreenOffRemaining.text = record.remainingScreenOffText
+        hBinding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
+        hBinding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", offEnergy), offEnergyRatioStr)
+        hBinding.tvMetricScreenOffPower.text = offPowerStr
+        hBinding.tvMetricScreenOffRemaining.text = record.remainingScreenOffText
 
         // 第三行：全局数据（前置半亮半暗太阳图标，时长占比 / 能量占比 / 功耗 / 续航）
-        binding.tvMetricGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
-        binding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", totalEnergy), "100%")
-        binding.tvMetricGlobalPower.text = avgPowerStr
-        binding.tvMetricGlobalRemaining.text = record.remainingCompositeText
+        hBinding.tvMetricGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
+        hBinding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", totalEnergy), "100%")
+        hBinding.tvMetricGlobalPower.text = avgPowerStr
+        hBinding.tvMetricGlobalRemaining.text = record.remainingCompositeText
 
         // 指标卡片三行点击提示（亮屏 / 息屏 / 全局）
-        binding.layoutMetricScreenOnRow.setOnClickListener {
-            val joules = onEnergy * 3600f
-            val timeText = if (onDurationRatioStr != "0.0%") "$onDurationStr($onDurationRatioStr)" else onDurationStr
-            val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", onEnergy)})"
-            val remainingText = record.remainingScreenOnText.ifBlank { "--" }
-//            Toast.makeText(this, "亮屏：时间 $timeText、平均功耗 $onPowerStr、能量 $energyText、续航时间 $remainingText", Toast.LENGTH_SHORT).show()
+        hBinding.layoutMetricScreenOnRow.setOnClickListener {
             Toast.makeText(this, "亮屏：时间、平均功耗、能量、续航时间", Toast.LENGTH_SHORT).show()
         }
-        binding.layoutMetricScreenOffRow.setOnClickListener {
-            val joules = offEnergy * 3600f
-            val timeText = if (offDurationRatioStr != "0.0%") "$offDurationStr($offDurationRatioStr)" else offDurationStr
-            val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", offEnergy)})"
-            val remainingText = record.remainingScreenOffText.ifBlank { "--" }
-//            Toast.makeText(this, "息屏：时间 $timeText、平均功耗 $offPowerStr、能量 $energyText、续航时间 $remainingText", Toast.LENGTH_SHORT).show()
+        hBinding.layoutMetricScreenOffRow.setOnClickListener {
             Toast.makeText(this, "息屏：时间、平均功耗、能量、续航时间", Toast.LENGTH_SHORT).show()
         }
-        binding.layoutMetricGlobalRow.setOnClickListener {
-            val joules = totalEnergy * 3600f
-            val timeText = "$totalDurationStr(100%)"
-            val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", totalEnergy)})"
-            val remainingText = record.remainingCompositeText.ifBlank { "--" }
-//            Toast.makeText(this, "全局：时间 $timeText、平均功耗 $avgPowerStr、能量 $energyText、续航时间 $remainingText", Toast.LENGTH_SHORT).show()
+        hBinding.layoutMetricGlobalRow.setOnClickListener {
             Toast.makeText(this, "全局：时间、平均功耗、能量、续航时间", Toast.LENGTH_SHORT).show()
         }
+    }
 
-        // 3. 卡片 3 与 4：反序列化全量数据包加载功耗时间轴与应用排行榜
+    /**
+     * 将当前缓存的全部快照数据（时段状态、三维核心看板、走势折线图、列表操作栏与条目数量）完整绑定至头部视图。
+     * 无论后台数据反序列化与 ViewHolder 创建的先后时序如何，均能确保所有卡片与折线图数据完整无遗漏地呈现。
+     *
+     * @param hBinding 头部组合视图绑定对象
+     */
+    private fun bindHeaderAll(hBinding: ItemHistoryDetailHeaderBinding) {
+        val record = currentRecord ?: return
+        renderHeaderDetails(record, hBinding)
+
+        cachedTimelineState?.let { state ->
+            hBinding.batteryTimelineView.setState(state)
+        }
+
+        hBinding.layoutBackgroundStatsContainer.visibility =
+            if (record.isShizukuRealData) View.VISIBLE else View.GONE
+
+        val count = if (cachedDisplayAppCount > 0) cachedDisplayAppCount else appAdapter.getDisplayItemCount()
+        if (count > 0) {
+            hBinding.tvAppListTitle.text = getString(R.string.power_usage_list_format, count)
+        }
+    }
+
+    /**
+     * 将解析后的完整耗电数据包绑定并渲染至卡片、图表与列表中。
+     *
+     * @param record 耗电历史快照数据实体
+     */
+    private fun renderRecordDetails(record: PowerUsageRecord) {
+        currentRecord = record
+        headerBinding?.let { bindHeaderAll(it) }
+
+        // 反序列化全量数据包加载功耗时间轴与应用排行榜
         lifecycleScope.launch(Dispatchers.IO) {
             val fullPackage = record.toFullPowerPackage(this@PowerHistoryDetailActivity)
             val powerMgr = PowerUsageManager.getInstance(this@PowerHistoryDetailActivity)
-            val selectedMetrics = binding.metricSelectorView.getSelectedMetrics()
+            val selectedMetrics = headerBinding?.metricSelectorView?.getSelectedMetrics()
+                ?: cachedTimelineState?.selectedMetrics
+                ?: com.battery.analysis.timeline.presentation.TimelineMetric.entries.toSet()
             val timelineState = powerMgr.buildTimelineState(fullPackage, isHistoryRecord = true).copy(selectedMetrics = selectedMetrics)
             withContext(Dispatchers.Main) {
-                binding.batteryTimelineView.setState(timelineState)
-                binding.layoutBackgroundStatsContainer.visibility = if (record.isShizukuRealData) android.view.View.VISIBLE else android.view.View.GONE
+                cachedTimelineState = timelineState
                 appAdapter.submitList(fullPackage.appList)
-                updateUsageListTitle(appAdapter.getDisplayItemCount())
+                cachedDisplayAppCount = appAdapter.getDisplayItemCount()
+                headerBinding?.let { hBinding ->
+                    bindHeaderAll(hBinding)
+                } ?: run {
+                    headerAdapter.notifyItemChanged(0)
+                }
             }
         }
     }
@@ -449,92 +511,69 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
      */
     private fun formatValueWithSmallPercent(mainText: String, percentText: String): CharSequence {
         val fullText = "$mainText($percentText)"
-        val startIndex = mainText.length
         val spannable = SpannableString(fullText)
-        spannable.setSpan(
-            AbsoluteSizeSpan(8, true),
-            startIndex,
-            fullText.length,
-            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
+        val start = mainText.length
+        val end = fullText.length
+        spannable.setSpan(AbsoluteSizeSpan(8, true), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         return spannable
     }
 
     /**
-     * 将毫秒时长按 "0m0s" 规范格式化为紧凑友好文本。
-     * 当小于 1 小时时展示为分秒格式（如 "0m0s"、"13m44s"、"49m55s"）；
-     * 当大于等于 1 小时且小于 1 天时展示为时分格式（如 "1h03m"）；
-     * 当大于等于 1 天时展示为天时格式（如 "1d03h"）。
+     * 将时长毫秒数格式化为紧凑卡片展示文本（如 "1h03m" 或 "49m55s"）。
      *
-     * @param ms 物理持续时长毫秒值
-     * @param fallbackText 当毫秒值为 0 或无效时的备用文本
-     * @return 格式化后的紧凑时长字符串（如 "0m0s"、"13m44s"）
+     * @param durationMs 时长毫秒数值
+     * @param rawText 原始文本兜底
+     * @return 紧凑格式化时长文本
      */
-    private fun formatCardDuration(ms: Long, fallbackText: String): String {
-        if (ms <= 0L) {
-            return if (fallbackText.isNotBlank()) fallbackText else "0m0s"
-        }
-        val totalSec = ms / 1000L
-        val days = totalSec / 86400L
-        val hours = (totalSec % 86400L) / 3600L
+    private fun formatCardDuration(durationMs: Long, rawText: String): String {
+        if (durationMs <= 0L) return if (rawText.isNotBlank()) rawText else "0s"
+        val totalSec = durationMs / 1000L
+        val hours = totalSec / 3600L
         val minutes = (totalSec % 3600L) / 60L
         val seconds = totalSec % 60L
         return when {
-            days > 0L -> String.format(Locale.getDefault(), "%dd%02dh", days, hours)
-            hours > 0L -> String.format(Locale.getDefault(), "%dh%02dm", hours, minutes)
-            else -> "${minutes}m${seconds}s"
+            hours > 0 -> String.format(Locale.getDefault(), "%dh%02dm", hours, minutes)
+            minutes > 0 -> String.format(Locale.getDefault(), "%dm%02ds", minutes, seconds)
+            else -> String.format(Locale.getDefault(), "%ds", seconds)
         }
     }
 
     /**
-     * 从历史快照等字符串中解析时长文本为物理毫秒值。
-     * 支持形如 "1d03h"、"1h03m"、"13m44s" 或 "13:44" 等格式。
+     * 将中文或冒号格式的时长文本解析换算为对应的毫秒数。
      *
-     * @param text 格式化时长字符串
-     * @return 解析出的物理毫秒数，无法解析时返回 0L
+     * @param text 待解析的时长文本内容
+     * @return 解析得出的时长毫秒数值
      */
     private fun parseDurationTextToMs(text: String): Long {
-        if (text.isBlank() || text == "--") return 0L
+        if (text.isBlank()) return 0L
         var totalMs = 0L
-        val dayMatch = Regex("(\\d+)d").find(text)
-        val hourMatch = Regex("(\\d+)h").find(text)
-        val minMatch = Regex("(\\d+)m").find(text)
-        val secMatch = Regex("(\\d+)s").find(text)
-        val colonMatch = Regex("(\\d+):(\\d+)(?::(\\d+))?").find(text)
+        try {
+            val dMatch = Regex("(\\d+)\\s*(?:天|d)").find(text)
+            val hMatch = Regex("(\\d+)\\s*(?:小时|h)").find(text)
+            val mMatch = Regex("(\\d+)\\s*(?:分|m)").find(text)
+            val sMatch = Regex("(\\d+)\\s*(?:秒|s)").find(text)
 
-        if (colonMatch != null) {
-            val parts = colonMatch.destructured
-            if (parts.component3().isNotEmpty()) {
-                val h = parts.component1().toLongOrNull() ?: 0L
-                val m = parts.component2().toLongOrNull() ?: 0L
-                val s = parts.component3().toLongOrNull() ?: 0L
-                return (h * 3600L + m * 60L + s) * 1000L
-            } else {
-                val m = parts.component1().toLongOrNull() ?: 0L
-                val s = parts.component2().toLongOrNull() ?: 0L
-                return (m * 60L + s) * 1000L
+            if (dMatch != null || hMatch != null || mMatch != null || sMatch != null) {
+                dMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 86400000L }
+                hMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 3600000L }
+                mMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 60000L }
+                sMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 1000L }
+                return totalMs
             }
-        }
 
-        dayMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 86400000L }
-        hourMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 3600000L }
-        minMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 60000L }
-        secMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 1000L }
-        return totalMs
-    }
-
-    /**
-     * 为自定义对话框应用居中、半透明背景及适屏宽度的窗口样式。
-     *
-     * @param dialog 待配置样式的 [AlertDialog] 实例
-     */
-    private fun applyDialogWindowStyle(dialog: AlertDialog) {
-        dialog.window?.let { window ->
-            window.setBackgroundDrawableResource(android.R.color.transparent)
-            val width = (resources.displayMetrics.widthPixels * 0.92).toInt()
-            window.setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
-            window.setGravity(android.view.Gravity.CENTER)
-        }
+            val parts = text.split(":")
+            if (parts.size == 3) {
+                val h = parts[0].toLongOrNull() ?: 0L
+                val m = parts[1].toLongOrNull() ?: 0L
+                val s = parts[2].toLongOrNull() ?: 0L
+                return (h * 3600 + m * 60 + s) * 1000L
+            } else if (parts.size == 2) {
+                val m = parts[0].toLongOrNull() ?: 0L
+                val s = parts[1].toLongOrNull() ?: 0L
+                return (m * 60 + s) * 1000L
+            }
+        } catch (_: Exception) {}
+        return 0L
     }
 
     /**
@@ -543,13 +582,13 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
     private fun showDeleteConfirmDialog() {
         val record = currentRecord ?: return
         val dialogView = layoutInflater.inflate(R.layout.dialog_custom_delete_confirm, null)
-        val tvTitle = dialogView.findViewById<android.widget.TextView>(R.id.tv_dialog_delete_title)
-        val tvDesc = dialogView.findViewById<android.widget.TextView>(R.id.tv_dialog_delete_desc)
-        val tvPreviewCat = dialogView.findViewById<android.widget.TextView>(R.id.tv_preview_cat)
-        val tvPreviewTime = dialogView.findViewById<android.widget.TextView>(R.id.tv_preview_time)
-        val tvPreviewSummary = dialogView.findViewById<android.widget.TextView>(R.id.tv_preview_summary)
-        val btnCancel = dialogView.findViewById<android.widget.TextView>(R.id.btn_dialog_delete_cancel)
-        val btnConfirm = dialogView.findViewById<android.widget.TextView>(R.id.btn_dialog_delete_confirm)
+        val tvTitle = dialogView.findViewById<TextView>(R.id.tv_dialog_delete_title)
+        val tvDesc = dialogView.findViewById<TextView>(R.id.tv_dialog_delete_desc)
+        val tvPreviewCat = dialogView.findViewById<TextView>(R.id.tv_preview_cat)
+        val tvPreviewTime = dialogView.findViewById<TextView>(R.id.tv_preview_time)
+        val tvPreviewSummary = dialogView.findViewById<TextView>(R.id.tv_preview_summary)
+        val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
+        val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
 
         tvTitle.text = "确认删除此耗电快照？"
         tvDesc.text = "删除后该条放电快照记录将从本地永久移除，无法找回。"
@@ -565,7 +604,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         btnConfirm.setOnClickListener {
             lifecycleScope.launch(Dispatchers.IO) {
                 val db = PowerUsageDbHelper.getInstance(this@PowerHistoryDetailActivity)
-                db.deleteRecord(recordId)
+                db.deleteRecord(record.id)
                 withContext(Dispatchers.Main) {
                     setResult(RESULT_OK)
                     finish()
@@ -575,6 +614,20 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
 
         showAndTrackDialog(dialog)
         applyDialogWindowStyle(dialog)
+    }
+
+    /**
+     * 为自定义对话框应用统一的居中、宽度与半透明背景窗口样式。
+     *
+     * @param dialog 待配置样式的 [AlertDialog] 实例
+     */
+    private fun applyDialogWindowStyle(dialog: AlertDialog) {
+        dialog.window?.let { window ->
+            window.setBackgroundDrawableResource(android.R.color.transparent)
+            val width = (resources.displayMetrics.widthPixels * 0.88).toInt()
+            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT)
+            window.setGravity(Gravity.CENTER)
+        }
     }
 
     /**

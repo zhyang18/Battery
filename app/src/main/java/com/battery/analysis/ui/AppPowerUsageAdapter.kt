@@ -1,192 +1,478 @@
 package com.battery.analysis.ui
 
-import androidx.recyclerview.widget.DiffUtil
+import android.graphics.Color
+import android.util.Log
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.battery.analysis.R
 import com.battery.analysis.databinding.ItemAppPowerUsageBinding
+import com.battery.analysis.databinding.ItemPowerChargingContentBinding
+import com.battery.analysis.databinding.ItemPowerFirstTimeSetupBinding
+import com.battery.analysis.databinding.ItemPowerSceneHeaderBinding
+import com.battery.analysis.databinding.ItemPowerShizukuGuideBinding
+import com.battery.analysis.databinding.ItemPowerSnapshotBannerBinding
+import com.battery.analysis.databinding.ItemPowerUsageOverviewBinding
+import com.battery.analysis.databinding.LayoutChargingStatsBinding
 import com.battery.analysis.model.AppPowerUsageItem
+import com.battery.analysis.model.PowerUsageItem
+import com.battery.analysis.timeline.presentation.BatteryTimelineState
+import com.battery.analysis.timeline.util.DrawableBitmapCache
 import com.google.android.material.shape.CornerFamily
 import com.google.android.material.shape.ShapeAppearanceModel
 import java.util.Locale
 
-import android.view.View
-import android.widget.TextView
-import com.battery.analysis.timeline.util.DrawableBitmapCache
-
 /**
- * 应用使用场景与功耗列表适配器。
- * 负责展示应用图标、运行状态、平均功耗、温度指标及前台时长，并支持按耗电、功耗及时间动态排序切换。
- *
- * 优化：
- * 1. 采用按需分批/展开呈现机制（默认展示 Top 30 核心项，超量条目通过底部操作卡片按需展开），
- *    彻底根治 NestedScrollView 下一次性实例化上百个应用条目引发的 2000+ View 严重膨胀；
- * 2. 引入 [DrawableBitmapCache] 将应用图标限制在 42dp 像素规范，杜绝全分辨率大图占用 Native 堆；
- * 3. 使用 [DiffUtil] 结合增量更新，消除无意义的全量重绘开销。
+ * 电池统计页面主 RecyclerView 多类型列表适配器。
+ * 统一调度首次模式引导、历史快照横幅、Shizuku 权限提示、功耗时间轴概览卡片、
+ * 使用场景操作栏、具体的应用能耗条目以及充电统计卡片，彻底根除 NestedScrollView 嵌套，
+ * 实现应用列表完整的 ViewHolder 虚拟化与高效复用。
  */
 class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
-        /** 默认初始最大展示应用条目数，避免 NestedScrollView 无限高度下一口气创建千个 View 导致内存膨胀 */
-        const val INITIAL_DISPLAY_LIMIT = 30
-        /** 普通应用数据项视图类型 */
-        private const val VIEW_TYPE_ITEM = 0
-        /** 展开/收起更多应用底部操作卡片视图类型 */
-        private const val VIEW_TYPE_EXPAND_FOOTER = 1
+        private const val TAG = "PowerUsageRecycler"
+
+        /** 视图类型：首次模式选择引导卡片 */
+        const val TYPE_FIRST_TIME_SETUP = 1
+        /** 视图类型：历史快照提示横幅 */
+        const val TYPE_SNAPSHOT_BANNER = 2
+        /** 视图类型：Shizuku 权限与状态提示卡片 */
+        const val TYPE_SHIZUKU_GUIDE = 3
+        /** 视图类型：使用过程核心概览卡片（四维时间轴 + 瞬时指标） */
+        const val TYPE_USAGE_OVERVIEW = 4
+        /** 视图类型：使用场景列表标题行（含后台开关与排序按钮） */
+        const val TYPE_SCENE_HEADER = 5
+        /** 视图类型：单个应用能耗列表项（支持虚拟化复用） */
+        const val TYPE_APP_USAGE = 6
+        /** 视图类型：充电统计卡片（三合一走势折线图） */
+        const val TYPE_CHARGING_CONTENT = 7
     }
 
+    // 当前供 RecyclerView 绑定的完整平铺条目数据列表
+    private val items = mutableListOf<PowerUsageItem>()
+
     // 原始完整应用功耗数据集合
-    private val allItems = mutableListOf<AppPowerUsageItem>()
+    private val allAppItems = mutableListOf<AppPowerUsageItem>()
 
     // 当前经筛选与排序后供列表渲染呈现的应用数据集合
-    private val displayItems = mutableListOf<AppPowerUsageItem>()
+    private val displayAppItems = mutableListOf<AppPowerUsageItem>()
 
-    // 排序模式：0-按使用时长降序，1-按平均功耗降序，2-按消耗电量(Wh)降序，3-按应用名称升序
+    // 排序模式：0-按使用时长降序，1-按平均功耗升序，2-按消耗电量(Wh)降序，3-按应用名称升序
     private var sortMode: Int = 0
 
     // 是否展示后台统计数据及后台运行应用（默认开启）
     private var showBackgroundStats: Boolean = true
 
-    // 标记是否已展开全部应用列表
-    private var isExpanded: Boolean = false
+    // 当前页面模式：0 为耗电统计，1 为充电统计
+    private var currentDisplayTab: Int = 0
 
-    /**
-     * 列表项点击事件回调监听器，向调用方传递被点击的应用使用场景数据实体。
-     */
+    // 是否显示首次配置引导
+    private var showFirstTimeSetup: Boolean = false
+    private var setupSelectedMode: Int = 0
+    private var isShizukuInstalled: Boolean = true
+
+    // 是否显示历史快照横幅及提示文本
+    private var showSnapshotBanner: Boolean = false
+    private var snapshotHintText: String = ""
+
+    // 是否显示 Shizuku 引导卡片及提示文本
+    private var showShizukuGuide: Boolean = false
+    private var shizukuGuideTitle: String = ""
+    private var shizukuGuideDesc: String = ""
+    private var shizukuGuideActionText: String = ""
+
+    // 普通模式权限横幅显隐
+    private var showPermissionBanner: Boolean = false
+
+    // 概览卡片最新缓存数据
+    private var cachedEnergyWh: Float = 0f
+    private var cachedTotalEnergyWh: Float? = null
+    private var cachedLastUnplugWh: Float? = null
+    private var cachedTemperature: Float = 0f
+    private var cachedVoltageVolts: Float = 0f
+    private var cachedIsCharging: Boolean = false
+    private var cachedTimelineState: BatteryTimelineState? = null
+
+    // 弱保持当前活跃的卡片 ViewHolder 引用以提供平滑桥接
+    var overviewHolder: UsageOverviewViewHolder? = null
+        private set
+    var sceneHeaderHolder: SceneHeaderViewHolder? = null
+        private set
+    var chargingHolder: ChargingContentViewHolder? = null
+        private set
+    var setupHolder: FirstTimeSetupViewHolder? = null
+        private set
+
+    // 交互监听回调
     var onItemClickListener: ((AppPowerUsageItem) -> Unit)? = null
-
-    /**
-     * 当前展示列表数据集发生更新（数据提交、过滤、排序切换）时的回调监听器。
-     * 向外传递当前经筛选排序后实际渲染在列表中的条目总数。
-     */
     var onListCountChangedListener: ((Int) -> Unit)? = null
+    var onBackgroundStatsChangedListener: ((Boolean) -> Unit)? = null
+    var onSortButtonClickedListener: ((View) -> Unit)? = null
+    var onHelpButtonClickedListener: (() -> Unit)? = null
+    var onPermissionGrantClickedListener: (() -> Unit)? = null
+    var onRestoreRealtimeClickedListener: (() -> Unit)? = null
+    var onShizukuActionClickedListener: (() -> Unit)? = null
+    var onSetupModeSelectedListener: ((Int) -> Unit)? = null
+    var onSetupConfirmListener: (() -> Unit)? = null
+    var onEnergyContainerClickedListener: (() -> Unit)? = null
+
+    // MetricSelectorView 与 Charging 图表的外部监听器保持
+    var onMetricsChangedListener: ((Set<com.battery.analysis.timeline.presentation.TimelineMetric>) -> Unit)? = null
+
+    // ==================== ViewHolder 定义 ====================
 
     /**
-     * 获取当前过滤与排序后在列表中实际展示的数据项总数。
-     *
-     * @return 当前展示的应用项总数
-     */
-    fun getDisplayItemCount(): Int = displayItems.size
-
-    /**
-     * 设置是否展示后台统计数据及后台运行应用，并刷新列表视图。
-     * 当开启时，显示全部应用（包含后台运行应用）及各应用的后台统计指标；
-     * 当关闭时，过滤掉纯后台运行应用，仅显示前台运行应用（foregroundTimeMs > 0L）。
-     *
-     * @param show 是否展示后台运行应用及各应用的后台指标
-     */
-    fun setShowBackgroundStats(show: Boolean) {
-        if (showBackgroundStats != show) {
-            showBackgroundStats = show
-            applyFilterAndSortWithDiff()
-        }
-    }
-
-    /**
-     * 收起应用列表展示至初始限制数量（前 30 项），供界面切入后台或内存修剪时主动释放非活跃 Item 视图。
-     */
-    fun collapseToInitial() {
-        if (isExpanded) {
-            isExpanded = false
-            notifyDataSetChanged()
-        }
-    }
-
-    /**
-     * 视图持有者，绑定 item_app_power_usage 视图层级。
+     * 首次进入模式引导卡片 ViewHolder。
      *
      * @param binding 视图绑定对象
      */
-    inner class ViewHolder(val binding: ItemAppPowerUsageBinding) : RecyclerView.ViewHolder(binding.root)
-
-    /**
-     * 底部“展开/收起全部应用”操作卡片视图持有者。
-     *
-     * @param view 底部操作卡片根视图
-     */
-    inner class FooterViewHolder(view: View) : RecyclerView.ViewHolder(view)
-
-    /**
-     * 根据条目位置判断该条目的视图类型（普通应用条目还是展开/收起底部卡片）。
-     *
-     * @param position 列表项索引下标
-     * @return 视图类型枚举值（[VIEW_TYPE_ITEM] 或 [VIEW_TYPE_EXPAND_FOOTER]）
-     */
-    override fun getItemViewType(position: Int): Int {
-        val total = displayItems.size
-        if (total > INITIAL_DISPLAY_LIMIT) {
-            if (!isExpanded && position == INITIAL_DISPLAY_LIMIT) {
-                return VIEW_TYPE_EXPAND_FOOTER
-            } else if (isExpanded && position == total) {
-                return VIEW_TYPE_EXPAND_FOOTER
-            }
+    inner class FirstTimeSetupViewHolder(val binding: ItemPowerFirstTimeSetupBinding) :
+        RecyclerView.ViewHolder(binding.root) {
+        init {
+            setIsRecyclable(false)
         }
-        return VIEW_TYPE_ITEM
     }
 
     /**
-     * 创建列表项视图持有者。
+     * 历史快照提示横幅 ViewHolder。
+     *
+     * @param binding 视图绑定对象
+     */
+    inner class SnapshotBannerViewHolder(val binding: ItemPowerSnapshotBannerBinding) :
+        RecyclerView.ViewHolder(binding.root)
+
+    /**
+     * Shizuku 授权与状态提示引导卡片 ViewHolder。
+     *
+     * @param binding 视图绑定对象
+     */
+    inner class ShizukuGuideViewHolder(val binding: ItemPowerShizukuGuideBinding) :
+        RecyclerView.ViewHolder(binding.root)
+
+    /**
+     * 耗电模式使用过程概览卡片 ViewHolder。
+     *
+     * @param binding 视图绑定对象
+     */
+    inner class UsageOverviewViewHolder(val binding: ItemPowerUsageOverviewBinding) :
+        RecyclerView.ViewHolder(binding.root) {
+        init {
+            setIsRecyclable(false)
+        }
+    }
+
+    /**
+     * 使用场景列表标题栏与操作按钮组 ViewHolder。
+     *
+     * @param binding 视图绑定对象
+     */
+    inner class SceneHeaderViewHolder(val binding: ItemPowerSceneHeaderBinding) :
+        RecyclerView.ViewHolder(binding.root) {
+        init {
+            setIsRecyclable(false)
+        }
+    }
+
+    /**
+     * 单个应用能耗列表项 ViewHolder。
+     *
+     * @param binding 视图绑定对象
+     */
+    inner class AppViewHolder(val binding: ItemAppPowerUsageBinding) :
+        RecyclerView.ViewHolder(binding.root)
+
+    /**
+     * 充电统计卡片 ViewHolder。
+     *
+     * @param binding 视图绑定对象
+     */
+    inner class ChargingContentViewHolder(val binding: ItemPowerChargingContentBinding) :
+        RecyclerView.ViewHolder(binding.root) {
+        init {
+            setIsRecyclable(false)
+        }
+    }
+
+    // ==================== 生命周期与复用实现 ====================
+
+    /**
+     * 获取指定索引位置条目的 ViewType 枚举标识。
+     *
+     * @param position 列表项下标
+     * @return 条目对应的 ViewType 整型常量
+     */
+    override fun getItemViewType(position: Int): Int {
+        return when (items[position]) {
+            is PowerUsageItem.FirstTimeSetup -> TYPE_FIRST_TIME_SETUP
+            is PowerUsageItem.SnapshotBanner -> TYPE_SNAPSHOT_BANNER
+            is PowerUsageItem.ShizukuGuide -> TYPE_SHIZUKU_GUIDE
+            is PowerUsageItem.UsageOverview -> TYPE_USAGE_OVERVIEW
+            is PowerUsageItem.SceneHeader -> TYPE_SCENE_HEADER
+            is PowerUsageItem.AppUsage -> TYPE_APP_USAGE
+            is PowerUsageItem.ChargingContent -> TYPE_CHARGING_CONTENT
+        }
+    }
+
+    /**
+     * 创建对应 ViewType 的 ViewHolder 实例。
+     * 在创建 App ViewHolder 时输出调试日志以验证虚拟化与复用机制。
      *
      * @param parent 父容器视图
      * @param viewType 视图类型
-     * @return 新创建的 [RecyclerView.ViewHolder]
+     * @return 创建的 ViewHolder 实例
      */
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
-        return if (viewType == VIEW_TYPE_EXPAND_FOOTER) {
-            val view = LayoutInflater.from(parent.context).inflate(
-                R.layout.item_app_power_expand_footer,
-                parent,
-                false
-            )
-            FooterViewHolder(view)
-        } else {
-            val binding = ItemAppPowerUsageBinding.inflate(
-                LayoutInflater.from(parent.context),
-                parent,
-                false
-            )
-            // 给应用图标应用圆角外观
-            val shapeModel = ShapeAppearanceModel.builder()
-                .setAllCorners(CornerFamily.ROUNDED, 24f)
-                .build()
-            binding.ivAppIcon.shapeAppearanceModel = shapeModel
-            ViewHolder(binding)
+        val inflater = LayoutInflater.from(parent.context)
+        return when (viewType) {
+            TYPE_FIRST_TIME_SETUP -> {
+                val binding = ItemPowerFirstTimeSetupBinding.inflate(inflater, parent, false)
+                FirstTimeSetupViewHolder(binding).also { setupHolder = it }
+            }
+            TYPE_SNAPSHOT_BANNER -> {
+                val binding = ItemPowerSnapshotBannerBinding.inflate(inflater, parent, false)
+                SnapshotBannerViewHolder(binding)
+            }
+            TYPE_SHIZUKU_GUIDE -> {
+                val binding = ItemPowerShizukuGuideBinding.inflate(inflater, parent, false)
+                ShizukuGuideViewHolder(binding)
+            }
+            TYPE_USAGE_OVERVIEW -> {
+                val binding = ItemPowerUsageOverviewBinding.inflate(inflater, parent, false)
+                UsageOverviewViewHolder(binding).also {
+                    overviewHolder = it
+                    it.binding.metricSelectorView.setOnMetricsChangedListener { metrics ->
+                        onMetricsChangedListener?.invoke(metrics)
+                    }
+                    it.binding.llEnergyContainer.setOnClickListener {
+                        onEnergyContainerClickedListener?.invoke()
+                    }
+                }
+            }
+            TYPE_SCENE_HEADER -> {
+                val binding = ItemPowerSceneHeaderBinding.inflate(inflater, parent, false)
+                SceneHeaderViewHolder(binding).also {
+                    sceneHeaderHolder = it
+                    it.binding.btnSceneSort.setOnClickListener { v ->
+                        onSortButtonClickedListener?.invoke(v)
+                    }
+                    it.binding.btnSceneHelp.setOnClickListener {
+                        onHelpButtonClickedListener?.invoke()
+                    }
+                    it.binding.btnGrantPermission.setOnClickListener {
+                        onPermissionGrantClickedListener?.invoke()
+                    }
+                }
+            }
+            TYPE_APP_USAGE -> {
+                val binding = ItemAppPowerUsageBinding.inflate(inflater, parent, false)
+                val shapeModel = ShapeAppearanceModel.builder()
+                    .setAllCorners(CornerFamily.ROUNDED, 24f)
+                    .build()
+                binding.ivAppIcon.shapeAppearanceModel = shapeModel
+                val holder = AppViewHolder(binding)
+                Log.d(TAG, "create ViewHolder: ${holder.hashCode()}")
+                holder
+            }
+            TYPE_CHARGING_CONTENT -> {
+                val binding = ItemPowerChargingContentBinding.inflate(inflater, parent, false)
+                ChargingContentViewHolder(binding).also { chargingHolder = it }
+            }
+            else -> throw IllegalArgumentException("Unsupported viewType: $viewType")
         }
     }
 
     /**
-     * 绑定列表项数据至视图组件。
+     * 将数据实体绑定至对应的 ViewHolder 视图组件中。
+     * 在绑定 App ViewHolder 时输出复用验证日志。
      *
      * @param holder 视图持有者
-     * @param position 数据项索引
+     * @param position 列表项下标
      */
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
-        if (holder is FooterViewHolder) {
-            val tvHint = holder.itemView.findViewById<TextView>(R.id.tv_expand_hint)
-            val total = displayItems.size
-            if (!isExpanded) {
-                val remaining = total - INITIAL_DISPLAY_LIMIT
-                tvHint?.text = "查看全部应用 (共 ${total} 个，剩余 ${remaining} 个) ▾"
-            } else {
-                tvHint?.text = "收起部分应用 (恢复前 ${INITIAL_DISPLAY_LIMIT} 个) ▴"
+        when (val item = items[position]) {
+            is PowerUsageItem.FirstTimeSetup -> {
+                bindFirstTimeSetup(holder as FirstTimeSetupViewHolder)
             }
-            holder.itemView.setOnClickListener {
-                isExpanded = !isExpanded
-                notifyDataSetChanged()
+            is PowerUsageItem.SnapshotBanner -> {
+                bindSnapshotBanner(holder as SnapshotBannerViewHolder, item.hintText)
             }
-            return
+            is PowerUsageItem.ShizukuGuide -> {
+                bindShizukuGuide(holder as ShizukuGuideViewHolder, item)
+            }
+            is PowerUsageItem.UsageOverview -> {
+                bindUsageOverview(holder as UsageOverviewViewHolder)
+            }
+            is PowerUsageItem.SceneHeader -> {
+                bindSceneHeader(holder as SceneHeaderViewHolder, item)
+            }
+            is PowerUsageItem.AppUsage -> {
+                val appHolder = holder as AppViewHolder
+                Log.d(TAG, "bind position=$position holder=${appHolder.hashCode()}")
+                bindAppUsage(appHolder, item.data)
+            }
+            is PowerUsageItem.ChargingContent -> {
+                // 充电视图内部由 Fragment 的 renderChargingData 直接驱动
+            }
         }
+    }
 
-        val itemHolder = holder as? ViewHolder ?: return
-        if (position >= displayItems.size) return
-        val item = displayItems[position]
-        itemHolder.itemView.setOnClickListener {
+    /**
+     * 返回当前列表中的条目总数。
+     *
+     * @return 条目数量
+     */
+    override fun getItemCount(): Int = items.size
+
+    // ==================== 具体条目绑定逻辑 ====================
+
+    /**
+     * 绑定首次配置引导卡片数据与事件。
+     *
+     * @param holder 首次配置 ViewHolder
+     */
+    private fun bindFirstTimeSetup(holder: FirstTimeSetupViewHolder) {
+        with(holder.binding) {
+            val context = root.context
+            if (isShizukuInstalled) {
+                tvSetupShizukuTitle.text = context.getString(R.string.power_mode_shizuku)
+                cardSetupModeShizuku.alpha = 1.0f
+            } else {
+                tvSetupShizukuTitle.text = context.getString(R.string.power_mode_shizuku_not_installed)
+                cardSetupModeShizuku.alpha = 0.55f
+            }
+
+            if (setupSelectedMode == 0 && isShizukuInstalled) { // MODE_SHIZUKU
+                cardSetupModeShizuku.strokeColor = Color.parseColor("#2196F3")
+                cardSetupModeShizuku.strokeWidth = (2 * context.resources.displayMetrics.density).toInt()
+                radioSetupShizuku.isChecked = true
+
+                cardSetupModeNormal.strokeColor = Color.parseColor("#18888888")
+                cardSetupModeNormal.strokeWidth = (1 * context.resources.displayMetrics.density).toInt()
+                radioSetupNormal.isChecked = false
+            } else {
+                cardSetupModeNormal.strokeColor = Color.parseColor("#2196F3")
+                cardSetupModeNormal.strokeWidth = (2 * context.resources.displayMetrics.density).toInt()
+                radioSetupNormal.isChecked = true
+
+                cardSetupModeShizuku.strokeColor = Color.parseColor("#18888888")
+                cardSetupModeShizuku.strokeWidth = (1 * context.resources.displayMetrics.density).toInt()
+                radioSetupShizuku.isChecked = false
+            }
+
+            cardSetupModeShizuku.setOnClickListener {
+                if (isShizukuInstalled) {
+                    onSetupModeSelectedListener?.invoke(0)
+                }
+            }
+            cardSetupModeNormal.setOnClickListener {
+                onSetupModeSelectedListener?.invoke(1)
+            }
+            btnSetupConfirm.setOnClickListener {
+                onSetupConfirmListener?.invoke()
+            }
+        }
+    }
+
+    /**
+     * 绑定快照提示横幅数据与点击事件。
+     *
+     * @param holder 快照横幅 ViewHolder
+     * @param hintText 提示文字
+     */
+    private fun bindSnapshotBanner(holder: SnapshotBannerViewHolder, hintText: String) {
+        holder.binding.tvPowerSnapshotHint.text = hintText
+        holder.binding.btnPowerRestoreRealtime.setOnClickListener {
+            onRestoreRealtimeClickedListener?.invoke()
+        }
+    }
+
+    /**
+     * 绑定 Shizuku 引导卡片数据与事件。
+     *
+     * @param holder Shizuku 引导卡片 ViewHolder
+     * @param item 引导数据实体
+     */
+    private fun bindShizukuGuide(holder: ShizukuGuideViewHolder, item: PowerUsageItem.ShizukuGuide) {
+        holder.binding.tvShizukuGuideTitle.text = item.title
+        holder.binding.tvShizukuGuideDesc.text = item.desc
+        holder.binding.btnShizukuAction.text = item.actionText
+        holder.binding.btnShizukuAction.setOnClickListener {
+            onShizukuActionClickedListener?.invoke()
+        }
+    }
+
+    /**
+     * 绑定使用过程概览卡片（瞬时指标与时间轴）。
+     *
+     * @param holder 概览卡片 ViewHolder
+     */
+    private fun bindUsageOverview(holder: UsageOverviewViewHolder) {
+        with(holder.binding) {
+            val context = root.context
+            val energyText = String.format(Locale.getDefault(), context.getString(R.string.power_wh_format), cachedEnergyWh)
+            tvEnergyWh.text = energyText
+
+            val totalEnergyText = cachedTotalEnergyWh?.takeIf { it > 0f }?.let {
+                String.format(Locale.getDefault(), context.getString(R.string.power_wh_format), it)
+            } ?: "--"
+            val unplugEnergyText = cachedLastUnplugWh?.takeIf { it > 0f }?.let {
+                String.format(Locale.getDefault(), context.getString(R.string.power_wh_format), it)
+            } ?: "--"
+            val energyTooltip = context.getString(R.string.power_tooltip_energy, energyText, totalEnergyText, unplugEnergyText)
+            llEnergyContainer.contentDescription = energyTooltip
+
+            tvTemperature.text = String.format(Locale.getDefault(), context.getString(R.string.power_temp_format), cachedTemperature)
+            tvVoltage.text = String.format(Locale.getDefault(), context.getString(R.string.power_volt_format), cachedVoltageVolts)
+            tvChargingStatus.text = if (cachedIsCharging) {
+                context.getString(R.string.power_status_charging)
+            } else {
+                context.getString(R.string.power_status_unplugged)
+            }
+
+            cachedTimelineState?.let { state ->
+                batteryTimelineView.setState(state)
+            }
+        }
+    }
+
+    /**
+     * 绑定使用场景操作栏数据与状态。
+     *
+     * @param holder 场景头部 ViewHolder
+     * @param item 场景数据实体
+     */
+    private fun bindSceneHeader(holder: SceneHeaderViewHolder, item: PowerUsageItem.SceneHeader) {
+        with(holder.binding) {
+            val context = root.context
+            tvSceneTitle.text = context.getString(R.string.power_usage_list_format, item.count)
+            // 先解绑监听器，防止被动数据绑定触发 onCheckedChanged 导致在 RecyclerView 布局计算期间递归刷新
+            switchBackgroundStats.setOnCheckedChangeListener(null)
+            switchBackgroundStats.isChecked = item.showBackgroundStats
+            switchBackgroundStats.setOnCheckedChangeListener { buttonView, isChecked ->
+                // 仅当用户主动触摸操作开关时派发事件
+                if (buttonView.isPressed) {
+                    onBackgroundStatsChangedListener?.invoke(isChecked)
+                }
+            }
+            layoutPermissionBanner.visibility = if (showPermissionBanner) View.VISIBLE else View.GONE
+        }
+    }
+
+    /**
+     * 绑定单个应用条目的视图数据。
+     *
+     * @param holder 应用条目 ViewHolder
+     * @param item 应用能耗数据实体
+     */
+    private fun bindAppUsage(holder: AppViewHolder, item: AppPowerUsageItem) {
+        holder.itemView.setOnClickListener {
             onItemClickListener?.invoke(item)
         }
-        with(itemHolder.binding) {
-            // 图标规格限制与 LRU 缓存复用：按 42dp 像素进行缩放，彻底消灭全分辨率大图占用 Native 堆
-            val targetIconPx = (itemHolder.itemView.context.resources.displayMetrics.density * 42f).toInt()
+        with(holder.binding) {
+            val targetIconPx = (holder.itemView.context.resources.displayMetrics.density * 42f).toInt()
             val cachedBitmap = DrawableBitmapCache.getOrConvertBitmap(
                 item.packageName,
                 item.icon,
@@ -200,7 +486,6 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 ivAppIcon.setImageResource(R.mipmap.ic_launcher)
             }
 
-            // 前后台状态标识圆点：前台运行应用显示绿色，纯后台应用显示蓝色
             if (item.foregroundTimeMs > 0L) {
                 viewStatusDot.setBackgroundResource(R.drawable.bg_dot_green)
             } else {
@@ -236,79 +521,292 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             val hasBg = showBackgroundStats && item.backgroundTimeMs > 0L
 
             if (hasFg) {
-                layoutFgDuration.visibility = android.view.View.VISIBLE
+                layoutFgDuration.visibility = View.VISIBLE
                 tvFgDuration.text = item.getFormattedDuration()
             } else if (!hasBg) {
-                layoutFgDuration.visibility = android.view.View.VISIBLE
+                layoutFgDuration.visibility = View.VISIBLE
                 tvFgDuration.text = "0s"
             } else {
-                layoutFgDuration.visibility = android.view.View.GONE
+                layoutFgDuration.visibility = View.GONE
             }
 
-            // 中间竖线分隔符：仅在前后台时长同时显示时呈现
-            tvDurationDivider.visibility = if (hasFg && hasBg) android.view.View.VISIBLE else android.view.View.GONE
+            tvDurationDivider.visibility = if (hasFg && hasBg) View.VISIBLE else View.GONE
 
             if (hasBg) {
-                layoutBgDuration.visibility = android.view.View.VISIBLE
+                layoutBgDuration.visibility = View.VISIBLE
                 tvBgDuration.text = item.getFormattedBackgroundDuration()
             } else {
-                layoutBgDuration.visibility = android.view.View.GONE
+                layoutBgDuration.visibility = View.GONE
             }
         }
     }
 
+    // ==================== 页面数据构建与外部接口 ====================
+
+    private var attachedRecyclerView: RecyclerView? = null
+
     /**
-     * 获取数据列表当前实际向 RecyclerView 报告的渲染总条数。
-     * 当总条目超出 [INITIAL_DISPLAY_LIMIT] 时：
-     * 未展开状态渲染前 30 项 + 展开按钮；已展开状态渲染全部项 + 收起按钮。
+     * 适配器挂载至 RecyclerView 时回调，保存视图引用以支持安全布局状态检查。
      *
-     * @return 实际渲染条目大小
+     * @param recyclerView 关联的 RecyclerView 实例
      */
-    override fun getItemCount(): Int {
-        val total = displayItems.size
-        return if (total <= INITIAL_DISPLAY_LIMIT) {
-            total
-        } else if (!isExpanded) {
-            INITIAL_DISPLAY_LIMIT + 1
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        super.onAttachedToRecyclerView(recyclerView)
+        attachedRecyclerView = recyclerView
+    }
+
+    /**
+     * 适配器与 RecyclerView 解绑时回调，释放视图引用防止内存泄漏。
+     *
+     * @param recyclerView 解绑的 RecyclerView 实例
+     */
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        super.onDetachedFromRecyclerView(recyclerView)
+        attachedRecyclerView = null
+    }
+
+    /**
+     * 安全地触发数据集全量刷新通知。
+     * 检查关联的 RecyclerView 是否正处于布局计算或滚动中，若是则自动通过 post 延期到下一帧安全执行，
+     * 彻底消除 IllegalStateException: Cannot call this method while RecyclerView is computing a layout or scrolling。
+     */
+    fun safeNotifyDataSetChanged() {
+        val rv = attachedRecyclerView
+        if (rv != null && (rv.isComputingLayout || rv.isAnimating)) {
+            rv.post {
+                if (attachedRecyclerView != null) {
+                    notifyDataSetChanged()
+                }
+            }
         } else {
-            total + 1
+            notifyDataSetChanged()
         }
     }
 
     /**
-     * 提交并更新应用功耗列表原始数据源，并根据当前过滤规则与排序方式以差量方式刷新展示列表。
-     *
-     * @param newItems 新的应用功耗列表
+     * 是否处于纯应用列表模式。
+     * 当作为独立组件被 ConcatAdapter 或其它只展示应用排行榜的页面（如快照详情页）复用时设为 true，
+     * 此时 rebuildItems 仅平铺 App 能耗条目，绝不额外注入主页专用的概览卡片或头部操作栏。
      */
-    fun submitList(newItems: List<AppPowerUsageItem>) {
-        allItems.clear()
-        allItems.addAll(newItems)
-        applyFilterAndSortWithDiff()
+    var isPureAppListMode: Boolean = false
+
+    /**
+     * 重新构建平铺的 RecyclerView 条目列表并安全通知刷新。
+     */
+    fun rebuildItems() {
+        items.clear()
+        if (isPureAppListMode) {
+            for (app in displayAppItems) {
+                items.add(PowerUsageItem.AppUsage(app))
+            }
+            safeNotifyDataSetChanged()
+            return
+        }
+
+        if (showFirstTimeSetup) {
+            items.add(PowerUsageItem.FirstTimeSetup)
+            safeNotifyDataSetChanged()
+            return
+        }
+
+        if (currentDisplayTab == 1) {
+            items.add(PowerUsageItem.ChargingContent)
+            safeNotifyDataSetChanged()
+            return
+        }
+
+        // 耗电模式
+        if (showSnapshotBanner) {
+            items.add(PowerUsageItem.SnapshotBanner(snapshotHintText))
+        }
+        if (showShizukuGuide) {
+            items.add(PowerUsageItem.ShizukuGuide(shizukuGuideTitle, shizukuGuideDesc, shizukuGuideActionText))
+        }
+        items.add(PowerUsageItem.UsageOverview)
+        items.add(PowerUsageItem.SceneHeader(displayAppItems.size, showBackgroundStats))
+        for (app in displayAppItems) {
+            items.add(PowerUsageItem.AppUsage(app))
+        }
+        safeNotifyDataSetChanged()
     }
 
     /**
-     * 切换排序模式并以差量方式重新排序刷新列表。
+     * 提交并更新应用功耗原始列表，执行排序与过滤并平滑刷新主列表。
      *
-     * @param mode 0-按时长排序，1-按功耗升序，2-按消耗电量降序，3-按名称升序
+     * @param newItems 最新应用列表
+     */
+    fun submitList(newItems: List<AppPowerUsageItem>) {
+        allAppItems.clear()
+        allAppItems.addAll(newItems)
+        applyFilterAndSort()
+        rebuildItems()
+    }
+
+    /**
+     * 获取当前过滤排序后的展示应用总数。
+     *
+     * @return 展示应用数量
+     */
+    fun getDisplayItemCount(): Int = displayAppItems.size
+
+    /**
+     * 设置是否展示后台统计数据。
+     *
+     * @param show 是否展示后台数据
+     */
+    fun setShowBackgroundStats(show: Boolean) {
+        if (showBackgroundStats != show) {
+            showBackgroundStats = show
+            applyFilterAndSort()
+            rebuildItems()
+        }
+    }
+
+    /**
+     * 切换排序模式。
+     *
+     * @param mode 0-按时长，1-按功耗，2-按电量，3-按名称
      */
     fun setSortMode(mode: Int) {
         sortMode = mode
-        applyFilterAndSortWithDiff()
+        applyFilterAndSort()
+        rebuildItems()
     }
 
     /**
-     * 根据后台统计开关对应用列表进行过滤，并依据当前排序模式对展示列表进行排序。
-     * 排序规则：前台运行应用（foregroundTimeMs > 0L）始终排在前面，纯后台运行应用（foregroundTimeMs <= 0L）始终排在前台应用后面；
-     * - 排序模式 0（按时长）：前台应用按前台时长降序，纯后台应用在后按后台时长降序；
-     * - 排序模式 1（按功耗）：前台应用按功耗升序，纯后台应用在后按功耗升序；
-     * - 排序模式 2（按电量）：前台应用按前台电量降序，纯后台应用在后按后台电量降序；
-     * - 排序模式 3（按名称）：前台应用按名称升序，纯后台应用在后按名称升序；
-     * 若关闭后台统计（showBackgroundStats == false），纯后台应用直接被过滤不予展示。
+     * 设置当前页面 Tab 模式（0 为耗电，1 为充电）。
+     *
+     * @param tab 页面模式索引
+     */
+    fun setDisplayTab(tab: Int) {
+        if (currentDisplayTab != tab) {
+            currentDisplayTab = tab
+            rebuildItems()
+        }
+    }
+
+    /**
+     * 设置首次配置引导显隐与状态。
+     *
+     * @param visible 是否显示引导
+     * @param selectedMode 当前选中模式
+     * @param isInstalled Shizuku 是否已安装
+     */
+    fun setFirstTimeSetup(visible: Boolean, selectedMode: Int = 0, isInstalled: Boolean = true) {
+        showFirstTimeSetup = visible
+        setupSelectedMode = selectedMode
+        isShizukuInstalled = isInstalled
+        rebuildItems()
+    }
+
+    /**
+     * 设置历史快照横幅显隐与提示。
+     *
+     * @param visible 是否显示
+     * @param hint 提示文字
+     */
+    fun setSnapshotBanner(visible: Boolean, hint: String = "") {
+        showSnapshotBanner = visible
+        snapshotHintText = hint
+        rebuildItems()
+    }
+
+    /**
+     * 设置 Shizuku 授权引导卡片显隐与文字。
+     *
+     * @param visible 是否显示
+     * @param title 标题
+     * @param desc 描述
+     * @param actionText 按钮文字
+     */
+    fun setShizukuGuide(visible: Boolean, title: String = "", desc: String = "", actionText: String = "") {
+        showShizukuGuide = visible
+        shizukuGuideTitle = title
+        shizukuGuideDesc = desc
+        shizukuGuideActionText = actionText
+        rebuildItems()
+    }
+
+    /**
+     * 设置普通模式权限提示横幅显隐。
+     *
+     * @param visible 是否显示权限横幅
+     */
+    fun setPermissionBannerVisible(visible: Boolean) {
+        if (showPermissionBanner != visible) {
+            showPermissionBanner = visible
+            sceneHeaderHolder?.binding?.layoutPermissionBanner?.visibility =
+                if (visible) View.VISIBLE else View.GONE
+        }
+    }
+
+    /**
+     * 更新使用过程概览卡片的指标与时间轴状态。
+     *
+     * @param energyWh 能量消耗 Wh
+     * @param totalEnergyWh 电池总能量 Wh
+     * @param lastUnplugWh 拔电能量 Wh
+     * @param temp 电池温度
+     * @param volt 电池电压
+     * @param isCharging 是否处于充电中
+     * @param timelineState 时间轴状态实体
+     */
+    fun updateOverviewMetrics(
+        energyWh: Float,
+        totalEnergyWh: Float?,
+        lastUnplugWh: Float?,
+        temp: Float,
+        volt: Float,
+        isCharging: Boolean,
+        timelineState: BatteryTimelineState? = null
+    ) {
+        cachedEnergyWh = energyWh
+        cachedTotalEnergyWh = totalEnergyWh
+        cachedLastUnplugWh = lastUnplugWh
+        cachedTemperature = temp
+        cachedVoltageVolts = volt
+        cachedIsCharging = isCharging
+        if (timelineState != null) {
+            cachedTimelineState = timelineState
+        }
+        overviewHolder?.let { bindUsageOverview(it) }
+    }
+
+    /**
+     * 更新时间轴组件状态。
+     *
+     * @param timelineState 时间轴状态
+     */
+    fun updateTimelineState(timelineState: BatteryTimelineState) {
+        cachedTimelineState = timelineState
+        overviewHolder?.binding?.batteryTimelineView?.setState(timelineState)
+    }
+
+    /**
+     * 获取充电卡片中的内部控件绑定实例，供充电实时数据更新。
+     *
+     * @return 充电卡片内部绑定对象，若尚未创建则返回 null
+     */
+    fun getChargingBinding(): LayoutChargingStatsBinding? {
+        return chargingHolder?.binding?.layoutChargingContent
+    }
+
+    /**
+     * 将应用列表状态收起或重置至初始状态。
+     * 当前页面架构已切换为原生 RecyclerView 虚拟化与视图复用机制，
+     * 屏幕中常驻 ViewHolder 数量自然维持在 8~12 个，此处保留幂等方法供生命周期调用兼容。
+     */
+    fun collapseToInitial() {
+        // 当前架构已通过原生虚拟化复用完全解决内存与 View 膨胀，此方法提供向后兼容
+    }
+
+    /**
+     * 对应用列表执行过滤与排序。
      */
     private fun applyFilterAndSort() {
-        val fgList = allItems.filter { it.foregroundTimeMs > 0L }.toMutableList()
+        val fgList = allAppItems.filter { it.foregroundTimeMs > 0L }.toMutableList()
         val bgList = if (showBackgroundStats) {
-            allItems.filter { it.foregroundTimeMs <= 0L }.toMutableList()
+            allAppItems.filter { it.foregroundTimeMs <= 0L }.toMutableList()
         } else {
             mutableListOf()
         }
@@ -332,72 +830,9 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             }
         }
 
-        displayItems.clear()
-        displayItems.addAll(fgList)
-        displayItems.addAll(bgList)
-        onListCountChangedListener?.invoke(displayItems.size)
-    }
-
-    /**
-     * 应用过滤与排序后，使用 [DiffUtil] 计算新旧列表差异，并以增量方式通知 RecyclerView 更新。
-     * 相比 notifyDataSetChanged，仅对实际变化的条目执行插入、删除与变更动画，消除全量重绘开销。
-     */
-    private fun applyFilterAndSortWithDiff() {
-        val oldList = displayItems.toList()
-        applyFilterAndSort()
-        val newList = displayItems.toList()
-
-        val diffResult = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
-            /**
-             * 返回旧列表大小。
-             *
-             * @return 旧列表条目数
-             */
-            override fun getOldListSize(): Int = oldList.size
-
-            /**
-             * 返回新列表大小。
-             *
-             * @return 新列表条目数
-             */
-            override fun getNewListSize(): Int = newList.size
-
-            /**
-             * 判断两个位置的条目是否代表同一对象（以包名为唯一标识）。
-             *
-             * @param oldItemPosition 旧列表中的位置
-             * @param newItemPosition 新列表中的位置
-             * @return 是否为同一应用条目
-             */
-            override fun areItemsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                return oldList[oldItemPosition].packageName == newList[newItemPosition].packageName
-            }
-
-            /**
-             * 判断两个条目的内容是否完全相同（用于决定是否触发 onBindViewHolder 刷新）。
-             *
-             * @param oldItemPosition 旧列表中的位置
-             * @param newItemPosition 新列表中的位置
-             * @return 内容是否相同（包括功耗、时长、温度等关键字段）
-             */
-            override fun areContentsTheSame(oldItemPosition: Int, newItemPosition: Int): Boolean {
-                val old = oldList[oldItemPosition]
-                val new = newList[newItemPosition]
-                return old.packageName == new.packageName
-                        && old.avgPowerWatts == new.avgPowerWatts
-                        && old.energyWh == new.energyWh
-                        && old.foregroundTimeMs == new.foregroundTimeMs
-                        && old.backgroundTimeMs == new.backgroundTimeMs
-                        && old.avgTemperature == new.avgTemperature
-                        && old.maxTemperature == new.maxTemperature
-            }
-        })
-        if (oldList.size > INITIAL_DISPLAY_LIMIT || newList.size > INITIAL_DISPLAY_LIMIT) {
-            notifyDataSetChanged()
-        } else {
-            diffResult.dispatchUpdatesTo(this)
-        }
+        displayAppItems.clear()
+        displayAppItems.addAll(fgList)
+        displayAppItems.addAll(bgList)
+        onListCountChangedListener?.invoke(displayAppItems.size)
     }
 }
-
-

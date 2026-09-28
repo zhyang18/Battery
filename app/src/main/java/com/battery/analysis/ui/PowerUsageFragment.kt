@@ -395,7 +395,7 @@ class PowerUsageFragment : Fragment() {
             // AppBarLayout 向上收拢手势感知：当用户上滑折叠顶部卡片时，立即联动隐藏底部页签栏
             if (verticalOffset < prevOffset && verticalOffset < -4) {
                 (activity as? MainActivity)?.setBottomNavigationVisibility(false)
-            } else if (verticalOffset > prevOffset && verticalOffset >= 0 && binding.nestedScrollView.scrollY <= 0) {
+            } else if (verticalOffset > prevOffset && verticalOffset >= 0 && !binding.recyclerAppUsage.canScrollVertically(-1)) {
                 // 向下滑回最顶端且完全展开时，恢复展示底部页签栏
                 (activity as? MainActivity)?.setBottomNavigationVisibility(true)
             }
@@ -428,48 +428,21 @@ class PowerUsageFragment : Fragment() {
             }
         }
 
-        // 2. 列表滚动监听：联动控制底部页签栏显隐
-        binding.nestedScrollView.setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
-            if (currentDisplayTab == 1) {
-                // 充电模式下完全禁用手势联动，底部导航栏保持显示，不触发任何显隐与刷新
-                (activity as? MainActivity)?.setBottomNavigationVisibility(true)
-                return@setOnScrollChangeListener
-            }
-
-            val dy = scrollY - oldScrollY
-            if (dy > 4) {
-                // 手指向上滑动列表，灵敏联动隐藏底部页签栏
-                (activity as? MainActivity)?.setBottomNavigationVisibility(false)
-            } else if (dy < -8 || (dy < 0 && scrollY <= 0 && lastAppBarVerticalOffset == 0)) {
-                // 手指向下滑动列表或已回滚至最顶端，恢复展示底部页签栏
-                (activity as? MainActivity)?.setBottomNavigationVisibility(true)
-            }
-        }
-
-        // 3. 触摸手势辅助监听：优化触底边界与慢速拖动时的手势感知
-        var startTouchY = 0f
-        binding.nestedScrollView.setOnTouchListener { _, event ->
-            if (currentDisplayTab == 1) return@setOnTouchListener false
-
-            when (event.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    startTouchY = event.rawY
+        // 2. 列表滚动监听：主 RecyclerView 原生滑动联动控制底部页签栏显隐
+        binding.recyclerAppUsage.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
+                super.onScrolled(recyclerView, dx, dy)
+                if (currentDisplayTab == 1) {
+                    (activity as? MainActivity)?.setBottomNavigationVisibility(true)
+                    return
                 }
-                android.view.MotionEvent.ACTION_MOVE -> {
-                    val deltaY = event.rawY - startTouchY
-                    if (deltaY < -12f) {
-                        // 手指向上拖动，立即平滑联动隐藏底部导航栏，避免遮挡底部列表内容
-                        (activity as? MainActivity)?.setBottomNavigationVisibility(false)
-                        startTouchY = event.rawY
-                    } else if (deltaY > 15f && binding.nestedScrollView.scrollY <= 0 && lastAppBarVerticalOffset == 0) {
-                        // 处于最顶部且手指向下拉动，恢复展示底部导航栏
-                        (activity as? MainActivity)?.setBottomNavigationVisibility(true)
-                        startTouchY = event.rawY
-                    }
+                if (dy > 4) {
+                    (activity as? MainActivity)?.setBottomNavigationVisibility(false)
+                } else if (dy < -8 || (dy < 0 && !recyclerView.canScrollVertically(-1) && lastAppBarVerticalOffset == 0)) {
+                    (activity as? MainActivity)?.setBottomNavigationVisibility(true)
                 }
             }
-            false
-        }
+        })
     }
 
     /**
@@ -477,7 +450,7 @@ class PowerUsageFragment : Fragment() {
      */
     private fun checkFirstTimeConfiguration() {
         if (powerManager.isPowerModeConfigured()) {
-            binding.layoutFirstTimeSetup.visibility = View.GONE
+            adapter.setFirstTimeSetup(false)
             updateBackgroundStatsSwitchVisibility()
             val isCharging = chargingManager.isCharging()
             applySmartChargingMode(isCharging = isCharging, showToast = false)
@@ -488,11 +461,8 @@ class PowerUsageFragment : Fragment() {
             } else {
                 PowerUsageManager.MODE_NORMAL
             }
-            binding.layoutFirstTimeSetup.visibility = View.VISIBLE
-            binding.layoutPowerContent.visibility = View.GONE
+            adapter.setFirstTimeSetup(true, tempSelectedSetupMode, isShizukuInstalled)
             binding.cardPowerMetrics.visibility = View.GONE
-            binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
-            updateSetupCardSelection(tempSelectedSetupMode)
         }
     }
 
@@ -529,11 +499,9 @@ class PowerUsageFragment : Fragment() {
         if (shouldKeepOn) {
             activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             _binding?.root?.keepScreenOn = true
-            _binding?.layoutChargingContent?.layoutChargingRoot?.keepScreenOn = true
         } else {
             activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             _binding?.root?.keepScreenOn = false
-            _binding?.layoutChargingContent?.layoutChargingRoot?.keepScreenOn = false
         }
         updateBulbVisual(keepOn)
     }
@@ -544,8 +512,7 @@ class PowerUsageFragment : Fragment() {
      * @param isKeepOn 当前是否已启用常亮配置
      */
     private fun updateBulbVisual(isKeepOn: Boolean) {
-        if (_binding == null) return
-        val bulb = binding.layoutChargingContent.ivChargingBulb
+        val bulb = adapter.getChargingBinding()?.ivChargingBulb ?: return
         val activeColor = Color.parseColor("#FFC107")
         val inactiveColor = Color.parseColor("#888888")
         bulb.imageTintList = android.content.res.ColorStateList.valueOf(if (isKeepOn) activeColor else inactiveColor)
@@ -670,27 +637,20 @@ class PowerUsageFragment : Fragment() {
      * 若未安装 Shizuku，点击 Shizuku 模式卡片或确认按钮时触发友好提示并阻止选中。
      */
     private fun setupFirstTimeGuideUI() {
-        binding.cardSetupModeShizuku.setOnClickListener {
-            if (!powerManager.isShizukuInstalled()) {
+        adapter.onSetupModeSelectedListener = { mode ->
+            if (mode == PowerUsageManager.MODE_SHIZUKU && !powerManager.isShizukuInstalled()) {
                 Toast.makeText(
                     requireContext(),
                     getString(R.string.toast_shizuku_not_installed_tip),
                     Toast.LENGTH_SHORT
                 ).show()
-                return@setOnClickListener
+            } else {
+                tempSelectedSetupMode = mode
+                updateSetupCardSelection(tempSelectedSetupMode)
             }
-            tempSelectedSetupMode = PowerUsageManager.MODE_SHIZUKU
-            updateSetupCardSelection(tempSelectedSetupMode)
         }
 
-        binding.cardSetupModeNormal.setOnClickListener {
-            isWaitingForShizukuAuthFromSetup = false
-            tempSelectedSetupMode = PowerUsageManager.MODE_NORMAL
-            updateSetupCardSelection(tempSelectedSetupMode)
-        }
-
-        binding.btnSetupConfirm.setOnClickListener {
-            // 防呆校验：若当前意图选择 Shizuku 模式但设备并未安装 Shizuku，拦截并提醒
+        adapter.onSetupConfirmListener = {
             if (tempSelectedSetupMode == PowerUsageManager.MODE_SHIZUKU && !powerManager.isShizukuInstalled()) {
                 Toast.makeText(
                     requireContext(),
@@ -699,11 +659,7 @@ class PowerUsageFragment : Fragment() {
                 ).show()
                 tempSelectedSetupMode = PowerUsageManager.MODE_NORMAL
                 updateSetupCardSelection(tempSelectedSetupMode)
-                return@setOnClickListener
-            }
-
-            if (tempSelectedSetupMode == PowerUsageManager.MODE_SHIZUKU) {
-                // Shizuku 模式：若已授权则直接进入主界面；若尚未授权则先触发授权，禁止直接进入主界面
+            } else if (tempSelectedSetupMode == PowerUsageManager.MODE_SHIZUKU) {
                 if (powerManager.isShizukuAuthorized()) {
                     isWaitingForShizukuAuthFromSetup = false
                     completeSetupAndEnterMain(PowerUsageManager.MODE_SHIZUKU)
@@ -712,7 +668,6 @@ class PowerUsageFragment : Fragment() {
                     requestShizukuPermission()
                 }
             } else {
-                // 标准模式：直接保存并进入主界面
                 isWaitingForShizukuAuthFromSetup = false
                 completeSetupAndEnterMain(PowerUsageManager.MODE_NORMAL)
             }
@@ -730,7 +685,7 @@ class PowerUsageFragment : Fragment() {
         powerManager.setSelectedMode(currentMode)
         powerManager.setPowerModeConfigured(true)
 
-        binding.layoutFirstTimeSetup.visibility = View.GONE
+        adapter.setFirstTimeSetup(false)
 
         val tip = if (currentMode == PowerUsageManager.MODE_SHIZUKU) {
             getString(R.string.power_mode_tip_shizuku)
@@ -748,39 +703,12 @@ class PowerUsageFragment : Fragment() {
 
     /**
      * 更新初次引导界面中两个模式卡片的选中边框与单选按钮状态。
-     * 若检测到当前设备未安装 Shizuku，动态将 Shizuku 卡片置灰半透明并显示未安装标签。
      *
      * @param selectedMode 选中的模式（[PowerUsageManager.MODE_SHIZUKU] 或 [PowerUsageManager.MODE_NORMAL]）
      */
     private fun updateSetupCardSelection(selectedMode: Int) {
         val isShizukuInstalled = powerManager.isShizukuInstalled()
-
-        // 依据是否安装 Shizuku 动态更新卡片视觉样式与标题
-        if (isShizukuInstalled) {
-            binding.tvSetupShizukuTitle.text = getString(R.string.power_mode_shizuku)
-            binding.cardSetupModeShizuku.alpha = 1.0f
-        } else {
-            binding.tvSetupShizukuTitle.text = getString(R.string.power_mode_shizuku_not_installed)
-            binding.cardSetupModeShizuku.alpha = 0.55f
-        }
-
-        if (selectedMode == PowerUsageManager.MODE_SHIZUKU && isShizukuInstalled) {
-            binding.cardSetupModeShizuku.strokeColor = Color.parseColor("#2196F3")
-            binding.cardSetupModeShizuku.strokeWidth = (2 * resources.displayMetrics.density).toInt()
-            binding.radioSetupShizuku.isChecked = true
-
-            binding.cardSetupModeNormal.strokeColor = Color.parseColor("#18888888")
-            binding.cardSetupModeNormal.strokeWidth = (1 * resources.displayMetrics.density).toInt()
-            binding.radioSetupNormal.isChecked = false
-        } else {
-            binding.cardSetupModeNormal.strokeColor = Color.parseColor("#2196F3")
-            binding.cardSetupModeNormal.strokeWidth = (2 * resources.displayMetrics.density).toInt()
-            binding.radioSetupNormal.isChecked = true
-
-            binding.cardSetupModeShizuku.strokeColor = Color.parseColor("#18888888")
-            binding.cardSetupModeShizuku.strokeWidth = (1 * resources.displayMetrics.density).toInt()
-            binding.radioSetupShizuku.isChecked = false
-        }
+        adapter.setFirstTimeSetup(true, selectedMode, isShizukuInstalled)
     }
 
     /**
@@ -824,6 +752,49 @@ class PowerUsageFragment : Fragment() {
                 }
             }
         }
+        adapter.onBackgroundStatsChangedListener = { isChecked ->
+            val statsPrefs = requireContext().getSharedPreferences(PREFS_POWER_STATS, Context.MODE_PRIVATE)
+            statsPrefs.edit().putBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, isChecked).apply()
+            updateBackgroundStatsVisibility(isChecked)
+            if (currentMode == PowerUsageManager.MODE_SHIZUKU && powerManager.isPowerModeConfigured() && !isViewingSnapshot) {
+                loadData()
+            }
+        }
+        adapter.onSortButtonClickedListener = { v ->
+            showSortChoiceDialog(v)
+        }
+        adapter.onHelpButtonClickedListener = {
+            showPowerSceneGuideDialog()
+        }
+        adapter.onPermissionGrantClickedListener = {
+            try {
+                val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                startActivity(intent)
+            } catch (_: Exception) {
+                Toast.makeText(requireContext(), getString(R.string.toast_request_auth_failed, ""), Toast.LENGTH_SHORT).show()
+            }
+        }
+        adapter.onMetricsChangedListener = { selectedMetrics ->
+            adapter.overviewHolder?.binding?.batteryTimelineView?.setSelectedMetrics(selectedMetrics)
+        }
+        adapter.onRestoreRealtimeClickedListener = {
+            restoreLivePowerData()
+        }
+        adapter.onEnergyContainerClickedListener = {
+            lastRenderedPackage?.let { pkg ->
+                val snapshot = pkg.batterySnapshot
+                val energyText = String.format(Locale.getDefault(), getString(R.string.power_wh_format), snapshot.energyWh)
+                val totalEnergyText = snapshot.totalEnergyWh?.takeIf { it > 0f }?.let {
+                    String.format(Locale.getDefault(), getString(R.string.power_wh_format), it)
+                } ?: "--"
+                val lastUnplugWh = powerManager.getLastUnplugEnergyWh()
+                val unplugEnergyText = lastUnplugWh?.takeIf { it > 0f }?.let {
+                    String.format(Locale.getDefault(), getString(R.string.power_wh_format), it)
+                } ?: "--"
+                val energyTooltip = getString(R.string.power_tooltip_energy, energyText, totalEnergyText, unplugEnergyText)
+                Toast.makeText(requireContext(), energyTooltip, Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     /**
@@ -857,7 +828,7 @@ class PowerUsageFragment : Fragment() {
             if (currentDisplayTab != 0) {
                 true
             } else {
-                lastAppBarVerticalOffset != 0 || binding.nestedScrollView.canScrollVertically(-1)
+                lastAppBarVerticalOffset != 0 || binding.recyclerAppUsage.canScrollVertically(-1)
             }
         }
     }
@@ -873,26 +844,30 @@ class PowerUsageFragment : Fragment() {
             val isAuthorized = powerManager.isShizukuAuthorized()
 
             if (!isRunning) {
-                binding.cardShizukuGuide.visibility = View.VISIBLE
-                binding.tvShizukuGuideTitle.text = getString(R.string.power_shizuku_not_running_title)
-                binding.tvShizukuGuideDesc.text = getString(R.string.power_shizuku_not_running_desc)
-                binding.btnShizukuAction.text = getString(R.string.power_shizuku_btn_open)
-                binding.btnShizukuAction.setOnClickListener {
+                adapter.setShizukuGuide(
+                    visible = true,
+                    title = getString(R.string.power_shizuku_not_running_title),
+                    desc = getString(R.string.power_shizuku_not_running_desc),
+                    actionText = getString(R.string.power_shizuku_btn_open)
+                )
+                adapter.onShizukuActionClickedListener = {
                     openShizukuApp()
                 }
             } else if (!isAuthorized) {
-                binding.cardShizukuGuide.visibility = View.VISIBLE
-                binding.tvShizukuGuideTitle.text = getString(R.string.power_shizuku_unauthorized_title)
-                binding.tvShizukuGuideDesc.text = getString(R.string.power_shizuku_unauthorized_desc)
-                binding.btnShizukuAction.text = getString(R.string.power_shizuku_btn_auth)
-                binding.btnShizukuAction.setOnClickListener {
+                adapter.setShizukuGuide(
+                    visible = true,
+                    title = getString(R.string.power_shizuku_unauthorized_title),
+                    desc = getString(R.string.power_shizuku_unauthorized_desc),
+                    actionText = getString(R.string.power_shizuku_btn_auth)
+                )
+                adapter.onShizukuActionClickedListener = {
                     requestShizukuPermission()
                 }
             } else {
-                binding.cardShizukuGuide.visibility = View.GONE
+                adapter.setShizukuGuide(false)
             }
         } else {
-            binding.cardShizukuGuide.visibility = View.GONE
+            adapter.setShizukuGuide(false)
         }
     }
 
@@ -903,9 +878,9 @@ class PowerUsageFragment : Fragment() {
         if (_binding == null) return
         if (currentMode == PowerUsageManager.MODE_NORMAL && powerManager.isPowerModeConfigured()) {
             val hasPermission = powerManager.hasUsageStatsPermission()
-            binding.layoutPermissionBanner.visibility = if (hasPermission) View.GONE else View.VISIBLE
+            adapter.setPermissionBannerVisible(!hasPermission)
         } else {
-            binding.layoutPermissionBanner.visibility = View.GONE
+            adapter.setPermissionBannerVisible(false)
         }
     }
 
@@ -994,54 +969,20 @@ class PowerUsageFragment : Fragment() {
             }
         }
 
-        // 历史快照横幅恢复实时按钮点击
-        binding.btnPowerRestoreRealtime.setOnClickListener {
-            restoreLivePowerData()
-        }
+        // 核心功耗指标卡片（唯一实例常驻吸顶，三行：亮屏 / 息屏 / 全局）点击弹出详细数据 Toast
+        binding.layoutMetricScreenOnRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_ON) }
+        binding.layoutMetricScreenOffRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_OFF) }
+        binding.layoutMetricGlobalRow.setOnClickListener { showMetricRowDetailToast(ROW_GLOBAL) }
+    }
 
-        // “使用场景 ?” 问号图标点击
-        binding.btnSceneHelp.setOnClickListener {
-            showPowerSceneGuideDialog()
-        }
-
-        // 场景后台统计开关：控制是否在下方应用列表中展示各应用后台数据
-        val statsPrefs = requireContext().getSharedPreferences(PREFS_POWER_STATS, Context.MODE_PRIVATE)
-        val isBgStatsEnabled = statsPrefs.getBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, false)
-        binding.switchBackgroundStats.isChecked = isBgStatsEnabled
-        updateBackgroundStatsVisibility(isBgStatsEnabled)
-        updateBackgroundStatsSwitchVisibility()
-
-        binding.switchBackgroundStats.setOnCheckedChangeListener { _, isChecked ->
-            statsPrefs.edit().putBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, isChecked).apply()
-            updateBackgroundStatsVisibility(isChecked)
-            if (currentMode == PowerUsageManager.MODE_SHIZUKU && powerManager.isPowerModeConfigured() && !isViewingSnapshot) {
-                loadData()
-            }
-        }
-
-        // 场景排序菜单按钮（漏斗）：弹出多选排序弹窗
-        binding.btnSceneSort.setOnClickListener {
-            showSortChoiceDialog()
-        }
-
-        // 普通模式权限授权按钮点击
-        binding.btnGrantPermission.setOnClickListener {
-            try {
-                val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
-                startActivity(intent)
-            } catch (_: Exception) {
-                Toast.makeText(requireContext(), getString(R.string.toast_request_auth_failed, ""), Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        // 功耗时间轴底部指标多选/反选监听（功耗 / 电量 / 温度 / 电压 / 应用）
-        binding.metricSelectorView.setOnMetricsChangedListener { selectedMetrics ->
-            binding.batteryTimelineView.setSelectedMetrics(selectedMetrics)
-        }
-
-        // 充电趋势图底部指标多选/反选监听（电量 / 功率 / 温度 / 电压 / 应用）
-        binding.layoutChargingContent.chargingMetricSelectorView.setPowerLabelText("功率")
-        binding.layoutChargingContent.chargingMetricSelectorView.configurePrefs(
+    /**
+     * 配置充电卡片内部的图表指标选择器与常亮手势监听。
+     *
+     * @param chargingView 充电布局绑定实例
+     */
+    private fun setupChargingView(chargingView: com.battery.analysis.databinding.LayoutChargingStatsBinding) {
+        chargingView.chargingMetricSelectorView.setPowerLabelText("功率")
+        chargingView.chargingMetricSelectorView.configurePrefs(
             prefsKey = "saved_charging_timeline_metrics",
             defaultMetrics = setOf(
                 com.battery.analysis.timeline.presentation.TimelineMetric.BATTERY,
@@ -1051,22 +992,16 @@ class PowerUsageFragment : Fragment() {
                 com.battery.analysis.timeline.presentation.TimelineMetric.APP
             )
         )
-        binding.layoutChargingContent.chargingChartView.setSelectedMetrics(
-            binding.layoutChargingContent.chargingMetricSelectorView.getSelectedMetrics()
+        chargingView.chargingChartView.setSelectedMetrics(
+            chargingView.chargingMetricSelectorView.getSelectedMetrics()
         )
-        binding.layoutChargingContent.chargingMetricSelectorView.setOnMetricsChangedListener { selectedMetrics ->
-            binding.layoutChargingContent.chargingChartView.setSelectedMetrics(selectedMetrics)
+        chargingView.chargingMetricSelectorView.setOnMetricsChangedListener { selectedMetrics ->
+            chargingView.chargingChartView.setSelectedMetrics(selectedMetrics)
         }
 
-        // 充电大卡片右上角屏幕常亮灯泡点击监听
-        binding.layoutChargingContent.ivChargingBulb.setOnClickListener {
+        chargingView.ivChargingBulb.setOnClickListener {
             toggleKeepScreenOn()
         }
-
-        // 核心功耗指标卡片（唯一实例常驻吸顶，三行：亮屏 / 息屏 / 全局）点击弹出详细数据 Toast
-        binding.layoutMetricScreenOnRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_ON) }
-        binding.layoutMetricScreenOffRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_OFF) }
-        binding.layoutMetricGlobalRow.setOnClickListener { showMetricRowDetailToast(ROW_GLOBAL) }
     }
 
     /**
@@ -1162,25 +1097,22 @@ class PowerUsageFragment : Fragment() {
         (activity as? MainActivity)?.updateBottomNavPowerTab(isCharging)
 
         if (!powerManager.isPowerModeConfigured()) {
-            binding.layoutFirstTimeSetup.visibility = View.VISIBLE
-            binding.layoutPowerContent.visibility = View.GONE
+            adapter.setFirstTimeSetup(true, tempSelectedSetupMode, powerManager.isShizukuInstalled())
             binding.cardPowerMetrics.visibility = View.GONE
-            binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
             return
         }
 
-        binding.layoutFirstTimeSetup.visibility = View.GONE
+        adapter.setFirstTimeSetup(false)
 
         if (isCharging) {
             // 智能呈现【充电统计】界面并根据设置开启屏幕常亮
             currentDisplayTab = 1
+            adapter.setDisplayTab(1)
             applyKeepScreenOn(true)
             binding.swipeRefreshLayout.isEnabled = false
             binding.swipeRefreshLayout.isRefreshing = false
             binding.tvPowerTitle.text = getString(R.string.charging_stats_title)
-            binding.layoutPowerContent.visibility = View.GONE
             binding.cardPowerMetrics.visibility = View.GONE
-            binding.layoutChargingContent.layoutChargingRoot.visibility = View.VISIBLE
 
             // 充电状态下完全禁用联动折叠：展开并锁定 AppBarLayout，恢复底部页签栏常驻展示
             binding.appbarPower.setExpanded(true, false)
@@ -1192,7 +1124,7 @@ class PowerUsageFragment : Fragment() {
             binding.layoutExpandedHeader.visibility = View.VISIBLE
             (activity as? MainActivity)?.setBottomNavigationVisibility(true)
 
-            // 触发表层与内层容器重新布局，确保在去除放电大卡片后充电内容严密贴合标题栏，杜绝出现空白断层
+            // 触发表层与内层容器重新布局
             binding.appbarPower.requestLayout()
             binding.coordinatorPower.requestLayout()
 
@@ -1206,17 +1138,16 @@ class PowerUsageFragment : Fragment() {
         } else {
             // 智能呈现【耗电统计】界面并恢复屏幕休眠
             currentDisplayTab = 0
+            adapter.setDisplayTab(0)
             applyKeepScreenOn(false)
             binding.swipeRefreshLayout.isEnabled = true
             stopChargingPolling()
             binding.tvPowerTitle.text = getString(R.string.power_stats_title)
-            binding.layoutPowerContent.visibility = View.VISIBLE
             binding.cardPowerMetrics.visibility = View.VISIBLE
             binding.cardPowerMetrics.alpha = 1f
             binding.cardPowerMetrics.translationY = 0f
             binding.layoutTitleBar.alpha = 1f
             binding.layoutTitleBar.visibility = View.VISIBLE
-            binding.layoutChargingContent.layoutChargingRoot.visibility = View.GONE
 
             // 耗电模式下联动折叠能力交由 updateScrollLimitForShortList 自适应校准（一屏内完全禁用上滑，超出一屏时启用折叠）
             updateScrollLimitForShortList()
@@ -1345,9 +1276,16 @@ class PowerUsageFragment : Fragment() {
         val snapshot = fullPackage.batterySnapshot
         val overview = fullPackage.overviewStats
 
-        // 1. 刷新顶部核心瞬时指标卡片
-        binding.tvTemperature.text = String.format(Locale.getDefault(), getString(R.string.power_temp_format), snapshot.temperature)
-        binding.tvVoltage.text = String.format(Locale.getDefault(), getString(R.string.power_volt_format), snapshot.voltageVolts)
+        // 1. 刷新概览卡片瞬时指标
+        val lastUnplugWh = powerManager.getLastUnplugEnergyWh()
+        adapter.updateOverviewMetrics(
+            energyWh = snapshot.energyWh,
+            totalEnergyWh = snapshot.totalEnergyWh,
+            lastUnplugWh = lastUnplugWh,
+            temp = snapshot.temperature,
+            volt = snapshot.voltageVolts,
+            isCharging = snapshot.isCharging
+        )
 
         val onPowerStr = if (overview.screenOnPowerWatts >= 0.05f) {
             String.format(Locale.getDefault(), "%.2fW", overview.screenOnPowerWatts)
@@ -1387,7 +1325,8 @@ class PowerUsageFragment : Fragment() {
         latestPoint: ChargingSamplePoint? = null
     ) {
         if (_binding == null) return
-        val chargingView = binding.layoutChargingContent
+        val chargingView = adapter.getChargingBinding() ?: return
+        setupChargingView(chargingView)
         val liveSnapshot = powerManager.getCurrentBatteryStatus()
         val currentPoint = latestPoint ?: points.lastOrNull() ?: ChargingSamplePoint(
             timestamp = System.currentTimeMillis(),
@@ -1514,7 +1453,7 @@ class PowerUsageFragment : Fragment() {
             val appEvents = powerManager.queryChargingAppTimelineEvents(startTs, endTs)
             withContext(Dispatchers.Main) {
                 if (_binding != null) {
-                    binding.layoutChargingContent.chargingChartView.setAppEvents(appEvents)
+                    adapter.getChargingBinding()?.chargingChartView?.setAppEvents(appEvents)
                 }
             }
         }
@@ -1623,7 +1562,7 @@ class PowerUsageFragment : Fragment() {
 
         btnConfirm.setOnClickListener {
             chargingManager.resetChargingStats()
-            binding.layoutChargingContent.chargingChartView.clearData()
+            adapter.getChargingBinding()?.chargingChartView?.clearData()
             renderChargingData()
             Toast.makeText(requireContext(), getString(R.string.charging_reset_success), Toast.LENGTH_SHORT).show()
             dialog.dismiss()
@@ -1699,32 +1638,21 @@ class PowerUsageFragment : Fragment() {
         val overview = fullPackage.overviewStats
 
         // 构建并绑定功耗时间轴最新状态（多选模式，优先复用后台异步预构建的 timelineState 避免主线程卡顿）
-        val selectedMetrics = binding.metricSelectorView.getSelectedMetrics()
+        val selectedMetrics = adapter.overviewHolder?.binding?.metricSelectorView?.getSelectedMetrics()
+            ?: com.battery.analysis.timeline.presentation.TimelineMetric.entries.toSet()
         val baseState = prebuiltTimelineState ?: powerManager.buildTimelineState(fullPackage, isHistoryRecord = isViewingSnapshot)
         val timelineState = baseState.copy(selectedMetrics = selectedMetrics)
-        binding.batteryTimelineView.setState(timelineState)
-
-        val energyText = String.format(Locale.getDefault(), getString(R.string.power_wh_format), snapshot.energyWh)
-        binding.tvEnergyWh.text = energyText
-        val totalEnergyText = snapshot.totalEnergyWh?.takeIf { it > 0f }?.let {
-            String.format(Locale.getDefault(), getString(R.string.power_wh_format), it)
-        } ?: "--"
         val lastUnplugWh = powerManager.getLastUnplugEnergyWh()
-        val unplugEnergyText = lastUnplugWh?.takeIf { it > 0f }?.let {
-            String.format(Locale.getDefault(), getString(R.string.power_wh_format), it)
-        } ?: "--"
-        val energyTooltip = getString(R.string.power_tooltip_energy, energyText, totalEnergyText, unplugEnergyText)
-        binding.llEnergyContainer.contentDescription = energyTooltip
-        binding.llEnergyContainer.setOnClickListener {
-            Toast.makeText(requireContext(), energyTooltip, Toast.LENGTH_SHORT).show()
-        }
-        binding.tvTemperature.text = String.format(Locale.getDefault(), getString(R.string.power_temp_format), snapshot.temperature)
-        binding.tvVoltage.text = String.format(Locale.getDefault(), getString(R.string.power_volt_format), snapshot.voltageVolts)
-        binding.tvChargingStatus.text = if (snapshot.isCharging) {
-            getString(R.string.power_status_charging)
-        } else {
-            getString(R.string.power_status_unplugged)
-        }
+
+        adapter.updateOverviewMetrics(
+            energyWh = snapshot.energyWh,
+            totalEnergyWh = snapshot.totalEnergyWh,
+            lastUnplugWh = lastUnplugWh,
+            temp = snapshot.temperature,
+            volt = snapshot.voltageVolts,
+            isCharging = snapshot.isCharging,
+            timelineState = timelineState
+        )
 
         // 2. 刷新核心功耗指标卡片（按图一三行四列高密结构：亮屏 / 息屏 / 全局，每行呈现：图标 + 时长占比 + 能量占比 + 功率 + 续航）
         val onEnergy = overview.screenOnEnergyWh
@@ -1813,9 +1741,11 @@ class PowerUsageFragment : Fragment() {
         adapter.submitList(fullPackage.appList)
 
         // 4. 根据当前开关状态同步卡片与列表后台指标可见性
-        updateBackgroundStatsVisibility(binding.switchBackgroundStats.isChecked)
+        val statsPrefs = requireContext().getSharedPreferences(PREFS_POWER_STATS, Context.MODE_PRIVATE)
+        val isBgStats = statsPrefs.getBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, false)
+        updateBackgroundStatsVisibility(isBgStats)
 
-        // 5. 依据列表数据量动态校准上滑边界，确保短列表底部与视口底端恰好保留 10dp 空白区域
+        // 5. 依据列表数据量动态校准上滑边界
         updateScrollLimitForShortList()
     }
 
@@ -1910,7 +1840,7 @@ class PowerUsageFragment : Fragment() {
     private fun updateBackgroundStatsSwitchVisibility() {
         if (_binding == null) return
         val isShizuku = currentMode == PowerUsageManager.MODE_SHIZUKU
-        binding.layoutBackgroundStatsContainer.visibility = if (isShizuku) View.VISIBLE else View.GONE
+        adapter.sceneHeaderHolder?.binding?.layoutBackgroundStatsContainer?.visibility = if (isShizuku) View.VISIBLE else View.GONE
     }
 
     /**
@@ -1932,7 +1862,7 @@ class PowerUsageFragment : Fragment() {
      */
     private fun updateUsageListTitle(count: Int) {
         if (_binding == null) return
-        binding.tvSceneTitle.text = getString(R.string.power_usage_list_format, count)
+        adapter.sceneHeaderHolder?.binding?.tvSceneTitle?.text = getString(R.string.power_usage_list_format, count)
     }
 
     /**
@@ -1943,33 +1873,21 @@ class PowerUsageFragment : Fragment() {
      */
     private fun updateScrollLimitForShortList() {
         if (_binding == null || currentDisplayTab != 0) return
-        binding.nestedScrollView.post {
+        binding.recyclerAppUsage.post {
             if (_binding == null || currentDisplayTab != 0) return@post
             val coordinatorH = binding.coordinatorPower.height
             if (coordinatorH <= 0) return@post
 
-            val targetBottomGapPx = (10 * resources.displayMetrics.density).toInt()
-            val headerH = binding.layoutExpandedHeader.height
-            val metricsH = if (binding.cardPowerMetrics.visibility == View.VISIBLE) binding.cardPowerMetrics.height else 0
-            val contentH = binding.layoutPowerContent.height
-            val totalContentH = headerH + metricsH + contentH + targetBottomGapPx
-
             val collapsingToolbarParams = binding.collapsingToolbar.layoutParams as? com.google.android.material.appbar.AppBarLayout.LayoutParams ?: return@post
-            val targetFlags = if (totalContentH <= coordinatorH) {
+            val canScroll = binding.recyclerAppUsage.canScrollVertically(1) || binding.recyclerAppUsage.canScrollVertically(-1)
+            val targetFlags = if (!canScroll && adapter.getDisplayItemCount() <= 3) {
                 // 1. 数据极少（一屏内完全呈现）：禁用折叠与上滑，保持完整展开且底部留白恰好协调
                 0
             } else {
-                // 2. 超出一屏：恢复原生联动折叠能力，由联动机制自然滑动到底部（留白 10dp）
+                // 2. 超出一屏：恢复原生联动折叠能力，由联动机制自然滑动到底部
                 com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_SCROLL or
                         com.google.android.material.appbar.AppBarLayout.LayoutParams.SCROLL_FLAG_EXIT_UNTIL_COLLAPSED
             }
-
-            // 若物理总高度与视口高度均未发生变动，且实际生效的 scrollFlags 已经等于期望的目标值，直接退出，彻底斩断每帧重复测量与布局
-            if (totalContentH == lastTotalContentH && coordinatorH == lastCoordinatorH && collapsingToolbarParams.scrollFlags == targetFlags && lastAppliedScrollFlags == targetFlags) {
-                return@post
-            }
-            lastTotalContentH = totalContentH
-            lastCoordinatorH = coordinatorH
 
             // 仅在目标标志位与当前生效标志位不一致时才重新赋值 LayoutParams，杜绝无谓的 requestLayout 导致 120Hz 刷新死循环
             if (collapsingToolbarParams.scrollFlags != targetFlags || lastAppliedScrollFlags != targetFlags) {
@@ -1978,7 +1896,7 @@ class PowerUsageFragment : Fragment() {
                 binding.collapsingToolbar.layoutParams = collapsingToolbarParams
                 if (targetFlags == 0) {
                     binding.appbarPower.setExpanded(true, false)
-                    binding.nestedScrollView.scrollTo(0, 0)
+                    binding.recyclerAppUsage.scrollToPosition(0)
                 }
             }
         }
@@ -2256,8 +2174,8 @@ class PowerUsageFragment : Fragment() {
         // 确保切换至耗电模式并使核心放电容器与卡片呈现为可见状态
         applySmartChargingMode(isCharging = false, showToast = false)
 
-        binding.tvPowerSnapshotHint.text = getString(R.string.power_history_banner_format, record.recordTime)
-        binding.layoutPowerSnapshotBanner.visibility = View.VISIBLE
+        val hint = getString(R.string.power_history_banner_format, record.recordTime)
+        adapter.setSnapshotBanner(visible = true, hint = hint)
         binding.cardPowerMetrics.visibility = View.VISIBLE
         binding.cardPowerMetrics.alpha = 1f
         binding.cardPowerMetrics.translationY = 0f
@@ -2280,7 +2198,7 @@ class PowerUsageFragment : Fragment() {
     private fun restoreLivePowerData() {
         isViewingSnapshot = false
         currentLoadedSnapshotTime = null
-        binding.layoutPowerSnapshotBanner.visibility = View.GONE
+        adapter.setSnapshotBanner(visible = false)
         loadData()
         Toast.makeText(requireContext(), getString(R.string.toast_restored_realtime), Toast.LENGTH_SHORT).show()
     }
@@ -2421,8 +2339,10 @@ class PowerUsageFragment : Fragment() {
     /**
      * 弹出选择排序方式下拉气泡菜单。
      * 展开与刷新时间间隔样式一致的气泡菜单，支持按使用时长、按功耗、按消耗电量或按名称进行排序切换。
+     *
+     * @param anchor 触发下拉菜单的目标锚点视图，为空时使用头部排序按钮或根视图兜底
      */
-    private fun showSortChoiceDialog() {
+    private fun showSortChoiceDialog(anchor: View? = null) {
         val popupView = layoutInflater.inflate(R.layout.popup_power_sort_picker, null)
         val density = resources.displayMetrics.density
         val popupWidth = (170 * density).toInt()
@@ -2459,8 +2379,9 @@ class PowerUsageFragment : Fragment() {
             }
         }
 
+        val targetAnchor = anchor ?: adapter.sceneHeaderHolder?.binding?.btnSceneSort ?: binding.root
         popupWindow.showAsDropDown(
-            binding.btnSceneSort,
+            targetAnchor,
             0,
             (4 * density).toInt(),
             android.view.Gravity.END

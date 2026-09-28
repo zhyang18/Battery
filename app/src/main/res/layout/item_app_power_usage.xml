@@ -5,7 +5,7 @@
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:background="#14888888"
+    android:background="@drawable/bg_item_app_usage_normal"
     android:clickable="true"
     android:focusable="true"
     android:paddingEnd="10dp"

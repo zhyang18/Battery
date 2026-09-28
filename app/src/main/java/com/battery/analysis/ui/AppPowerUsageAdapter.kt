@@ -311,7 +311,8 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             is PowerUsageItem.AppUsage -> {
                 val appHolder = holder as AppViewHolder
                 Log.d(TAG, "bind position=$position holder=${appHolder.hashCode()}")
-                bindAppUsage(appHolder, item.data)
+                val isLastRow = position == items.size - 1 || (position + 1 < items.size && items[position + 1] !is PowerUsageItem.AppUsage)
+                bindAppUsage(appHolder, item.data, isLastRow)
             }
             is PowerUsageItem.ChargingContent -> {
                 // 充电视图内部由 Fragment 的 renderChargingData 直接驱动
@@ -463,11 +464,30 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     /**
      * 绑定单个应用条目的视图数据。
+     * 当处于使用列表最后一行时，为背景添加左下、右下 14dp 圆角。
      *
      * @param holder 应用条目 ViewHolder
      * @param item 应用能耗数据实体
+     * @param isLastRow 是否为使用列表的最后一行数据
      */
-    private fun bindAppUsage(holder: AppViewHolder, item: AppPowerUsageItem) {
+    private fun bindAppUsage(holder: AppViewHolder, item: AppPowerUsageItem, isLastRow: Boolean) {
+        val context = holder.itemView.context
+        val density = context.resources.displayMetrics.density
+
+        val bgRes = if (isLastRow) {
+            R.drawable.bg_item_app_usage_bottom_rounded
+        } else {
+            R.drawable.bg_item_app_usage_normal
+        }
+        val padStart = (10 * density).toInt()
+        val padEnd = (10 * density).toInt()
+        val padTop = (5 * density).toInt()
+        val padBottom = if (isLastRow) (8 * density).toInt() else (5 * density).toInt()
+
+        holder.itemView.setBackgroundResource(bgRes)
+        holder.itemView.setPaddingRelative(padStart, padTop, padEnd, padBottom)
+        holder.itemView.clipToOutline = isLastRow
+
         holder.itemView.setOnClickListener {
             onItemClickListener?.invoke(item)
         }

@@ -13,7 +13,10 @@ import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
 import com.battery.analysis.model.ChargingSamplePoint
+import com.battery.analysis.timeline.domain.AppTimelineEvent
 import com.battery.analysis.timeline.presentation.TimelineMetric
+import com.battery.analysis.timeline.util.DrawableBitmapCache
+import com.battery.analysis.timeline.util.TimelineLayoutCalculator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -239,8 +242,13 @@ class ChargingChartView @JvmOverloads constructor(
     private val voltagePointPool = mutableListOf<PointF>()
     private val voltagePoints = mutableListOf<PointF>()
 
-    // 前台活跃应用时间轴事件集合与图标绘制矩形复用
-    private val appEvents = mutableListOf<com.battery.analysis.timeline.domain.AppTimelineEvent>()
+    // 前台活跃应用时间轴事件集合、时间槽排布缓存与图标绘制矩形复用
+    private val appEvents = mutableListOf<AppTimelineEvent>()
+    private var cachedSlotItems: List<TimelineLayoutCalculator.LaidOutAppSlotItem> = emptyList()
+    private var lastSlotCalcMinTs: Long = 0L
+    private var lastSlotCalcMaxTs: Long = 0L
+    private var lastSlotCalcWidth: Float = 0f
+    private var lastSlotCalcEventsHash: Int = 0
     private val iconSrcRect = android.graphics.Rect()
     private val iconDstRect = RectF()
 
@@ -330,9 +338,11 @@ class ChargingChartView @JvmOverloads constructor(
      *
      * @param events 前台应用时间轴事件集合
      */
-    fun setAppEvents(events: List<com.battery.analysis.timeline.domain.AppTimelineEvent>) {
+    fun setAppEvents(events: List<AppTimelineEvent>) {
         appEvents.clear()
         appEvents.addAll(events)
+        cachedSlotItems = emptyList()
+        lastSlotCalcEventsHash = 0
         invalidate()
     }
 
@@ -372,6 +382,8 @@ class ChargingChartView @JvmOverloads constructor(
         tempPoints.clear()
         voltagePoints.clear()
         appEvents.clear()
+        cachedSlotItems = emptyList()
+        lastSlotCalcEventsHash = 0
         selectedIndex = -1
         pointSelectedListener?.onPointSelected(null)
         invalidate()
@@ -664,7 +676,9 @@ class ChargingChartView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制充电期间活跃的前台应用小图标紧凑堆叠（紧贴状态指示条上方，圆角深色衬底防重叠显示）。
+     * 绘制充电期间活跃的前台应用小图标按时间槽平铺与多行纵向堆叠排布。
+     * 采用与耗电趋势图完全一致的分槽对齐与按包名去重算法，同一时间段内同一 App 绝不重复堆叠，
+     * 多个不同应用并发时自底向上垂直堆叠，持续使用时水平时间槽连续平铺。
      *
      * @param canvas 绘制画布
      * @param chartLeft 图表左边界 X 坐标
@@ -681,41 +695,45 @@ class ChargingChartView @JvmOverloads constructor(
 
         val minTs = dataPoints.first().timestamp
         val maxTs = if (dataPoints.size > 1) dataPoints.last().timestamp else (minTs + 60000L)
-        val tsRange = (maxTs - minTs).coerceAtLeast(60000L).toFloat()
+        if (maxTs <= minTs) return
 
-        val iconSize = dp12
+        val slotSizePx = dp11
         val iconRenderSize = dp11.toInt().coerceAtLeast(1)
         val baseBottomY = gridBottomY + dp2
-        val minX = chartLeft + iconSize / 2f
-        val maxX = chartLeft + chartWidth - iconSize / 2f
 
-        val drawnRects = mutableListOf<RectF>()
+        // 计算或复用布局排布结果，避免手势探查重绘时重复执行分槽计算
+        val currentEventsHash = appEvents.hashCode()
+        if (cachedSlotItems.isEmpty() ||
+            lastSlotCalcMinTs != minTs ||
+            lastSlotCalcMaxTs != maxTs ||
+            lastSlotCalcWidth != chartWidth ||
+            lastSlotCalcEventsHash != currentEventsHash
+        ) {
+            cachedSlotItems = TimelineLayoutCalculator.calculateSlotItems(
+                events = appEvents,
+                visibleStartTs = minTs,
+                visibleEndTs = maxTs,
+                canvasWidth = chartWidth,
+                baseBottomY = baseBottomY,
+                slotSizePx = slotSizePx,
+                slotGapPx = 0f,
+                rowGapPx = 0f,
+                maxRows = Int.MAX_VALUE,
+                leftMarginPx = chartLeft
+            )
+            lastSlotCalcMinTs = minTs
+            lastSlotCalcMaxTs = maxTs
+            lastSlotCalcWidth = chartWidth
+            lastSlotCalcEventsHash = currentEventsHash
+        }
 
-        for (event in appEvents) {
-            if (event.endTime < minTs || event.startTime > maxTs) continue
+        val topLimitY = dp30
+        for (item in cachedSlotItems) {
+            // 向上堆叠边界保护，防止超出图表上方读数面板
+            if (item.top < topLimitY) continue
 
-            val midTs = (maxOf(event.startTime, minTs) + minOf(event.endTime, maxTs)) / 2f
-            val xRatio = ((midTs - minTs) / tsRange).coerceIn(0f, 1f)
-            val centerX = (chartLeft + chartWidth * xRatio).coerceIn(minX, maxX)
-            val iconLeft = centerX - iconSize / 2f
-            val iconRight = iconLeft + iconSize
-
-            var currentBottomY = baseBottomY
-            for (rect in drawnRects) {
-                if (abs(rect.centerX() - centerX) < iconSize - dp1) {
-                    if (rect.top < currentBottomY) {
-                        currentBottomY = rect.top
-                    }
-                }
-            }
-
-            val iconTop = currentBottomY - iconSize
-            if (iconTop < dp30) continue
-
-            val badgeRect = RectF(iconLeft, iconTop, iconRight, currentBottomY)
-            drawnRects.add(badgeRect)
-
-            val bmp = com.battery.analysis.timeline.util.DrawableBitmapCache.getOrConvertBitmap(
+            val event = item.event
+            val bmp = DrawableBitmapCache.getOrConvertBitmap(
                 event.packageName,
                 event.icon,
                 iconRenderSize
@@ -723,10 +741,10 @@ class ChargingChartView @JvmOverloads constructor(
             if (bmp != null && !bmp.isRecycled) {
                 iconSrcRect.set(0, 0, bmp.width, bmp.height)
                 iconDstRect.set(
-                    iconLeft,
-                    iconTop,
-                    iconRight,
-                    currentBottomY
+                    item.left,
+                    item.top,
+                    item.right,
+                    item.bottom
                 )
                 canvas.drawBitmap(bmp, iconSrcRect, iconDstRect, null)
             }

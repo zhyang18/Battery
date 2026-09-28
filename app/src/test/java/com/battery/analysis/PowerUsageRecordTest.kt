@@ -111,4 +111,56 @@ class PowerUsageRecordTest {
         val isInvalidChargingRecord = record.avgPowerWatts <= 0.001f && record.getDurationMs() >= 60_000L
         assertEquals(true, isInvalidChargingRecord)
     }
+
+    /**
+     * 测试耗电历史记录实体转换为 JSON 字符串以及从 JSON 字符串完整反向还原的准确性。
+     */
+    @Test
+    fun testPowerUsageRecordJsonSerialization() {
+        val original = PowerUsageRecord(
+            id = 1790566000000L,
+            recordTime = "2026-09-28 12:00:00",
+            levelPercent = 88,
+            voltageVolts = 4.25f,
+            temperature = 31.5f,
+            energyWh = 18.5f,
+            isCharging = false,
+            avgPowerWatts = 1.85f,
+            screenOnPowerWatts = 2.10f,
+            screenOffPowerWatts = 0.35f,
+            screenOnDurationText = "1h30m",
+            screenOffDurationText = "2h15m",
+            totalDurationText = "3h45m",
+            remainingScreenOnText = "6h",
+            remainingCompositeText = "12h",
+            remainingScreenOffText = "30h",
+            isShizukuRealData = true,
+            appCount = 5,
+            trendPointsJson = """[{"ts":1790566000000,"lvl":88}]""",
+            appListJson = """[{"pkg":"com.example.app","name":"Example","time":3600000}]""",
+            backgroundPowerWatts = 0.2f,
+            backgroundDurationText = "1h",
+            remainingBackgroundText = "15h",
+            screenOnEnergyWh = 3.15f,
+            totalEnergyWh = 6.94f,
+            screenOffEnergyWh = 0.79f,
+            backgroundEnergyWh = 0.2f,
+            isCompleted = true,
+            lastCheckpointTime = 1790566000000L
+        )
+
+        val jsonStr = original.toJsonString()
+        val restored = PowerUsageRecord.fromJsonString(jsonStr)
+
+        org.junit.Assert.assertNotNull(restored)
+        assertEquals(original.id, restored!!.id)
+        assertEquals(original.recordTime, restored.recordTime)
+        assertEquals(original.levelPercent, restored.levelPercent)
+        assertEquals(original.voltageVolts, restored.voltageVolts, 0.001f)
+        assertEquals(original.temperature, restored.temperature, 0.001f)
+        assertEquals(original.avgPowerWatts, restored.avgPowerWatts, 0.001f)
+        assertEquals(original.isShizukuRealData, restored.isShizukuRealData)
+        assertEquals(original.trendPointsJson, restored.trendPointsJson)
+        assertEquals(original.appListJson, restored.appListJson)
+    }
 }

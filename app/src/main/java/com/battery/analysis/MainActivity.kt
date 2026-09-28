@@ -216,7 +216,8 @@ class MainActivity : AppCompatActivity() {
 
         // 禁用顶级 ViewPager2 手势横滑，避免干扰内部子 Tab 横滑切换
         binding.mainViewPager.isUserInputEnabled = false
-        binding.mainViewPager.offscreenPageLimit = 1
+        // 预加载并常驻全部 3 个顶级页签（耗电、检测、设置），杜绝底部页签切换时销毁重建耗电页视图造成重复刷新与视觉卡顿
+        binding.mainViewPager.offscreenPageLimit = 2
 
         // 动态控制充、耗电统计菜单项在底部导航栏中的显隐
         val powerMenuItem = binding.bottomNavigation.menu.findItem(R.id.nav_power)
@@ -436,6 +437,9 @@ class MainActivity : AppCompatActivity() {
         Shizuku.removeRequestPermissionResultListener(requestPermissionResultListener)
         Shizuku.removeBinderReceivedListener(binderReceivedListener)
         Shizuku.removeBinderDeadListener(binderDeadListener)
+        try {
+            com.battery.analysis.util.ShizukuProcessCleaner.purgeDanglingProcesses()
+        } catch (_: Exception) {}
     }
 
     /**

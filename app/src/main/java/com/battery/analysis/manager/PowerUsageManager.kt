@@ -37,7 +37,11 @@ import android.os.PowerManager
 import com.battery.analysis.service.KeepAliveAccessibilityService
 import com.battery.analysis.util.ShizukuForegroundAppDetector
 import rikka.shizuku.Shizuku
+import java.io.File
 import java.util.Calendar
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -2810,6 +2814,89 @@ class PowerUsageManager private constructor(private val context: Context) {
             isShizukuRealData = false,
             startLevelPercent = startLevel
         )
+    }
+
+    /** 内存级当前完整耗电数据包缓存，供应用内页签切换与返回秒级复用 */
+    @Volatile
+    private var cachedPowerPackage: FullPowerDataPackage? = null
+
+    /** 本地轻量快照缓存文件对象 */
+    private val cacheFile: File
+        get() = File(context.cacheDir, "power_package_cache.json")
+
+    /**
+     * 判断当前是否存在有效的耗电数据包缓存（包含内存缓存与本地磁盘快照）。
+     *
+     * @return 若存在有效缓存返回 true，否则返回 false
+     */
+    fun hasCachedPowerPackage(): Boolean {
+        if (cachedPowerPackage != null) return true
+        val file = cacheFile
+        return file.exists() && file.length() > 0L
+    }
+
+    /**
+     * 获取最近一次刷新成功的完整耗电数据包。
+     * 优先从高频内存中直接读取；若进程刚经历冷启动导致内存为空，则尝试从磁盘私有缓存文件中恢复。
+     *
+     * @return 还原构建的完整耗电数据包 [FullPowerDataPackage]，若无可用缓存或解析失败返回 null
+     */
+    fun getCachedPowerPackage(): FullPowerDataPackage? {
+        cachedPowerPackage?.let { return it }
+
+        val file = cacheFile
+        if (!file.exists() || file.length() <= 0L) return null
+
+        return try {
+            val jsonStr = file.readText()
+            val record = PowerUsageRecord.fromJsonString(jsonStr) ?: return null
+            val restoredPackage = record.toFullPowerPackage(context)
+            cachedPowerPackage = restoredPackage
+            restoredPackage
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /**
+     * 设置并更新最近一次刷新成功的完整耗电数据包。
+     * 同步保存在内存中，并在后台异步线程写入应用私有缓存文件供冷启动秒开复用。
+     *
+     * @param pkg 刚刚完成抓取与渲染的完整耗电数据包 [FullPowerDataPackage]
+     */
+    fun setCachedPowerPackage(pkg: FullPowerDataPackage) {
+        cachedPowerPackage = pkg
+        try {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val timeStr = dateFormatter.get()?.format(Date()) ?: ""
+                    val record = PowerUsageRecord.fromFullPowerPackage(
+                        fullPackage = pkg,
+                        recordTime = timeStr,
+                        id = System.currentTimeMillis()
+                    )
+                    cacheFile.writeText(record.toJsonString())
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        } catch (_: Exception) {
+            // 忽略异常，降级保留内存缓存
+        }
+    }
+
+    /**
+     * 清理当前已缓存的完整耗电数据包（包含内存与磁盘文件）。
+     */
+    fun clearCachedPowerPackage() {
+        cachedPowerPackage = null
+        try {
+            val file = cacheFile
+            if (file.exists()) {
+                file.delete()
+            }
+        } catch (_: Exception) {}
     }
 
     /**

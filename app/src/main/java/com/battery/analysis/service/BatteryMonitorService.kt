@@ -352,6 +352,11 @@ class BatteryMonitorService : Service() {
         // 核心策略：启动 AlarmManager 心跳，每 15 分钟触发一次
         // 若服务被 OOM Killer 杀死，心跳 Alarm 唤醒进程后会自动重启服务，实现自愈拉活
         scheduleHeartbeatAlarm(this)
+
+        // 服务启动时主动清查一次历史可能残留的悬挂 Shizuku 远程进程
+        try {
+            com.battery.analysis.util.ShizukuProcessCleaner.purgeDanglingProcesses()
+        } catch (_: Exception) {}
     }
 
     /**
@@ -440,6 +445,9 @@ class BatteryMonitorService : Service() {
         monitorSamplingJob?.cancel()
         serviceScope.cancel()
         com.battery.analysis.timeline.util.DrawableBitmapCache.trimToLevel(android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+        try {
+            com.battery.analysis.util.ShizukuProcessCleaner.purgeDanglingProcesses()
+        } catch (_: Exception) {}
     }
 
     /**
@@ -450,6 +458,11 @@ class BatteryMonitorService : Service() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         com.battery.analysis.timeline.util.DrawableBitmapCache.trimToLevel(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            try {
+                com.battery.analysis.util.ShizukuProcessCleaner.purgeDanglingProcesses()
+            } catch (_: Exception) {}
+        }
     }
 
     /**

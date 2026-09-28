@@ -493,5 +493,90 @@ data class PowerUsageRecord(
                 lastCheckpointTime = lastCheckpointTime
             )
         }
+
+        /**
+         * 从 JSON 字符串反序列化构建 [PowerUsageRecord] 实例。
+         *
+         * @param jsonStr 待解析的 JSON 字符串
+         * @return 构建成功的 [PowerUsageRecord] 实例，若解析失败返回 null
+         */
+        fun fromJsonString(jsonStr: String): PowerUsageRecord? {
+            return try {
+                val obj = JSONObject(jsonStr)
+                PowerUsageRecord(
+                    id = obj.optLong("id", System.currentTimeMillis()),
+                    recordTime = obj.optString("recordTime", ""),
+                    levelPercent = obj.optInt("levelPercent", 0),
+                    voltageVolts = obj.optDouble("voltageVolts", 0.0).toFloat(),
+                    temperature = obj.optDouble("temperature", 0.0).toFloat(),
+                    energyWh = obj.optDouble("energyWh", 0.0).toFloat(),
+                    isCharging = obj.optBoolean("isCharging", false),
+                    avgPowerWatts = obj.optDouble("avgPowerWatts", 0.0).toFloat(),
+                    screenOnPowerWatts = obj.optDouble("screenOnPowerWatts", 0.0).toFloat(),
+                    screenOffPowerWatts = obj.optDouble("screenOffPowerWatts", 0.0).toFloat(),
+                    screenOnDurationText = obj.optString("screenOnDurationText", ""),
+                    screenOffDurationText = obj.optString("screenOffDurationText", ""),
+                    totalDurationText = obj.optString("totalDurationText", ""),
+                    remainingScreenOnText = obj.optString("remainingScreenOnText", ""),
+                    remainingCompositeText = obj.optString("remainingCompositeText", ""),
+                    remainingScreenOffText = obj.optString("remainingScreenOffText", ""),
+                    isShizukuRealData = obj.optBoolean("isShizukuRealData", false),
+                    appCount = obj.optInt("appCount", 0),
+                    trendPointsJson = obj.optString("trendPointsJson", "[]"),
+                    appListJson = obj.optString("appListJson", "[]"),
+                    backgroundPowerWatts = obj.optDouble("backgroundPowerWatts", 0.0).toFloat(),
+                    backgroundDurationText = obj.optString("backgroundDurationText", ""),
+                    remainingBackgroundText = obj.optString("remainingBackgroundText", ""),
+                    screenOnEnergyWh = obj.optDouble("screenOnEnergyWh", 0.0).toFloat(),
+                    totalEnergyWh = obj.optDouble("totalEnergyWh", 0.0).toFloat(),
+                    screenOffEnergyWh = obj.optDouble("screenOffEnergyWh", 0.0).toFloat(),
+                    backgroundEnergyWh = obj.optDouble("backgroundEnergyWh", 0.0).toFloat(),
+                    isCompleted = obj.optBoolean("isCompleted", true),
+                    lastCheckpointTime = obj.optLong("lastCheckpointTime", 0L)
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null
+            }
+        }
+    }
+
+    /**
+     * 将当前耗电记录实体序列化为 JSON 字符串，便于本地磁盘轻量缓存。
+     *
+     * @return 序列化后的 JSON 字符串
+     */
+    fun toJsonString(): String {
+        val obj = JSONObject()
+        obj.put("id", id)
+        obj.put("recordTime", recordTime)
+        obj.put("levelPercent", levelPercent)
+        obj.put("voltageVolts", voltageVolts.toDouble())
+        obj.put("temperature", temperature.toDouble())
+        obj.put("energyWh", energyWh.toDouble())
+        obj.put("isCharging", isCharging)
+        obj.put("avgPowerWatts", avgPowerWatts.toDouble())
+        obj.put("screenOnPowerWatts", screenOnPowerWatts.toDouble())
+        obj.put("screenOffPowerWatts", screenOffPowerWatts.toDouble())
+        obj.put("screenOnDurationText", screenOnDurationText)
+        obj.put("screenOffDurationText", screenOffDurationText)
+        obj.put("totalDurationText", totalDurationText)
+        obj.put("remainingScreenOnText", remainingScreenOnText)
+        obj.put("remainingCompositeText", remainingCompositeText)
+        obj.put("remainingScreenOffText", remainingScreenOffText)
+        obj.put("isShizukuRealData", isShizukuRealData)
+        obj.put("appCount", appCount)
+        obj.put("trendPointsJson", trendPointsJson)
+        obj.put("appListJson", appListJson)
+        obj.put("backgroundPowerWatts", backgroundPowerWatts.toDouble())
+        obj.put("backgroundDurationText", backgroundDurationText)
+        obj.put("remainingBackgroundText", remainingBackgroundText)
+        obj.put("screenOnEnergyWh", screenOnEnergyWh.toDouble())
+        obj.put("totalEnergyWh", totalEnergyWh.toDouble())
+        obj.put("screenOffEnergyWh", screenOffEnergyWh.toDouble())
+        obj.put("backgroundEnergyWh", backgroundEnergyWh.toDouble())
+        obj.put("isCompleted", isCompleted)
+        obj.put("lastCheckpointTime", lastCheckpointTime)
+        return obj.toString()
     }
 }

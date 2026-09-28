@@ -591,8 +591,16 @@ class PowerUsageFragment : Fragment() {
             }
             updateBackgroundStatsSwitchVisibility()
             if (!isViewingSnapshot && !isCharging && currentDisplayTab == 0) {
-                if (com.battery.analysis.manager.AppLifecycleTracker.shouldRefreshPowerStats(lastRenderedPackage != null)) {
+                val hasRendered = lastRenderedPackage != null
+                val hasCache = powerManager.hasCachedPowerPackage()
+                val hasAvailableData = hasRendered || hasCache
+                if (com.battery.analysis.manager.AppLifecycleTracker.shouldRefreshPowerStats(hasAvailableData)) {
                     loadData()
+                } else if (lastRenderedPackage == null && hasCache) {
+                    // 处于防刷新周期内（如冷启动 1 分钟内或视图重建），从本地/内存缓存直接快速还原数据，免除重复解析与闪烁
+                    powerManager.getCachedPowerPackage()?.let { cached ->
+                        renderFullPowerData(cached, markAsRefreshed = false)
+                    }
                 }
             }
             updateShizukuBannerState()
@@ -1215,8 +1223,6 @@ class PowerUsageFragment : Fragment() {
             binding.appbarPower.requestLayout()
             binding.coordinatorPower.requestLayout()
 
-            loadData()
-
             if (showToast) {
 //                Toast.makeText(requireContext(), getString(R.string.toast_auto_switch_discharging), Toast.LENGTH_SHORT).show()
             }
@@ -1236,12 +1242,13 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 当监听到断开外部电源（拔掉充电器）时触发，更新界面展示模式切回耗电统计。
-     * 底层数据固化与归档已由后台监控服务与广播接收器原子保障，界面仅专注视图渲染切换。
+     * 当监听到断开外部电源（拔掉充电器）时触发，更新界面展示模式切回耗电统计并重新加载最新放电数据。
+     * 底层数据固化与归档已由后台监控服务与广播接收器原子保障，界面仅专注视图渲染切换与新周期数据展示。
      */
     private fun onDevicePowerDisconnected() {
         if (_binding == null) return
         applySmartChargingMode(isCharging = false, showToast = true)
+        loadData()
     }
 
     /**
@@ -1676,13 +1683,18 @@ class PowerUsageFragment : Fragment() {
      *
      * @param fullPackage 包含电池快照、核心指标、应用列表及走势点的完整数据包
      * @param prebuiltTimelineState 在后台异步线程预先构建的功耗时间轴状态对象，若为 null 则在当前线程回退构建
+     * @param markAsRefreshed 是否标记本次为新完成的刷新并记录更新时间戳（从缓存恢复或查看快照时传 false）
      */
     private fun renderFullPowerData(
         fullPackage: com.battery.analysis.manager.FullPowerDataPackage,
-        prebuiltTimelineState: com.battery.analysis.timeline.presentation.BatteryTimelineState? = null
+        prebuiltTimelineState: com.battery.analysis.timeline.presentation.BatteryTimelineState? = null,
+        markAsRefreshed: Boolean = true
     ) {
         lastRenderedPackage = fullPackage
-        com.battery.analysis.manager.AppLifecycleTracker.markDischargeRefreshed()
+        powerManager.setCachedPowerPackage(fullPackage)
+        if (markAsRefreshed && !isViewingSnapshot) {
+            com.battery.analysis.manager.AppLifecycleTracker.markDischargeRefreshed()
+        }
         val snapshot = fullPackage.batterySnapshot
         val overview = fullPackage.overviewStats
 

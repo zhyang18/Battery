@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.IBinder
 import android.util.Log
 import rikka.shizuku.Shizuku
+import rikka.shizuku.ShizukuBinderWrapper
 import rikka.shizuku.SystemServiceHelper
 
 /**
@@ -33,6 +34,20 @@ object ShizukuForegroundAppDetector {
 
     /** 结果内存缓存（2000ms），避免高频重复 IPC 与反射查询，显著降低轮询 CPU 占用与电池功耗 */
     private const val CACHE_EXPIRE_MS = 2000L
+
+    /** 命令行兜底探测下一次允许执行的时间戳（毫秒），杜绝每 2 秒高频 fork 进程 */
+    @Volatile
+    private var cmdProbeNextAllowedTs: Long = 0L
+
+    /** 命令行探测连续失败次数，用于计算指数退避冷却时长 */
+    @Volatile
+    private var cmdProbeFailCount: Int = 0
+
+    /** 命令行探测基础冷却时长（15 秒） */
+    private const val CMD_PROBE_BASE_COOLDOWN_MS = 15_000L
+
+    /** 命令行探测最大退避冷却时长（60 秒） */
+    private const val CMD_PROBE_MAX_COOLDOWN_MS = 60_000L
 
     /**
      * 检查当前 Shizuku 特权通道是否可用且已授权。
@@ -125,12 +140,23 @@ object ShizukuForegroundAppDetector {
             return amPkg
         }
 
-        // 3. 兜底尝试通过 Shizuku 轻量命令查询（在 Binder IPC 均失败时兜底，确保 OEM 深度定制系统兼容）
-        val cmdPkg = getForegroundPackageViaCmd()
-        if (!cmdPkg.isNullOrEmpty()) {
-            lastQueryTs = now
-            lastForegroundPackage = cmdPkg
-            return cmdPkg
+        // 3. 兜底尝试通过 Shizuku 轻量命令查询（在 Binder IPC 均失败时兜底，受 15~60 秒熔断冷却保护，确保 OEM 深度定制系统兼容）
+        if (now >= cmdProbeNextAllowedTs) {
+            val cmdPkg = getForegroundPackageViaCmd()
+            if (!cmdPkg.isNullOrEmpty()) {
+                cmdProbeFailCount = 0
+                cmdProbeNextAllowedTs = now + CMD_PROBE_BASE_COOLDOWN_MS
+                lastQueryTs = now
+                lastForegroundPackage = cmdPkg
+                return cmdPkg
+            } else {
+                cmdProbeFailCount++
+                val cooldown = minOf(
+                    CMD_PROBE_BASE_COOLDOWN_MS * (1L shl minOf(cmdProbeFailCount, 4)),
+                    CMD_PROBE_MAX_COOLDOWN_MS
+                )
+                cmdProbeNextAllowedTs = now + cooldown
+            }
         }
 
         // 4. 最终回退：沿用上一已知有效前台包名，无法获取时如实返回 null，绝不伪造桌面保底数据
@@ -176,9 +202,10 @@ object ShizukuForegroundAppDetector {
             var service = cachedAtmService
             if (service == null) {
                 val binder = SystemServiceHelper.getSystemService("activity_task") ?: return null
+                val wrappedBinder = ShizukuBinderWrapper(binder)
                 val stubClass = Class.forName("android.app.IActivityTaskManager\$Stub")
                 val asInterfaceMethod = stubClass.getMethod("asInterface", IBinder::class.java).apply { isAccessible = true }
-                service = asInterfaceMethod.invoke(null, binder)
+                service = asInterfaceMethod.invoke(null, wrappedBinder)
                 cachedAtmService = service
             }
             if (service == null) return null
@@ -272,9 +299,10 @@ object ShizukuForegroundAppDetector {
             var service = cachedAmService
             if (service == null) {
                 val binder = SystemServiceHelper.getSystemService("activity") ?: return null
+                val wrappedBinder = ShizukuBinderWrapper(binder)
                 val stubClass = Class.forName("android.app.IActivityManager\$Stub")
                 val asInterfaceMethod = stubClass.getMethod("asInterface", IBinder::class.java).apply { isAccessible = true }
-                service = asInterfaceMethod.invoke(null, binder)
+                service = asInterfaceMethod.invoke(null, wrappedBinder)
                 cachedAmService = service
             }
             if (service == null) return null

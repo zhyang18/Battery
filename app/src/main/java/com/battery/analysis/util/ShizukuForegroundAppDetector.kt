@@ -90,10 +90,11 @@ object ShizukuForegroundAppDetector {
      *
      * 优先通过 `activity_task` (Android 10+) 的 `getTasks(1)` 反射获取；
      * 其次通过 `activity` (Android 9 及以下) 的 `getTasks(1)` 获取；
-     * 若均失败则安全回退至上一已知有效前台包名或默认桌面，杜绝在秒级采样循环中重复 fork 进程执行 heavy dumpsys 耗电命令。
+     * 若均失败则安全回退至上一已知有效前台包名或 null，杜绝在秒级采样循环中重复 fork 进程执行 heavy dumpsys 耗电命令，
+     * 且严禁伪造桌面保底数据以防止其他前台应用的亮屏时间与能耗被误记入桌面。
      *
      * @param context 应用程序上下文，可选
-     * @return 当前置顶前台应用包名，若未授权或无法获取则返回 null
+     * @return 当前置顶前台应用包名，若未授权或无法获取真实数据则返回 null
      */
     fun getForegroundPackageName(context: android.content.Context? = null): String? {
         if (context != null && cachedHomePackage == null) {
@@ -132,9 +133,9 @@ object ShizukuForegroundAppDetector {
             return cmdPkg
         }
 
-        // 4. 最终回退：沿用上一已知前台包名或系统默认桌面
+        // 4. 最终回退：沿用上一已知有效前台包名，无法获取时如实返回 null，绝不伪造桌面保底数据
         lastQueryTs = now
-        return lastForegroundPackage ?: cachedHomePackage
+        return lastForegroundPackage
     }
 
     /**
@@ -224,13 +225,13 @@ object ShizukuForegroundAppDetector {
 
             val topTask = tasks?.firstOrNull()
             if (topTask != null) {
-                if (isHomeTaskInfo(topTask)) {
-                    cachedHomePackage?.let { return it }
-                }
+                val isHome = isHomeTaskInfo(topTask)
                 val topActivity = extractTopActivity(topTask)
                 val pkg = normalizeForegroundPackage(topActivity?.packageName)
                 if (!pkg.isNullOrEmpty()) {
                     return pkg
+                } else if (isHome) {
+                    cachedHomePackage?.let { return it }
                 }
             }
         } catch (e: Throwable) {

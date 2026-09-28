@@ -2384,9 +2384,12 @@ class PowerUsageFragment : Fragment() {
         }
 
         btnConfirm.setOnClickListener {
-            val resetLevel = powerManager.getCurrentBatteryStatus().levelPercent
+            val status = powerManager.getCurrentBatteryStatus()
+            val isCharging = status.isCharging || chargingManager.isCharging()
             viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-                powerManager.onPowerDisconnected(resetLevel)
+                if (!isCharging) {
+                    powerManager.onPowerDisconnected(status.levelPercent)
+                }
                 powerManager.resetPowerStats()
                 withContext(Dispatchers.Main) {
                     if (_binding != null) {

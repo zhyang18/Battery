@@ -531,7 +531,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             } else if (screenOnHours <= 0f) {
                 // 全息屏工况：亮屏能耗严格为 0，息屏能耗对齐整机总能耗
                 onEnergyWh = 0f
-                offEnergyWh = if (physicalTotalEnergyWh > intOffEnergyWh) {
+                offEnergyWh = if (physicalTotalEnergyWh > 0f) {
                     physicalTotalEnergyWh
                 } else {
                     if (intTotalEnergyWh > 0f) intTotalEnergyWh else intOffEnergyWh
@@ -541,14 +541,21 @@ class PowerUsageManager private constructor(private val context: Context) {
                 // 亮息混合工况：
                 // 亮屏期间 CPU 活跃且高频（1Hz）连续采样，瞬时电压电流微积分具备最高物理真值置信度；
                 // 息屏期间系统进入 Deep Sleep（深度休眠），CPU 暂停导致软件采样缺失。
-                // 硬件芯片库仑计在硬件层持续积分电荷量，当硬件物理总能量大于软件亮屏能量时，
-                // 将差值补偿为息屏真实能耗（包含深度休眠漏电），实现整机物理闭环。
+                // 硬件芯片库仑计在硬件层持续积分电荷量（physicalTotalEnergyWh 为整机真实放电能量）。
+                // 当整机真实放电能量大于亮屏实测能量时，差值即为息屏待机期间（含深度休眠）消耗的真实能量！
                 val hwCompensatedOffEnergyWh = if (physicalTotalEnergyWh > onEnergyWh) {
                     physicalTotalEnergyWh - onEnergyWh
                 } else {
                     0f
                 }
-                offEnergyWh = maxOf(intOffEnergyWh, hwCompensatedOffEnergyWh)
+                // 修复息屏能量严重失真虚高：以硬件芯片库仑计/掉电量真值为准。
+                // 息屏软件积分容易因唤醒瞬态功耗大断层导致虚高，因此当存在硬件物理总放电量时，
+                // 息屏能耗以硬件守恒差值 hwCompensatedOffEnergyWh 为真值，杜绝虚高软件积分覆盖真实数据。
+                offEnergyWh = if (physicalTotalEnergyWh > 0f) {
+                    hwCompensatedOffEnergyWh
+                } else {
+                    intOffEnergyWh
+                }
                 realTotalEnergyWh = onEnergyWh + offEnergyWh
             }
 
@@ -843,9 +850,12 @@ class PowerUsageManager private constructor(private val context: Context) {
                     }
                 }
             } else if (!lastOn && !isScreenOn) {
-                // 纯息屏切片：即便跨越长休眠也连续归入息屏能量
-                val dJoules = avgWatts * (dt / 1000.0)
-                dischargeAccumulator.screenOffJoules += dJoules
+                // 纯息屏切片：仅在正常采样间隔内（<= MAX_INTEGRATION_INTERVAL_MS）进行梯形微积分，
+                // 严禁将跨越数小时的深度休眠大断层直接乘以唤醒瞬态功耗，杜绝息屏能耗虚高暴增
+                if (dt in 1L..MAX_INTEGRATION_INTERVAL_MS) {
+                    val dJoules = avgWatts * (dt / 1000.0)
+                    dischargeAccumulator.screenOffJoules += dJoules
+                }
                 dischargeAccumulator.screenOffDurationMs += dt
             } else if (lastOn && !isScreenOn) {
                 // 亮屏转息屏过渡切片
@@ -855,7 +865,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                 dischargeAccumulator.screenOnJoules += onJoules
                 dischargeAccumulator.screenOnDurationMs += onMs
                 if (offMs > 0L) {
-                    dischargeAccumulator.screenOffJoules += roundedWatts * (offMs / 1000.0)
+                    if (offMs <= MAX_INTEGRATION_INTERVAL_MS) {
+                        dischargeAccumulator.screenOffJoules += roundedWatts * (offMs / 1000.0)
+                    }
                     dischargeAccumulator.screenOffDurationMs += offMs
                 }
                 if (!packageName.isNullOrEmpty() && onMs > 0L) {
@@ -872,7 +884,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val onMs = minOf(1000L, dt)
                 val offMs = dt - onMs
                 if (offMs > 0L) {
-                    dischargeAccumulator.screenOffJoules += lastWatts * (offMs / 1000.0)
+                    if (offMs <= MAX_INTEGRATION_INTERVAL_MS) {
+                        dischargeAccumulator.screenOffJoules += lastWatts * (offMs / 1000.0)
+                    }
                     dischargeAccumulator.screenOffDurationMs += offMs
                 }
                 val onJoules = roundedWatts * (onMs / 1000.0)
@@ -1388,9 +1402,9 @@ class PowerUsageManager private constructor(private val context: Context) {
             return
         }
 
-        // 开启新会话前，先将数据库中所有其它未完结的放电草稿正式结案归档，杜绝生成多个“放电中”
+        // 开启新会话前，先将数据库中所有其它未完结的放电草稿彻底物理删除，杜绝脏草稿堆积
         try {
-            PowerUsageDbHelper.getInstance(context).finalizeRunningRecords(exceptId = unplugTime)
+            PowerUsageDbHelper.getInstance(context).deleteRunningRecords(exceptId = unplugTime)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -1441,6 +1455,14 @@ class PowerUsageManager private constructor(private val context: Context) {
             val timeStr = dateFormatter.get()!!.format(Date(now))
             val currentMode = getSelectedMode()
             val fullPackage = loadPowerData(currentMode)
+            val avgWatts = fullPackage.overviewStats.avgPowerWatts
+            val durationMs = fullPackage.overviewStats.totalDurationMs
+
+            // 严格守卫：若平均放电功耗 <= 0 且时长大于 1 分钟，说明该区间无真实放电采样或实际处于充电中，严禁保存为耗电历史
+            if (avgWatts <= 0.001f && durationMs >= 60_000L) {
+                return null
+            }
+
             // 耗电历史快照是记录放电周期的历史账本，强制其 isCharging 属性为 false，严禁保存为充电记录
             val powerRecord = PowerUsageRecord.fromFullPowerPackage(
                 fullPackage = fullPackage,
@@ -1450,7 +1472,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                 lastCheckpointTime = now
             ).copy(isCharging = false)
             val powerDbHelper = PowerUsageDbHelper.getInstance(context)
-            powerDbHelper.insertRecord(powerRecord)
+            val insertedRowId = powerDbHelper.insertRecord(powerRecord)
+            if (insertedRowId == -1L) {
+                return null
+            }
 
             lastDischargeCheckpointTime = now
             if (currentLevel > 0) {
@@ -1514,12 +1539,12 @@ class PowerUsageManager private constructor(private val context: Context) {
      */
     @Synchronized
     fun onPowerConnected(timestamp: Long = System.currentTimeMillis()): PowerUsageRecord? {
-        // 1. 归档上一个放电周期的耗电账本快照（将 RUNNING 更新为 COMPLETED）
+        // 1. 归档上一个放电周期的耗电账本快照（若满足非充电真实放电条件则完结归档）
         val record = archiveDischargeSession(timestamp)
 
-        // 2. 彻底扫清数据库中所有可能残留的放电中草稿（接入外部电源时必然已结束放电）
+        // 2. 彻底物理清理数据库中所有可能残留的放电中草稿（接入外部电源时必然已结束放电，严禁保存为耗电历史）
         try {
-            PowerUsageDbHelper.getInstance(context).finalizeRunningRecords()
+            PowerUsageDbHelper.getInstance(context).deleteRunningRecords()
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -1533,7 +1558,7 @@ class PowerUsageManager private constructor(private val context: Context) {
     /**
      * 结算并最终归档当前放电周期的完整耗电账本快照（Finalize 入库）。
      * 将 RUNNING 状态更新为 COMPLETED 状态，同时具备无效短时插拔清理与幂等防重守卫。
-     * 若在放电周期内电量反而上升（实际在充电），严禁保存为耗电记录并清理已有草稿。
+     * 若在放电周期内电量反而上升（实际在充电）或平均放电功耗为零，严禁保存为耗电记录并清理已有草稿。
      *
      * @param now 触发插电或结算时刻的时间戳毫秒值
      * @return 成功归档的 [PowerUsageRecord] 快照实体，若周期不足 30 秒、充电异常或已归档过则返回 null
@@ -1544,17 +1569,18 @@ class PowerUsageManager private constructor(private val context: Context) {
         val lastUnplugLevel = getLastUnplugLevel()
         val currentLevel = getCurrentBatteryStatus().levelPercent
         val sessionId = if (currentDischargeSessionId > 0L) currentDischargeSessionId else lastUnplugTime
+        val dbHelper = PowerUsageDbHelper.getInstance(context)
 
         // 1. 无效短时拔插防护：若拔电时长不足 30 秒，清除可能已建立的草稿，杜绝碎片垃圾数据
         if (lastUnplugTime <= 0L || (now - lastUnplugTime) <= 30000L) {
             if (sessionId > 0L) {
                 try {
-                    PowerUsageDbHelper.getInstance(context).deleteRecord(sessionId)
+                    dbHelper.deleteRecord(sessionId)
                 } catch (_: Exception) {}
             }
             currentDischargeSessionId = 0L
             try {
-                PowerUsageDbHelper.getInstance(context).finalizeRunningRecords()
+                dbHelper.deleteRunningRecords()
             } catch (_: Exception) {}
             return null
         }
@@ -1563,12 +1589,12 @@ class PowerUsageManager private constructor(private val context: Context) {
         if (lastUnplugLevel > 0 && currentLevel > lastUnplugLevel) {
             if (sessionId > 0L) {
                 try {
-                    PowerUsageDbHelper.getInstance(context).deleteRecord(sessionId)
+                    dbHelper.deleteRecord(sessionId)
                 } catch (_: Exception) {}
             }
             currentDischargeSessionId = 0L
             try {
-                PowerUsageDbHelper.getInstance(context).finalizeRunningRecords()
+                dbHelper.deleteRunningRecords()
             } catch (_: Exception) {}
             return null
         }
@@ -1576,12 +1602,30 @@ class PowerUsageManager private constructor(private val context: Context) {
         // 3. 关键幂等防重：同一拔电周期的放电账本只允许归档一次
         if (lastArchivedUnplugTime == lastUnplugTime) {
             try {
-                PowerUsageDbHelper.getInstance(context).finalizeRunningRecords()
+                dbHelper.deleteRunningRecords()
             } catch (_: Exception) {}
             return null
         }
 
-        // 4. 执行最终 Checkpoint 并置为 COMPLETED 完结状态
+        // 4. 充电与零功耗防御：若会话平均放电功耗 <= 0 且时长超过 1 分钟，判定为充电状态无放电采样的无效记录，严禁保存为耗电记录
+        val currentMode = getSelectedMode()
+        val fullPackage = loadPowerData(currentMode)
+        val avgWatts = fullPackage.overviewStats.avgPowerWatts
+        val durationMs = fullPackage.overviewStats.totalDurationMs
+        if (avgWatts <= 0.001f && durationMs >= 60_000L) {
+            if (sessionId > 0L) {
+                try {
+                    dbHelper.deleteRecord(sessionId)
+                } catch (_: Exception) {}
+            }
+            currentDischargeSessionId = 0L
+            try {
+                dbHelper.deleteRunningRecords()
+            } catch (_: Exception) {}
+            return null
+        }
+
+        // 5. 执行最终 Checkpoint 并置为 COMPLETED 完结状态
         currentDischargeSessionId = lastUnplugTime
         val finalizedRecord = checkpointDischargeSession(isFinal = true)
         if (finalizedRecord != null) {
@@ -1593,7 +1637,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 .apply()
         }
         try {
-            PowerUsageDbHelper.getInstance(context).finalizeRunningRecords()
+            dbHelper.deleteRunningRecords()
         } catch (_: Exception) {}
         return finalizedRecord
     }
@@ -1601,10 +1645,11 @@ class PowerUsageManager private constructor(private val context: Context) {
     /**
      * 校验并自愈放电统计断层状态。
      * 当应用被强杀或长时间离线再次启动时：
-     * 1. 若当前设备未在充电，且当前电量大于先前记录的拔电基准电量（发生离线充电且未被捕捉到拔电），
+     * 1. 若当前设备处于充电状态，严禁将离线草稿保存为耗电历史，直接物理清理所有未完结草稿并重置放电会话；
+     * 2. 若当前设备未在充电，且当前电量大于先前记录的拔电基准电量（发生离线充电且未被捕捉到拔电），
      *    自动将拔电基准电量校准为当前电量（或通过 Shizuku 回溯真实拔电时刻），并刷新应用使用基准快照，
      *    防止因负掉电量导致放电功耗失真；
-     * 2. 若拔电时间戳距离当前已超过 48 小时且无底层 dumpsys 支撑，自动平滑对齐基准。
+     * 3. 若拔电时间戳距离当前已超过 48 小时且无底层 dumpsys 支撑，自动平滑对齐基准。
      *
      * @return 若执行了自愈校准返回 true，否则返回 false
      */
@@ -1622,29 +1667,21 @@ class PowerUsageManager private constructor(private val context: Context) {
         val runningSession = dbHelper.getRunningDischargeRecord()
         if (runningSession != null) {
             if (isCharging) {
-                // 场景 B：离线/关机期间发生了插电，若草稿本身是充电状态或电量上升，直接删除草稿，严禁保存为耗电记录
-                if (runningSession.isCharging || (lastUnplugLevel > 0 && currentLevel > lastUnplugLevel)) {
-                    dbHelper.deleteRecord(runningSession.id)
-                } else {
-                    dbHelper.insertRecord(
-                        runningSession.copy(
-                            isCompleted = true,
-                            isCharging = false,
-                            lastCheckpointTime = now
-                        )
-                    )
-                }
-                dbHelper.finalizeRunningRecords()
+                // 场景 B：设备当前处于充电状态，严禁将进行中草稿保存为耗电记录，直接物理删除草稿并清理会话
+                dbHelper.deleteRecord(runningSession.id)
+                dbHelper.deleteRunningRecords()
                 currentDischargeSessionId = 0L
                 lastArchivedUnplugTime = runningSession.id
                 prefs.edit()
                     .putLong("pref_last_archived_unplug_time", runningSession.id)
                     .putLong("pref_current_discharge_session_id", 0L)
+                    .putLong(PREF_KEY_LAST_UNPLUG_TIME, 0L)
+                    .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, 0)
                     .apply()
                 reconciled = true
             } else {
                 // 场景 A：当前仍处于放电中，恢复进行中放电会话的上下文，并清理其它残留的旧草稿
-                dbHelper.finalizeRunningRecords(exceptId = runningSession.id)
+                dbHelper.deleteRunningRecords(exceptId = runningSession.id)
                 currentDischargeSessionId = runningSession.id
                 if (lastUnplugTime <= 0L) {
                     prefs.edit()
@@ -1653,7 +1690,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
             }
         } else if (isCharging) {
-            dbHelper.finalizeRunningRecords()
+            dbHelper.deleteRunningRecords()
         }
 
         if (!isCharging) {
@@ -2061,8 +2098,9 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 读取当前系统的实时电池状态参数。
+     * 严防漏判充电状态：全面涵盖系统状态、供电类型（AC/USB/无线/Dock）、硬件 Manager 以及充电统计模块。
      *
-     * @return 包含当前电量百分比、电压(V)、温度(℃)、能量(Wh)及充电状态的五元组
+     * @return 包含当前电量百分比、电压(V)、温度(℃)、能量(Wh)及充电状态的数据快照 [BatteryStatusSnapshot]
      */
     fun getCurrentBatteryStatus(): BatteryStatusSnapshot {
         val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -2078,7 +2116,16 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_DISCHARGING)
             ?: BatteryManager.BATTERY_STATUS_DISCHARGING
-        val isCharging = (status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL)
+        val plugged = intent?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+        val isBmCharging = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val bmService = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+            bmService?.isCharging == true
+        } else false
+        val isCharging = (status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL ||
+                plugged > 0 ||
+                isBmCharging ||
+                ChargingStatsManager.getInstance(context).checkCurrentSystemChargingState().first)
 
         // 精确计算当前剩余能量（优先硬件计数器，其次多级真实容量推算）
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
@@ -2106,6 +2153,16 @@ class PowerUsageManager private constructor(private val context: Context) {
             isCharging = isCharging,
             totalEnergyWh = totalEnergyWh
         )
+    }
+
+    /**
+     * 判断当前系统是否处于充电或连接外部电源状态。
+     * 综合校验系统底层电池状态广播、插头状态、硬件管理器以及充电统计模块，严防状态漏判。
+     *
+     * @return 若当前处于充电状态或连接外部电源返回 true，否则返回 false
+     */
+    fun isDeviceCharging(): Boolean {
+        return getCurrentBatteryStatus().isCharging
     }
 
     @Volatile
@@ -2728,7 +2785,28 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 判断指定包名是否为用户应用（三方应用、可更新系统应用、有桌面启动入口或属于桌面启动器）。
+     * 检查指定包名是否为用户具有明确前台交互的系统级组件（如负一屏、系统分享、命令行 Shell、文档选择器与应用安装器）。
+     * 此类系统组件虽无桌面独立图标，但属于用户直接使用交互的前台场景，必须如实统计其使用时长与能耗。
+     *
+     * @param packageName 待检查的应用程序包名
+     * @return 若属于用户前台交互系统组件返回 true，否则返回 false
+     */
+    fun isInteractiveSystemApp(packageName: String): Boolean {
+        if (packageName.isBlank()) return false
+        val lower = packageName.lowercase()
+        return lower.contains("intelligent") ||
+                lower.contains("assistant") ||
+                lower.contains("hiboard") ||
+                lower.contains("share") ||
+                lower.contains("intentresolver") ||
+                lower == "com.android.shell" ||
+                lower.contains(".shell") ||
+                lower.contains("documentsui") ||
+                lower.contains("packageinstaller")
+    }
+
+    /**
+     * 判断指定包名是否为用户应用（三方应用、可更新系统应用、有桌面启动入口、属于桌面启动器或具备前台交互的系统组件）。
      *
      * @param packageName 目标包名
      * @return 若为用户交互应用返回 true，否则返回 false
@@ -2741,7 +2819,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             val isUpdatedSystem = (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
             val hasLauncher = pm.getLaunchIntentForPackage(packageName) != null
             val isHome = isHomeLauncher(packageName)
-            !isSystem || isUpdatedSystem || hasLauncher || isHome
+            val isInteractiveSys = isInteractiveSystemApp(packageName)
+            !isSystem || isUpdatedSystem || hasLauncher || isHome || isInteractiveSys
         } catch (_: Exception) {
             false
         }
@@ -2845,9 +2924,9 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 基于 UsageEvents 精准提取指定时间区间 [startTime, endTime] 内各应用的前台活跃毫秒数。
-     * 采用严格的单前台应用生命周期状态机，仅认准 ACTIVITY_RESUMED 至 ACTIVITY_PAUSED，
-     * 并将前台应用 PAUSED 后到下一个应用 RESUMED 之间的亮屏交互时长准确归集至系统桌面 Launcher，
-     * 彻底杜绝桌面停留时长丢失导致的功耗计算失真。
+     * 采用严格的单前台应用生命周期状态机，仅认准真实 ACTIVITY_RESUMED 至 ACTIVITY_PAUSED。
+     * 针对熄屏再亮屏直接进入应用、小窗/画中画导航、弹窗切换等复杂场景，严格保持前台应用连续性，
+     * 绝不盲目判定为系统桌面 Launcher，彻底根除高德地图等第三方应用时长被桌面窃取的致命缺陷。
      *
      * @param usm UsageStatsManager 实例
      * @param startTime 统计起始时间戳（毫秒）
@@ -2862,8 +2941,6 @@ class PowerUsageManager private constructor(private val context: Context) {
         val resultMap = mutableMapOf<String, Long>()
         if (startTime >= endTime) return resultMap
 
-        val defaultHome = getDefaultHomeLauncherPackage()
-
         try {
             // 向前回溯探测在 startTime 瞬间正处于前台活跃状态的应用（最多回溯 15 分钟）
             val lookbackStart = (startTime - 15 * 60 * 1000L).coerceAtLeast(0L)
@@ -2871,7 +2948,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             val event = UsageEvents.Event()
             var currentForegroundPkg: String? = null
             var currentForegroundStartTs: Long = 0L
-            var isScreenOn = true
+            var lastActivePkgBeforeScreenOff: String? = null
 
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
@@ -2890,6 +2967,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                             }
                             currentForegroundPkg = pkg
                             currentForegroundStartTs = ts
+                            lastActivePkgBeforeScreenOff = pkg
                         }
                     }
                     UsageEvents.Event.ACTIVITY_PAUSED -> {
@@ -2899,31 +2977,29 @@ class PowerUsageManager private constructor(private val context: Context) {
                             if (activeEnd > activeStart) {
                                 resultMap[pkg] = (resultMap[pkg] ?: 0L) + (activeEnd - activeStart)
                             }
-                            // 切出当前应用后，若屏幕处于亮屏状态，自动归属为系统桌面
-                            if (isScreenOn && !defaultHome.isNullOrEmpty()) {
-                                currentForegroundPkg = defaultHome
-                                currentForegroundStartTs = ts
-                            } else {
-                                currentForegroundPkg = null
-                                currentForegroundStartTs = 0L
-                            }
+                            // 切出当前应用后置空前台，等待下一 RESUMED 事件或系统桌面显式 Resume 事件，
+                            // 严禁盲目将暂停时间强行赋给桌面启动器，彻底杜绝高德小窗导航或应用内切换时桌面时长虚高；
+                            // 同时保留 lastActivePkgBeforeScreenOff，以便在息屏后重新点亮时无缝恢复该应用
+                            currentForegroundPkg = null
+                            currentForegroundStartTs = 0L
                         }
                     }
                     UsageEvents.Event.SCREEN_INTERACTIVE -> {
-                        isScreenOn = true
-                        if (currentForegroundPkg == null && !defaultHome.isNullOrEmpty()) {
-                            currentForegroundPkg = defaultHome
+                        // 屏幕点亮瞬间：若灭屏前存在活跃应用且尚未收到新 Resume 事件，继承该应用（如熄屏前的高德导航或阅读），
+                        // 绝不盲目归属给系统桌面，杜绝直接点亮屏幕时桌面时长异常膨胀
+                        if (currentForegroundPkg == null && !lastActivePkgBeforeScreenOff.isNullOrEmpty()) {
+                            currentForegroundPkg = lastActivePkgBeforeScreenOff
                             currentForegroundStartTs = ts
                         }
                     }
                     UsageEvents.Event.SCREEN_NON_INTERACTIVE -> {
-                        isScreenOn = false
                         if (currentForegroundPkg != null) {
                             val activeStart = maxOf(currentForegroundStartTs, startTime)
                             val activeEnd = minOf(ts, endTime)
                             if (activeEnd > activeStart) {
                                 resultMap[currentForegroundPkg] = (resultMap[currentForegroundPkg] ?: 0L) + (activeEnd - activeStart)
                             }
+                            lastActivePkgBeforeScreenOff = currentForegroundPkg
                             currentForegroundPkg = null
                             currentForegroundStartTs = 0L
                         }
@@ -3427,6 +3503,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             val event = UsageEvents.Event()
             var currentForegroundPkg: String? = null
             var currentForegroundStartTs: Long = 0L
+            var lastActivePkgBeforeScreenOff: String? = null
             var screenOnStart: Long? = null
 
             while (events.hasNextEvent()) {
@@ -3449,6 +3526,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                             }
                             currentForegroundPkg = pkg
                             currentForegroundStartTs = ts
+                            lastActivePkgBeforeScreenOff = pkg
                         }
                     }
                     UsageEvents.Event.ACTIVITY_PAUSED -> {
@@ -3458,15 +3536,17 @@ class PowerUsageManager private constructor(private val context: Context) {
                             if (activeEnd > activeStart) {
                                 appIntervals.add(AppActivityInterval(pkg, activeStart, activeEnd))
                             }
-                            // 暂存应用切换断点，保留暂停时间戳，不盲目判定为系统桌面，杜绝应用内部切换 Activity 导致时序断流
+                            // 暂存应用切换断点，保留暂停时间戳，不盲目判定为系统桌面，杜绝应用内部切换 Activity 导致时序断流；
+                            // 同时保留 lastActivePkgBeforeScreenOff，以便在息屏后重新点亮时无缝恢复该应用
                             currentForegroundPkg = null
                             currentForegroundStartTs = ts
                         }
                     }
                     UsageEvents.Event.SCREEN_INTERACTIVE -> {
                         screenOnStart = ts
-                        if (currentForegroundPkg == null && !defaultHome.isNullOrEmpty()) {
-                            currentForegroundPkg = defaultHome
+                        // 屏幕点亮瞬间：若存在熄屏前活跃应用，无缝恢复，绝不盲目归属桌面
+                        if (currentForegroundPkg == null && !lastActivePkgBeforeScreenOff.isNullOrEmpty()) {
+                            currentForegroundPkg = lastActivePkgBeforeScreenOff
                             currentForegroundStartTs = ts
                         }
                     }
@@ -3483,6 +3563,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                             if (fgEnd > fgStart) {
                                 appIntervals.add(AppActivityInterval(currentForegroundPkg, fgStart, fgEnd))
                             }
+                            lastActivePkgBeforeScreenOff = currentForegroundPkg
                             currentForegroundPkg = null
                             currentForegroundStartTs = 0L
                         }
@@ -3999,32 +4080,48 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 重置当前放电周期的采样记录与基准快照。
+     * 若当前处于充电状态，清空放电采样与会话上下文，严禁将插电时刻作为拔电时刻记录；
+     * 若处于非充电状态，重新初始化放电周期的起点时间戳与电量基准。
      */
     fun resetPowerStats() {
         val now = System.currentTimeMillis()
         val curStatus = getCurrentBatteryStatus()
+        val isCharging = curStatus.isCharging
         resetDischargeTempPoints(now, curStatus.temperature)
         val initHwSample = SysfsBatterySampler.sampleHardwareDischarge(context, curStatus.voltageVolts, curStatus.temperature)
         val initPower = initHwSample?.powerWatts ?: 0f
-        resetDischargeRealtimeSamples(now, curStatus.levelPercent, curStatus.voltageVolts, curStatus.temperature, initPower, true)
+        resetDischargeRealtimeSamples(now, curStatus.levelPercent, curStatus.voltageVolts, curStatus.temperature, initPower, !isCharging)
 
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val counterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: 0
         val editor = prefs.edit()
-            .putLong(PREF_KEY_LAST_UNPLUG_TIME, now)
-            .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, curStatus.levelPercent.coerceIn(0, 100))
-            .putFloat(PREF_KEY_LAST_UNPLUG_ENERGY, curStatus.energyWh)
-            .putLong("pref_last_archived_unplug_time", 0L)
             .putLong("last_reset_time", now)
             .remove(PREF_KEY_UNPLUG_USAGE_SNAPSHOT)
             .remove(PREF_KEY_UNPLUG_BG_SERVICE_SNAPSHOT)
+
+        if (isCharging) {
+            // 核心守卫：若当前为充电状态，严禁设置拔电基准时间，清空当前进行中放电会话并删除草稿
+            editor.putLong(PREF_KEY_LAST_UNPLUG_TIME, 0L)
+                .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, 0)
+                .putFloat(PREF_KEY_LAST_UNPLUG_ENERGY, 0f)
+                .putLong("pref_current_discharge_session_id", 0L)
+            currentDischargeSessionId = 0L
+            try {
+                PowerUsageDbHelper.getInstance(context).deleteRunningRecords()
+            } catch (_: Exception) {}
+        } else {
+            editor.putLong(PREF_KEY_LAST_UNPLUG_TIME, now)
+                .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, curStatus.levelPercent.coerceIn(0, 100))
+                .putFloat(PREF_KEY_LAST_UNPLUG_ENERGY, curStatus.energyWh)
+                .putLong("pref_last_archived_unplug_time", 0L)
+            lastArchivedUnplugTime = 0L
+            saveUnplugUsageSnapshot()
+        }
+
         if (counterUah > 0) {
             editor.putInt(PREF_KEY_LAST_UNPLUG_CHARGE_COUNTER, counterUah)
         }
         editor.apply()
-
-        lastArchivedUnplugTime = 0L
-        saveUnplugUsageSnapshot()
 
         if (isShizukuAuthorized()) {
             shizukuParser.resetBatteryStats()

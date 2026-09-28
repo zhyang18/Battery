@@ -102,16 +102,22 @@ class PowerUsageDbHelper private constructor(context: Context) :
      * 插入一条新的耗电历史记录或增量更新已有会话草稿。
      * 具备精确主键匹配与防重检测机制：
      * 1. 严格守卫：若记录处于充电状态，严禁保存为耗电历史记录，直接返回 -1；
-     * 2. 优先匹配自身 Session ID，若已存在直接覆写更新（支持放电会话的增量 Checkpoint 原地更新，不产生历史碎片）；
-     * 3. 若自身 ID 未入库，则检测是否存在时间极相近（< 30 秒）且电量、总时长相同的相近记录并覆写；
-     * 4. 否则作为全新记录插入。
+     * 2. 严格守卫：若记录平均放电功耗 <= 0 且持续时长超过 1 分钟，判定为充电状态无放电采样的无效记录，严禁保存，直接返回 -1；
+     * 3. 优先匹配自身 Session ID，若已存在直接覆写更新（支持放电会话的增量 Checkpoint 原地更新，不产生历史碎片）；
+     * 4. 若自身 ID 未入库，则检测是否存在时间极相近（< 30 秒）且电量、总时长相同的相近记录并覆写；
+     * 5. 否则作为全新记录插入。
      *
      * @param record 待持久化的耗电历史实体对象
-     * @return 插入或更新成功返回行 ID，若处于充电状态或失败返回 -1
+     * @return 插入或更新成功返回行 ID，若处于充电状态或无效记录返回 -1
      */
     fun insertRecord(record: PowerUsageRecord): Long {
         // 核心守卫：若记录处于充电状态，严禁保存为耗电历史记录
         if (record.isCharging) {
+            return -1L
+        }
+
+        // 核心守卫：若记录平均放电功耗 <= 0 且时长大于 1 分钟，说明实际处于充电状态或无有效放电采样，严禁保存为耗电历史
+        if (record.avgPowerWatts <= 0.001f && record.getDurationMs() >= 60_000L) {
             return -1L
         }
 
@@ -172,13 +178,13 @@ class PowerUsageDbHelper private constructor(context: Context) :
 
     /**
      * 事务批量插入耗电历史记录列表（用于合并去重恢复）。
-     * 自动过滤剔除任何处于充电状态的异常记录。
+     * 自动过滤剔除任何处于充电状态或平均放电功耗为零的异常记录。
      *
      * @param records 待插入的耗电历史记录列表
      * @return 实际成功写入或更新的有效非充电记录条数
      */
     fun insertRecords(records: List<PowerUsageRecord>): Int {
-        val validRecords = records.filter { !it.isCharging }
+        val validRecords = records.filter { !it.isCharging && !(it.avgPowerWatts <= 0.001f && it.getDurationMs() >= 60_000L) }
         if (validRecords.isEmpty()) return 0
 
         val db = writableDatabase
@@ -207,13 +213,13 @@ class PowerUsageDbHelper private constructor(context: Context) :
 
     /**
      * 在单个事务中清空现有耗电历史记录并写入新的记录列表（用于覆盖式数据恢复）。
-     * 自动过滤剔除任何处于充电状态的异常记录。
+     * 自动过滤剔除任何处于充电状态或平均放电功耗为零的异常记录。
      *
      * @param records 待恢复的耗电历史记录列表
      * @return 实际成功写入的有效非充电记录条数
      */
     fun replaceRecords(records: List<PowerUsageRecord>): Int {
-        val validRecords = records.filter { !it.isCharging }
+        val validRecords = records.filter { !it.isCharging && !(it.avgPowerWatts <= 0.001f && it.getDurationMs() >= 60_000L) }
         val db = writableDatabase
         var insertedCount = 0
         db.beginTransaction()
@@ -341,6 +347,28 @@ class PowerUsageDbHelper private constructor(context: Context) :
     }
 
     /**
+     * 删除数据库中未完结（RUNNING 状态，即 is_completed = 0）的放电草稿。
+     * 用于接入外部电源、处于充电状态或自愈清理历史残留脏状态时，彻底清理未完结草稿，严防生成错误耗电历史。
+     *
+     * @param exceptId 允许保留的目标会话 ID（可选，若传入该 ID 则跳过删除）
+     * @return 实际被删除的记录条数
+     */
+    fun deleteRunningRecords(exceptId: Long? = null): Int {
+        val db = writableDatabase
+        val whereClause = if (exceptId != null && exceptId > 0L) {
+            "$COL_IS_COMPLETED = 0 AND $COL_ID != ?"
+        } else {
+            "$COL_IS_COMPLETED = 0"
+        }
+        val whereArgs = if (exceptId != null && exceptId > 0L) {
+            arrayOf(exceptId.toString())
+        } else {
+            null
+        }
+        return db.delete(TABLE_NAME, whereClause, whereArgs)
+    }
+
+    /**
      * 将数据库中未完结（RUNNING 状态，即 is_completed = 0）的放电草稿批量标记为已结案（is_completed = 1）。
      * 用于开启新会话、接入外部电源或自愈清理历史残留脏状态时，杜绝产生多个“放电中”条目。
      *
@@ -368,8 +396,8 @@ class PowerUsageDbHelper private constructor(context: Context) :
     /**
      * 查询所有已持久化的耗电历史记录，按时间从近到远倒序排列。
      * 自动执行单会话进行中自愈守护：物理上整机在同一时刻至多只允许存在一个处于“放电中”（RUNNING）的活跃会话。
-     * 若历史数据中检测到多条未完结草稿，自动保留最新一条为进行中，其余所有旧会话均原地自愈为已完成并更新数据库。
-     * 自动过滤剔除并清理任何处于充电状态（is_charging = 1）的异常脏记录，保证耗电历史绝对纯净。
+     * 若历史数据中检测到多条未完结草稿，自动保留最新一条为进行中，其余多余草稿物理删除清理。
+     * 自动过滤剔除并清理任何处于充电状态（is_charging = 1）或放电功耗为零且时长超1分钟的异常脏记录，保证耗电历史绝对纯净。
      *
      * @return 纯净有效的耗电历史快照记录列表
      */
@@ -377,15 +405,21 @@ class PowerUsageDbHelper private constructor(context: Context) :
         val list = mutableListOf<PowerUsageRecord>()
         val db = writableDatabase
 
-        // 自动清理历史累积遗留的充电异常脏记录，保证耗电历史绝对纯净
+        // 自动清理历史累积遗留的充电异常脏记录，保证耗电历史绝对纯净：
+        // 1. is_charging = 1 的记录
+        // 2. 平均放电功耗 <= 0 且时长大于 1 分钟的虚假耗电记录（实际在充电状态下误生成的记录）
         try {
-            db.delete(TABLE_NAME, "$COL_IS_CHARGING = 1", null)
+            db.delete(
+                TABLE_NAME,
+                "$COL_IS_CHARGING = 1 OR ($COL_AVG_POWER_WATTS <= 0.001 AND $COL_TOTAL_DURATION != '' AND $COL_TOTAL_DURATION != '0s' AND $COL_TOTAL_DURATION != '--')",
+                null
+            )
         } catch (_: Exception) {}
 
         val cursor = db.query(
             TABLE_NAME,
             null,
-            "$COL_IS_CHARGING = 0",
+            "$COL_IS_CHARGING = 0 AND NOT ($COL_AVG_POWER_WATTS <= 0.001 AND $COL_TOTAL_DURATION != '' AND $COL_TOTAL_DURATION != '0s' AND $COL_TOTAL_DURATION != '--')",
             null,
             null,
             null,
@@ -408,7 +442,7 @@ class PowerUsageDbHelper private constructor(context: Context) :
                     foundFirstRunning = true
                     fixedList.add(record)
                 } else {
-                    fixedList.add(record.copy(isCompleted = true))
+                    // 多余的未完结草稿直接标记为需物理清理，绝不能覆写为已完成
                     needDbFix = true
                 }
             } else {
@@ -419,7 +453,7 @@ class PowerUsageDbHelper private constructor(context: Context) :
         if (needDbFix) {
             val keepId = fixedList.firstOrNull { !it.isCompleted }?.id
             try {
-                finalizeRunningRecords(exceptId = keepId)
+                deleteRunningRecords(exceptId = keepId)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -430,7 +464,7 @@ class PowerUsageDbHelper private constructor(context: Context) :
 
     /**
      * 查询当前最新的一条未完成（RUNNING 状态，即 is_completed = 0）的放电会话记录。
-     * 严格排除处于充电状态的异常记录。
+     * 严格排除处于充电状态或平均放电功耗为零的异常记录。
      *
      * @return 未完结且处于非充电状态的放电草稿实体 [PowerUsageRecord]，若不存在返回 null
      */
@@ -439,7 +473,7 @@ class PowerUsageDbHelper private constructor(context: Context) :
         val cursor = db.query(
             TABLE_NAME,
             null,
-            "$COL_IS_COMPLETED = 0 AND $COL_IS_CHARGING = 0",
+            "$COL_IS_COMPLETED = 0 AND $COL_IS_CHARGING = 0 AND NOT ($COL_AVG_POWER_WATTS <= 0.001 AND $COL_TOTAL_DURATION != '' AND $COL_TOTAL_DURATION != '0s' AND $COL_TOTAL_DURATION != '--')",
             null,
             null,
             null,

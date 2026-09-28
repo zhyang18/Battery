@@ -72,4 +72,43 @@ class PowerUsageRecordTest {
         )
         assertEquals("2025/12/31 23:30~2026/01/01 01:15", recordCrossYear.getFormattedTimeRange())
     }
+
+    /**
+     * 测试充电状态下零放电功耗脏记录的识别与时长解析。
+     * 验证总时长如 "23m29s" 能够正确转换为毫秒数，并且当平均功耗为 0.00 W 且时长超过 1 分钟时，
+     * 判定该记录属于充电状态误保存的无效记录。
+     */
+    @Test
+    fun testZeroPowerChargingRecordDetection() {
+        val record = PowerUsageRecord(
+            id = 1790566000000L,
+            recordTime = "2026-09-28 11:23:00",
+            levelPercent = 49,
+            voltageVolts = 4.1f,
+            temperature = 32f,
+            energyWh = 12f,
+            isCharging = false,
+            avgPowerWatts = 0.00f,
+            screenOnPowerWatts = 0.00f,
+            screenOffPowerWatts = 0.00f,
+            screenOnDurationText = "23m29s",
+            screenOffDurationText = "0s",
+            totalDurationText = "23m29s",
+            remainingScreenOnText = "--",
+            remainingCompositeText = "--",
+            remainingScreenOffText = "--",
+            isShizukuRealData = false,
+            appCount = 0,
+            trendPointsJson = "[]",
+            appListJson = "[]"
+        )
+
+        // 验证时长解析准确性: 23 分钟 * 60 + 29 秒 = 1409 秒 = 1409000 毫秒
+        val expectedMs = (23 * 60 + 29) * 1000L
+        assertEquals(expectedMs, record.getDurationMs())
+
+        // 验证处于零功耗且时长大于 1 分钟的充电脏记录判定条件
+        val isInvalidChargingRecord = record.avgPowerWatts <= 0.001f && record.getDurationMs() >= 60_000L
+        assertEquals(true, isInvalidChargingRecord)
+    }
 }

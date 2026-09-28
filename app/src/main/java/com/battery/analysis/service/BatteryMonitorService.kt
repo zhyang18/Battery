@@ -615,18 +615,19 @@ class BatteryMonitorService : Service() {
     @Volatile
     private var lastForegroundQueryTime: Long = 0L
 
-    /** 前台包名短效内存缓存有效时长（毫秒），延长至 30 秒避免高频发起系统跨进程 IPC 查询消耗电量 */
-    private val FOREGROUND_CACHE_EXPIRE_MS = 30_000L
+    /** 前台包名短效内存缓存有效时长（毫秒），设为 2 秒，兼顾采样周期及时响应与避免高频 Binder IPC */
+    private val FOREGROUND_CACHE_EXPIRE_MS = 2_000L
 
     /**
      * 获取当前处于系统最前台运行的应用包名。
      * 全面事件驱动与低能耗架构：
      * 1. 最高优先级：若宿主本应用正处于前台可见活跃状态（用户正在浏览本 App），直接返回当前应用包名，0 毫秒、0 任何系统查询与 Binder IPC；
      * 2. 次优先级：采用无障碍服务事件驱动捕获的置顶应用（若用户开启了无障碍，纯事件驱动，0 轮询开销，0 跨进程 Binder）；
-     * 3. 亮屏持续静止保持：若此前已确定前台应用且在静止窗口内，直接沿用内存缓存，杜绝秒级频繁触发系统跨进程 IPC 与 CPU 唤醒；
-     * 4. 兜底策略：仅在初次无缓存或窗口超时后，通过特权 Binder 或 UsageStatsManager 增量事件探测。
+     * 3. 亮屏持续静止保持：若此前已确定前台应用且在 2 秒短缓存窗口内，直接沿用内存缓存，杜绝秒级频繁触发系统跨进程 IPC 与 CPU 唤醒；
+     * 4. 兜底策略：仅在初次无缓存或窗口超时后，通过特权 Binder 或 UsageStatsManager 增量事件探测；
+     * 5. 严格反映物理与系统真实数据：严禁在未检测到前台应用或应用暂停时无依据回退或伪造系统桌面保底数据。
      *
-     * @return 当前置顶前台应用包名，若无法获取则返回 null
+     * @return 当前置顶前台应用包名，若无法获取真实数据则返回 null
      */
     private fun getForegroundPackageName(): String? {
         // 0. 宿主应用在前台：极速短路返回，彻底消除前台静止不动时的所有 Binder IPC
@@ -655,10 +656,6 @@ class BatteryMonitorService : Service() {
             return shizukuPkg
         }
 
-        // 获取系统当前生效的默认桌面启动器包名
-        val defaultHomePkg = ShizukuForegroundAppDetector.getDefaultHomePackage(this)
-            ?: PowerUsageManager.getInstance(this).getDefaultHomeLauncherPackage()
-
         // 3. 兜底策略：基于 UsageStatsManager 增量事件探测
         // 若此前已存在有效前台包名，仅查询最近 10 秒增量事件；仅在首次冷启动无缓存时查询最近 30 秒窗口，杜绝 120 秒全量大遍历
         try {
@@ -669,7 +666,6 @@ class BatteryMonitorService : Service() {
                 val event = UsageEvents.Event()
                 var latestResumedPkg: String? = null
                 var latestResumedTs = 0L
-                var latestPausedTs = 0L
                 var hasAnyEvent = false
 
                 while (events.hasNextEvent()) {
@@ -678,17 +674,10 @@ class BatteryMonitorService : Service() {
                     if (pkg.isNullOrEmpty() || pkg.startsWith("com.android.systemui")) continue
                     hasAnyEvent = true
 
-                    when (event.eventType) {
-                        UsageEvents.Event.ACTIVITY_RESUMED -> {
-                            if (event.timeStamp >= latestResumedTs) {
-                                latestResumedPkg = pkg
-                                latestResumedTs = event.timeStamp
-                            }
-                        }
-                        UsageEvents.Event.ACTIVITY_PAUSED -> {
-                            if (event.timeStamp >= latestPausedTs) {
-                                latestPausedTs = event.timeStamp
-                            }
+                    if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
+                        if (event.timeStamp >= latestResumedTs) {
+                            latestResumedPkg = pkg
+                            latestResumedTs = event.timeStamp
                         }
                     }
                 }
@@ -696,12 +685,6 @@ class BatteryMonitorService : Service() {
                 // 若增量窗口内未发生任何应用切换生命周期事件，直接沿用上一已知有效应用，0 额外开销
                 if (!hasAnyEvent && lastKnownForegroundPackage != null) {
                     return lastKnownForegroundPackage
-                }
-
-                // 若最新事件为前台应用 PAUSED，且之后没有新的应用 RESUMED，说明用户已切回桌面
-                if (latestPausedTs > latestResumedTs && !defaultHomePkg.isNullOrEmpty()) {
-                    lastKnownForegroundPackage = defaultHomePkg
-                    return defaultHomePkg
                 }
 
                 if (!latestResumedPkg.isNullOrEmpty()) {
@@ -712,13 +695,9 @@ class BatteryMonitorService : Service() {
         } catch (_: Throwable) {
         }
 
-        // 4. 亮屏持续运行状态保持：若本周期内无新切换事件，持续沿用上一已知有效前台应用；若无历史记录则回退至默认桌面
+        // 4. 亮屏持续运行状态保持：若本周期内无新切换事件，持续沿用上一已知有效前台应用；无法获取真实数据时如实返回 null
         if (lastKnownForegroundPackage != null) {
             return lastKnownForegroundPackage
-        }
-        if (!defaultHomePkg.isNullOrEmpty()) {
-            lastKnownForegroundPackage = defaultHomePkg
-            return defaultHomePkg
         }
         return null
     }

@@ -784,7 +784,27 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     }
 
     /**
-     * 判断指定包名是否为用户应用（三方应用、可更新系统应用、有桌面图标或属于桌面启动器）。
+     * 检查指定包名是否为用户具有明确前台交互的系统级组件（如负一屏、系统分享、命令行 Shell、文档选择器与应用安装器）。
+     *
+     * @param packageName 待检查的应用程序包名
+     * @return 若属于用户前台交互系统组件返回 true，否则返回 false
+     */
+    fun isInteractiveSystemApp(packageName: String): Boolean {
+        if (packageName.isBlank()) return false
+        val lower = packageName.lowercase()
+        return lower.contains("intelligent") ||
+                lower.contains("assistant") ||
+                lower.contains("hiboard") ||
+                lower.contains("share") ||
+                lower.contains("intentresolver") ||
+                lower == "com.android.shell" ||
+                lower.contains(".shell") ||
+                lower.contains("documentsui") ||
+                lower.contains("packageinstaller")
+    }
+
+    /**
+     * 判断指定包名是否为用户应用（三方应用、可更新系统应用、有桌面图标、属于桌面启动器或具备前台交互的系统组件）。
      *
      * @param packageName 目标应用包名
      * @return 若属于用户交互应用返回 true，否则返回 false
@@ -798,7 +818,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             val appInfo = pm.getApplicationInfo(packageName, 0)
             val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
             val isUpdatedSystem = (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-            if (!isSystem || isUpdatedSystem) {
+            val isInteractiveSys = isInteractiveSystemApp(packageName)
+            if (!isSystem || isUpdatedSystem || isInteractiveSys) {
                 true
             } else {
                 pm.getLaunchIntentForPackage(packageName) != null || isHomeLauncher(packageName)
@@ -856,16 +877,14 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val resultMap = mutableMapOf<String, Long>()
         if (startTime >= endTime) return resultMap
 
-        val defaultHome = com.battery.analysis.manager.PowerUsageManager.getInstance(context).getDefaultHomeLauncherPackage()
-
         try {
-            // 向前回溯探测在 startTime 瞬间正处于前台活跃状态的应用（最多回溯 15 分钟）
+            // 向向前回溯探测在 startTime 瞬间正处于前台活跃状态的应用（最多回溯 15 分钟）
             val lookbackStart = (startTime - 15 * 60 * 1000L).coerceAtLeast(0L)
             val events = usm.queryEvents(lookbackStart, endTime)
             val event = UsageEvents.Event()
             var currentForegroundPkg: String? = null
             var currentForegroundStartTs: Long = 0L
-            var isScreenOn = true
+            var lastActivePkgBeforeScreenOff: String? = null
 
             while (events.hasNextEvent()) {
                 events.getNextEvent(event)
@@ -884,6 +903,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                         }
                         currentForegroundPkg = pkg
                         currentForegroundStartTs = ts
+                        lastActivePkgBeforeScreenOff = pkg
                     }
                     UsageEvents.Event.ACTIVITY_PAUSED -> {
                         // 仅当当前离开前台的应用正是记录中的前台应用时才进行结算，杜绝后台事件或旧事件误判
@@ -893,31 +913,29 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             if (activeEnd > activeStart) {
                                 resultMap[pkg] = (resultMap[pkg] ?: 0L) + (activeEnd - activeStart)
                             }
-                            // 切出应用后若屏幕点亮，自动归属为系统桌面
-                            if (isScreenOn && !defaultHome.isNullOrEmpty()) {
-                                currentForegroundPkg = defaultHome
-                                currentForegroundStartTs = ts
-                            } else {
-                                currentForegroundPkg = null
-                                currentForegroundStartTs = 0L
-                            }
+                            // 切出应用后置空前台，等待下一 RESUMED 事件或系统桌面显式 Resume 事件，
+                            // 严禁盲目将暂停时间强行赋给桌面启动器，彻底杜绝高德小窗导航或应用内切换时桌面时长虚高；
+                            // 同时保留 lastActivePkgBeforeScreenOff，以便在息屏后重新点亮时无缝恢复该应用
+                            currentForegroundPkg = null
+                            currentForegroundStartTs = 0L
                         }
                     }
                     UsageEvents.Event.SCREEN_INTERACTIVE -> {
-                        isScreenOn = true
-                        if (currentForegroundPkg == null && !defaultHome.isNullOrEmpty()) {
-                            currentForegroundPkg = defaultHome
+                        // 屏幕点亮瞬间：若灭屏前存在活跃应用且尚未收到新 Resume 事件，继承该应用（如熄屏前的高德导航或阅读），
+                        // 绝不盲目归属给系统桌面，杜绝直接点亮屏幕时桌面时长异常膨胀
+                        if (currentForegroundPkg == null && !lastActivePkgBeforeScreenOff.isNullOrEmpty()) {
+                            currentForegroundPkg = lastActivePkgBeforeScreenOff
                             currentForegroundStartTs = ts
                         }
                     }
                     UsageEvents.Event.SCREEN_NON_INTERACTIVE -> {
-                        isScreenOn = false
                         if (currentForegroundPkg != null) {
                             val activeStart = maxOf(currentForegroundStartTs, startTime)
                             val activeEnd = minOf(ts, endTime)
                             if (activeEnd > activeStart) {
                                 resultMap[currentForegroundPkg] = (resultMap[currentForegroundPkg] ?: 0L) + (activeEnd - activeStart)
                             }
+                            lastActivePkgBeforeScreenOff = currentForegroundPkg
                             currentForegroundPkg = null
                             currentForegroundStartTs = 0L
                         }

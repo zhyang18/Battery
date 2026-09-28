@@ -497,12 +497,15 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="10dp">
+                    android:paddingHorizontal="8dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/power_detail_chart_title"
+                        android:visibility="gone"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="13sp"
                         android:textStyle="bold" />
@@ -511,13 +514,13 @@
                         android:id="@+id/battery_timeline_view"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp" />
+                        android:layout_marginTop="5dp" />
 
                     <com.battery.analysis.timeline.presentation.MetricSelectorView
                         android:id="@+id/metric_selector_view"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp" />
+                        android:layout_marginTop="6dp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

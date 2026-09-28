@@ -2388,9 +2388,10 @@ class PowerUsageFragment : Fragment() {
             val isCharging = status.isCharging || chargingManager.isCharging()
             viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
                 if (!isCharging) {
-                    powerManager.onPowerDisconnected(status.levelPercent)
+                    powerManager.onPowerDisconnected(status.levelPercent, force = true)
+                } else {
+                    powerManager.resetPowerStats(explicitIsCharging = true)
                 }
-                powerManager.resetPowerStats()
                 withContext(Dispatchers.Main) {
                     if (_binding != null) {
                         Toast.makeText(requireContext(), getString(R.string.power_toast_cleared), Toast.LENGTH_SHORT).show()

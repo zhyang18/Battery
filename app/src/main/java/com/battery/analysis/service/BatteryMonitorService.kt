@@ -193,9 +193,11 @@ class BatteryMonitorService : Service() {
                     if (level > 0) cachedLevelPercent = level
                     if (voltRaw > 0) cachedVoltageVolts = com.battery.analysis.util.BatteryUnitNormalizer.normalizeVoltageVolts(voltRaw.toLong())
                     if (tempRaw > 0) cachedTemperature = tempRaw / 10f
-                    cachedIsCharging = (statusRaw == BatteryManager.BATTERY_STATUS_CHARGING ||
+                    val prevIsCharging = cachedIsCharging
+                    val newIsCharging = (statusRaw == BatteryManager.BATTERY_STATUS_CHARGING ||
                             statusRaw == BatteryManager.BATTERY_STATUS_FULL ||
                             pluggedRaw > 0)
+                    cachedIsCharging = newIsCharging
 
                     // 极致省电：仅亮屏时刷新通知，息屏直接跳过
                     updateNotification(force = false)
@@ -203,13 +205,18 @@ class BatteryMonitorService : Service() {
                     val isInteractive = cachedIsInteractive
                     val screenOffInterval = getScreenOffIntervalMs(appContext)
 
-                    if (cachedIsCharging) {
+                    if (newIsCharging) {
                         // 充电状态下：若处于息屏且配置为智能省电(0L)，借由系统电池状态广播被动记录采样点，零主动能耗
                         if (!isInteractive && screenOffInterval == 0L) {
                             ChargingStatsManager.getInstance(appContext).sampleCurrentPoint()
                         }
                     } else {
                         val powerManager = PowerUsageManager.getInstance(appContext)
+
+                        // 状态由充电转为未充电的二次对齐兜底：若拔电广播丢失或被拦截导致放电起点异常，自动补齐开启放电周期
+                        if (prevIsCharging && powerManager.getLastUnplugTime() <= 0L) {
+                            powerManager.onPowerDisconnected(cachedLevelPercent, force = true)
+                        }
 
                         // 检测电量下降，按 5% 步进阈值防抖触发放电 Checkpoint 增量持久化
                         powerManager.requestCheckpoint(force = false, currentLevel = cachedLevelPercent)
@@ -489,9 +496,9 @@ class BatteryMonitorService : Service() {
                 // 1. 固化保存充电历史记录
                 chargingManager.onPowerDisconnected()
 
-                // 2. 开启全新放电统计周期（健康度快照由用户主动检测时保存，充放电过程不自动生成）
+                // 2. 开启全新放电统计周期（强制生效，跳过系统粘性广播未刷新延迟）
                 val currentStatus = powerManager.getCurrentBatteryStatus()
-                powerManager.onPowerDisconnected(currentStatus.levelPercent)
+                powerManager.onPowerDisconnected(currentStatus.levelPercent, force = true)
 
                 // 3. 确保持续进行放电采样轮询
                 startMonitorSamplingLoop()

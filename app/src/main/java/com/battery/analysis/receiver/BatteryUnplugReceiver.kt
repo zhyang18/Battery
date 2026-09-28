@@ -165,11 +165,11 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
             e.printStackTrace()
         }
 
-        // 2. 关键步骤：开启全新放电统计周期，记录断电电量与时刻，重置底层 batterystats
+        // 2. 关键步骤：开启全新放电统计周期，记录断电电量与时刻，重置底层 batterystats（强制生效，跳过系统粘性广播延迟）
         try {
             val powerManager = PowerUsageManager.getInstance(context)
             val currentBattery = powerManager.getCurrentBatteryStatus()
-            powerManager.onPowerDisconnected(currentBattery.levelPercent)
+            powerManager.onPowerDisconnected(currentBattery.levelPercent, force = true)
         } catch (e: Exception) {
             e.printStackTrace()
         }

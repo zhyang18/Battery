@@ -1078,6 +1078,32 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
+     * 彻底清空当前放电周期的秒级瞬时采样点序列、物理能量累加器及应用即时能量映射表。
+     * 当设备接入外部电源进入充电状态时调用，确保充电期间不保留任何放电采样伪数据。
+     */
+    @Synchronized
+    fun clearDischargeRealtimeSamples() {
+        dischargeRealtimeSamples.clear()
+        unsavedDischargeSamplesCount = 0
+
+        // 重置物理能量累加器
+        dischargeAccumulator.screenOnJoules = 0.0
+        dischargeAccumulator.screenOffJoules = 0.0
+        dischargeAccumulator.screenOnDurationMs = 0L
+        dischargeAccumulator.screenOffDurationMs = 0L
+        dischargeAccumulator.lastSampleTs = 0L
+        dischargeAccumulator.lastSampleWatts = 0f
+        dischargeAccumulator.lastSampleScreenOn = false
+        dischargeAccumulator.lastSampleTemp = 0f
+
+        // 重置应用即时物理能耗映射表
+        appRealtimeEnergyMap.clear()
+
+        // 异步清除私有文件
+        saveDischargeSamplesToPrefsAsync()
+    }
+
+    /**
      * 重置当前放电周期的秒级瞬时采样点列表，并注入初始起点数据。
      * 同时清空并重置常驻物理能量累加器与应用即时能量映射表。
      *
@@ -1339,15 +1365,25 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
+     * 彻底清空当前放电周期的时序温度采样点列表。
+     * 当设备接入外部电源进入充电状态时调用，确保充电期间不保留任何放电温度伪数据。
+     */
+    @Synchronized
+    fun clearDischargeTempPoints() {
+        dischargeTempPoints.clear()
+    }
+
+    /**
      * 当外部电源断开（拔掉充电器）或用户手动重置时触发，重置当前放电统计周期基准。
-     * 具备充电状态守卫：若当前底层硬件仍处于充电状态，严禁开启放电统计周期。
+     * 具备充电状态守卫：非强制触发模式下，若当前底层硬件仍处于充电状态，严禁开启放电统计周期。
      *
      * @param unplugLevel 断开电源时刻的电池电量百分比
+     * @param force 是否强制开启放电周期（响应明确的断开电源事件广播时为 true，跳过系统粘性广播未刷新延迟）
      */
-    fun onPowerDisconnected(unplugLevel: Int) {
+    fun onPowerDisconnected(unplugLevel: Int, force: Boolean = false) {
         val status = getCurrentBatteryStatus()
-        // 严格守卫：若当前底层硬件仍处于充电状态，严禁开启放电统计周期
-        if (status.isCharging) {
+        // 严格守卫：非强制触发模式下，若当前底层硬件仍处于充电状态，严禁开启放电统计周期
+        if (!force && status.isCharging) {
             return
         }
 
@@ -1384,21 +1420,22 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         // 开启全新的 RUNNING 放电会话并立即完成首个检查点持久化入库
-        startDischargeSession(now, unplugLevel)
+        startDischargeSession(now, unplugLevel, force)
     }
 
     /**
      * 开启全新的放电会话并建立 RUNNING 状态的快照，立即执行首次检查点持久化。
-     * 具备充电状态守卫：若当前实际处于充电状态，严禁开启放电会话并保存快照。
+     * 具备充电状态守卫：非强制触发模式下，若当前实际处于充电状态，严禁开启放电会话并保存快照。
      *
      * @param unplugTime 拔掉充电器时刻的时间戳毫秒值
      * @param unplugLevel 拔掉充电器时刻的初始电量百分比
+     * @param force 是否强制开启放电会话（响应明确的断开电源事件广播时为 true）
      */
     @Synchronized
-    fun startDischargeSession(unplugTime: Long, unplugLevel: Int) {
+    fun startDischargeSession(unplugTime: Long, unplugLevel: Int, force: Boolean = false) {
         val status = getCurrentBatteryStatus()
-        // 严格守卫：若当前为充电状态，严禁开启放电会话并保存快照
-        if (status.isCharging) {
+        // 严格守卫：非强制触发模式下，若当前为充电状态，严禁开启放电会话并保存快照
+        if (!force && status.isCharging) {
             return
         }
 
@@ -1549,8 +1586,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             e.printStackTrace()
         }
 
-        // 3. 彻底重置放电采样点与屏幕/应用使用基准快照，确保充电期间不污染旧放电账本
-        resetPowerStats()
+        // 3. 彻底重置放电采样点与屏幕/应用使用基准快照，确保充电期间不污染旧放电账本（显式处于充电中）
+        resetPowerStats(explicitIsCharging = true)
 
         return record
     }
@@ -1643,13 +1680,106 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
+     * 校验当前放电周期起点与系统最新已归档充电记录的物理闭环，并执行断层自愈校准。
+     *
+     * 核心物理守恒法则：
+     * 若设备当前处于未充电状态，放电周期的真实起点绝不可能早于最近一次已完结充电的结束时间戳。
+     * 若本地存储的拔电时间早于最近一次充电结束时间，或落入充电区间内部，
+     * 说明拔电事件未被记录或插电时间被误写入了拔电时间，必须立即以最近一次充电的结束时刻与电量对齐。
+     *
+     * @param currentLevel 当前电池电量百分比
+     * @param currentIsCharging 当前系统是否处于充电状态
+     * @return 若检测并执行了状态自愈校准则返回 true，否则返回 false
+     */
+    @Synchronized
+    fun reconcileWithLatestChargingRecord(currentLevel: Int, currentIsCharging: Boolean): Boolean {
+        if (currentIsCharging) return false
+
+        val chargingDb = com.battery.analysis.db.ChargingHistoryDbHelper.getInstance(context)
+        val latestCharge = chargingDb.getAllRecords().firstOrNull() ?: return false
+        val chargeEndTs = latestCharge.endTimestamp
+        val chargeStartTs = latestCharge.startTimestamp
+        if (chargeEndTs <= 0L) return false
+
+        val currentUnplugTs = getLastUnplugTime()
+
+        // 判定异常条件：
+        // 1. 未记录拔电时间（<= 0L）；
+        // 2. 记录的拔电时间早于最近一次充电结束时间（例如充电 11:48~12:18，拔电时间被记为 11:48 或更早）；
+        // 3. 记录的拔电时间落在充电起止时间窗口内；
+        // 4. 充电结束时间合法且在合理时间窗口内
+        val isAnomaly = (currentUnplugTs <= 0L) ||
+                (currentUnplugTs < chargeEndTs) ||
+                (currentUnplugTs in (chargeStartTs - 60_000L)..(chargeEndTs - 5_000L))
+
+        if (!isAnomaly) return false
+
+        val safeEndLevel = if (latestCharge.endLevel in 1..100) latestCharge.endLevel else currentLevel
+        val targetUnplugTime = chargeEndTs
+        val targetUnplugLevel = safeEndLevel
+
+        // 1. 修正持久化拔电时刻与电量
+        prefs.edit()
+            .putLong(PREF_KEY_LAST_UNPLUG_TIME, targetUnplugTime)
+            .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, targetUnplugLevel)
+            .apply()
+        saveUnplugEnergy(targetUnplugLevel)
+
+        // 2. 清除放电采样点中所有早于真实拔电时刻的旧数据（剔除充电期间的残留点）
+        synchronized(this) {
+            val validSamples = dischargeRealtimeSamples.filter { it.timestamp >= targetUnplugTime }
+            dischargeRealtimeSamples.clear()
+            dischargeRealtimeSamples.addAll(validSamples)
+            if (dischargeRealtimeSamples.isEmpty()) {
+                val curStatus = getCurrentBatteryStatus()
+                val initPoint = PowerDischargePoint(
+                    timestamp = targetUnplugTime,
+                    elapsedHours = 0f,
+                    batteryLevel = targetUnplugLevel,
+                    voltageVolts = curStatus.voltageVolts.coerceAtLeast(0f),
+                    temperature = curStatus.temperature,
+                    powerWatts = 0f,
+                    activeAppIcons = emptyList(),
+                    isScreenOn = false,
+                    activeAppNames = emptyList()
+                )
+                dischargeRealtimeSamples.add(initPoint)
+            }
+            saveDischargeSamplesToPrefsAsync()
+
+            val validTempPoints = dischargeTempPoints.filter { it.first >= targetUnplugTime }
+            dischargeTempPoints.clear()
+            dischargeTempPoints.addAll(validTempPoints)
+
+            // 对齐累加器基准时间
+            if (dischargeAccumulator.lastSampleTs < targetUnplugTime) {
+                dischargeAccumulator.lastSampleTs = targetUnplugTime
+            }
+        }
+
+        // 3. 若有正在运行的放电草稿，若其 ID 早于拔电时刻，清理旧草稿并以真实时刻重新开启
+        try {
+            val powerDb = PowerUsageDbHelper.getInstance(context)
+            val runningRecord = powerDb.getRunningDischargeRecord()
+            if (runningRecord != null && runningRecord.id < targetUnplugTime) {
+                powerDb.deleteRecord(runningRecord.id)
+                currentDischargeSessionId = targetUnplugTime
+                startDischargeSession(targetUnplugTime, targetUnplugLevel, force = true)
+            }
+        } catch (_: Exception) {}
+
+        return true
+    }
+
+    /**
      * 校验并自愈放电统计断层状态。
      * 当应用被强杀或长时间离线再次启动时：
      * 1. 若当前设备处于充电状态，严禁将离线草稿保存为耗电历史，直接物理清理所有未完结草稿并重置放电会话；
      * 2. 若当前设备未在充电，且当前电量大于先前记录的拔电基准电量（发生离线充电且未被捕捉到拔电），
      *    自动将拔电基准电量校准为当前电量（或通过 Shizuku 回溯真实拔电时刻），并刷新应用使用基准快照，
      *    防止因负掉电量导致放电功耗失真；
-     * 3. 若拔电时间戳距离当前已超过 48 小时且无底层 dumpsys 支撑，自动平滑对齐基准。
+     * 3. 校验并自愈拔电时间早于最近一次充电结束时间的断层；
+     * 4. 若拔电时间戳距离当前已超过 48 小时且无底层 dumpsys 支撑，自动平滑对齐基准。
      *
      * @return 若执行了自愈校准返回 true，否则返回 false
      */
@@ -1694,6 +1824,11 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         if (!isCharging) {
+            // 场景 0：优先执行与最近充电历史记录的交叉物理闭环校验（彻底防止充电时间被误当成放电起点）
+            if (reconcileWithLatestChargingRecord(currentLevel, isCharging)) {
+                reconciled = true
+            }
+
             // 异常场景：离线期间充过电，导致当前电量高于上次记录的拔电电量
             if (currentLevel > lastUnplugLevel) {
                 // 尝试通过 Shizuku 探测真实拔电时刻与电量
@@ -2230,6 +2365,9 @@ class PowerUsageManager private constructor(private val context: Context) {
      */
     fun loadPowerData(mode: Int, enableBackgroundStats: Boolean = false): FullPowerDataPackage {
         val batterySnapshot = getCurrentBatteryStatus()
+        if (!batterySnapshot.isCharging) {
+            reconcileWithLatestChargingRecord(batterySnapshot.levelPercent, batterySnapshot.isCharging)
+        }
         val unplugTime = getLastUnplugTime()
         val unplugLevel = getLastUnplugLevel().coerceIn(0, 100)
         val now = System.currentTimeMillis()
@@ -4080,17 +4218,15 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 重置当前放电周期的采样记录与基准快照。
-     * 若当前处于充电状态，清空放电采样与会话上下文，严禁将插电时刻作为拔电时刻记录；
+     * 若当前处于充电状态，清空放电采样点、温度点与会话上下文，严禁将插电时刻作为拔电时刻记录；
      * 若处于非充电状态，重新初始化放电周期的起点时间戳与电量基准。
+     *
+     * @param explicitIsCharging 显式指定的充电状态标识（可选，若传入则跳过广播状态推断直接以此为准）
      */
-    fun resetPowerStats() {
+    fun resetPowerStats(explicitIsCharging: Boolean? = null) {
         val now = System.currentTimeMillis()
         val curStatus = getCurrentBatteryStatus()
-        val isCharging = curStatus.isCharging
-        resetDischargeTempPoints(now, curStatus.temperature)
-        val initHwSample = SysfsBatterySampler.sampleHardwareDischarge(context, curStatus.voltageVolts, curStatus.temperature)
-        val initPower = initHwSample?.powerWatts ?: 0f
-        resetDischargeRealtimeSamples(now, curStatus.levelPercent, curStatus.voltageVolts, curStatus.temperature, initPower, !isCharging)
+        val isCharging = explicitIsCharging ?: curStatus.isCharging
 
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val counterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: 0
@@ -4109,7 +4245,16 @@ class PowerUsageManager private constructor(private val context: Context) {
             try {
                 PowerUsageDbHelper.getInstance(context).deleteRunningRecords()
             } catch (_: Exception) {}
+
+            // 充电状态下彻底清空放电采样点与温度点，严禁插入插电瞬间的虚假放电点
+            clearDischargeRealtimeSamples()
+            clearDischargeTempPoints()
         } else {
+            resetDischargeTempPoints(now, curStatus.temperature)
+            val initHwSample = SysfsBatterySampler.sampleHardwareDischarge(context, curStatus.voltageVolts, curStatus.temperature)
+            val initPower = initHwSample?.powerWatts ?: 0f
+            resetDischargeRealtimeSamples(now, curStatus.levelPercent, curStatus.voltageVolts, curStatus.temperature, initPower, true)
+
             editor.putLong(PREF_KEY_LAST_UNPLUG_TIME, now)
                 .putInt(PREF_KEY_LAST_UNPLUG_LEVEL, curStatus.levelPercent.coerceIn(0, 100))
                 .putFloat(PREF_KEY_LAST_UNPLUG_ENERGY, curStatus.energyWh)

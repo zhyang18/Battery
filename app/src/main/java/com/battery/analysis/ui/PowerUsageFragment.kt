@@ -577,12 +577,15 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 界面退到后台或暂停时的生命周期回调，暂停高频充电采样协程与放电轻量刷新协程以节约系统资源，并恢复屏幕休眠。
+     * 界面退到后台或暂停时的生命周期回调，暂停高频充电采样协程与放电轻量刷新协程以节约系统资源，
+     * 重置图表渲染点数缓存，触发充电会话与采样点异步刷盘持久化，并恢复屏幕休眠。
      */
     override fun onPause() {
         super.onPause()
         stopChargingPolling()
         stopDischargePolling()
+        lastRenderedPointsCount = -1
+        chargingManager.flushChargingSessionToPrefsAsync()
         activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
@@ -607,6 +610,8 @@ class PowerUsageFragment : Fragment() {
         stopDischargePolling()
         loadDataJob?.cancel()
         loadDataJob = null
+        lastRenderedPointsCount = -1
+        lastRenderedSessionStart = -1L
         activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         try {
             requireContext().unregisterReceiver(powerStateReceiver)
@@ -1161,13 +1166,20 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 当监听到连接外部电源（插入充电器）时触发，开启全新充电采样并智能展示充电统计界面。
+     * 当监听到连接外部电源（插入充电器）时触发，开启全新充电采样或接续进行中会话，并智能展示充电统计界面。
      */
     private fun onDevicePowerConnected() {
         if (_binding == null) return
         val currentLevel = powerManager.getCurrentBatteryStatus().levelPercent
         val (_, type) = chargingManager.checkCurrentSystemChargingState()
-        chargingManager.onPowerConnected(currentLevel, type)
+
+        val isAlreadyCharging = chargingManager.isCharging() &&
+                chargingManager.getCurrentSummary().isCharging &&
+                chargingManager.getSamplePoints().isNotEmpty()
+
+        if (!isAlreadyCharging) {
+            chargingManager.onPowerConnected(currentLevel, type)
+        }
 
         applySmartChargingMode(isCharging = true, showToast = true)
     }
@@ -1338,15 +1350,16 @@ class PowerUsageFragment : Fragment() {
         )
 
         // 1. 增量更新三合一走势折线图 (功率: 绿, 电量: 蓝, 温度: 红)，消除每 1.5 秒全量重绘 1500 点
+        val currentChartPointsCount = chargingView.chargingChartView.getPointsCount()
         val isNewSession = summary.startTimestamp != lastRenderedSessionStart
-        if (isNewSession || points.size < lastRenderedPointsCount || lastRenderedPointsCount == -1) {
+        if (isNewSession || currentChartPointsCount == 0 || points.size < currentChartPointsCount || lastRenderedPointsCount == -1) {
             chargingView.chargingChartView.setData(points)
             lastRenderedPointsCount = points.size
             lastRenderedSessionStart = summary.startTimestamp
 
             refreshChargingAppEvents(force = true)
-        } else if (points.size > lastRenderedPointsCount) {
-            val newPoints = points.subList(lastRenderedPointsCount, points.size)
+        } else if (points.size > currentChartPointsCount) {
+            val newPoints = points.subList(currentChartPointsCount, points.size)
             chargingView.chargingChartView.appendPoints(newPoints)
             lastRenderedPointsCount = points.size
             refreshChargingAppEvents(force = false)

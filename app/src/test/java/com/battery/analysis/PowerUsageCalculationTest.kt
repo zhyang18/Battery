@@ -3117,6 +3117,73 @@ class PowerUsageCalculationTest {
     }
 
     /**
+     * 验证当硬件估算物理能量（如掉电百分比折算值）小于或等于实测亮屏能量时，
+     * 双锚定算法忠实保留微积分/基线推断的息屏能量与平均功耗，绝不发生“平均功耗存在但息屏能量为0”的物理矛盾。
+     *
+     * 该场景严格对应实测案例：
+     * 亮屏 4h36m (4.6h)，实测功耗 1.80W，实测能量 8.287Wh；
+     * 息屏 8h39m (8.65h)，实测功耗 0.29W，实测息屏能量约 2.509Wh；
+     * 电池掉电 28% 按 3.85V 标压折算仅 5.39Wh~7.42Wh（小于亮屏实测 8.287Wh）。
+     * 算法必须确保息屏能量忠实呈现为 2.509Wh，息屏平均功耗 0.29W，总能量 10.796Wh。
+     */
+    @Test
+    fun testDualAnchorWhenPhysicalEnergyLessThanScreenOnEnergy() {
+        val nominalVoltage = 3.85f
+        val screenOnHours = 4.6f // 4h36m
+        val screenOffHours = 8.65f // 8h39m
+        val dischargeHours = 13.25f // 13h15m
+        val screenOffMs = (8.65f * 3600000f).toLong()
+
+        // 软件 1Hz 微积分高精实测：亮屏消耗 8.287Wh (1.8015W)
+        val intOnEnergyWh = 8.287f
+        val intOnPowerWatts = 1.8015f
+
+        // 息屏采样与加权基线分位数外推测得：息屏消耗 2.5085Wh (0.29W)
+        val intOffEnergyWh = 2.5085f
+        val intOffPowerWatts = 0.29f
+        val intTotalEnergyWh = intOnEnergyWh + intOffEnergyWh
+        val intTotalPowerWatts = intTotalEnergyWh / dischargeHours
+
+        // 掉电百分比或粗略估算折算物理总能量仅为 7.42Wh（小于亮屏实测 8.287Wh）
+        val physicalTotalEnergyWh = 7.42f
+
+        val result = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = intOnEnergyWh,
+            intOffEnergyWh = intOffEnergyWh,
+            intTotalEnergyWh = intTotalEnergyWh,
+            intOnPowerWatts = intOnPowerWatts,
+            intOffPowerWatts = intOffPowerWatts,
+            intTotalPowerWatts = intTotalPowerWatts,
+            physicalTotalEnergyWh = physicalTotalEnergyWh,
+            screenOnHours = screenOnHours,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = nominalVoltage
+        )
+
+        // 1. 亮屏能量与功耗保持微积分真值
+        assertEquals("亮屏能量严格等于微积分真值 8.287Wh", 8.287f, result.onEnergyWh, 0.001f)
+        assertEquals("亮屏功耗准确计算为 1.80W", 1.8015f, result.screenOnWatts, 0.01f)
+
+        // 2. 息屏能量绝对不可被抹零为 0，必须忠实呈现微积分与基线外推真值 2.509Wh
+        assertEquals("息屏能量忠实保留真实消耗 2.509Wh 绝不被置零", 2.5085f, result.offEnergyWh, 0.001f)
+        assertEquals("息屏平均功耗准确体现为 0.29W", 0.29f, result.screenOffWatts, 0.01f)
+
+        // 3. 整机总能量为亮屏加息屏真实能量之和（10.796Wh），绝不仅等于亮屏能耗
+        assertEquals("整机总能量严格等于亮屏与息屏能量之和 10.7955Wh", 10.7955f, result.totalEnergyWh, 0.001f)
+        assertEquals("全局平均功耗准确计算约为 0.815W", 10.7955f / 13.25f, result.avgWatts, 0.01f)
+
+        // 4. 严格物理闭环校验：E_total = E_on + E_off，且 P * T = E
+        val sumEnergy = result.onEnergyWh + result.offEnergyWh
+        assertEquals("能量守恒：总能量等于亮屏能量加息屏能量", result.totalEnergyWh, sumEnergy, 0.0001f)
+
+        val powerTimeEnergy = result.screenOnWatts * screenOnHours + result.screenOffWatts * screenOffHours
+        val diff = Math.abs(result.totalEnergyWh - powerTimeEnergy)
+        assertTrue("功率时间与能量 100% 物理闭环", diff < 0.01f)
+    }
+
+    /**
      * 验证放电会话从拔电 RUNNING 到多阶段 Checkpoint 再到插电 COMPLETED 的状态机与主键稳定性。
      * 保证同一放电周期在多次 Checkpoint 覆写更新过程中，数据库中始终维持单条记录，绝不产生多条历史碎片。
      */

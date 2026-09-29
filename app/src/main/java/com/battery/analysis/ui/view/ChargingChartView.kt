@@ -71,11 +71,16 @@ class ChargingChartView @JvmOverloads constructor(
     private val dp12 = dpToPx(12f)
     private val dp14 = dpToPx(14f)
     private val dp16 = dpToPx(16f)
+    private val dp18 = dpToPx(18f)
     private val dp22 = dpToPx(22f)
     private val dp24 = dpToPx(24f)
     private val dp28 = dpToPx(28f)
     private val dp30 = dpToPx(30f)
+    private val dp32 = dpToPx(32f)
 
+    private val sp7_5 = spToPx(7.5f)
+    private val sp8 = spToPx(8f)
+    private val sp8_5 = spToPx(8.5f)
     private val sp9 = spToPx(9f)
     private val sp9_5 = spToPx(9.5f)
     private val sp10 = spToPx(10f)
@@ -262,6 +267,49 @@ class ChargingChartView @JvmOverloads constructor(
     // 亮灭屏指示条外轮廓 Path 复用
     private val screenBarPath = Path()
 
+    // 溢出 +N 徽章绘制画笔
+    private val overflowBadgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#E6263238") // 深灰蓝半透明背景
+    }
+    private val overflowBadgeStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp0_5
+        color = Color.parseColor("#455A64")
+    }
+    private val overflowTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp7_5
+        color = Color.WHITE
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
+
+    // 触控悬浮 Tooltip 气泡卡片绘制画笔
+    private val tooltipRect = RectF()
+    private val tooltipBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#EE1E293B") // 93% 不透明微深蓝灰
+    }
+    private val tooltipBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp1
+        color = Color.parseColor("#38495E")
+    }
+    private val tooltipTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp10
+        color = Color.WHITE
+        isFakeBoldText = true
+    }
+    private val tooltipSubPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp8_5
+        color = Color.parseColor("#90CAF9") // 淡蓝
+    }
+    private val tooltipAppPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp8_5
+        color = Color.parseColor("#81C784") // 浅绿应用高亮色
+        isFakeBoldText = true
+    }
+
     /**
      * 从预分配对象池中复用或扩容获取 PointF 坐标对象，避免高频创建对象。
      *
@@ -282,6 +330,7 @@ class ChargingChartView @JvmOverloads constructor(
     // 手势交互状态
     private var isTouching = false
     private var touchX = 0f
+    private var touchY = 0f
     private var selectedIndex = -1
 
     private var pointSelectedListener: OnPointSelectedListener? = null
@@ -304,6 +353,15 @@ class ChargingChartView @JvmOverloads constructor(
         dataPoints.clear()
         dataPoints.addAll(points)
         invalidate()
+    }
+
+    /**
+     * 获取当前图表内部实际已加载的采样数据点数量。
+     *
+     * @return 当前图表中持有的采样点总数
+     */
+    fun getPointsCount(): Int {
+        return dataPoints.size
     }
 
     /**
@@ -678,7 +736,8 @@ class ChargingChartView @JvmOverloads constructor(
     /**
      * 绘制充电期间活跃的前台应用小图标按时间槽平铺与多行纵向堆叠排布。
      * 采用与耗电趋势图完全一致的分槽对齐与按包名去重算法，同一时间段内同一 App 绝不重复堆叠，
-     * 多个不同应用并发时自底向上垂直堆叠，持续使用时水平时间槽连续平铺。
+     * 多个不同应用并发时自底向上垂直堆叠，持续使用时水平时间槽连续平铺；
+     * 若超出纵向最大可用显示行数，最顶层自动呈现微型 "+N" 徽章提示存在更多应用。
      *
      * @param canvas 绘制画布
      * @param chartLeft 图表左边界 X 坐标
@@ -700,6 +759,9 @@ class ChargingChartView @JvmOverloads constructor(
         val slotSizePx = dp11
         val iconRenderSize = dp11.toInt().coerceAtLeast(1)
         val baseBottomY = gridBottomY + dp2
+        val topLimitY = dp30
+        val availableHeight = (baseBottomY - topLimitY).coerceAtLeast(slotSizePx)
+        val maxDisplayRows = (availableHeight / slotSizePx).toInt().coerceAtLeast(1)
 
         // 计算或复用布局排布结果，避免手势探查重绘时重复执行分槽计算
         val currentEventsHash = appEvents.hashCode()
@@ -718,7 +780,7 @@ class ChargingChartView @JvmOverloads constructor(
                 slotSizePx = slotSizePx,
                 slotGapPx = 0f,
                 rowGapPx = 0f,
-                maxRows = Int.MAX_VALUE,
+                maxRows = maxDisplayRows,
                 leftMarginPx = chartLeft
             )
             lastSlotCalcMinTs = minTs
@@ -727,28 +789,48 @@ class ChargingChartView @JvmOverloads constructor(
             lastSlotCalcEventsHash = currentEventsHash
         }
 
-        val topLimitY = dp30
         for (item in cachedSlotItems) {
             // 向上堆叠边界保护，防止超出图表上方读数面板
             if (item.top < topLimitY) continue
 
-            val event = item.event
-            val bmp = DrawableBitmapCache.getOrConvertBitmap(
-                event.packageName,
-                event.icon,
-                iconRenderSize
-            )
-            if (bmp != null && !bmp.isRecycled) {
-                iconSrcRect.set(0, 0, bmp.width, bmp.height)
-                iconDstRect.set(
-                    item.left,
-                    item.top,
-                    item.right,
-                    item.bottom
+            if (item.overflowCount > 0) {
+                // 绘制顶层微型 +N 溢出折叠角标
+                drawOverflowBadge(canvas, item)
+            } else {
+                val event = item.event
+                val bmp = DrawableBitmapCache.getOrConvertBitmap(
+                    event.packageName,
+                    event.icon,
+                    iconRenderSize
                 )
-                canvas.drawBitmap(bmp, iconSrcRect, iconDstRect, null)
+                if (bmp != null && !bmp.isRecycled) {
+                    iconSrcRect.set(0, 0, bmp.width, bmp.height)
+                    iconDstRect.set(
+                        item.left,
+                        item.top,
+                        item.right,
+                        item.bottom
+                    )
+                    canvas.drawBitmap(bmp, iconSrcRect, iconDstRect, null)
+                }
             }
         }
+    }
+
+    /**
+     * 绘制时间槽顶层应用溢出指示徽章（+N 方块，提示用户此处存在更多活跃应用）。
+     *
+     * @param canvas 画布
+     * @param item 对应的时间槽排布单元实体
+     */
+    private fun drawOverflowBadge(canvas: Canvas, item: TimelineLayoutCalculator.LaidOutAppSlotItem) {
+        iconDstRect.set(item.left, item.top, item.right, item.bottom)
+        canvas.drawRoundRect(iconDstRect, dp2, dp2, overflowBadgeBgPaint)
+        canvas.drawRoundRect(iconDstRect, dp2, dp2, overflowBadgeStrokePaint)
+
+        val text = "+${item.overflowCount}"
+        val textY = item.centerY - (overflowTextPaint.descent() + overflowTextPaint.ascent()) / 2f
+        canvas.drawText(text, item.centerX, textY, overflowTextPaint)
     }
 
     /**
@@ -1104,6 +1186,127 @@ class ChargingChartView @JvmOverloads constructor(
             val voltY = voltagePoints[selectedIndex].y
             drawHighLightDot(canvas, pX, voltY, colorVoltage)
         }
+
+        // 绘制标尺跟随的悬浮 Tooltip 气泡卡片，完整列出该时间切片内的所有活跃应用名称
+        drawTouchTooltip(canvas, pX, chartTop, chartHeight)
+    }
+
+    /**
+     * 绘制触控探查垂直标尺旁的自适应悬浮气泡卡片（Tooltip），
+     * 完整列出该时间切片内的所有活跃前台应用名称及实时电气读数，自动规避手指遮挡与屏幕边界截断。
+     *
+     * @param canvas 画布
+     * @param pX 探查数据点横坐标
+     * @param chartTop 图表绘制区顶部
+     * @param chartHeight 图表绘制区净高度
+     */
+    private fun drawTouchTooltip(
+        canvas: Canvas,
+        pX: Float,
+        chartTop: Float,
+        chartHeight: Float
+    ) {
+        if (selectedIndex !in dataPoints.indices) return
+        val curPoint = dataPoints[selectedIndex]
+        val curTs = curPoint.timestamp
+
+        // 1. 匹配当前探查时间切片内所有活跃应用（包含已展示与溢出折叠项）
+        val slotItem = cachedSlotItems.minByOrNull { abs(it.centerX - pX) }
+        val activeAppsInSlot: List<AppTimelineEvent> = if (slotItem != null && abs(slotItem.centerX - pX) <= dp11 && slotItem.allSlotEvents.isNotEmpty()) {
+            slotItem.allSlotEvents
+        } else {
+            appEvents.filter { it.startTime <= curTs && it.endTime >= curTs }.distinctBy { it.packageName }
+        }
+        val appNames = activeAppsInSlot.map { it.appName.ifBlank { it.packageName } }
+
+        // 2. 构造标题与指标文本
+        val timeStr = timeFormatter.format(Date(curTs))
+        val pWatts = curPoint.powerWatts
+        val pLabel = if (pWatts >= 0f) {
+            String.format(Locale.getDefault(), "充电 +%.2fW", pWatts)
+        } else {
+            String.format(Locale.getDefault(), "放电 -%.2fW", abs(pWatts))
+        }
+        val titleText = "$timeStr · $pLabel (${curPoint.batteryLevel}%)"
+
+        val tempStr = String.format(Locale.getDefault(), "%.1f℃", curPoint.temperature)
+        val voltStr = if (curPoint.voltageVolts > 0.5f) {
+            String.format(Locale.getDefault(), "%.3fV", curPoint.voltageVolts)
+        } else {
+            "--V"
+        }
+        val subText = "温度: $tempStr    电压: $voltStr"
+
+        // 3. 构造应用名称展示行（若应用多款则智能换行排版，完整展示绝不截断）
+        val paddingH = dp10
+        val paddingV = dp8
+        val maxBoxWidth = (width - dp28).coerceAtLeast(dpToPx(180f))
+        val maxContentWidthAllowed = maxBoxWidth - paddingH * 2
+
+        val appLines = mutableListOf<String>()
+        if (appNames.isNotEmpty()) {
+            val prefix = "前台应用 (${appNames.size}款): "
+            var currentLine = StringBuilder(prefix)
+            for (i in appNames.indices) {
+                val candidate = if (currentLine.length == prefix.length) appNames[i] else "、" + appNames[i]
+                if (tooltipAppPaint.measureText(currentLine.toString() + candidate) <= maxContentWidthAllowed) {
+                    currentLine.append(candidate)
+                } else {
+                    appLines.add(currentLine.toString())
+                    currentLine = StringBuilder("    " + appNames[i])
+                }
+            }
+            if (currentLine.isNotEmpty()) {
+                appLines.add(currentLine.toString())
+            }
+        } else {
+            appLines.add("前台应用: 息屏待机 (无前台应用)")
+        }
+
+        // 4. 测量卡片尺寸
+        var maxContentW = maxOf(
+            tooltipTitlePaint.measureText(titleText),
+            tooltipSubPaint.measureText(subText)
+        )
+        for (line in appLines) {
+            maxContentW = maxOf(maxContentW, tooltipAppPaint.measureText(line))
+        }
+        val boxWidth = maxContentW + paddingH * 2
+        val lineSpacing = dp3
+        val boxHeight = paddingV * 2 + sp10 + dp4 + sp8_5 + dp4 + (appLines.size * sp8_5) + ((appLines.size - 1).coerceAtLeast(0) * lineSpacing)
+
+        // 5. 计算卡片水平与垂直防越界避让坐标
+        var boxLeft = pX - boxWidth / 2f
+        boxLeft = boxLeft.coerceIn(dp14, width - dp14 - boxWidth)
+
+        val targetY = if (touchY > 0f) touchY else (chartTop + chartHeight / 2f)
+        var boxTop = targetY - boxHeight - dp14
+        if (boxTop < dp32) {
+            boxTop = targetY + dp18
+        }
+        if (boxTop + boxHeight > height - dp24) {
+            boxTop = height - dp24 - boxHeight
+        }
+        if (boxTop < dp32) {
+            boxTop = dp32
+        }
+
+        // 6. 绘制卡片背景、细描边及文本
+        tooltipRect.set(boxLeft, boxTop, boxLeft + boxWidth, boxTop + boxHeight)
+        canvas.drawRoundRect(tooltipRect, dp6, dp6, tooltipBgPaint)
+        canvas.drawRoundRect(tooltipRect, dp6, dp6, tooltipBorderPaint)
+
+        var curTextY = boxTop + paddingV + sp10
+        canvas.drawText(titleText, boxLeft + paddingH, curTextY, tooltipTitlePaint)
+
+        curTextY += dp4 + sp8_5
+        canvas.drawText(subText, boxLeft + paddingH, curTextY, tooltipSubPaint)
+
+        for (line in appLines) {
+            curTextY += dp4 + sp8_5
+            canvas.drawText(line, boxLeft + paddingH, curTextY, tooltipAppPaint)
+            curTextY += lineSpacing
+        }
     }
 
     /**
@@ -1134,6 +1337,7 @@ class ChargingChartView @JvmOverloads constructor(
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
                 isTouching = true
                 touchX = event.x
+                touchY = event.y
                 parent?.requestDisallowInterceptTouchEvent(true)
                 findClosestIndex(touchX)
                 invalidate()
@@ -1141,6 +1345,7 @@ class ChargingChartView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 isTouching = false
+                touchY = 0f
                 parent?.requestDisallowInterceptTouchEvent(false)
                 pointSelectedListener?.onPointSelected(null)
                 invalidate()

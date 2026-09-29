@@ -23,6 +23,8 @@ object TimelineLayoutCalculator {
      * @property bottom 徽章下边界像素坐标
      * @property centerX 徽章中心 X 像素坐标
      * @property centerY 徽章中心 Y 像素坐标
+     * @property overflowCount 溢出折叠的未展示应用数量（大于 0 时表示此项为该槽顶部的 +N 徽章）
+     * @property allSlotEvents 该时间槽区间内所有活跃的去重应用事件列表（包含已展示与溢出折叠项，用于手势探查）
      */
     data class LaidOutAppSlotItem(
         val event: AppTimelineEvent,
@@ -33,7 +35,9 @@ object TimelineLayoutCalculator {
         val right: Float,
         val bottom: Float,
         val centerX: Float,
-        val centerY: Float
+        val centerY: Float,
+        val overflowCount: Int = 0,
+        val allSlotEvents: List<AppTimelineEvent> = emptyList()
     )
 
     /**
@@ -119,8 +123,12 @@ object TimelineLayoutCalculator {
                     compareBy<AppTimelineEvent>({ it.startTime }, { it.packageName })
                 )
 
-                // 从 Row 0 向上堆叠排布（不限制最多 4 行）
-                for ((rowIndex, event) in sortedEvents.take(maxRows).withIndex()) {
+                val hasOverflow = maxRows < Int.MAX_VALUE && sortedEvents.size > maxRows
+                val displayIconCount = if (hasOverflow) (maxRows - 1).coerceAtLeast(1) else sortedEvents.size
+                val eventsToTake = sortedEvents.take(displayIconCount)
+
+                // 从 Row 0 向上堆叠排布
+                for ((rowIndex, event) in eventsToTake.withIndex()) {
                     val bottom = baseBottomY - rowIndex * (slotSizePx + rowGapPx)
                     val top = bottom - slotSizePx
                     val centerX = (slotLeft + slotRight) / 2f
@@ -136,7 +144,36 @@ object TimelineLayoutCalculator {
                             right = slotRight,
                             bottom = bottom,
                             centerX = centerX,
-                            centerY = centerY
+                            centerY = centerY,
+                            overflowCount = 0,
+                            allSlotEvents = sortedEvents
+                        )
+                    )
+                }
+
+                // 若超出最大允许显示行数，在最顶层追加一个微型 +N 徽章单元
+                if (hasOverflow) {
+                    val overflowCount = sortedEvents.size - displayIconCount
+                    val overflowRowIndex = displayIconCount
+                    val bottom = baseBottomY - overflowRowIndex * (slotSizePx + rowGapPx)
+                    val top = bottom - slotSizePx
+                    val centerX = (slotLeft + slotRight) / 2f
+                    val centerY = (top + bottom) / 2f
+                    val reprEvent = sortedEvents.getOrNull(displayIconCount) ?: sortedEvents.last()
+
+                    result.add(
+                        LaidOutAppSlotItem(
+                            event = reprEvent,
+                            slotIndex = slotIndex,
+                            rowIndex = overflowRowIndex,
+                            left = slotLeft,
+                            top = top,
+                            right = slotRight,
+                            bottom = bottom,
+                            centerX = centerX,
+                            centerY = centerY,
+                            overflowCount = overflowCount,
+                            allSlotEvents = sortedEvents
                         )
                     )
                 }

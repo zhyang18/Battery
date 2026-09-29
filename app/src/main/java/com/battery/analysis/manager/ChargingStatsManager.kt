@@ -133,10 +133,10 @@ class ChargingStatsManager private constructor(private val context: Context) {
      * 校验并自愈充放电状态断层。
      * 当应用被强杀、进程被杀死或设备重启后再次启动时，比对持久化的充电摘要状态与当前系统底层实际电源状态：
      * 1. 若持久化显示处于充电中（isCharging == true），但当前系统实际已断开外部电源，
-     *    说明在应用离线期间发生了断开电源事件，自动将未闭合的充电会话以合理指标归档存入数据库；
-     * 2. 若当前系统正处于充电中，但内存会话标记为未充电，自动根据系统状态补齐开启充电采样；
-     * 3. 若处于未充电状态，但自上次离线记录以来电量发生了跳跃式大幅增加（增量 >= 3%），
-     *    说明应用在离线被杀期间曾插上充过电且已被拔掉，自动合成并归档一条“离线补齐充电记录”。
+     *    内部通过 force = true 二次确认底层广播，消除切前台瞬间粘性广播可能出现的虚假断电，确认后将未闭合会话归档；
+     * 2. 若当前系统正处于充电中，且短时间内断开但电量未跌落，平滑接续当前充电会话并保留所有采样点；
+     *    若断开已久或无有效会话，则根据系统状态初始化全新充电采样；
+     * 3. 若处于未充电状态，仅同步当前真实电量，严禁伪造离线充电记录。
      *
      * @return 若检测并执行了状态自愈修复返回 true，否则返回 false
      */
@@ -148,8 +148,15 @@ class ChargingStatsManager private constructor(private val context: Context) {
         val now = System.currentTimeMillis()
         var reconciled = false
 
-        // 场景 1：持久化显示还在充电中，但实际已经拔掉充电器
-        if (currentSummary.isCharging && !nowCharging) {
+        // 场景 1 防抖：后台切前台瞬间系统粘性广播偶发未就绪，强制跨进程获取最新电池状态二次确认，杜绝误判断电
+        val confirmedCharging = if (currentSummary.isCharging && !nowCharging) {
+            getOrRefreshSystemBatteryStatus(force = true).isCharging
+        } else {
+            nowCharging
+        }
+
+        // 场景 1：持久化显示还在充电中，但实际确认已拔掉充电器
+        if (currentSummary.isCharging && !confirmedCharging) {
             val duration = (now - currentSummary.startTimestamp).coerceAtLeast(0L)
             val levelGain = (currentLevel - currentSummary.startLevel).coerceAtLeast(0)
             val finalChargedEnergyWh = currentSummary.chargedEnergyWh
@@ -204,11 +211,30 @@ class ChargingStatsManager private constructor(private val context: Context) {
             )
             saveChargingSessionToPrefs()
             reconciled = true
-        } else if (!currentSummary.isCharging && nowCharging) {
+        } else if (!currentSummary.isCharging && confirmedCharging) {
             // 场景 2：当前实际在充电，但上次记录为未充电
-            onPowerConnected(currentLevel, currentChargeType)
-            reconciled = true
-        } else if (!currentSummary.isCharging && !nowCharging) {
+            val hasValidPoints = synchronized(samplePoints) { samplePoints.isNotEmpty() }
+            val isRecentSession = currentSummary.startTimestamp > 0L &&
+                    (now - currentSummary.endTimestamp).coerceAtLeast(0L) < 180_000L &&
+                    currentLevel >= (currentSummary.currentLevel - 1)
+
+            if (hasValidPoints && isRecentSession) {
+                // 平滑接续：恢复进行中状态，保持累计时长、充入能量与历史采样点连续性
+                isCurrentlyCharging = true
+                currentSummary = currentSummary.copy(
+                    isCharging = true,
+                    endTimestamp = now,
+                    currentLevel = currentLevel,
+                    chargeType = if (currentChargeType.isNotEmpty() && currentChargeType != "未充电") currentChargeType else currentSummary.chargeType
+                )
+                saveChargingSessionToPrefs()
+                reconciled = true
+            } else {
+                // 真正的新一轮充电周期（如拔掉已久后重新插入）
+                onPowerConnected(currentLevel, currentChargeType)
+                reconciled = true
+            }
+        } else if (!currentSummary.isCharging && !confirmedCharging) {
             // 场景 3：均未充电，仅同步当前真实电量，严禁伪造离线充电记录
             if (currentSummary.currentLevel != currentLevel && currentLevel > 0) {
                 currentSummary = currentSummary.copy(
@@ -307,12 +333,33 @@ class ChargingStatsManager private constructor(private val context: Context) {
 
     /**
      * 当检测到连接充电器或系统由放电转为充电时调用，初始化全新充电统计周期。
+     * 具备完善的会话幂等防重守卫：若底层系统当前正处于充电中且当前会话已有有效采样数据，
+     * 自动判定为前后台生命周期切换或重复广播触发，仅同步接口类型与当前电量，严禁清空历史采样点与累计能量。
      *
      * @param initialLevel 当前接入时刻的电池电量百分比
      * @param chargeType 充电连接类型
      */
     fun onPowerConnected(initialLevel: Int, chargeType: String) {
         val now = System.currentTimeMillis()
+        val (isSysCharging, sysChargeType) = checkCurrentSystemChargingState()
+        val hasPoints = synchronized(samplePoints) { samplePoints.isNotEmpty() }
+        val hasOngoingSession = currentSummary.isCharging && currentSummary.startTimestamp > 0L
+
+        // 幂等防重守卫：若底层系统当前确在充电，且当前内存中已有进行中的有效充电会话，
+        // 判定为同一充电周期的重复通知或生命周期重入事件，严禁清空采样点与重置会话！
+        if (isSysCharging && hasOngoingSession && hasPoints) {
+            isCurrentlyCharging = true
+            val effectiveType = if (chargeType.isNotEmpty() && chargeType != "未充电") chargeType else sysChargeType
+            if (effectiveType.isNotEmpty() && effectiveType != currentSummary.chargeType) {
+                currentSummary = currentSummary.copy(
+                    chargeType = effectiveType,
+                    currentLevel = if (initialLevel > 0) initialLevel else currentSummary.currentLevel
+                )
+                saveChargingSessionToPrefs()
+            }
+            return
+        }
+
         isCurrentlyCharging = true
         hasPersistedCurrentSession = false
 
@@ -791,7 +838,8 @@ class ChargingStatsManager private constructor(private val context: Context) {
     }
 
     /**
-     * 从本地 SharedPreferences 读取恢复先前保存的充电记录。
+     * 从本地 SharedPreferences 读取恢复先前持久化保存的充电摘要与采样点记录。
+     * 若上次持久化显示会话处于充电中，同步恢复内存状态标记，支撑跨前后台及进程重启的无缝连续接续。
      */
     private fun loadSavedChargingSession() {
         try {
@@ -814,6 +862,9 @@ class ChargingStatsManager private constructor(private val context: Context) {
                     screenOffLevelGain = json.optInt("screenOffLevelGain", 0),
                     screenOffEnergyWh = json.optDouble("screenOffEnergyWh", 0.0).toFloat()
                 )
+                if (currentSummary.isCharging) {
+                    isCurrentlyCharging = true
+                }
             }
 
             val pointsStr = prefs.getString(PREF_KEY_SAVED_POINTS, null)

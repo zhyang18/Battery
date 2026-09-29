@@ -520,7 +520,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             nominalVoltageVolts: Float
         ): DualAnchorPowerStats {
             var onEnergyWh = intOnEnergyWh
-            var offEnergyWh: Float
+            val offEnergyWh: Float
             val realTotalEnergyWh: Float
 
             if (screenOffHours <= 0f || screenOffMs < 1000L) {
@@ -536,31 +536,43 @@ class PowerUsageManager private constructor(private val context: Context) {
                 // 全息屏工况：亮屏能耗严格为 0，息屏能耗对齐整机总能耗
                 onEnergyWh = 0f
                 offEnergyWh = if (physicalTotalEnergyWh > 0f) {
-                    physicalTotalEnergyWh
+                    maxOf(physicalTotalEnergyWh, intOffEnergyWh)
                 } else {
                     if (intTotalEnergyWh > 0f) intTotalEnergyWh else intOffEnergyWh
                 }
                 realTotalEnergyWh = offEnergyWh
             } else {
                 // 亮息混合工况：
-                // 亮屏期间 CPU 活跃且高频（1Hz）连续采样，瞬时电压电流微积分具备最高物理真值置信度；
-                // 息屏期间系统进入 Deep Sleep（深度休眠），CPU 暂停导致软件采样缺失。
-                // 硬件芯片库仑计在硬件层持续积分电荷量（physicalTotalEnergyWh 为整机真实放电能量）。
-                // 当整机真实放电能量大于亮屏实测能量时，差值即为息屏待机期间（含深度休眠）消耗的真实能量！
-                val hwCompensatedOffEnergyWh = if (physicalTotalEnergyWh > onEnergyWh) {
-                    physicalTotalEnergyWh - onEnergyWh
+                // 1. 基础息屏能量基线：依据物理学第一性原理 E = P * T，有效平均功耗与有效时长必对应真实的能量消耗
+                val baseOffWatts = if (screenOffHours > 0f && intOffEnergyWh > 0f) {
+                    intOffEnergyWh / screenOffHours
+                } else if (intOffPowerWatts > 0f) {
+                    intOffPowerWatts
                 } else {
                     0f
                 }
-                // 修复息屏能量严重失真虚高：以硬件芯片库仑计/掉电量真值为准。
-                // 息屏软件积分容易因唤醒瞬态功耗大断层导致虚高，因此当存在硬件物理总放电量时，
-                // 息屏能耗以硬件守恒差值 hwCompensatedOffEnergyWh 为真值，杜绝虚高软件积分覆盖真实数据。
-                offEnergyWh = if (physicalTotalEnergyWh > 0f) {
-                    hwCompensatedOffEnergyWh
-                } else {
+                val baseOffEnergyWh = if (intOffEnergyWh > 0f) {
                     intOffEnergyWh
+                } else if (baseOffWatts > 0f && screenOffHours > 0f) {
+                    baseOffWatts * screenOffHours
+                } else {
+                    0f
                 }
-                realTotalEnergyWh = onEnergyWh + offEnergyWh
+
+                // 2. 硬件芯片库仑计双锚定与休眠漏电补偿：
+                // 亮屏期间 CPU 活跃且高频（1Hz）连续采样，瞬时电压电流微积分具备最高物理真值置信度；
+                // 息屏期间系统进入 Deep Sleep（深度休眠），CPU 暂停导致软件采样缺失。
+                // 硬件芯片库仑计在硬件层持续积分电荷量（physicalTotalEnergyWh 为整机物理总能量）。
+                // 当硬件物理总能量大于亮屏实测能量与息屏软件基线能量之和时，差值即为深度休眠期间硬件未被微积分完全覆盖的额外漏电；
+                // 反之，若硬件物理估算由于电量百分比跳变滞后、标称电压换算偏差或测量容差而偏小（甚至小于亮屏实测能量），
+                // 绝不可将息屏能量清零或虚构截断，必须忠实保留软件微积分/统计推断的真实物理息屏能量！
+                if (physicalTotalEnergyWh > (onEnergyWh + baseOffEnergyWh)) {
+                    offEnergyWh = physicalTotalEnergyWh - onEnergyWh
+                    realTotalEnergyWh = physicalTotalEnergyWh
+                } else {
+                    offEnergyWh = baseOffEnergyWh
+                    realTotalEnergyWh = onEnergyWh + offEnergyWh
+                }
             }
 
             val screenOnWatts = if (screenOnHours > 0f && onEnergyWh > 0f) {
@@ -2514,7 +2526,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val hasAccData = (acc.screenOnJoules > 0.0 || acc.screenOffJoules > 0.0) && (acc.screenOnDurationMs > 0L || acc.screenOffDurationMs > 0L)
 
                 val recentSamples = getDischargeRealtimeSamples().filter { it.timestamp in (startTs - 60_000L)..now }
-                val dischargeStats = if (!hasAccData) computeDischargePowerStats(recentSamples) else null
+                val dischargeStats = computeDischargePowerStats(recentSamples)
 
                 val intTotalEnergyWh: Float
                 val intTotalPowerWatts: Float
@@ -2525,10 +2537,19 @@ class PowerUsageManager private constructor(private val context: Context) {
 
                 if (hasAccData) {
                     intOnEnergyWh = (acc.screenOnJoules / 3600.0).toFloat()
-                    intOffEnergyWh = (acc.screenOffJoules / 3600.0).toFloat()
+                    val accOffEnergy = (acc.screenOffJoules / 3600.0).toFloat()
+                    if (accOffEnergy > 0f) {
+                        intOffEnergyWh = accOffEnergy
+                        intOffPowerWatts = if (screenOffHours > 0f) intOffEnergyWh / screenOffHours else 0f
+                    } else if (dischargeStats != null && dischargeStats.screenOffDisplayEnergyWh > 0f) {
+                        intOffEnergyWh = dischargeStats.screenOffDisplayEnergyWh
+                        intOffPowerWatts = dischargeStats.screenOffPowerWatts
+                    } else {
+                        intOffEnergyWh = 0f
+                        intOffPowerWatts = 0f
+                    }
                     intTotalEnergyWh = intOnEnergyWh + intOffEnergyWh
                     intOnPowerWatts = if (screenOnHours > 0f) intOnEnergyWh / screenOnHours else 0f
-                    intOffPowerWatts = if (screenOffHours > 0f) intOffEnergyWh / screenOffHours else 0f
                     intTotalPowerWatts = if (dischargeHours > 0f) intTotalEnergyWh / dischargeHours else 0f
                 } else {
                     intTotalEnergyWh = dischargeStats?.totalDisplayEnergyWh ?: 0f
@@ -4440,7 +4461,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         val hasAccData = (acc.screenOnJoules > 0.0 || acc.screenOffJoules > 0.0) && (acc.screenOnDurationMs > 0L || acc.screenOffDurationMs > 0L)
 
         val recentSamples = getDischargeRealtimeSamples().filter { it.timestamp in startTs..now }
-        val dischargeStats = if (!hasAccData) computeDischargePowerStats(recentSamples) else null
+        val dischargeStats = computeDischargePowerStats(recentSamples)
 
         val intTotalEnergyWh: Float
         val intTotalPowerWatts: Float
@@ -4451,10 +4472,19 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         if (hasAccData) {
             intOnEnergyWh = (acc.screenOnJoules / 3600.0).toFloat()
-            intOffEnergyWh = (acc.screenOffJoules / 3600.0).toFloat()
+            val accOffEnergy = (acc.screenOffJoules / 3600.0).toFloat()
+            if (accOffEnergy > 0f) {
+                intOffEnergyWh = accOffEnergy
+                intOffPowerWatts = if (screenOffHours > 0f) intOffEnergyWh / screenOffHours else 0f
+            } else if (dischargeStats != null && dischargeStats.screenOffDisplayEnergyWh > 0f) {
+                intOffEnergyWh = dischargeStats.screenOffDisplayEnergyWh
+                intOffPowerWatts = dischargeStats.screenOffPowerWatts
+            } else {
+                intOffEnergyWh = 0f
+                intOffPowerWatts = 0f
+            }
             intTotalEnergyWh = intOnEnergyWh + intOffEnergyWh
             intOnPowerWatts = if (screenOnHours > 0f) intOnEnergyWh / screenOnHours else 0f
-            intOffPowerWatts = if (screenOffHours > 0f) intOffEnergyWh / screenOffHours else 0f
             intTotalPowerWatts = if (dischargeHours > 0f) intTotalEnergyWh / dischargeHours else 0f
         } else {
             intTotalEnergyWh = dischargeStats?.totalDisplayEnergyWh ?: 0f

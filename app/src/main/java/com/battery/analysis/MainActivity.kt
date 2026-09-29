@@ -486,6 +486,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * Activity 处于不可见状态生命周期回调。
+     * 当应用退入后台时，触发充电会话与采样点的异步落盘持久化，确保后台期间数据安全。
+     */
+    override fun onStop() {
+        super.onStop()
+        if (com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(this)) {
+            com.battery.analysis.manager.ChargingStatsManager.getInstance(this).flushChargingSessionToPrefsAsync()
+        }
+    }
+
+    /**
      * 响应系统内存修剪回调，根据内存紧张等级主动释放图标缓存以降低进程 OOM 风险。
      *
      * @param level 系统当前传递的内存修剪级别，参见 [android.content.ComponentCallbacks2]

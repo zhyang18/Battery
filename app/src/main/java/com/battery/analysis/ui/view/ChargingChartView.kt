@@ -56,6 +56,7 @@ class ChargingChartView @JvmOverloads constructor(
     private val tempPoints = mutableListOf<PointF>()
 
     // 预计算物理像素尺寸
+    private val dp0 = dpToPx(0f)
     private val dp0_5 = dpToPx(0.5f)
     private val dp1 = dpToPx(1f)
     private val dp1_5 = dpToPx(1.5f)
@@ -69,15 +70,22 @@ class ChargingChartView @JvmOverloads constructor(
     private val dp10 = dpToPx(10f)
     private val dp11 = dpToPx(11f)
     private val dp12 = dpToPx(12f)
+    private val dp13 = dpToPx(13f)
     private val dp14 = dpToPx(14f)
     private val dp16 = dpToPx(16f)
     private val dp18 = dpToPx(18f)
     private val dp22 = dpToPx(22f)
     private val dp24 = dpToPx(24f)
+    private val dp26 = dpToPx(26f)
     private val dp28 = dpToPx(28f)
     private val dp30 = dpToPx(30f)
     private val dp32 = dpToPx(32f)
+    private val dp40 = dpToPx(40f)
+    private val dp50 = dpToPx(50f)
 
+    private val sp5 = spToPx(5f)
+    private val sp6 = spToPx(6f)
+    private val sp7 = spToPx(7f)
     private val sp7_5 = spToPx(7.5f)
     private val sp8 = spToPx(8f)
     private val sp8_5 = spToPx(8.5f)
@@ -278,36 +286,23 @@ class ChargingChartView @JvmOverloads constructor(
         color = Color.parseColor("#455A64")
     }
     private val overflowTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = sp7_5
+//        textSize = sp7_5
+        textSize = sp6
         color = Color.WHITE
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
     }
 
-    // 触控悬浮 Tooltip 气泡卡片绘制画笔
+    // 触控悬浮 Tooltip 气泡卡片绘制画笔（仅在 +N 溢出时展示应用图标）
     private val tooltipRect = RectF()
     private val tooltipBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.parseColor("#EE1E293B") // 93% 不透明微深蓝灰
+        color = Color.parseColor("#12888888")
     }
     private val tooltipBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = dp1
-        color = Color.parseColor("#38495E")
-    }
-    private val tooltipTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = sp10
-        color = Color.WHITE
-        isFakeBoldText = true
-    }
-    private val tooltipSubPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = sp8_5
-        color = Color.parseColor("#90CAF9") // 淡蓝
-    }
-    private val tooltipAppPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = sp8_5
-        color = Color.parseColor("#81C784") // 浅绿应用高亮色
-        isFakeBoldText = true
+        color = Color.parseColor("#1F888888")
     }
 
     /**
@@ -657,7 +652,9 @@ class ChargingChartView @JvmOverloads constructor(
             // 文字以刻度点 tickX 为中心严格居中对齐，并在左右屏幕物理边缘做防截断保护
             val textWidth = axisTextPaint.measureText(timeText)
             val halfW = textWidth / 2f
-            val textX = tickX.coerceIn(halfW + dp2, w - halfW - dp2)
+            val minTextX = halfW + dp2
+            val maxTextX = maxOf(minTextX, w - halfW - dp2)
+            val textX = tickX.coerceIn(minTextX, maxTextX)
             canvas.drawText(timeText, textX, h - dp5, axisTextPaint)
         }
 
@@ -759,7 +756,7 @@ class ChargingChartView @JvmOverloads constructor(
         val slotSizePx = dp11
         val iconRenderSize = dp11.toInt().coerceAtLeast(1)
         val baseBottomY = gridBottomY + dp2
-        val topLimitY = dp30
+        val topLimitY = dp50
         val availableHeight = (baseBottomY - topLimitY).coerceAtLeast(slotSizePx)
         val maxDisplayRows = (availableHeight / slotSizePx).toInt().coerceAtLeast(1)
 
@@ -1123,7 +1120,9 @@ class ChargingChartView @JvmOverloads constructor(
         val halfW = textWidth / 2f
 
         // 水平防溢出
-        val drawX = pointX.coerceIn(chartLeft + halfW + dp2, chartRight - halfW - dp2)
+        val minDrawX = chartLeft + halfW + dp2
+        val maxDrawX = maxOf(minDrawX, chartRight - halfW - dp2)
+        val drawX = pointX.coerceIn(minDrawX, maxDrawX)
 
         // 垂直排版：峰值位于点上方，谷值位于点下方；如贴近边界则智能翻转
         val drawY = if (isPeak) {
@@ -1187,125 +1186,88 @@ class ChargingChartView @JvmOverloads constructor(
             drawHighLightDot(canvas, pX, voltY, colorVoltage)
         }
 
-        // 绘制标尺跟随的悬浮 Tooltip 气泡卡片，完整列出该时间切片内的所有活跃应用名称
-        drawTouchTooltip(canvas, pX, chartTop, chartHeight)
+        // 当触控命中存在 +N 溢出应用的时间槽时，在顶部固定探查看板下方显示纯图标气泡卡片
+        drawTouchTooltip(canvas, pX)
     }
 
     /**
-     * 绘制触控探查垂直标尺旁的自适应悬浮气泡卡片（Tooltip），
-     * 完整列出该时间切片内的所有活跃前台应用名称及实时电气读数，自动规避手指遮挡与屏幕边界截断。
+     * 绘制触控探查时针对 "+N" 溢出折叠应用的自适应悬浮气泡卡片（Tooltip）。
+     * 仅当选中的时间切片内存在超出纵向最大显示行数的 "+N" 溢出应用时才触发显示，
+     * 卡片内部仅纯净展示溢出被折叠的 N 款应用图标，并精准定位在顶部探查看板的正下方。
      *
-     * @param canvas 画布
+     * @param canvas 绘制画布
      * @param pX 探查数据点横坐标
-     * @param chartTop 图表绘制区顶部
-     * @param chartHeight 图表绘制区净高度
      */
     private fun drawTouchTooltip(
         canvas: Canvas,
-        pX: Float,
-        chartTop: Float,
-        chartHeight: Float
+        pX: Float
     ) {
-        if (selectedIndex !in dataPoints.indices) return
-        val curPoint = dataPoints[selectedIndex]
-        val curTs = curPoint.timestamp
+        if (!selectedMetrics.contains(TimelineMetric.APP) || cachedSlotItems.isEmpty()) return
 
-        // 1. 匹配当前探查时间切片内所有活跃应用（包含已展示与溢出折叠项）
-        val slotItem = cachedSlotItems.minByOrNull { abs(it.centerX - pX) }
-        val activeAppsInSlot: List<AppTimelineEvent> = if (slotItem != null && abs(slotItem.centerX - pX) <= dp11 && slotItem.allSlotEvents.isNotEmpty()) {
-            slotItem.allSlotEvents
-        } else {
-            appEvents.filter { it.startTime <= curTs && it.endTime >= curTs }.distinctBy { it.packageName }
-        }
-        val appNames = activeAppsInSlot.map { it.appName.ifBlank { it.packageName } }
+        // 1. 就近检索当前触控探查横坐标所对应的时间槽
+        val nearestItem = cachedSlotItems.minByOrNull { abs(it.centerX - pX) } ?: return
+        if (abs(nearestItem.centerX - pX) > dp11 * 1.5f) return
 
-        // 2. 构造标题与指标文本
-        val timeStr = timeFormatter.format(Date(curTs))
-        val pWatts = curPoint.powerWatts
-        val pLabel = if (pWatts >= 0f) {
-            String.format(Locale.getDefault(), "充电 +%.2fW", pWatts)
-        } else {
-            String.format(Locale.getDefault(), "放电 -%.2fW", abs(pWatts))
-        }
-        val titleText = "$timeStr · $pLabel (${curPoint.batteryLevel}%)"
+        // 2. 查找该时间槽内是否存在 +N 溢出折叠项
+        val overflowItem = cachedSlotItems.firstOrNull {
+            it.slotIndex == nearestItem.slotIndex && it.overflowCount > 0
+        } ?: return
 
-        val tempStr = String.format(Locale.getDefault(), "%.1f℃", curPoint.temperature)
-        val voltStr = if (curPoint.voltageVolts > 0.5f) {
-            String.format(Locale.getDefault(), "%.3fV", curPoint.voltageVolts)
-        } else {
-            "--V"
-        }
-        val subText = "温度: $tempStr    电压: $voltStr"
+        val overflowCount = overflowItem.overflowCount
+        if (overflowCount <= 0 || overflowItem.allSlotEvents.isEmpty()) return
 
-        // 3. 构造应用名称展示行（若应用多款则智能换行排版，完整展示绝不截断）
-        val paddingH = dp10
-        val paddingV = dp8
-        val maxBoxWidth = (width - dp28).coerceAtLeast(dpToPx(180f))
-        val maxContentWidthAllowed = maxBoxWidth - paddingH * 2
+        // 3. 提取被折叠在 +N 徽章内的 N 款应用事件列表
+        val overflowEvents = overflowItem.allSlotEvents.takeLast(overflowCount)
+        if (overflowEvents.isEmpty()) return
 
-        val appLines = mutableListOf<String>()
-        if (appNames.isNotEmpty()) {
-            val prefix = "前台应用 (${appNames.size}款): "
-            var currentLine = StringBuilder(prefix)
-            for (i in appNames.indices) {
-                val candidate = if (currentLine.length == prefix.length) appNames[i] else "、" + appNames[i]
-                if (tooltipAppPaint.measureText(currentLine.toString() + candidate) <= maxContentWidthAllowed) {
-                    currentLine.append(candidate)
-                } else {
-                    appLines.add(currentLine.toString())
-                    currentLine = StringBuilder("    " + appNames[i])
-                }
-            }
-            if (currentLine.isNotEmpty()) {
-                appLines.add(currentLine.toString())
-            }
-        } else {
-            appLines.add("前台应用: 息屏待机 (无前台应用)")
-        }
+        // 4. 计算纯图标气泡卡片尺寸与坐标（固定显示在顶部固定看板下方）
+        val iconSize = dp11
+        val iconGap = dp0
+        val paddingH = dp1
+        val paddingV = dp1
+        val renderIconSize = iconSize.toInt().coerceAtLeast(1)
 
-        // 4. 测量卡片尺寸
-        var maxContentW = maxOf(
-            tooltipTitlePaint.measureText(titleText),
-            tooltipSubPaint.measureText(subText)
-        )
-        for (line in appLines) {
-            maxContentW = maxOf(maxContentW, tooltipAppPaint.measureText(line))
-        }
-        val boxWidth = maxContentW + paddingH * 2
-        val lineSpacing = dp3
-        val boxHeight = paddingV * 2 + sp10 + dp4 + sp8_5 + dp4 + (appLines.size * sp8_5) + ((appLines.size - 1).coerceAtLeast(0) * lineSpacing)
+        val availableW = (width - dp11 * 2 - paddingH * 2).coerceAtLeast(iconSize)
+        val maxCols = ((availableW + iconGap) / (iconSize + iconGap)).toInt().coerceAtLeast(1)
+        val cols = minOf(overflowEvents.size, maxCols)
+        val rows = (overflowEvents.size + cols - 1) / cols
 
-        // 5. 计算卡片水平与垂直防越界避让坐标
-        var boxLeft = pX - boxWidth / 2f
-        boxLeft = boxLeft.coerceIn(dp14, width - dp14 - boxWidth)
+        val boxWidth = paddingH * 2 + cols * iconSize + (cols - 1).coerceAtLeast(0) * iconGap
+        val boxHeight = paddingV * 2 + rows * iconSize + (rows - 1).coerceAtLeast(0) * iconGap
 
-        val targetY = if (touchY > 0f) touchY else (chartTop + chartHeight / 2f)
-        var boxTop = targetY - boxHeight - dp14
-        if (boxTop < dp32) {
-            boxTop = targetY + dp18
-        }
-        if (boxTop + boxHeight > height - dp24) {
-            boxTop = height - dp24 - boxHeight
-        }
-        if (boxTop < dp32) {
-            boxTop = dp32
-        }
+        // 顶部固定看板底部为 dp24，卡片固定定位在 dp26 处（即看板正下方）
+        val boxTop = dp26
+        val minLeft = dp14
+        val maxLeft = maxOf(minLeft, width - dp14 - boxWidth)
+        val boxLeft = (pX - boxWidth / 2f).coerceIn(minLeft, maxLeft)
 
-        // 6. 绘制卡片背景、细描边及文本
+        // 5. 绘制卡片圆角背景与微暗边框
         tooltipRect.set(boxLeft, boxTop, boxLeft + boxWidth, boxTop + boxHeight)
-        canvas.drawRoundRect(tooltipRect, dp6, dp6, tooltipBgPaint)
-        canvas.drawRoundRect(tooltipRect, dp6, dp6, tooltipBorderPaint)
+        canvas.drawRoundRect(tooltipRect, dp4, dp4, tooltipBgPaint)
+        canvas.drawRoundRect(tooltipRect, dp4, dp4, tooltipBorderPaint)
 
-        var curTextY = boxTop + paddingV + sp10
-        canvas.drawText(titleText, boxLeft + paddingH, curTextY, tooltipTitlePaint)
+        // 6. 依次居中绘制被折叠的 N 款应用图标（支持单行与多行网格自适应）
+        for ((index, event) in overflowEvents.withIndex()) {
+            val col = index % cols
+            val row = index / cols
+            val curIconLeft = boxLeft + paddingH + col * (iconSize + iconGap)
+            val curIconTop = boxTop + paddingV + row * (iconSize + iconGap)
 
-        curTextY += dp4 + sp8_5
-        canvas.drawText(subText, boxLeft + paddingH, curTextY, tooltipSubPaint)
-
-        for (line in appLines) {
-            curTextY += dp4 + sp8_5
-            canvas.drawText(line, boxLeft + paddingH, curTextY, tooltipAppPaint)
-            curTextY += lineSpacing
+            val bmp = DrawableBitmapCache.getOrConvertBitmap(
+                event.packageName,
+                event.icon,
+                renderIconSize
+            )
+            if (bmp != null && !bmp.isRecycled) {
+                iconSrcRect.set(0, 0, bmp.width, bmp.height)
+                iconDstRect.set(
+                    curIconLeft,
+                    curIconTop,
+                    curIconLeft + iconSize,
+                    curIconTop + iconSize
+                )
+                canvas.drawBitmap(bmp, iconSrcRect, iconDstRect, null)
+            }
         }
     }
 

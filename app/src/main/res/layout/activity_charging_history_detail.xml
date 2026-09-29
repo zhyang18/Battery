@@ -471,7 +471,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:paddingHorizontal="10dp"
+                    android:paddingHorizontal="8dp"
                     android:paddingTop="10dp"
                     android:paddingBottom="10dp">
 
@@ -479,7 +479,7 @@
                     <com.battery.analysis.ui.view.ChargingChartView
                         android:id="@+id/charging_chart_view"
                         android:layout_width="match_parent"
-                        android:layout_height="240dp" />
+                        android:layout_height="270dp" />
 
                     <!-- 底部指标切换选择器（电量 / 功率 / 温度 / 电压 / 应用） -->
                     <com.battery.analysis.timeline.presentation.MetricSelectorView

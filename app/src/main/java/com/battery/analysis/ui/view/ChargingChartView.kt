@@ -286,7 +286,6 @@ class ChargingChartView @JvmOverloads constructor(
         color = Color.parseColor("#455A64")
     }
     private val overflowTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-//        textSize = sp7_5
         textSize = sp6
         color = Color.WHITE
         textAlign = Paint.Align.CENTER

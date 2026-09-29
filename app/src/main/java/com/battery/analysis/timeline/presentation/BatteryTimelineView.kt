@@ -84,6 +84,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     private var onCursorInspectListener: OnCursorInspectListener? = null
 
     // 预计算 DP 标量
+    private val dp0 = dpToPx(0f)
     private val dp0_5 = dpToPx(0.5f)
     private val dp1 = dpToPx(1f)
     private val dp1_5 = dpToPx(1.5f)
@@ -105,15 +106,51 @@ class BatteryTimelineView @JvmOverloads constructor(
     private val dp20 = dpToPx(20f)
     private val dp22 = dpToPx(22f)
     private val dp24 = dpToPx(24f)
+    private val dp26 = dpToPx(26f)
     private val dp28 = dpToPx(28f)
     private val dp30 = dpToPx(30f)
     private val dp32 = dpToPx(32f)
     private val dp35 = dpToPx(35f)
     private val dp36 = dpToPx(36f)
+    private val dp40 = dpToPx(40f)
+    private val dp50 = dpToPx(50f)
 
+    private val sp5 = spToPx(5f)
+    private val sp6 = spToPx(6f)
+    private val sp7 = spToPx(7f)
+    private val sp7_5 = spToPx(7.5f)
     private val sp8_5 = spToPx(8.5f)
     private val sp9_5 = spToPx(9.5f)
     private val sp10_5 = spToPx(10.5f)
+
+    // 溢出 +N 徽章绘制画笔
+    private val overflowBadgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#E6263238")
+    }
+    private val overflowBadgeStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp0_5
+        color = Color.parseColor("#455A64")
+    }
+    private val overflowTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp6
+        color = Color.WHITE
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
+
+    // 触控悬浮 Tooltip 气泡卡片绘制画笔（仅在 +N 溢出时展示应用图标）
+    private val popupTooltipRect = RectF()
+    private val popupTooltipBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#12888888")
+    }
+    private val popupTooltipBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = dp1
+        color = Color.parseColor("#1F888888")
+    }
 
     // 画笔体系（趋势折线统一设置为 1.5dp）
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -459,6 +496,10 @@ class BatteryTimelineView @JvmOverloads constructor(
         val screenBarTop = screenBarBottom - dp3_5
         val baseBottomY = screenBarTop - dp2
 
+        val topLimitY = dp40
+        val availableHeight = (baseBottomY - topLimitY).coerceAtLeast(dp11)
+        val maxDisplayRows = (availableHeight / dp11).toInt().coerceAtLeast(1)
+
         val laidOut = TimelineLayoutCalculator.calculateSlotItems(
             events = timelineState.appEvents,
             visibleStartTs = visibleStart,
@@ -468,7 +509,7 @@ class BatteryTimelineView @JvmOverloads constructor(
             slotSizePx = dp11,
             slotGapPx = 0f,
             rowGapPx = 0f,
-            maxRows = Int.MAX_VALUE,
+            maxRows = maxDisplayRows,
             leftMarginPx = contentLeft
         )
         cachedSlotItems.addAll(laidOut)
@@ -662,7 +703,9 @@ class BatteryTimelineView @JvmOverloads constructor(
             // 时间文本以对应时间点 x 为中心严格居中对齐绘制，并在屏幕边缘做安全防截断
             val textWidth = textPaint.measureText(tick.label)
             val halfWidth = textWidth / 2f
-            val textX = x.coerceIn(halfWidth + dp2, w - halfWidth - dp2)
+            val minTextX = halfWidth + dp2
+            val maxTextX = maxOf(minTextX, w - halfWidth - dp2)
+            val textX = x.coerceIn(minTextX, maxTextX)
             canvas.drawText(tick.label, textX, textY, textPaint)
         }
     }
@@ -681,22 +724,44 @@ class BatteryTimelineView @JvmOverloads constructor(
         for (item in cachedSlotItems) {
             // 视口横向可见性过滤裁剪（Culling）：完全超出内容边界的图标直接跳过
             if (item.right < cLeft || item.left > cRight) continue
+            if (item.top < dp30) continue
 
-            val event = item.event
-            tempRectF.set(item.left, item.top, item.right, item.bottom)
+            if (item.overflowCount > 0) {
+                // 绘制顶层微型 +N 溢出折叠角标
+                drawOverflowBadge(canvas, item)
+            } else {
+                val event = item.event
+                tempRectF.set(item.left, item.top, item.right, item.bottom)
 
-            // 1. 若当前应用被选中，绘制高亮聚焦外框
-            if (timelineState.selectedApp?.packageName == event.packageName) {
-                canvas.drawRoundRect(tempRectF, cornerRadius, cornerRadius, iconBadgeSelectedStrokePaint)
-            }
+                // 1. 若当前应用被选中，绘制高亮聚焦外框
+                if (timelineState.selectedApp?.packageName == event.packageName) {
+                    canvas.drawRoundRect(tempRectF, cornerRadius, cornerRadius, iconBadgeSelectedStrokePaint)
+                }
 
-            // 2. 直接绘制 App 图标
-            val bmp = DrawableBitmapCache.getOrConvertBitmap(event.packageName, event.icon, iconRenderSize)
-            if (bmp != null && !bmp.isRecycled) {
-                tempSrcRect.set(0, 0, bmp.width, bmp.height)
-                canvas.drawBitmap(bmp, tempSrcRect, tempRectF, bitmapPaint)
+                // 2. 直接绘制 App 图标
+                val bmp = DrawableBitmapCache.getOrConvertBitmap(event.packageName, event.icon, iconRenderSize)
+                if (bmp != null && !bmp.isRecycled) {
+                    tempSrcRect.set(0, 0, bmp.width, bmp.height)
+                    canvas.drawBitmap(bmp, tempSrcRect, tempRectF, bitmapPaint)
+                }
             }
         }
+    }
+
+    /**
+     * 绘制时间槽顶层应用溢出指示徽章（+N 方块，提示用户此处存在更多活跃应用）。
+     *
+     * @param canvas 画布
+     * @param item 对应的时间槽排布单元实体
+     */
+    private fun drawOverflowBadge(canvas: Canvas, item: TimelineLayoutCalculator.LaidOutAppSlotItem) {
+        tempDstRectF.set(item.left, item.top, item.right, item.bottom)
+        canvas.drawRoundRect(tempDstRectF, dp2, dp2, overflowBadgeBgPaint)
+        canvas.drawRoundRect(tempDstRectF, dp2, dp2, overflowBadgeStrokePaint)
+
+        val text = "+${item.overflowCount}"
+        val textY = item.centerY - (overflowTextPaint.descent() + overflowTextPaint.ascent()) / 2f
+        canvas.drawText(text, item.centerX, textY, overflowTextPaint)
     }
 
     /**
@@ -1504,6 +1569,90 @@ class BatteryTimelineView @JvmOverloads constructor(
                 val voltNorm = (((voltV - 3.4f) / 1.0f).coerceIn(0f, 1f) * 0.35f + 0.35f)
                 val voltY = topPadding + (1f - voltNorm) * availableH
                 drawHighLightDot(canvas, clampedX, voltY, colorVoltage)
+            }
+        }
+
+        // 6. 若命中存在 +N 溢出应用的时间槽，在顶部固定探查看板正下方显示纯图标气泡卡片
+        drawTouchTooltip(canvas, clampedX)
+    }
+
+    /**
+     * 绘制触控探查时针对 "+N" 溢出折叠应用的自适应悬浮气泡卡片（Tooltip）。
+     * 仅当选中的时间切片内存在超出纵向最大显示行数的 "+N" 溢出应用时才触发显示，
+     * 卡片内部仅纯净展示溢出被折叠的 N 款应用图标，并精准定位在顶部探查看板的正下方。
+     *
+     * @param canvas 绘制画布
+     * @param pX 探查数据点横坐标
+     */
+    private fun drawTouchTooltip(
+        canvas: Canvas,
+        pX: Float
+    ) {
+        if (!timelineState.selectedMetrics.contains(TimelineMetric.APP) || cachedSlotItems.isEmpty()) return
+
+        // 1. 就近检索当前触控探查横坐标所对应的时间槽
+        val nearestItem = cachedSlotItems.minByOrNull { abs(it.centerX - pX) } ?: return
+        if (abs(nearestItem.centerX - pX) > dp11 * 1.5f) return
+
+        // 2. 查找该时间槽内是否存在 +N 溢出折叠项
+        val overflowItem = cachedSlotItems.firstOrNull {
+            it.slotIndex == nearestItem.slotIndex && it.overflowCount > 0
+        } ?: return
+
+        val overflowCount = overflowItem.overflowCount
+        if (overflowCount <= 0 || overflowItem.allSlotEvents.isEmpty()) return
+
+        // 3. 提取被折叠在 +N 徽章内的 N 款应用事件列表
+        val overflowEvents = overflowItem.allSlotEvents.takeLast(overflowCount)
+        if (overflowEvents.isEmpty()) return
+
+        // 4. 计算纯图标气泡卡片尺寸与坐标（固定显示在顶部固定看板下方）
+        val iconSize = dp11
+        val iconGap = dp0
+        val paddingH = dp1
+        val paddingV = dp1
+        val renderIconSize = iconSize.toInt().coerceAtLeast(1)
+
+        val availableW = (width - dp11 * 2 - paddingH * 2).coerceAtLeast(iconSize)
+        val maxCols = ((availableW + iconGap) / (iconSize + iconGap)).toInt().coerceAtLeast(1)
+        val cols = minOf(overflowEvents.size, maxCols)
+        val rows = (overflowEvents.size + cols - 1) / cols
+
+        val boxWidth = paddingH * 2 + cols * iconSize + (cols - 1).coerceAtLeast(0) * iconGap
+        val boxHeight = paddingV * 2 + rows * iconSize + (rows - 1).coerceAtLeast(0) * iconGap
+
+        // 顶部固定看板底部为 dp24，卡片固定定位在 dp26 处（即看板正下方）
+        val boxTop = dp26
+        val minLeft = dp14
+        val maxLeft = maxOf(minLeft, width - dp14 - boxWidth)
+        val boxLeft = (pX - boxWidth / 2f).coerceIn(minLeft, maxLeft)
+
+        // 5. 绘制卡片圆角背景与微暗边框
+        popupTooltipRect.set(boxLeft, boxTop, boxLeft + boxWidth, boxTop + boxHeight)
+        canvas.drawRoundRect(popupTooltipRect, dp4, dp4, popupTooltipBgPaint)
+        canvas.drawRoundRect(popupTooltipRect, dp4, dp4, popupTooltipBorderPaint)
+
+        // 6. 依次居中绘制被折叠的 N 款应用图标（支持单行与多行网格自适应）
+        for ((index, event) in overflowEvents.withIndex()) {
+            val col = index % cols
+            val row = index / cols
+            val curIconLeft = boxLeft + paddingH + col * (iconSize + iconGap)
+            val curIconTop = boxTop + paddingV + row * (iconSize + iconGap)
+
+            val bmp = DrawableBitmapCache.getOrConvertBitmap(
+                event.packageName,
+                event.icon,
+                renderIconSize
+            )
+            if (bmp != null && !bmp.isRecycled) {
+                tempSrcRect.set(0, 0, bmp.width, bmp.height)
+                tempDstRectF.set(
+                    curIconLeft,
+                    curIconTop,
+                    curIconLeft + iconSize,
+                    curIconTop + iconSize
+                )
+                canvas.drawBitmap(bmp, tempSrcRect, tempDstRectF, bitmapPaint)
             }
         }
     }

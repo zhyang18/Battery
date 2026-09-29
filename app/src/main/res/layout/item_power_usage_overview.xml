@@ -17,7 +17,7 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingHorizontal="8dp"
-        android:paddingTop="10dp"
+        android:paddingTop="5dp"
         android:paddingBottom="10dp">
 
         <!-- 功耗时间轴主可视化交互组件（四维数据融合与多行 App 堆叠） -->
@@ -25,13 +25,13 @@
             android:id="@+id/battery_timeline_view"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="0dp" />
+            android:layout_marginTop="5dp" />
 
         <!-- 底部指标切换选择器（功耗 / 电量 / 温度 / 电压 / 应用） -->
         <com.battery.analysis.timeline.presentation.MetricSelectorView
             android:id="@+id/metric_selector_view"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp" />
+            android:layout_marginTop="6dp" />
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

@@ -4710,7 +4710,14 @@ class PowerUsageManager private constructor(private val context: Context) {
                 500.0
             }
 
-            val initialEnergyWh = if (totalEnergyWh != null && totalEnergyWh > 0f) {
+            val initialEnergyWh = if (!isHistory) {
+                val unplugWh = getLastUnplugEnergyWh()
+                if (unplugWh != null && unplugWh > 0f) {
+                    unplugWh.toDouble()
+                } else if (totalEnergyWh != null && totalEnergyWh > 0f) {
+                    (initialLevel / 100.0) * totalEnergyWh
+                } else null
+            } else if (totalEnergyWh != null && totalEnergyWh > 0f) {
                 (initialLevel / 100.0) * totalEnergyWh
             } else null
 
@@ -4765,7 +4772,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                     if (snap.voltageVolts > 0f) (snap.voltageVolts * 1000).toInt() else (lastPt.voltageVolts * 1000).toInt()
                 }
                 val finalTemp = if (isHistory) lastPt.temperature.toDouble() else snap.temperature.toDouble()
-                val finalEnergyWh = if (totalEnergyWh != null && totalEnergyWh > 0f) {
+                val finalEnergyWh = if (!isHistory && snap.energyWh > 0f) {
+                    snap.energyWh.toDouble()
+                } else if (totalEnergyWh != null && totalEnergyWh > 0f) {
                     (finalLevel / 100.0) * totalEnergyWh
                 } else null
 

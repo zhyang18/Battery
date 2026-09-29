@@ -216,10 +216,19 @@ class ChargingChartView @JvmOverloads constructor(
     }
 
     // 顶部固定信息栏文本画笔
-    private val headerTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = sp10
-        textAlign = Paint.Align.CENTER
-        color = Color.parseColor("#888888")
+    private val headerTimePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp9_5
+        color = Color.parseColor("#9E9E9E")
+    }
+
+    private val headerMetricValuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp9_5
+        isFakeBoldText = true
+    }
+
+    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        isFilterBitmap = true
+        isDither = true
     }
 
     // 峰谷值微型标签光晕描边画笔（双层绘制，确保在折线和网格上方文字清晰）
@@ -830,12 +839,13 @@ class ChargingChartView @JvmOverloads constructor(
     }
 
     /**
-     * 在图表最顶部固定区域绘制读数指示看板（触摸时显示探查点指标，非触摸时显示最新实时读数）。
+     * 在图表最顶部固定区域绘制读数指示看板。
+     * 时间靠左对齐距左 10dp，应用图标靠右对齐距右 10dp，中间 4 个指标（电量、功率、温度、电压）等比例 4 等分居中排布（无分隔符，无中文字符前缀）。
      *
-     * @param canvas 画布
-     * @param w 视图总宽度
-     * @param paddingLeft 左边距
-     * @param paddingRight 右边距
+     * @param canvas 绘制画布 [Canvas]
+     * @param w 视图总宽度（像素）
+     * @param paddingLeft 图表左内边距（像素）
+     * @param paddingRight 图表右内边距（像素）
      */
     private fun drawFixedTopHeader(canvas: Canvas, w: Float, paddingLeft: Float, paddingRight: Float) {
         val headerTop = dp2
@@ -847,9 +857,10 @@ class ChargingChartView @JvmOverloads constructor(
         canvas.drawRoundRect(headerRect, dp4, dp4, headerBorderPaint)
 
         if (dataPoints.isEmpty()) {
-            headerTextPaint.color = Color.parseColor("#888888")
-            val textY = headerTop + (headerBottom - headerTop) / 2f - (headerTextPaint.descent() + headerTextPaint.ascent()) / 2f
-            canvas.drawText("等待充电数据采样...", w / 2f, textY, headerTextPaint)
+            headerTimePaint.textAlign = Paint.Align.CENTER
+            headerTimePaint.color = Color.parseColor("#888888")
+            val textY = headerTop + (headerBottom - headerTop) / 2f - (headerTimePaint.descent() + headerTimePaint.ascent()) / 2f
+            canvas.drawText("等待充电数据采样...", w / 2f, textY, headerTimePaint)
             return
         }
 
@@ -859,50 +870,71 @@ class ChargingChartView @JvmOverloads constructor(
             dataPoints.last()
         }
 
-        val timeStr = timeFormatter.format(Date(point.timestamp))
+        val curTs = point.timestamp
+        val curApp = appEvents.find { it.startTime <= curTs && it.endTime >= curTs } ?: appEvents.lastOrNull()
+
+        val timeStr = timeFormatter.format(Date(curTs))
         val levelStr = "${point.batteryLevel}%"
         val pWatts = point.powerWatts
-        val pLabel: String
-        val pColor: Int
-        if (pWatts >= 0f) {
-            pLabel = String.format(Locale.getDefault(), "充电 +%.2fW", pWatts)
-            pColor = colorPowerCharge
+        val pLabel = if (pWatts >= 0f) {
+            String.format(Locale.getDefault(), "+%.2fW", pWatts)
         } else {
-            pLabel = String.format(Locale.getDefault(), "放电 -%.2fW", abs(pWatts))
-            pColor = colorPowerDischarge
+            String.format(Locale.getDefault(), "-%.2fW", abs(pWatts))
         }
+        val pColor = if (pWatts >= 0f) colorPowerCharge else colorPowerDischarge
         val tempStr = String.format(Locale.getDefault(), "%.1f℃", point.temperature)
         val voltStr = if (point.voltageVolts > 0.5f) {
             String.format(Locale.getDefault(), "%.3fV", point.voltageVolts)
         } else {
-            "--V"
+            "--"
         }
 
-        val totalHeaderWidth = w - paddingLeft - paddingRight
-        val colWidth = totalHeaderWidth / 5f
-        val textY = headerTop + (headerBottom - headerTop) / 2f - (headerTextPaint.descent() + headerTextPaint.ascent()) / 2f
+        val textY = headerTop + (headerBottom - headerTop) / 2f - (headerTimePaint.descent() + headerTimePaint.ascent()) / 2f
+        val paddingH = dp5
+        val iconSize = dp12
 
-        // 列 1：时间（触摸状态加光标符号，非触摸状态加“实时”标识）
-        headerTextPaint.textAlign = Paint.Align.CENTER
-        headerTextPaint.color = if (isTouching) Color.parseColor("#B0BEC5") else Color.parseColor("#888888")
-        val labelTime = if (isTouching) "探查 $timeStr" else "实时 $timeStr"
-        canvas.drawText(labelTime, paddingLeft + colWidth * 0.5f, textY, headerTextPaint)
+        // 1. 绘制时间（靠左对齐，距左 10dp）
+        headerTimePaint.textAlign = Paint.Align.LEFT
+        headerTimePaint.color = Color.parseColor("#9E9E9E")
+        canvas.drawText(timeStr, paddingLeft + paddingH, textY, headerTimePaint)
+        val timeWidth = headerTimePaint.measureText(timeStr)
 
-        // 列 2：电量（蓝色 3A7FF0）
-        headerTextPaint.color = colorLevel
-        canvas.drawText("电量 $levelStr", paddingLeft + colWidth * 1.5f, textY, headerTextPaint)
+        // 2. 绘制应用图标（靠右对齐，距右 10dp）
+        val iconLeft = w - paddingRight - paddingH - iconSize
+        val iconTop = headerTop + (headerBottom - headerTop - iconSize) / 2f
+        if (curApp != null) {
+            val renderIconSize = iconSize.toInt().coerceAtLeast(1)
+            val bmp = DrawableBitmapCache.getOrConvertBitmap(curApp.packageName, curApp.icon, renderIconSize)
+            if (bmp != null && !bmp.isRecycled) {
+                iconSrcRect.set(0, 0, bmp.width, bmp.height)
+                iconDstRect.set(iconLeft, iconTop, iconLeft + iconSize, iconTop + iconSize)
+                canvas.drawBitmap(bmp, iconSrcRect, iconDstRect, bitmapPaint)
+            }
+        }
 
-        // 列 3：功率（充电浅蓝/放电橙色）
-        headerTextPaint.color = pColor
-        canvas.drawText(pLabel, paddingLeft + colWidth * 2.5f, textY, headerTextPaint)
+        // 3. 中间 4 个指标（电量、功率、温度、电压）在时间与图标之间按比例等分居中排布（无分隔符，无中文字符前缀）
+        val middleLeft = paddingLeft + paddingH + timeWidth + dp6
+        val middleRight = w - paddingRight - paddingH - iconSize - dp6
+        val middleWidth = maxOf(0f, middleRight - middleLeft)
+        val colWidth = middleWidth / 4f
 
-        // 列 4：温度（红色）
-        headerTextPaint.color = colorTemp
-        canvas.drawText("温度 $tempStr", paddingLeft + colWidth * 3.5f, textY, headerTextPaint)
+        headerMetricValuePaint.textAlign = Paint.Align.CENTER
 
-        // 列 5：电压（黄色）
-        headerTextPaint.color = colorVoltage
-        canvas.drawText("电压 $voltStr", paddingLeft + colWidth * 4.5f, textY, headerTextPaint)
+        // 绘制电量（深天蓝 #3A7FF0，第 1 列居中）
+        headerMetricValuePaint.color = colorLevel
+        canvas.drawText(levelStr, middleLeft + colWidth * 0.5f, textY, headerMetricValuePaint)
+
+        // 绘制功率（充电浅天蓝 #90CAF9 / 放电橙色 #FF9800，第 2 列居中）
+        headerMetricValuePaint.color = pColor
+        canvas.drawText(pLabel, middleLeft + colWidth * 1.5f, textY, headerMetricValuePaint)
+
+        // 绘制温度（红色 #FF5252，第 3 列居中）
+        headerMetricValuePaint.color = colorTemp
+        canvas.drawText(tempStr, middleLeft + colWidth * 2.5f, textY, headerMetricValuePaint)
+
+        // 绘制电压（金黄 #FFD54F，第 4 列居中）
+        headerMetricValuePaint.color = colorVoltage
+        canvas.drawText(voltStr, middleLeft + colWidth * 3.5f, textY, headerMetricValuePaint)
     }
 
     /**

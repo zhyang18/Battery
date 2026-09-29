@@ -1559,9 +1559,9 @@ class BatteryTimelineView @JvmOverloads constructor(
         val timeStr = timeFormatterTooltip.format(Date(curTs))
         val levelStr = curSample?.let { "${it.batteryLevel}%" }
         val energyStr = curSample?.let { s ->
-            s.energyWh?.let { String.format(Locale.getDefault(), "%.3fWh", it) }
+            s.energyWh?.let { String.format(Locale.getDefault(), "%.1fWh", it) }
                 ?: timelineState.totalEnergyWh?.takeIf { it > 0f }?.let {
-                    String.format(Locale.getDefault(), "%.3fWh", s.batteryLevel / 100f * it)
+                    String.format(Locale.getDefault(), "%.1fWh", s.batteryLevel / 100f * it)
                 }
         }
         val powerStr = curSample?.let {

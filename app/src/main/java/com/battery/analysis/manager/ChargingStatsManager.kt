@@ -467,6 +467,12 @@ class ChargingStatsManager private constructor(private val context: Context) {
             isScreenOn = isInteractive
         )
 
+        // 核心守卫：若当前设备未处于充电状态（处于放电使用中），仅返回瞬时点供 UI 读数展示，
+        // 严禁向充电走势折线图追加放电数据点，严禁更新充电会话指标与时间戳！
+        if (!charging) {
+            return point
+        }
+
         // 梯形数值积分微元：计算本采样周期的能量增量 dE
         var deltaEnergyWh = 0f
         if (lastSampleTimestamp > 0L && now > lastSampleTimestamp) {

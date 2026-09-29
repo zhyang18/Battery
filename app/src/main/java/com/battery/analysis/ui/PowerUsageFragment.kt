@@ -1228,8 +1228,11 @@ class PowerUsageFragment : Fragment() {
             }
 
             while (isActive) {
+                val isCharging = chargingManager.isCharging()
                 val serviceAlive = com.battery.analysis.service.BatteryMonitorService.isServiceActive()
-                val samplePoint = if (serviceAlive) {
+                val samplePoint = if (!isCharging) {
+                    chargingManager.getSamplePoints().lastOrNull()
+                } else if (serviceAlive) {
                     chargingManager.getSamplePoints().lastOrNull()
                 } else if (shouldSample) {
                     chargingManager.sampleCurrentPoint()

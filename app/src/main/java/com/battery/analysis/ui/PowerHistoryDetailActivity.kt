@@ -29,6 +29,7 @@ import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.PowerUsageRecord
 import com.battery.analysis.timeline.presentation.AppEnergyDetailBottomSheetDialog
 import com.battery.analysis.timeline.presentation.BatteryTimelineState
+import com.battery.analysis.util.BatteryEnergyCalculator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -247,6 +248,47 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             val dialog = AppEnergyDetailBottomSheetDialog(this@PowerHistoryDetailActivity, event)
             showAndTrackDialog(dialog)
         }
+
+        hBinding.batteryTimelineView.setOnEnergyClickListener {
+            showEnergyTooltip()
+        }
+    }
+
+    /**
+     * 弹出快照趋势图上方能量指标的详细信息 Toast 提示。
+     * 忠实呈现当前快照剩余能量、电池总能量、拔电时初始能量以及该放电周期已消耗能量，
+     * 缺失时如实显示未知占位符，严禁伪造假数据。
+     */
+    private fun showEnergyTooltip() {
+        val record = currentRecord
+        val powerManager = PowerUsageManager.getInstance(this)
+        val totalCapMah = powerManager.getEffectiveDeviceCapacityMah()
+
+        val totalWh = if (totalCapMah > 0f) {
+            totalCapMah / 1000f * BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
+        } else {
+            null
+        }
+
+        val currentWh = record?.energyWh?.takeIf { it > 0f }
+            ?: (if (totalCapMah > 0f && record != null) {
+                record.levelPercent / 100f * (totalCapMah / 1000f * BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS)
+            } else null)
+
+        val consumedWh = record?.totalEnergyWh?.takeIf { it > 0f }
+        val unplugWh = if (currentWh != null && consumedWh != null) {
+            currentWh + consumedWh
+        } else {
+            null
+        }
+
+        val currentStr = currentWh?.let { String.format(Locale.getDefault(), "%.3fWh", it) } ?: "--"
+        val totalStr = totalWh?.let { String.format(Locale.getDefault(), "%.3fWh", it) } ?: "--"
+        val unplugStr = unplugWh?.let { String.format(Locale.getDefault(), "%.3fWh", it) } ?: "--"
+        val consumedStr = consumedWh?.let { String.format(Locale.getDefault(), "%.3fWh", it) } ?: "--"
+
+        val message = getString(R.string.power_tooltip_energy, currentStr, totalStr, unplugStr, consumedStr)
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
     /**

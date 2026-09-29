@@ -50,6 +50,7 @@ enum class TimelineMetric {
  * @property selectedMetric 兼容保留的主展示指标
  * @property selectedMetrics 当前选中的指标集合（支持多选与反选叠加展示）
  * @property selectedApp 当前被点击选中的 App 事件（若有）
+ * @property totalEnergyWh 电池总能量基准（单位：瓦时 Wh，用于能量计算，若无则为 null）
  */
 data class BatteryTimelineState(
     val startTimestamp: Long = 0L,
@@ -63,7 +64,8 @@ data class BatteryTimelineState(
     val batterySamples: List<BatterySample> = emptyList(),
     val selectedMetric: TimelineMetric = TimelineMetric.POWER,
     val selectedMetrics: Set<TimelineMetric> = setOf(TimelineMetric.POWER, TimelineMetric.APP),
-    val selectedApp: AppTimelineEvent? = null
+    val selectedApp: AppTimelineEvent? = null,
+    val totalEnergyWh: Float? = null
 ) {
     /**
      * 获取数据全集的总时间跨度（毫秒）。

@@ -117,10 +117,10 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     var onShizukuActionClickedListener: (() -> Unit)? = null
     var onSetupModeSelectedListener: ((Int) -> Unit)? = null
     var onSetupConfirmListener: (() -> Unit)? = null
-    var onEnergyContainerClickedListener: (() -> Unit)? = null
 
     // MetricSelectorView 与 Charging 图表的外部监听器保持
     var onMetricsChangedListener: ((Set<com.battery.analysis.timeline.presentation.TimelineMetric>) -> Unit)? = null
+    var onEnergyClickListener: (() -> Unit)? = null
 
     // ==================== ViewHolder 定义 ====================
 
@@ -246,8 +246,8 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                     it.binding.metricSelectorView.setOnMetricsChangedListener { metrics ->
                         onMetricsChangedListener?.invoke(metrics)
                     }
-                    it.binding.llEnergyContainer.setOnClickListener {
-                        onEnergyContainerClickedListener?.invoke()
+                    it.binding.batteryTimelineView.setOnEnergyClickListener {
+                        onEnergyClickListener?.invoke()
                     }
                 }
             }
@@ -406,33 +406,12 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     }
 
     /**
-     * 绑定使用过程概览卡片（瞬时指标与时间轴）。
+     * 绑定使用过程概览卡片（四维时间轴与底部指标选择器）。
      *
      * @param holder 概览卡片 ViewHolder
      */
     private fun bindUsageOverview(holder: UsageOverviewViewHolder) {
         with(holder.binding) {
-            val context = root.context
-            val energyText = String.format(Locale.getDefault(), context.getString(R.string.power_wh_format), cachedEnergyWh)
-            tvEnergyWh.text = energyText
-
-            val totalEnergyText = cachedTotalEnergyWh?.takeIf { it > 0f }?.let {
-                String.format(Locale.getDefault(), context.getString(R.string.power_wh_format), it)
-            } ?: "--"
-            val unplugEnergyText = cachedLastUnplugWh?.takeIf { it > 0f }?.let {
-                String.format(Locale.getDefault(), context.getString(R.string.power_wh_format), it)
-            } ?: "--"
-            val energyTooltip = context.getString(R.string.power_tooltip_energy, energyText, totalEnergyText, unplugEnergyText)
-            llEnergyContainer.contentDescription = energyTooltip
-
-            tvTemperature.text = String.format(Locale.getDefault(), context.getString(R.string.power_temp_format), cachedTemperature)
-            tvVoltage.text = String.format(Locale.getDefault(), context.getString(R.string.power_volt_format), cachedVoltageVolts)
-            tvChargingStatus.text = if (cachedIsCharging) {
-                context.getString(R.string.power_status_charging)
-            } else {
-                context.getString(R.string.power_status_unplugged)
-            }
-
             cachedTimelineState?.let { state ->
                 batteryTimelineView.setState(state)
             }

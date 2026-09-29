@@ -38,6 +38,7 @@ import com.battery.analysis.model.ChargingSessionSummary
 import com.battery.analysis.ui.view.ChargingChartView
 import com.battery.analysis.timeline.presentation.AppEnergyDetailBottomSheetDialog
 import com.battery.analysis.timeline.presentation.TimelineMetric
+import com.battery.analysis.util.BatteryEnergyCalculator
 import android.os.PowerManager
 import com.battery.analysis.provider.NormalApiProvider
 import kotlinx.coroutines.Dispatchers
@@ -782,24 +783,47 @@ class PowerUsageFragment : Fragment() {
         adapter.onMetricsChangedListener = { selectedMetrics ->
             adapter.overviewHolder?.binding?.batteryTimelineView?.setSelectedMetrics(selectedMetrics)
         }
+        adapter.onEnergyClickListener = {
+            showEnergyTooltip()
+        }
         adapter.onRestoreRealtimeClickedListener = {
             restoreLivePowerData()
         }
-        adapter.onEnergyContainerClickedListener = {
-            lastRenderedPackage?.let { pkg ->
-                val snapshot = pkg.batterySnapshot
-                val energyText = String.format(Locale.getDefault(), getString(R.string.power_wh_format), snapshot.energyWh)
-                val totalEnergyText = snapshot.totalEnergyWh?.takeIf { it > 0f }?.let {
-                    String.format(Locale.getDefault(), getString(R.string.power_wh_format), it)
-                } ?: "--"
-                val lastUnplugWh = powerManager.getLastUnplugEnergyWh()
-                val unplugEnergyText = lastUnplugWh?.takeIf { it > 0f }?.let {
-                    String.format(Locale.getDefault(), getString(R.string.power_wh_format), it)
-                } ?: "--"
-                val energyTooltip = getString(R.string.power_tooltip_energy, energyText, totalEnergyText, unplugEnergyText)
-                Toast.makeText(requireContext(), energyTooltip, Toast.LENGTH_SHORT).show()
-            }
-        }
+    }
+
+    /**
+     * 弹出趋势图上方能量指标的详细信息 Toast 提示。
+     * 忠实呈现当前剩余能量、电池总能量、拔电时初始能量以及当前放电周期已消耗能量，
+     * 缺失时如实显示未知占位符，严禁伪造假数据。
+     */
+    private fun showEnergyTooltip() {
+        val snapshot = lastRenderedPackage?.batterySnapshot
+        val overview = lastRenderedPackage?.overviewStats
+        val totalCapMah = powerManager.getEffectiveDeviceCapacityMah()
+
+        val currentWh = snapshot?.energyWh
+            ?: (if (totalCapMah > 0f && snapshot != null) {
+                snapshot.levelPercent / 100f * (totalCapMah / 1000f * BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS)
+            } else null)
+
+        val totalWh = snapshot?.totalEnergyWh?.takeIf { it > 0f }
+            ?: (if (totalCapMah > 0f) {
+                totalCapMah / 1000f * BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
+            } else null)
+
+        val unplugWh = powerManager.getLastUnplugEnergyWh()
+        val consumedWh = overview?.totalEnergyWh?.takeIf { it > 0f }
+            ?: (if (unplugWh != null && currentWh != null && unplugWh >= currentWh) {
+                (unplugWh - currentWh).toFloat()
+            } else null)
+
+        val currentStr = currentWh?.let { String.format(Locale.getDefault(), "%.3fWh", it) } ?: "--"
+        val totalStr = totalWh?.let { String.format(Locale.getDefault(), "%.3fWh", it) } ?: "--"
+        val unplugStr = unplugWh?.let { String.format(Locale.getDefault(), "%.3fWh", it) } ?: "--"
+        val consumedStr = consumedWh?.let { String.format(Locale.getDefault(), "%.3fWh", it) } ?: "--"
+
+        val message = getString(R.string.power_tooltip_energy, currentStr, totalStr, unplugStr, consumedStr)
+        Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
     }
 
     /**

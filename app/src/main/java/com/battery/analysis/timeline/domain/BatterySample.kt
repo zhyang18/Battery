@@ -10,6 +10,7 @@ package com.battery.analysis.timeline.domain
  * @property currentMa 瞬时放电/充电电流（单位：毫安 mA，放电为正值）
  * @property temperatureC 电池温度（单位：摄氏度 ℃）
  * @property powerMw 瞬时功率（单位：毫瓦 mW，由电压与电流换算）
+ * @property energyWh 采样时刻对应的电池剩余能量（单位：瓦时 Wh，若无有效基准容量则为 null）
  */
 data class BatterySample(
     val timestamp: Long,
@@ -17,7 +18,8 @@ data class BatterySample(
     val voltageMv: Int,
     val currentMa: Double,
     val temperatureC: Double,
-    val powerMw: Double
+    val powerMw: Double,
+    val energyWh: Double? = null
 ) {
     /**
      * 获取以伏特（V）为单位的电压值。

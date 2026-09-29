@@ -4683,6 +4683,10 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         // 1. 转换物理采样点（确保 startTs 与 endTs 100% 闭合覆盖）
         val samples = mutableListOf<BatterySample>()
+        val effectiveCapacity = getEffectiveDeviceCapacityMah()
+        val totalEnergyWh = fullPackage.batterySnapshot.totalEnergyWh
+            ?: BatteryEnergyCalculator.calculateTotalEnergyWh(effectiveCapacity)
+
         if (points.isNotEmpty()) {
             val firstPt = points.first()
             val snap = fullPackage.batterySnapshot
@@ -4706,6 +4710,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                 500.0
             }
 
+            val initialEnergyWh = if (totalEnergyWh != null && totalEnergyWh > 0f) {
+                (initialLevel / 100.0) * totalEnergyWh
+            } else null
+
             // 必须包含起点采样点 (startTs)
             samples.add(
                 BatterySample(
@@ -4714,7 +4722,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                     voltageMv = (firstPt.voltageVolts * 1000).toInt(),
                     currentMa = if (firstPt.voltageVolts > 0.5f) (firstPt.powerWatts * 1000.0 / firstPt.voltageVolts) else estAvgCurrentMa,
                     temperatureC = firstPt.temperature.toDouble(),
-                    powerMw = (firstPt.powerWatts * 1000).toDouble()
+                    powerMw = (firstPt.powerWatts * 1000).toDouble(),
+                    energyWh = initialEnergyWh
                 )
             )
 
@@ -4723,6 +4732,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                     val vMv = (pt.voltageVolts * 1000).toInt()
                     val pMw = (pt.powerWatts * 1000).toDouble()
                     val cMa = if (pt.voltageVolts > 0f) (pMw / pt.voltageVolts) else estAvgCurrentMa
+                    val ptEnergyWh = if (totalEnergyWh != null && totalEnergyWh > 0f) {
+                        (pt.batteryLevel / 100.0) * totalEnergyWh
+                    } else null
                     samples.add(
                         BatterySample(
                             timestamp = pt.timestamp,
@@ -4730,7 +4742,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                             voltageMv = vMv,
                             currentMa = cMa,
                             temperatureC = pt.temperature.toDouble(),
-                            powerMw = pMw
+                            powerMw = pMw,
+                            energyWh = ptEnergyWh
                         )
                     )
                 }
@@ -4752,6 +4765,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                     if (snap.voltageVolts > 0f) (snap.voltageVolts * 1000).toInt() else (lastPt.voltageVolts * 1000).toInt()
                 }
                 val finalTemp = if (isHistory) lastPt.temperature.toDouble() else snap.temperature.toDouble()
+                val finalEnergyWh = if (totalEnergyWh != null && totalEnergyWh > 0f) {
+                    (finalLevel / 100.0) * totalEnergyWh
+                } else null
 
                 samples.add(
                     BatterySample(
@@ -4760,7 +4776,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                         voltageMv = finalVoltMv,
                         currentMa = estAvgCurrentMa,
                         temperatureC = finalTemp,
-                        powerMw = latestPwrMw
+                        powerMw = latestPwrMw,
+                        energyWh = finalEnergyWh
                     )
                 )
             }
@@ -4960,7 +4977,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             screenEvents = screenEvents,
             appEvents = appEvents,
             batterySamples = samples,
-            selectedMetric = metric
+            selectedMetric = metric,
+            totalEnergyWh = totalEnergyWh
         )
     }
 

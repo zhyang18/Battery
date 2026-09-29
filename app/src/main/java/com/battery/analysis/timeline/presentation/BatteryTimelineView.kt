@@ -60,6 +60,16 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
+     * 顶部固定看板能量指标点击回调接口。
+     */
+    fun interface OnEnergyClickListener {
+        /**
+         * 当用户点击顶部固定看板上的能量指标文本时触发。
+         */
+        fun onEnergyClick()
+    }
+
+    /**
      * 长按游标探查状态监听器接口。
      */
     interface OnCursorInspectListener {
@@ -81,6 +91,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     // 内部状态维护
     private var timelineState = BatteryTimelineState()
     private var onAppEventListener: OnAppEventListener? = null
+    private var onEnergyClickListener: OnEnergyClickListener? = null
     private var onCursorInspectListener: OnCursorInspectListener? = null
 
     // 预计算 DP 标量
@@ -271,6 +282,22 @@ class BatteryTimelineView @JvmOverloads constructor(
         color = Color.parseColor("#E0E0E0")
     }
 
+    // 顶部固定读数看板分段绘制画笔体系
+    private val headerTimePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp9_5
+        color = Color.parseColor("#9E9E9E")
+    }
+
+    private val headerSeparatorPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp9_5
+        color = Color.parseColor("#55888888")
+    }
+
+    private val headerMetricValuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp9_5
+        isFakeBoldText = true
+    }
+
     // 各指标折线主题颜色（与充电趋势图规范完全统一）
     private val colorPower = Color.parseColor("#90CAF9")
     private val colorBattery = Color.parseColor("#3A7FF0")
@@ -297,6 +324,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     private val tempDstRectF = RectF()
     private val tempSrcRect = Rect()
     private val tooltipRect = RectF()
+    private val energyTouchRect = RectF()
     private val cachedSlotItems = mutableListOf<TimelineLayoutCalculator.LaidOutAppSlotItem>()
 
     /**
@@ -429,6 +457,15 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
+     * 设置顶部固定看板能量指标点击监听器。
+     *
+     * @param listener 能量指标点击监听器实例 [OnEnergyClickListener]
+     */
+    fun setOnEnergyClickListener(listener: OnEnergyClickListener?) {
+        this.onEnergyClickListener = listener
+    }
+
+    /**
      * 设置应用事件点击监听器。
      *
      * @param listener 监听器实例
@@ -454,7 +491,7 @@ class BatteryTimelineView @JvmOverloads constructor(
      */
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val width = MeasureSpec.getSize(widthMeasureSpec)
-        val defaultBaseH = dpToPx(240f).toInt()
+        val defaultBaseH = dpToPx(270f).toInt()
         val maxRow = cachedSlotItems.maxOfOrNull { it.rowIndex } ?: -1
         val maxRowsCount = maxRow + 1
 
@@ -595,9 +632,9 @@ class BatteryTimelineView @JvmOverloads constructor(
         val screenBarBottom = timeTickTop - dp2
         val screenBarTop = screenBarBottom - dp3_5
 
-        // 曲线区域顶部紧凑排布，平时不触摸时不占用多余空间；触摸 View 直接悬浮在顶部
+        // 曲线区域顶部预留顶部常驻看板高度，避免与折线重合
         val mainChartHeight = screenBarTop - dp6
-        val topPadding = dp6
+        val topPadding = dp28
         val bottomPadding = dp4
         val availableH = max(1f, mainChartHeight - topPadding - bottomPadding)
 
@@ -641,10 +678,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         // 5. 绘制横贯全宽的固定底图时间轴屏幕状态实线条（亮屏绿 / 息屏红）
         drawScreenStateBar(canvas, contentLeft, contentRight, screenBarTop, screenBarBottom, visibleStart, visibleEnd)
 
-        // 6. 若长按处于活跃状态，绘制垂直游标并将信息固定在图表顶部展示（无遮挡弹框）
-        if (isCursorActive) {
-            drawCursorAndHeaderInfo(canvas, contentLeft, contentRight, contentWidth, screenBarTop, visibleStart, visibleEnd, topPadding, availableH)
-        }
+        // 6. 在图表上方固定常驻绘制读数指示看板（默认显示当前刷新时间，触摸时实时更新为游标时刻数据）
+        drawFixedTopHeaderAndCursor(canvas, contentLeft, contentRight, contentWidth, screenBarTop, visibleStart, visibleEnd, topPadding, availableH)
     }
 
     /**
@@ -1471,10 +1506,11 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制手势长按或触控滑动时的垂直虚线游标，以及顶部单行读数指示看板（与充电趋势图触摸看板样式保持一致）。
-     * 单行紧凑展示当前时刻指标，中间以 " | " 分隔，去除指标名称标签。
-     * 格式形如：10:10:02 :  60% | -1.35W | 38.5℃ | 3.941V | 电池统计
-     * 并在各激活折线交点处绘制高亮圆点（双层圆点：外圈彩色主题色，内圈白色圆心）。
+     * 绘制图表顶部常驻固定的单行读数指示看板（默认显示当前刷新时间与最新指标，触摸时实时更新为游标时刻指标），
+     * 并当触控处于活跃状态时绘制垂直虚线游标与各曲线交点彩色高亮点。
+     * 单行紧凑展示当前时刻指标，中间以 " | " 分隔；
+     * 指标颜色严格对应下方标签颜色（电量/能量为深天蓝 #3A7FF0，功耗为浅天蓝 #90CAF9，温度为红色 #FF5252，电压为金黄 #FFD54F）；
+     * 对应时刻前台活跃应用通过真实应用图标在末尾居中绘制（不使用文本名称）。
      *
      * @param canvas 绘制画布 [Canvas]
      * @param contentLeft 图表内容左边界 X 坐标
@@ -1486,7 +1522,7 @@ class BatteryTimelineView @JvmOverloads constructor(
      * @param topPadding 曲线绘制区域顶部安全间距
      * @param availableH 曲线有效可用绘制高度
      */
-    private fun drawCursorAndHeaderInfo(
+    private fun drawFixedTopHeaderAndCursor(
         canvas: Canvas,
         contentLeft: Float,
         contentRight: Float,
@@ -1497,15 +1533,37 @@ class BatteryTimelineView @JvmOverloads constructor(
         topPadding: Float,
         availableH: Float
     ) {
-        val clampedX = cursorX.coerceIn(contentLeft, contentRight)
+        val clampedX = if (isCursorActive) {
+            cursorX.coerceIn(contentLeft, contentRight)
+        } else {
+            contentRight
+        }
 
-        // 1. 查询当前游标时刻对应的数据
-        val curTs = TimelineScaleCalculator.xToTime(clampedX, visibleStart, visibleEnd, contentWidth, contentLeft)
-        val curSample = timelineState.batterySamples.minByOrNull { abs(it.timestamp - curTs) }
-        val curApp = timelineState.appEvents.find { it.startTime <= curTs && it.endTime >= curTs }
+        // 1. 查询目标时刻对应的数据实体（触摸时取游标时刻临近点，非触摸时取最新采样点或当前刷新时间）
+        val curTs: Long
+        val curSample: BatterySample?
+        val curApp: AppTimelineEvent?
+
+        if (isCursorActive) {
+            curTs = TimelineScaleCalculator.xToTime(clampedX, visibleStart, visibleEnd, contentWidth, contentLeft)
+            curSample = timelineState.batterySamples.minByOrNull { abs(it.timestamp - curTs) }
+            curApp = timelineState.appEvents.find { it.startTime <= curTs && it.endTime >= curTs }
+        } else {
+            val lastSample = timelineState.batterySamples.lastOrNull()
+            curSample = lastSample
+            val latestTs = lastSample?.timestamp ?: timelineState.endTimestamp.takeIf { it > 0L } ?: System.currentTimeMillis()
+            curTs = latestTs
+            curApp = timelineState.appEvents.find { it.startTime <= latestTs && it.endTime >= latestTs } ?: timelineState.appEvents.lastOrNull()
+        }
 
         val timeStr = timeFormatterTooltip.format(Date(curTs))
         val levelStr = curSample?.let { "${it.batteryLevel}%" }
+        val energyStr = curSample?.let { s ->
+            s.energyWh?.let { String.format(Locale.getDefault(), "%.3fWh", it) }
+                ?: timelineState.totalEnergyWh?.takeIf { it > 0f }?.let {
+                    String.format(Locale.getDefault(), "%.3fWh", s.batteryLevel / 100f * it)
+                }
+        }
         val powerStr = curSample?.let {
             val pWatts = it.getPowerWatts()
             val signedPower = if (pWatts > 0) -pWatts else pWatts
@@ -1513,67 +1571,119 @@ class BatteryTimelineView @JvmOverloads constructor(
         }
         val tempStr = curSample?.let { String.format(Locale.getDefault(), "%.1f℃", it.temperatureC) }
         val voltStr = curSample?.let { String.format(Locale.getDefault(), "%.3fV", it.getVoltageVolts()) }
-        val appStr = curApp?.appName?.takeIf { it.isNotBlank() }
 
-        // 2. 将数据合并为单行展示，中间以 " | " 间隔，去除指标名称
-        val metricsList = listOfNotNull(levelStr, powerStr, tempStr, voltStr, appStr)
-        val fullText = if (metricsList.isNotEmpty()) {
-            "$timeStr :  ${metricsList.joinToString(" | ")}"
-        } else {
-            timeStr
-        }
-
-        // 3. 触摸显示的 view 修改为充电趋势图触摸显示 view 样式：顶部单行轻微圆角背景与描边卡片
+        // 2. 顶部单行轻微圆角背景与描边卡片
         val headerTop = dp2
         val headerBottom = dp24
         tooltipRect.set(contentLeft, headerTop, contentRight, headerBottom)
         canvas.drawRoundRect(tooltipRect, dp4, dp4, tooltipBgPaint)
         canvas.drawRoundRect(tooltipRect, dp4, dp4, tooltipBorderPaint)
 
-        // 单行文字垂直居中排布
-        val textY = headerTop + (headerBottom - headerTop) / 2f - (tooltipTextPaint.descent() + tooltipTextPaint.ascent()) / 2f
-        canvas.drawText(fullText, contentLeft + dp8, textY, tooltipTextPaint)
+        // 单行文字垂直居中排布基线
+        val textY = headerTop + (headerBottom - headerTop) / 2f - (headerTimePaint.descent() + headerTimePaint.ascent()) / 2f
+        val paddingH = dp5
+        val iconSize = dp12
 
-        // 4. 垂直虚线游标从顶部悬浮卡片下方引出延伸至图表底部
-        canvas.drawLine(clampedX, headerBottom, clampedX, mainHeight + dp6, cursorPaint)
+        // 2.1 绘制时间（靠左对齐，距左 5dp）
+        headerTimePaint.textAlign = Paint.Align.LEFT
+        canvas.drawText(timeStr, contentLeft + paddingH, textY, headerTimePaint)
+        val timeWidth = headerTimePaint.measureText(timeStr)
 
-        // 5. 各曲线上高亮圆圈打点（外层彩色光环 + 内层白色圆心，与充电趋势图规范完全统一）
-        if (curSample != null) {
-            val selected = timelineState.selectedMetrics
-
-            // 功率指标高亮点
-            if (selected.contains(TimelineMetric.POWER)) {
-                val pW = (abs(curSample.powerMw) / 1000.0).toFloat().coerceIn(0f, cachedMaxScaleW.toFloat())
-                val powerRatio = (pW / cachedMaxScaleW.toFloat()).coerceIn(0f, 1f)
-                val powerY = topPadding + (1f - powerRatio * 0.85f) * availableH
-                drawHighLightDot(canvas, clampedX, powerY, colorPower)
-            }
-
-            // 电量指标高亮点
-            if (selected.contains(TimelineMetric.BATTERY)) {
-                val batteryNorm = (curSample.batteryLevel / 100f).coerceIn(0f, 1f) * 0.45f + 0.50f
-                val batteryY = topPadding + (1f - batteryNorm) * availableH
-                drawHighLightDot(canvas, clampedX, batteryY, colorBattery)
-            }
-
-            // 温度指标高亮点
-            if (selected.contains(TimelineMetric.TEMPERATURE)) {
-                val tempNorm = (((curSample.temperatureC - 15.0) / 30.0).coerceIn(0.0, 1.0) * 0.40 + 0.45).toFloat()
-                val tempY = topPadding + (1f - tempNorm) * availableH
-                drawHighLightDot(canvas, clampedX, tempY, colorTemp)
-            }
-
-            // 电压指标高亮点
-            if (selected.contains(TimelineMetric.VOLTAGE)) {
-                val voltV = curSample.voltageMv / 1000f
-                val voltNorm = (((voltV - 3.4f) / 1.0f).coerceIn(0f, 1f) * 0.35f + 0.35f)
-                val voltY = topPadding + (1f - voltNorm) * availableH
-                drawHighLightDot(canvas, clampedX, voltY, colorVoltage)
+        // 2.2 绘制应用图标（靠右对齐，距右 5dp）
+        val iconLeft = contentRight - paddingH - iconSize
+        val iconTop = headerTop + (headerBottom - headerTop - iconSize) / 2f
+        if (curApp != null) {
+            val renderIconSize = iconSize.toInt().coerceAtLeast(1)
+            val bmp = DrawableBitmapCache.getOrConvertBitmap(curApp.packageName, curApp.icon, renderIconSize)
+            if (bmp != null && !bmp.isRecycled) {
+                tempSrcRect.set(0, 0, bmp.width, bmp.height)
+                tempDstRectF.set(iconLeft, iconTop, iconLeft + iconSize, iconTop + iconSize)
+                canvas.drawBitmap(bmp, tempSrcRect, tempDstRectF, bitmapPaint)
             }
         }
 
-        // 6. 若命中存在 +N 溢出应用的时间槽，在顶部固定探查看板正下方显示纯图标气泡卡片
-        drawTouchTooltip(canvas, clampedX)
+        // 2.3 中间 5 个指标（电量、能量、功耗、温度、电压）在时间与图标之间按比例等分居中排布（无分隔符）
+        val middleLeft = contentLeft + paddingH + timeWidth + dp6
+        val middleRight = contentRight - paddingH - iconSize - dp6
+        val middleWidth = maxOf(0f, middleRight - middleLeft)
+        val colWidth = middleWidth / 5f
+
+        headerMetricValuePaint.textAlign = Paint.Align.CENTER
+
+        // 绘制电量（深天蓝 #3A7FF0，第 1 列居中）
+        if (levelStr != null) {
+            headerMetricValuePaint.color = colorBattery
+            canvas.drawText(levelStr, middleLeft + colWidth * 0.5f, textY, headerMetricValuePaint)
+        }
+
+        // 绘制能量（紧随电量之后，同深天蓝 #3A7FF0，第 2 列居中）
+        val energyColLeft = middleLeft + colWidth * 1.0f
+        val energyColRight = middleLeft + colWidth * 2.0f
+        energyTouchRect.set(energyColLeft, 0f, energyColRight, dp28)
+        if (energyStr != null) {
+            headerMetricValuePaint.color = colorBattery
+            canvas.drawText(energyStr, middleLeft + colWidth * 1.5f, textY, headerMetricValuePaint)
+        }
+
+        // 绘制功耗（浅天蓝 #90CAF9，第 3 列居中）
+        if (powerStr != null) {
+            headerMetricValuePaint.color = colorPower
+            canvas.drawText(powerStr, middleLeft + colWidth * 2.5f, textY, headerMetricValuePaint)
+        }
+
+        // 绘制温度（红色 #FF5252，第 4 列居中）
+        if (tempStr != null) {
+            headerMetricValuePaint.color = colorTemp
+            canvas.drawText(tempStr, middleLeft + colWidth * 3.5f, textY, headerMetricValuePaint)
+        }
+
+        // 绘制电压（金黄 #FFD54F，第 5 列居中）
+        if (voltStr != null) {
+            headerMetricValuePaint.color = colorVoltage
+            canvas.drawText(voltStr, middleLeft + colWidth * 4.5f, textY, headerMetricValuePaint)
+        }
+
+        // 3. 若处于触控活跃状态，绘制垂直虚线游标与各折线交点高亮点
+        if (isCursorActive) {
+            canvas.drawLine(clampedX, headerBottom, clampedX, mainHeight + dp6, cursorPaint)
+
+            if (curSample != null) {
+                val selected = timelineState.selectedMetrics
+
+                // 功率指标高亮点
+                if (selected.contains(TimelineMetric.POWER)) {
+                    val pW = (abs(curSample.powerMw) / 1000.0).toFloat().coerceIn(0f, cachedMaxScaleW.toFloat())
+                    val powerRatio = (pW / cachedMaxScaleW.toFloat()).coerceIn(0f, 1f)
+                    val powerY = topPadding + (1f - powerRatio * 0.85f) * availableH
+                    drawHighLightDot(canvas, clampedX, powerY, colorPower)
+                }
+
+                // 电量指标高亮点
+                if (selected.contains(TimelineMetric.BATTERY)) {
+                    val batteryNorm = (curSample.batteryLevel / 100f).coerceIn(0f, 1f) * 0.45f + 0.50f
+                    val batteryY = topPadding + (1f - batteryNorm) * availableH
+                    drawHighLightDot(canvas, clampedX, batteryY, colorBattery)
+                }
+
+                // 温度指标高亮点
+                if (selected.contains(TimelineMetric.TEMPERATURE)) {
+                    val tempNorm = (((curSample.temperatureC - 15.0) / 30.0).coerceIn(0.0, 1.0) * 0.40 + 0.45).toFloat()
+                    val tempY = topPadding + (1f - tempNorm) * availableH
+                    drawHighLightDot(canvas, clampedX, tempY, colorTemp)
+                }
+
+                // 电压指标高亮点
+                if (selected.contains(TimelineMetric.VOLTAGE)) {
+                    val voltV = curSample.voltageMv / 1000f
+                    val voltNorm = (((voltV - 3.4f) / 1.0f).coerceIn(0f, 1f) * 0.35f + 0.35f)
+                    val voltY = topPadding + (1f - voltNorm) * availableH
+                    drawHighLightDot(canvas, clampedX, voltY, colorVoltage)
+                }
+            }
+
+            // 若命中存在 +N 溢出应用的时间槽，在顶部固定探查看板正下方显示纯图标气泡卡片
+            drawTouchTooltip(canvas, clampedX)
+        }
     }
 
     /**
@@ -1672,13 +1782,18 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 处理单指点击，检测是否命中 App 图标徽章。
+     * 处理单指点击，检测是否命中顶部固定看板能量指标或 App 图标徽章。
      *
      * @param x 点击 X 坐标
      * @param y 点击 Y 坐标
      * @return 是否成功处理点击事件
      */
     private fun handleSingleTap(x: Float, y: Float): Boolean {
+        if (energyTouchRect.contains(x, y)) {
+            onEnergyClickListener?.onEnergyClick()
+            return true
+        }
+
         if (!timelineState.selectedMetrics.contains(TimelineMetric.APP)) return false
         val touchSlop = dp4
 

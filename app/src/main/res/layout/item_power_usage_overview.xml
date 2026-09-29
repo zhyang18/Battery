@@ -20,118 +20,12 @@
         android:paddingTop="10dp"
         android:paddingBottom="10dp">
 
-        <!-- 顶部状态指示行：能量、温度、电压、充电状态 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="5dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
-
-            <!-- 能量 -->
-            <LinearLayout
-                android:id="@+id/ll_energy_container"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <ImageView
-                    android:layout_width="16dp"
-                    android:layout_height="16dp"
-                    android:contentDescription="@string/power_param_energy"
-                    android:src="@drawable/ic_battery_energy" />
-
-                <TextView
-                    android:id="@+id/tv_energy_wh"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="4dp"
-                    android:textColor="#757575"
-                    android:textSize="12sp"
-                    tools:text="17.8Wh" />
-            </LinearLayout>
-
-            <!-- 温度 -->
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <ImageView
-                    android:layout_width="16dp"
-                    android:layout_height="16dp"
-                    android:contentDescription="@string/param_temperature"
-                    android:src="@drawable/ic_thermometer" />
-
-                <TextView
-                    android:id="@+id/tv_temperature"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="4dp"
-                    android:textColor="#757575"
-                    android:textSize="12sp"
-                    tools:text="30.5℃" />
-            </LinearLayout>
-
-            <!-- 电压 -->
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <ImageView
-                    android:layout_width="16dp"
-                    android:layout_height="16dp"
-                    android:contentDescription="@string/param_voltage"
-                    android:src="@drawable/ic_bolt"
-                    app:tint="#888888" />
-
-                <TextView
-                    android:id="@+id/tv_voltage"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="4dp"
-                    android:textColor="#757575"
-                    android:textSize="12sp"
-                    tools:text="3.972V" />
-            </LinearLayout>
-
-            <!-- 充电状态 -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <ImageView
-                    android:layout_width="16dp"
-                    android:layout_height="16dp"
-                    android:contentDescription="@string/param_status"
-                    android:src="@drawable/ic_power_plug" />
-
-                <TextView
-                    android:id="@+id/tv_charging_status"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="4dp"
-                    android:textColor="#757575"
-                    android:textSize="12sp"
-                    tools:text="未充电" />
-            </LinearLayout>
-        </LinearLayout>
-
         <!-- 功耗时间轴主可视化交互组件（四维数据融合与多行 App 堆叠） -->
         <com.battery.analysis.timeline.presentation.BatteryTimelineView
             android:id="@+id/battery_timeline_view"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp" />
+            android:layout_marginTop="0dp" />
 
         <!-- 底部指标切换选择器（功耗 / 电量 / 温度 / 电压 / 应用） -->
         <com.battery.analysis.timeline.presentation.MetricSelectorView

@@ -39,9 +39,9 @@
     <string name="power_header_background">Back</string>
     <string name="power_value_format">%s</string>
     <string name="power_value_format_with_energy">%1$s (%2$s)</string>
-    <string name="power_wh_format">%.1fWh</string>
+    <string name="power_wh_format">%.3fWh</string>
     <string name="power_param_energy">Remaining Energy</string>
-    <string name="power_tooltip_energy">Remaining Energy: %1$s, Total Energy: %2$s, Unplug Energy: %3$s</string>
+    <string name="power_tooltip_energy">Current: %1$s, Total: %2$s, At Unplug: %3$s, Consumed: %4$s</string>
     <string name="power_temp_format">%.1f℃</string>
     <string name="power_volt_format">%.3fV</string>
     <string name="power_status_unplugged">Not charging</string>

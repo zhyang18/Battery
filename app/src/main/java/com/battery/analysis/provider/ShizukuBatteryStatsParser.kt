@@ -792,15 +792,41 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     fun isInteractiveSystemApp(packageName: String): Boolean {
         if (packageName.isBlank()) return false
         val lower = packageName.lowercase()
-        return lower.contains("intelligent") ||
+        // 电话与通话相关组件
+        val isPhoneApp = lower == "com.android.phone" ||
+                lower == "com.android.incallui" ||
+                lower == "com.android.server.telecom" ||
+                lower == "com.google.android.dialer" ||
+                lower == "com.samsung.android.incallui" ||
+                lower.contains(".incallui") ||
+                lower.contains(".dialer") ||
+                lower.contains(".telecom") ||
+                lower.contains("telephony") ||
+                (lower.contains("phone") && !lower.contains("wallpaper") && !lower.contains("theme"))
+        // 负一屏与智慧助手
+        val isAssistantOrScreen = lower.contains("intelligent") ||
                 lower.contains("assistant") ||
                 lower.contains("hiboard") ||
+                lower.contains("personalassistant") ||
+                lower.contains("assistantscreen") ||
+                lower.contains("quicksearchbox") ||
+                lower == "com.google.android.googlequicksearchbox" ||
+                lower == "com.vivo.assistant" ||
+                lower == "com.coloros.cosa"
+        // 核心系统工具与前台组件
+        val isSystemUtility = lower.contains("settings") ||
+                lower.contains("camera") ||
+                lower.contains("gallery") ||
                 lower.contains("share") ||
                 lower.contains("intentresolver") ||
                 lower == "com.android.shell" ||
                 lower.contains(".shell") ||
                 lower.contains("documentsui") ||
-                lower.contains("packageinstaller")
+                lower.contains("packageinstaller") ||
+                lower.contains("permissioncontroller") ||
+                lower.contains("filemanager")
+
+        return isPhoneApp || isAssistantOrScreen || isSystemUtility
     }
 
     /**
@@ -825,7 +851,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 pm.getLaunchIntentForPackage(packageName) != null || isHomeLauncher(packageName)
             }
         } catch (_: Exception) {
-            false
+            isInteractiveSystemApp(packageName)
         }
         userInstalledAppCache[packageName] = result
         return result

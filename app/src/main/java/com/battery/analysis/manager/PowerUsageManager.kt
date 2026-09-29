@@ -2325,10 +2325,10 @@ class PowerUsageManager private constructor(private val context: Context) {
      * 获取设备当前最精准的基准电池容量（优先实际满充容量 FCC，其次设计容量）。
      *
      * 优先级策略：
-     * 1. 历史数据库中最新记录的真实满充容量 [HistoryRecord.fullChargeCapacity]（反映真实电池健康衰减）；
-     * 2. 历史数据库中最新记录的出厂设计容量 [HistoryRecord.designCapacity]；
-     * 3. 系统底层 PowerProfile 反射读取的电池额定容量；
-     * 4. 若均无法获取则如实返回 0f（不伪造保底数据）。
+     * 1. 历史数据库中优先按 "Shizuku" 分类获取最新记录的真实满充容量 [HistoryRecord.fullChargeCapacity]（反映真实电池健康衰减）或设计容量；
+     * 2. 历史数据库中若无 Shizuku 记录，按 "系统api" 分类获取最新记录的真实满充容量或设计容量；
+     * 3. 若数据库中均无有效记录，尝试从系统内置 PowerProfile.xml 反射获取出厂设计容量；
+     * 4. 若均无法获取则如实返回 0f（严禁伪造假数据）。
      * 内部具备 60 秒轻量内存缓存与单例复用，消除高频统计计算中的重复数据库 I/O 开销与连接泄漏。
      *
      * @return 设备基准电池容量（单位：mAh）
@@ -3031,7 +3031,7 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 检查指定包名是否为用户具有明确前台交互的系统级组件（如负一屏、系统分享、命令行 Shell、文档选择器与应用安装器）。
+     * 检查指定包名是否为用户具有明确前台交互的系统级组件（如电话、通话界面、负一屏、智慧助手、系统设置、文档选择器、系统安装器等）。
      * 此类系统组件虽无桌面独立图标，但属于用户直接使用交互的前台场景，必须如实统计其使用时长与能耗。
      *
      * @param packageName 待检查的应用程序包名
@@ -3040,15 +3040,62 @@ class PowerUsageManager private constructor(private val context: Context) {
     fun isInteractiveSystemApp(packageName: String): Boolean {
         if (packageName.isBlank()) return false
         val lower = packageName.lowercase()
-        return lower.contains("intelligent") ||
+        // 电话与通话相关组件
+        val isPhoneApp = lower == "com.android.phone" ||
+                lower == "com.android.incallui" ||
+                lower == "com.android.server.telecom" ||
+                lower == "com.google.android.dialer" ||
+                lower == "com.samsung.android.incallui" ||
+                lower.contains(".incallui") ||
+                lower.contains(".dialer") ||
+                lower.contains(".telecom") ||
+                lower.contains("telephony") ||
+                (lower.contains("phone") && !lower.contains("wallpaper") && !lower.contains("theme"))
+        // 负一屏与智慧助手
+        val isAssistantOrScreen = lower.contains("intelligent") ||
                 lower.contains("assistant") ||
                 lower.contains("hiboard") ||
+                lower.contains("personalassistant") ||
+                lower.contains("assistantscreen") ||
+                lower.contains("quicksearchbox") ||
+                lower == "com.google.android.googlequicksearchbox" ||
+                lower == "com.vivo.assistant" ||
+                lower == "com.coloros.cosa"
+        // 核心系统工具与前台组件
+        val isSystemUtility = lower.contains("settings") ||
+                lower.contains("camera") ||
+                lower.contains("gallery") ||
                 lower.contains("share") ||
                 lower.contains("intentresolver") ||
                 lower == "com.android.shell" ||
                 lower.contains(".shell") ||
                 lower.contains("documentsui") ||
-                lower.contains("packageinstaller")
+                lower.contains("packageinstaller") ||
+                lower.contains("permissioncontroller") ||
+                lower.contains("filemanager")
+
+        return isPhoneApp || isAssistantOrScreen || isSystemUtility
+    }
+
+    /**
+     * 检查指定包名是否为负一屏或智慧助手组件（如荣耀 hiboard、华为 intelligent、小米 personalassistant 等）。
+     *
+     * @param packageName 待检查的应用程序包名
+     * @return 若属于负一屏或智慧助手组件返回 true，否则返回 false
+     */
+    fun isAssistantScreenApp(packageName: String?): Boolean {
+        if (packageName.isNullOrBlank()) return false
+        val lower = packageName.lowercase()
+        return lower == "com.hihonor.hiboard" ||
+                lower == "com.huawei.hiboard" ||
+                lower == "com.hihonor.intelligent" ||
+                lower == "com.huawei.intelligent" ||
+                lower == "com.miui.personalassistant" ||
+                lower == "com.coloros.assistantscreen" ||
+                lower == "com.vivo.assistant" ||
+                lower.contains("hiboard") ||
+                lower.contains("personalassistant") ||
+                lower.contains("assistantscreen")
     }
 
     /**
@@ -3068,7 +3115,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             val isInteractiveSys = isInteractiveSystemApp(packageName)
             !isSystem || isUpdatedSystem || hasLauncher || isHome || isInteractiveSys
         } catch (_: Exception) {
-            false
+            isInteractiveSystemApp(packageName)
         }
     }
 
@@ -3216,7 +3263,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                             lastActivePkgBeforeScreenOff = pkg
                         }
                     }
-                    UsageEvents.Event.ACTIVITY_PAUSED -> {
+                    UsageEvents.Event.ACTIVITY_PAUSED,
+                    UsageEvents.Event.ACTIVITY_STOPPED -> {
                         if (currentForegroundPkg == pkg) {
                             val activeStart = maxOf(currentForegroundStartTs, startTime)
                             val activeEnd = minOf(ts, endTime)
@@ -3228,6 +3276,18 @@ class PowerUsageManager private constructor(private val context: Context) {
                             // 同时保留 lastActivePkgBeforeScreenOff，以便在息屏后重新点亮时无缝恢复该应用
                             currentForegroundPkg = null
                             currentForegroundStartTs = 0L
+                        }
+                    }
+                    UsageEvents.Event.USER_INTERACTION -> {
+                        // 负一屏特殊联动：当用户在桌面产生交互时，若前台仍停留在负一屏，立即切断负一屏前台活跃
+                        if (currentForegroundPkg != null && isAssistantScreenApp(currentForegroundPkg) && isHomeLauncher(pkg ?: "")) {
+                            val activeStart = maxOf(currentForegroundStartTs, startTime)
+                            val activeEnd = minOf(ts, endTime)
+                            if (activeEnd > activeStart) {
+                                resultMap[currentForegroundPkg] = (resultMap[currentForegroundPkg] ?: 0L) + (activeEnd - activeStart)
+                            }
+                            currentForegroundPkg = pkg
+                            currentForegroundStartTs = ts
                         }
                     }
                     UsageEvents.Event.SCREEN_INTERACTIVE -> {
@@ -3775,7 +3835,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                             lastActivePkgBeforeScreenOff = pkg
                         }
                     }
-                    UsageEvents.Event.ACTIVITY_PAUSED -> {
+                    UsageEvents.Event.ACTIVITY_PAUSED,
+                    UsageEvents.Event.ACTIVITY_STOPPED -> {
                         if (currentForegroundPkg == pkg) {
                             val activeStart = maxOf(currentForegroundStartTs, startTime)
                             val activeEnd = minOf(ts, endTime)
@@ -3785,6 +3846,18 @@ class PowerUsageManager private constructor(private val context: Context) {
                             // 暂存应用切换断点，保留暂停时间戳，不盲目判定为系统桌面，杜绝应用内部切换 Activity 导致时序断流；
                             // 同时保留 lastActivePkgBeforeScreenOff，以便在息屏后重新点亮时无缝恢复该应用
                             currentForegroundPkg = null
+                            currentForegroundStartTs = ts
+                        }
+                    }
+                    UsageEvents.Event.USER_INTERACTION -> {
+                        // 负一屏特殊联动：当用户在桌面产生交互时，若前台仍停留在负一屏，立即切断负一屏前台活跃区间
+                        if (currentForegroundPkg != null && isAssistantScreenApp(currentForegroundPkg) && isHomeLauncher(pkg ?: "")) {
+                            val activeStart = maxOf(currentForegroundStartTs, startTime)
+                            val activeEnd = minOf(ts, endTime)
+                            if (activeEnd > activeStart) {
+                                appIntervals.add(AppActivityInterval(currentForegroundPkg, activeStart, activeEnd))
+                            }
+                            currentForegroundPkg = pkg
                             currentForegroundStartTs = ts
                         }
                     }

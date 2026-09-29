@@ -269,20 +269,21 @@ object ShizukuForegroundAppDetector {
     }
 
     /**
-     * 规范化并清洗前台应用包名，过滤系统底层覆盖层与输入法。
+     * 规范化并清洗前台应用包名，仅过滤输入法键盘与系统底层 SystemUI 遮罩层，完整保留电话、负一屏、系统设置等前台交互组件。
      *
      * @param rawPkg 原始提取到的组件包名
-     * @return 规范化后的前台主应用包名，若为系统无效覆盖层则返回 null
+     * @return 规范化后的前台主应用包名，若为系统底层遮罩或输入法则返回 null
      */
     fun normalizeForegroundPackage(rawPkg: String?): String? {
         if (rawPkg.isNullOrEmpty()) return null
-        // 过滤系统 SystemUI、输入法等底层遮罩层
+        val lower = rawPkg.lowercase()
+        // 过滤系统 SystemUI 与各类输入法键盘遮罩层
         if (rawPkg.startsWith("com.android.systemui") ||
-            rawPkg.startsWith("com.android.inputmethod") ||
-            rawPkg.startsWith("com.google.android.inputmethod") ||
-            rawPkg.startsWith("com.baidu.input") ||
-            rawPkg.startsWith("com.sohu.inputmethod") ||
-            rawPkg.startsWith("com.tencent.qqpinyin")
+            lower.contains("inputmethod") ||
+            lower.contains("pinyin") ||
+            lower == "com.tencent.wetype" ||
+            lower.startsWith("com.baidu.input") ||
+            lower.startsWith("com.iflytek.inputmethod")
         ) {
             return null
         }

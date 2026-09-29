@@ -165,8 +165,9 @@ class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
 
     /**
      * 根据分类名称查询最新的一条历史快照记录。
+     * 同时兼容 category 与 source 字段过滤，确保历史旧数据也能精准命中。
      *
-     * @param category 目标数据分类（例如 "错误报告"、"Shizuku"）
+     * @param category 目标数据分类（例如 "错误报告"、"Shizuku"、"系统api"）
      * @return 最新的 [HistoryRecord] 实例，若无记录则返回 null
      */
     fun getLatestRecordByCategory(category: String): HistoryRecord? {
@@ -174,8 +175,8 @@ class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
         val cursor = db.query(
             TABLE_NAME,
             null,
-            "$COL_CATEGORY = ?",
-            arrayOf(category),
+            "$COL_CATEGORY = ? OR $COL_SOURCE = ?",
+            arrayOf(category, category),
             null,
             null,
             "$COL_ID DESC",
@@ -192,11 +193,30 @@ class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
     }
 
     /**
-     * 查询全库最新的一条历史快照记录（不论分类）。
+     * 查询系统最精准的最新历史快照记录。
+     * 按照多级数据源优先级依次检索：
+     * 1. 优先按 "Shizuku" 分类查询包含有效容量数据（满充容量或设计容量）的最新快照；
+     * 2. 若 Shizuku 无有效容量数据，按 "系统api" 分类查询包含有效容量数据的最新快照；
+     * 3. 若上述分类均无有效容量数据，降级查询全库按 ID 倒序最新的一条历史记录。
      *
-     * @return 最新的 [HistoryRecord] 实例，若无记录则返回 null
+     * @return 符合优先级策略的最优 [HistoryRecord] 实例，若全库无任何记录则返回 null
      */
     fun getLatestRecord(): HistoryRecord? {
+        // 1. 优先查询 Shizuku 分类的最新记录（具备硬件底层真实满充容量）
+        val shizukuRecord = getLatestRecordByCategory("Shizuku")
+        if (shizukuRecord != null && ((shizukuRecord.fullChargeCapacity != null && shizukuRecord.fullChargeCapacity > 0f) ||
+                    (shizukuRecord.designCapacity != null && shizukuRecord.designCapacity > 0f))) {
+            return shizukuRecord
+        }
+
+        // 2. 其次查询 系统api 分类的最新记录
+        val normalRecord = getLatestRecordByCategory("系统api")
+        if (normalRecord != null && ((normalRecord.fullChargeCapacity != null && normalRecord.fullChargeCapacity > 0f) ||
+                    (normalRecord.designCapacity != null && normalRecord.designCapacity > 0f))) {
+            return normalRecord
+        }
+
+        // 3. 降级查询全库按主键 ID 倒序排列的最新一条记录
         val db = readableDatabase
         val cursor = db.query(
             TABLE_NAME,

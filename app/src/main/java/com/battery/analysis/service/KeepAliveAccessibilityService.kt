@@ -90,19 +90,44 @@ class KeepAliveAccessibilityService : AccessibilityService() {
 
     /**
      * 接收系统分发的无障碍事件。
-     * 毫秒级捕获窗口状态变动，精准提取当前置顶应用包名。
+     * 毫秒级捕获窗口状态变动与桌面交互事件，精准提取当前置顶应用包名，特别纠正负一屏与桌面间的无缝滑动切换。
      *
      * @param event 无障碍事件对象，可能为空
      */
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val pkg = event.packageName?.toString()
-            if (!pkg.isNullOrEmpty() &&
-                !pkg.startsWith("com.android.systemui") &&
-                !pkg.startsWith("android")
-            ) {
+        val pkg = event.packageName?.toString() ?: return
+        val lower = pkg.lowercase()
+
+        // 过滤底层输入法与 SystemUI 纯遮罩
+        if (pkg.startsWith("com.android.systemui") ||
+            lower.contains("inputmethod") ||
+            lower.contains("pinyin") ||
+            lower == "com.tencent.wetype" ||
+            pkg == "android"
+        ) {
+            return
+        }
+
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 currentForegroundPackage = pkg
+            }
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_SCROLLED,
+            AccessibilityEvent.TYPE_VIEW_FOCUSED,
+            AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+                // 若此前记录为负一屏（hiboard/intelligent），当桌面产生任何触摸/滑动/聚焦事件时，立即纠偏回系统桌面
+                val current = currentForegroundPackage
+                val isCurrentAssistant = current != null && (
+                    current.contains("hiboard", ignoreCase = true) ||
+                    current.contains("intelligent", ignoreCase = true) ||
+                    current.contains("personalassistant", ignoreCase = true)
+                )
+                val isEventLauncher = lower.contains("launcher") || lower.contains("home")
+                if (isCurrentAssistant && isEventLauncher) {
+                    currentForegroundPackage = pkg
+                }
             }
         }
     }

@@ -89,7 +89,8 @@ class DetectionFragment : Fragment() {
         // 1. 初始化子 ViewPager2 与 TabLayout
         val pagerAdapter = DetectionPagerAdapter(this)
         binding.detectionViewPager.adapter = pagerAdapter
-        binding.detectionViewPager.offscreenPageLimit = 2
+        // 限制预加载相邻页签（系统api/Shizuku），避免预先构建低频且沉重的错误报告日志解析视图
+        binding.detectionViewPager.offscreenPageLimit = 1
 
         val tabTitles = arrayOf(
             getString(R.string.tab_normal_api),

@@ -768,51 +768,53 @@ class PowerUsageManager private constructor(private val context: Context) {
         synchronized(appInfoCache) {
             val cached = appInfoCache[packageName]
             if (cached != null) {
-                val icon = cached.first?.get() // 解引用弱引用
-                // 若弱引用仍有效（Drawable 未被 GC 回收），直接返回缓存
-                if (icon != null || cached.first == null) {
-                    return Triple(icon, cached.second, cached.third)
-                }
-                // 弱引用已失效（GC 回收了 Drawable），移除过期条目，重新向 PM 查询
-                appInfoCache.remove(packageName)
+                return Triple(null, cached.second, cached.third)
             }
         }
         val pm = context.packageManager
         if (packageName == com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY) {
-            val defaultHome = getDefaultHomeLauncherPackage()
-            val homeIcon = if (!defaultHome.isNullOrEmpty()) {
-                try {
-                    val ai = pm.getApplicationInfo(defaultHome, 0)
-                    pm.getApplicationIcon(ai)
-                } catch (_: Exception) {
-                    null
-                }
-            } else null
-            val finalIcon = homeIcon ?: pm.defaultActivityIcon
-            return Triple(finalIcon, "系统界面 / 桌面待机", 1000)
+            val entry = Triple(null, "系统界面 / 桌面待机", 1000)
+            synchronized(appInfoCache) {
+                appInfoCache[packageName] = entry
+            }
+            return entry
         }
-        val (icon, name, uid) = try {
+        val (name, uid) = try {
             val ai = pm.getApplicationInfo(packageName, 0)
             val rawName = pm.getApplicationLabel(ai).toString()
             val friendlyName = when (packageName) {
                 "com.hihonor.hiboard", "com.huawei.hiboard" -> "负一屏"
                 else -> rawName
             }
-            Triple(pm.getApplicationIcon(ai), friendlyName, ai.uid)
+            Pair(friendlyName, ai.uid)
         } catch (_: Exception) {
             val fallbackName = when (packageName) {
                 "com.hihonor.hiboard", "com.huawei.hiboard" -> "负一屏"
                 else -> packageName.substringAfterLast('.')
             }
-            Triple(null, fallbackName, 10000)
+            Pair(fallbackName, 10000)
         }
-        // 使用弱引用存储 Drawable，GC 在内存紧张时可自动释放 Native bitmap
-        val weakIcon = if (icon != null) java.lang.ref.WeakReference(icon) else null
-        val cacheEntry = Triple(weakIcon, name, uid)
+        val cacheEntry = Triple(null, name, uid)
         synchronized(appInfoCache) {
             appInfoCache[packageName] = cacheEntry
         }
-        return Triple(icon, name, uid)
+        return cacheEntry
+    }
+
+    /**
+     * 响应系统低内存或切后台修剪信号，主动释放可再生的内存缓存。
+     * 当 UI 进入后台不可见（TRIM_MEMORY_UI_HIDDEN 及以上）时，
+     * 清空应用信息缓存与预渲染全量数据包，大幅降低进程常驻内存。
+     *
+     * @param level 系统内存修剪级别，参见 [android.content.ComponentCallbacks2]
+     */
+    fun trimMemory(level: Int) {
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            synchronized(appInfoCache) {
+                appInfoCache.clear()
+            }
+            cachedPowerPackage = null
+        }
     }
 
     /**
@@ -3517,7 +3519,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                         try {
                             val appInfo = pm.getApplicationInfo(pkgName, 0)
                             val appName = pm.getApplicationLabel(appInfo).toString()
-                            val icon = pm.getApplicationIcon(appInfo)
 
                             val avgTemp = formattedBaseTemp
                             val maxTemp = formattedBaseTemp
@@ -3534,7 +3535,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                                 AppPowerUsageItem(
                                     packageName = pkgName,
                                     appName = appName,
-                                    icon = icon,
+                                    icon = null,
                                     foregroundTimeMs = timeMs,
                                     avgPowerWatts = 0f,
                                     avgTemperature = avgTemp,
@@ -3563,7 +3564,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                                 AppPowerUsageItem(
                                     packageName = pkgName,
                                     appName = fallbackName,
-                                    icon = pm.defaultActivityIcon,
+                                    icon = null,
                                     foregroundTimeMs = timeMs,
                                     avgPowerWatts = 0f,
                                     avgTemperature = avgTemp,
@@ -3593,7 +3594,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                     try {
                         val appInfo = pm.getApplicationInfo(pkg, 0)
                         val appName = pm.getApplicationLabel(appInfo).toString()
-                        val icon = pm.getApplicationIcon(appInfo)
                         val baseTemp = (currentTempCelsius ?: getCurrentBatteryStatus().temperature)
                         val formattedBaseTemp = (Math.round(baseTemp * 10f) / 10f)
 
@@ -3601,7 +3601,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                             AppPowerUsageItem(
                                 packageName = pkg,
                                 appName = appName,
-                                icon = icon,
+                                icon = null,
                                 foregroundTimeMs = safeDuration,
                                 avgPowerWatts = 0f,
                                 avgTemperature = formattedBaseTemp,
@@ -3968,11 +3968,11 @@ class PowerUsageManager private constructor(private val context: Context) {
                 maxTemp = defaultTempCelsius
             }
 
-            val (icon, name, _) = getAppInfo(pkg)
+            val (_, name, _) = getAppInfo(pkg)
             val newItem = AppPowerUsageItem(
                 packageName = pkg,
                 appName = name,
-                icon = icon,
+                icon = null,
                 foregroundTimeMs = durationMs,
                 avgPowerWatts = finalFgWatts,
                 avgTemperature = avgTemp,
@@ -5293,7 +5293,6 @@ class PowerUsageManager private constructor(private val context: Context) {
             val duration = (interval.endTs - interval.startTs).coerceAtLeast(0L)
             val info = getAppInfo(pkg)
             val appName = item?.appName ?: info.second
-            val icon = item?.icon ?: info.first
             val uid = info.third
 
             val directWh = item?.energyWh?.toDouble()
@@ -5324,7 +5323,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                     packageName = pkg,
                     uid = uid,
                     appName = appName,
-                    icon = icon,
+                    icon = null,
                     startTime = interval.startTs,
                     endTime = interval.endTs,
                     durationMs = duration,
@@ -5394,7 +5393,6 @@ class PowerUsageManager private constructor(private val context: Context) {
         val standbyItem = appMap[com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY]
         val standbyInfo = getAppInfo(com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY)
         val standbyName = standbyItem?.appName ?: standbyInfo.second
-        val standbyIcon = standbyItem?.icon ?: standbyInfo.first
         val standbyUid = standbyInfo.third
         val standbyAvgMw = standbyItem?.let { it.avgPowerWatts * 1000.0 }
             ?: (fullPackage.overviewStats.screenOnPowerWatts * 1000.0)
@@ -5429,7 +5427,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                             packageName = com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY,
                             uid = standbyUid,
                             appName = standbyName,
-                            icon = standbyIcon,
+                            icon = null,
                             startTime = curCursor,
                             endTime = appStart,
                             durationMs = gapDuration,
@@ -5461,7 +5459,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                         packageName = com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY,
                         uid = standbyUid,
                         appName = standbyName,
-                        icon = standbyIcon,
+                        icon = null,
                         startTime = curCursor,
                         endTime = onEnd,
                         durationMs = gapDuration,

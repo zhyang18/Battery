@@ -11,6 +11,7 @@ import com.battery.analysis.R
 import com.battery.analysis.model.AppPowerUsageItem
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.imageview.ShapeableImageView
+import com.battery.analysis.timeline.util.DrawableBitmapCache
 import com.google.android.material.shape.CornerFamily
 import com.google.android.material.shape.ShapeAppearanceModel
 import java.text.SimpleDateFormat
@@ -112,8 +113,10 @@ class AppUsageDetailBottomSheetDialog(
             .setAllCorners(CornerFamily.ROUNDED, 24f)
             .build()
         ivIcon.shapeAppearanceModel = shapeModel
-        if (item.icon != null) {
-            ivIcon.setImageDrawable(item.icon)
+        val targetIconPx = (context.resources.displayMetrics.density * 48f).toInt()
+        val bmp = DrawableBitmapCache.getOrLoadBitmap(context, item.packageName, targetIconPx, item.icon)
+        if (bmp != null && !bmp.isRecycled) {
+            ivIcon.setImageBitmap(bmp)
         } else {
             ivIcon.setImageResource(R.mipmap.ic_launcher)
         }

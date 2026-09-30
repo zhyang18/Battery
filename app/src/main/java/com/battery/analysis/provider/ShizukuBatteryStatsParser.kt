@@ -14,6 +14,10 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.Calendar
 import java.util.regex.Pattern
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Shizuku 提权系统电池功耗账本解析引擎。
@@ -24,6 +28,7 @@ import java.util.regex.Pattern
  */
 class ShizukuBatteryStatsParser(private val context: Context) {
 
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val networkStatsHelper = NetworkStatsHelper(context)
 
     /**
@@ -558,11 +563,11 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                         val realGpsMs = hw?.gpsMs ?: 0L
                         val realFgsMs = hw?.fgsMs ?: 0L
 
-                        val (appName, icon) = getAppMetadata(effectivePkg, pm)
+                        val appName = getAppName(effectivePkg, pm)
                         val newItem = AppPowerUsageItem(
                             packageName = effectivePkg,
                             appName = appName,
-                            icon = icon,
+                            icon = null,
                             foregroundTimeMs = foregroundMs,
                             avgPowerWatts = avgWatts,
                             avgTemperature = appTemp,
@@ -759,7 +764,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * 将已知的 UID 到包名映射异步持久化至本地存储，确保进程重启后历史放电周期的 UID 映射关系依然可追溯。
      */
     private fun persistUidPackageMapAsync() {
-        java.util.concurrent.Executors.newSingleThreadExecutor().execute {
+        ioScope.launch {
             try {
                 val prefs = context.getSharedPreferences("battery_uid_pkg_cache", Context.MODE_PRIVATE)
                 val editor = prefs.edit()
@@ -794,7 +799,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * 通过 Shizuku 异步执行 pm list packages -U 完善多用户与隐藏包名的 UID 映射，并持久化到本地。
      */
     private fun loadUidPackageMapViaShizukuAsync() {
-        java.util.concurrent.Executors.newSingleThreadExecutor().execute {
+        ioScope.launch {
             try {
                 val output = executeShizukuCommand("pm list packages -U")
                 if (output.isNotBlank()) {
@@ -1220,7 +1225,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         for ((pkgName, fgTime) in preciseTimes) {
             val safeFgTime = fgTime.coerceAtMost(dischargeMs)
             if (safeFgTime > 0L && isUserInstalledApp(pkgName) && !existingMap.containsKey(pkgName)) {
-                val (appName, icon) = getAppMetadata(pkgName, pm)
+                val appName = getAppName(pkgName, pm)
                 val uid = try { pm.getApplicationInfo(pkgName, 0).uid } catch (_: Exception) { -1 }
                 val hw = if (uid > 0) hwStatsMap[uid] else null
 
@@ -1242,7 +1247,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 existingMap[pkgName] = AppPowerUsageItem(
                     packageName = pkgName,
                     appName = appName,
-                    icon = icon,
+                    icon = null,
                     foregroundTimeMs = safeFgTime,
                     avgPowerWatts = baselineWatts,
                     avgTemperature = cycleAvgTemp,
@@ -1282,7 +1287,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 val safeBgTime = bgWorkMs.coerceAtMost(dischargeMs)
                 if (safeBgTime <= 0L) continue
 
-                val (appName, icon) = getAppMetadata(pkgName, pm)
+                val appName = getAppName(pkgName, pm)
                 val rawDrainMah = pkgDrainMahMap[pkgName] ?: 0f
                 val totalEnergy = if (rawDrainMah > 0f) (rawDrainMah * voltage / 1000f) else 0f
                 val bgHours = safeBgTime / 3600000.0
@@ -1291,7 +1296,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 existingMap[pkgName] = AppPowerUsageItem(
                     packageName = pkgName,
                     appName = appName,
-                    icon = icon,
+                    icon = null,
                     foregroundTimeMs = 0L,
                     avgPowerWatts = bgWatts,
                     avgTemperature = cycleAvgTemp,
@@ -1666,15 +1671,15 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     }
 
     /**
-     * 获取指定包名的应用名称与图标。
-     * 优先从全局内存缓存中获取，消除每次刷新与排序时高频反复执行 PackageManager 解码与 Binder IPC。
+     * 获取指定包名的应用可读名称。
+     * 优先从轻量级应用名缓存中获取，避免在频繁解析时重复执行 PackageManager Binder IPC，不缓存任何图片对象以节省内存。
      *
      * @param pkgName 目标应用包名
      * @param pm 系统的 PackageManager 实例
-     * @return 包含应用名称与图标 Drawable 的二元组 [Pair<String, android.graphics.drawable.Drawable>]
+     * @return 应用程序的可读展示名称 [String]
      */
-    private fun getAppMetadata(pkgName: String, pm: PackageManager): Pair<String, android.graphics.drawable.Drawable> {
-        val cached = appMetadataCache[pkgName]
+    private fun getAppName(pkgName: String, pm: PackageManager): String {
+        val cached = appNameCache[pkgName]
         if (cached != null) return cached
 
         if (AppPowerUsageItem.isUninstalledPackage(pkgName)) {
@@ -1688,26 +1693,22 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             } else {
                 context.getString(com.battery.analysis.R.string.power_uninstalled_app)
             }
-            val pair = Pair(name, pm.defaultActivityIcon)
-            appMetadataCache[pkgName] = pair
-            return pair
+            appNameCache[pkgName] = name
+            return name
         }
 
-        val pair = try {
+        val name = try {
             val appInfo = pm.getApplicationInfo(pkgName, 0)
-            val appName = pm.getApplicationLabel(appInfo).toString()
-            val icon = pm.getApplicationIcon(appInfo)
-            Pair(appName, icon)
+            pm.getApplicationLabel(appInfo).toString()
         } catch (_: Exception) {
-            val fallbackName = if (pkgName.contains(".")) {
+            if (pkgName.contains(".")) {
                 context.getString(com.battery.analysis.R.string.power_uninstalled_app_with_pkg, pkgName.substringAfterLast('.'))
             } else {
                 context.getString(com.battery.analysis.R.string.power_uninstalled_app)
             }
-            Pair(fallbackName, pm.defaultActivityIcon)
         }
-        appMetadataCache[pkgName] = pair
-        return pair
+        appNameCache[pkgName] = name
+        return name
     }
 
     /**
@@ -1790,14 +1791,11 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         /** 全局 UID 到包名映射内存缓存，消除下拉刷新重复执行 pm list packages -U */
         private val cachedUidPkgMap = java.util.concurrent.ConcurrentHashMap<Int, String>()
 
-        /** 全局应用名称与图标 Drawable 内存缓存，消除高频 Binder IPC 与图片解码开销 */
-        private val appMetadataCache = java.util.concurrent.ConcurrentHashMap<String, Pair<String, android.graphics.drawable.Drawable>>()
+        /** 全局应用名称轻量级内存缓存，消除高频 Binder IPC 开销，不持有任何图片 Drawable 引用 */
+        private val appNameCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
         /** 全局是否三方应用判定内存缓存，消除快速排序时的海量 Intent 查询 */
         private val userInstalledAppCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
-
-        /** 并发执行 dumpsys 命令的线程池，加速多命令并发获取 */
-        private val asyncCmdExecutor = java.util.concurrent.Executors.newCachedThreadPool()
         private val REGEX_CAP_DRAIN = Pattern.compile("Capacity:\\s*([\\d.]+).*?Computed drain:\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_COMPUTED_DRAIN_ALONE = Pattern.compile("Computed drain:\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_SCREEN_DRAIN_LINE = Pattern.compile("^\\s*Screen:\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)

@@ -1,5 +1,8 @@
 package com.battery.analysis.timeline.util
 
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
@@ -7,30 +10,28 @@ import android.graphics.drawable.Drawable
 import androidx.collection.LruCache
 
 /**
- * 应用图标 Drawable 到 Bitmap 的内存缓存工具类。
- * 避免在 Canvas 绘制循环中频繁进行 Drawable 转换与内存分配，提升整体帧率。
+ * 应用图标 Drawable 到 Bitmap 的轻量级内存缓存工具类。
+ * 避免在 Canvas 绘制循环及列表滚动中频繁进行 Drawable 转换与内存分配，提升整体帧率。
  *
- * 优化：改为基于 Bitmap 字节大小的 [LruCache]，上限取应用可用堆的 1/16（最大 8MB），
- * 避免固定 100 条目在低内存设备上常驻过多内存；
- * 同时提供 [trimToLevel] 方法响应系统 [android.content.ComponentCallbacks2] 低内存回调，
- * 在内存紧张时主动 evict 缓存，降低 OOM 风险。
+ * 优化：
+ * 1. 采用按需加载与直出指定尺寸 Bitmap 机制，防止在数据模型中长期强引用庞大的原始 AdaptiveIconDrawable；
+ * 2. 基于 Bitmap 字节大小的 [LruCache]，上限压缩至最大 4MB，显著降低常驻内存；
+ * 3. 提供 [trimToLevel] 响应 [android.content.ComponentCallbacks2] 内存修剪，UI 不可见或切后台时彻底清空。
  */
 object DrawableBitmapCache {
 
     /**
-     * 计算当前进程 Bitmap 图标缓存的最大字节上限（取当前最大可用堆内存的 1/16，最大 8MB）。
+     * 计算当前进程 Bitmap 图标缓存的最大字节上限（取当前最大可用堆内存的 1/32，最大 4MB）。
      *
      * @return 最大缓存字节数
      */
     private fun calcMaxMemoryBytes(): Int {
-        // Runtime.maxMemory() 返回 JVM 可用最大堆大小，取 1/16 作为图标缓存上限，最大不超过 8MB
         val maxHeap = Runtime.getRuntime().maxMemory()
-        return (maxHeap / 16).coerceIn(1 * 1024 * 1024L, 8 * 1024 * 1024L).toInt()
+        return (maxHeap / 32).coerceIn(1 * 1024 * 1024L, 4 * 1024 * 1024L).toInt()
     }
 
     /**
-     * 基于字节大小的 LruCache，sizeOf 返回每个 Bitmap 的真实内存占用字节数，
-     * 使缓存总内存严格受限在 [calcMaxMemoryBytes] 以内。
+     * 基于字节大小的 LruCache，sizeOf 返回每个 Bitmap 的真实内存占用字节数。
      */
     private val cache = object : LruCache<String, Bitmap>(calcMaxMemoryBytes()) {
         /**
@@ -47,6 +48,7 @@ object DrawableBitmapCache {
 
     /**
      * 获取指定包名与指定像素尺寸的 Bitmap 图标对象。
+     * 若已缓存则直接返回；若未缓存且传入了 Drawable 则转换为 Bitmap 并缓存。
      *
      * @param packageName 目标应用包名
      * @param drawable 原始 Drawable 图标
@@ -87,19 +89,100 @@ object DrawableBitmapCache {
     }
 
     /**
-     * 响应系统低内存信号，按内存压力等级主动收缩缓存。
-     * 建议在 [android.view.View.onDetachedFromWindow] 或
-     * Activity/Service 的 [android.content.ComponentCallbacks2.onTrimMemory] 中调用。
+     * 按需获取或直接从 PackageManager 极速解码指定尺寸的应用小图标 Bitmap。
+     * 解决数据模型中强引用原始 Drawable 导致内存暴涨的问题，解码后原始 Drawable 立即释放，
+     * 仅将极小尺寸（如 42dp，单张约 60KB）的 Bitmap 保留在 LRU 缓存中。
      *
-     * @param level 系统低内存等级，参见 [android.content.ComponentCallbacks2] 常量：
-     *   - TRIM_MEMORY_UI_HIDDEN (20)：UI 不可见，释放 75% 缓存
-     *   - TRIM_MEMORY_BACKGROUND (40)：进程已进入后台 LRU 列表，清空全部缓存
-     *   - TRIM_MEMORY_MODERATE (60) / TRIM_MEMORY_COMPLETE (80)：内存极度紧张，清空全部缓存
+     * @param context 运行上下文
+     * @param packageName 目标应用包名
+     * @param sizePx 目标绘制像素大小
+     * @param fallbackDrawable 可选的备选 Drawable
+     * @return 转换或命中缓存的 [Bitmap] 实例，加载失败返回 null
+     */
+    fun getOrLoadBitmap(
+        context: Context,
+        packageName: String,
+        sizePx: Int,
+        fallbackDrawable: Drawable? = null
+    ): Bitmap? {
+        if (sizePx <= 0) return null
+        val cacheKey = "${packageName}_$sizePx"
+
+        val cached = cache.get(cacheKey)
+        if (cached != null && !cached.isRecycled) {
+            return cached
+        }
+
+        val bitmap = try {
+            val drawable = fallbackDrawable ?: run {
+                val pm = context.packageManager
+                if (packageName == "com.android.systemui.standby" || packageName.startsWith("systemui.standby")) {
+                    getDefaultHomeLauncherIcon(context) ?: pm.defaultActivityIcon
+                } else {
+                    try {
+                        val ai = pm.getApplicationInfo(packageName, 0)
+                        pm.getApplicationIcon(ai)
+                    } catch (_: Exception) {
+                        pm.defaultActivityIcon
+                    }
+                }
+            }
+            if (drawable is BitmapDrawable && drawable.bitmap != null && !drawable.bitmap.isRecycled) {
+                Bitmap.createScaledBitmap(drawable.bitmap, sizePx, sizePx, true)
+            } else {
+                val newBmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+                val canvas = Canvas(newBmp)
+                drawable.setBounds(0, 0, sizePx, sizePx)
+                drawable.draw(canvas)
+                newBmp
+            }
+        } catch (_: Throwable) {
+            null
+        }
+
+        if (bitmap != null) {
+            cache.put(cacheKey, bitmap)
+        }
+        return bitmap
+    }
+
+    /**
+     * 获取系统当前默认桌面启动器的应用图标 Drawable。
+     *
+     * @param context 运行上下文
+     * @return 默认桌面图标 Drawable，获取失败返回 null
+     */
+    private fun getDefaultHomeLauncherIcon(context: Context): Drawable? {
+        return try {
+            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            val resolveInfo = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.resolveActivity(intent, PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong()))
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            }
+            val homePkg = resolveInfo?.activityInfo?.packageName
+            if (!homePkg.isNullOrEmpty()) {
+                val pm = context.packageManager
+                val ai = pm.getApplicationInfo(homePkg, 0)
+                pm.getApplicationIcon(ai)
+            } else {
+                null
+            }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
+     * 响应系统低内存信号，按内存压力等级主动收缩缓存。
+     * 当进入后台（level >= 20）时立即释放全部缓存，彻底消除图标内存驻留。
+     *
+     * @param level 系统低内存等级，参见 [android.content.ComponentCallbacks2] 常量
      */
     fun trimToLevel(level: Int) {
         when {
-            level >= 40 -> cache.evictAll()                           // TRIM_MEMORY_BACKGROUND 及以上：清空全部
-            level >= 20 -> cache.trimToSize(cache.maxSize() / 4)     // TRIM_MEMORY_UI_HIDDEN：保留 25%
+            level >= 20 -> cache.evictAll() // TRIM_MEMORY_UI_HIDDEN 及以上直接清空全部图标缓存
         }
     }
 

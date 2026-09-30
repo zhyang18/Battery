@@ -778,7 +778,7 @@ class BatteryTimelineView @JvmOverloads constructor(
                 }
 
                 // 2. 直接绘制 App 图标
-                val bmp = DrawableBitmapCache.getOrConvertBitmap(event.packageName, event.icon, iconRenderSize)
+                val bmp = DrawableBitmapCache.getOrLoadBitmap(context, event.packageName, iconRenderSize, event.icon)
                 if (bmp != null && !bmp.isRecycled) {
                     tempSrcRect.set(0, 0, bmp.width, bmp.height)
                     canvas.drawBitmap(bmp, tempSrcRect, tempRectF, bitmapPaint)
@@ -1644,7 +1644,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         val iconTop = headerTop + (headerBottom - headerTop - iconSize) / 2f
         if (curApp != null) {
             val renderIconSize = iconSize.toInt().coerceAtLeast(1)
-            val bmp = DrawableBitmapCache.getOrConvertBitmap(curApp.packageName, curApp.icon, renderIconSize)
+            val bmp = DrawableBitmapCache.getOrLoadBitmap(context, curApp.packageName, renderIconSize, curApp.icon)
             if (bmp != null && !bmp.isRecycled) {
                 tempSrcRect.set(0, 0, bmp.width, bmp.height)
                 tempDstRectF.set(iconLeft, iconTop, iconLeft + iconSize, iconTop + iconSize)
@@ -1801,10 +1801,11 @@ class BatteryTimelineView @JvmOverloads constructor(
             val curIconLeft = boxLeft + paddingH + col * (iconSize + iconGap)
             val curIconTop = boxTop + paddingV + row * (iconSize + iconGap)
 
-            val bmp = DrawableBitmapCache.getOrConvertBitmap(
+            val bmp = DrawableBitmapCache.getOrLoadBitmap(
+                context,
                 event.packageName,
-                event.icon,
-                renderIconSize
+                renderIconSize,
+                event.icon
             )
             if (bmp != null && !bmp.isRecycled) {
                 tempSrcRect.set(0, 0, bmp.width, bmp.height)

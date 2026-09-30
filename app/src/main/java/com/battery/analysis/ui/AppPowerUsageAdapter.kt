@@ -472,15 +472,14 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         }
         with(holder.binding) {
             val targetIconPx = (holder.itemView.context.resources.displayMetrics.density * 42f).toInt()
-            val cachedBitmap = DrawableBitmapCache.getOrConvertBitmap(
+            val cachedBitmap = DrawableBitmapCache.getOrLoadBitmap(
+                holder.itemView.context,
                 item.packageName,
-                item.icon,
-                targetIconPx
+                targetIconPx,
+                item.icon
             )
             if (cachedBitmap != null && !cachedBitmap.isRecycled) {
                 ivAppIcon.setImageBitmap(cachedBitmap)
-            } else if (item.icon != null) {
-                ivAppIcon.setImageDrawable(item.icon)
             } else {
                 ivAppIcon.setImageResource(R.mipmap.ic_launcher)
             }

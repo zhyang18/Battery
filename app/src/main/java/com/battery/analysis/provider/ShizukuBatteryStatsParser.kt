@@ -451,117 +451,144 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                     }
                 }
 
-                // 兼容匹配：Uid 10234: 345.2、Uid 10234 (com.tencent.mobileqq): 345.2、Uid u0_a234 (com.tencent.mm): 156.2 ( cpu=120 ) 等各种真实格式
+                // 兼容匹配：Uid 10234: 345.2、Uid 10234 (com.tencent.mobileqq): 345.2、Uid u0_a234 (com.tencent.mm): 156.2 ( cpu=120 ) 以及已卸载应用 Uid 10234 (uninstalled): 15.2、UNINSTALLED: 12.3 等真实格式
                 val uidMatcher = REGEX_UID_POWER.matcher(trimmed)
                 if (uidMatcher.find()) {
-                    val uidRaw = uidMatcher.group(1) ?: continue
+                    val uidRaw = uidMatcher.group(1) ?: "uninstalled"
                     val directPkg = uidMatcher.group(2)?.trim()
                     val drainMah = uidMatcher.group(3)?.toFloatOrNull() ?: 0f
                     val extraDetails = uidMatcher.group(4) ?: ""
 
                     val uid = convertUidStringToNumeric(uidRaw)
+                    val isExplicitlyUninstalled = uidRaw.equals("uninstalled", ignoreCase = true) ||
+                            directPkg.equals("uninstalled", ignoreCase = true) ||
+                            (extraDetails.contains("uninstalled", ignoreCase = true) && !extraDetails.contains("="))
+
                     // 只要产生了有效放电记录（> 0.001 mAh），即纳入统计
-                    if (uid > 0 && drainMah > 0.001f) {
-                        // 优先提取 dumpsys 直接携带的包名，次查 Shizuku 提权映射表，次选系统 pm 及 Shizuku 特权兜底
-                        val pkgName = if (!directPkg.isNullOrEmpty() && directPkg.contains(".")) {
+                    if ((uid > 0 || isExplicitlyUninstalled) && drainMah > 0.001f) {
+                        // 优先提取 dumpsys 直接携带的包名，次查当前 UID 映射表，次查持久化历史 UID 缓存（跨卸载重装溯源），次选系统 pm 及 Shizuku 特权兜底
+                        val resolvedPkg = if (!directPkg.isNullOrEmpty() && directPkg.contains(".") && !isExplicitlyUninstalled) {
                             directPkg
                         } else {
                             uidPkgMap[uid]
-                                ?: pm.getPackagesForUid(uid)?.firstOrNull()
-                                ?: pm.getNameForUid(uid)?.let { if (it.contains(":")) it.substringAfter(":") else it }
-                                ?: resolvePackageNameForUid(uid)
+                                ?: (if (uid > 0) cachedUidPkgMap[uid] else null)
+                                ?: (if (uid > 0) pm.getPackagesForUid(uid)?.firstOrNull() else null)
+                                ?: (if (uid > 0) pm.getNameForUid(uid)?.let { if (it.contains(":")) it.substringAfter(":") else it } else null)
+                                ?: (if (uid > 0) resolvePackageNameForUid(uid) else null)
                         }
 
-                        if (!pkgName.isNullOrEmpty()) {
-                            val (rawFgMs, rawBackgroundMs, cpuMs) = parseAppTimesFromDetails(
-                                extraDetails,
-                                dischargeDurationMs,
-                                isHistoricalDumpsys
+                        // 若成功解析出包名则使用真实包名；若已彻底卸载且无历史包名记录，则生成专用的已卸载虚拟包名标识
+                        val effectivePkg = if (!resolvedPkg.isNullOrEmpty()) {
+                            resolvedPkg
+                        } else if (uid > 0) {
+                            "${AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX}$uid"
+                        } else {
+                            "uninstalled_app_summary"
+                        }
+
+                        val isUninstalled = AppPowerUsageItem.isUninstalledPackage(effectivePkg)
+
+                        val (rawFgMs, rawBackgroundMs, cpuMs) = parseAppTimesFromDetails(
+                            extraDetails,
+                            dischargeDurationMs,
+                            isHistoricalDumpsys
+                        )
+
+                        val hw = if (uid > 0) hwStatsMap[uid] else null
+                        val realCpuMs = if (hw != null && hw.getTotalCpuMs() > 0L) hw.getTotalCpuMs() else cpuMs
+                        val totalDirectEnergyWh = (drainMah * voltageVolts) / 1000f
+
+                        // 关键突破：针对负一屏、电话等交互式系统应用，优先采用后台秒级硬件放电采样实测的真实前台壁钟工时，
+                        // 杜绝因缺失 dumpsys 显式 fg= 标签而回退为微小的 CPU 运算时间导致的严重缩水
+                        val realtimeSampleDurationMs = if (!isUninstalled) {
+                            com.battery.analysis.manager.PowerUsageManager.getInstance(context).getAppRealtimeDurationMs(effectivePkg)
+                        } else {
+                            0L
+                        }
+                        val foregroundMs = if (realtimeSampleDurationMs > 0L) {
+                            maxOf(rawFgMs, realtimeSampleDurationMs).coerceAtMost(dischargeDurationMs)
+                        } else if (rawFgMs > 0L) {
+                            rawFgMs
+                        } else {
+                            0L
+                        }
+
+                        // 若未开启后台统计，纯后台系统应用（foregroundMs <= 0L）跳过；但已卸载产生真实耗电的应用予以保留展示
+                        if (!enableBackgroundStats && foregroundMs <= 0L && !isUninstalled) {
+                            continue
+                        }
+
+                        val backgroundMs = if (enableBackgroundStats) rawBackgroundMs else 0L
+
+                        val baseBg = if (hw != null && enableBackgroundStats) {
+                            val bgCpu = (hw.getTotalCpuMs() - foregroundMs).coerceAtLeast(0L)
+                            val directBg = hw.cpuBackgroundMs
+                            maxOf(bgCpu, directBg) + hw.wakelockMs
+                        } else {
+                            backgroundMs
+                        }
+
+                        val isGame = if (!isUninstalled) com.battery.analysis.manager.PowerUsageManager.getInstance(context).isGameApp(effectivePkg) else false
+                        val (fgEnergyWh, bgEnergyWh, safeBgMs) = if (enableBackgroundStats) {
+                            decoupleAppEnergyAndTimes(
+                                totalEnergy = totalDirectEnergyWh,
+                                foregroundMs = foregroundMs,
+                                backgroundMs = maxOf(backgroundMs, baseBg),
+                                cpuMs = realCpuMs,
+                                dischargeMs = dischargeDurationMs,
+                                isGame = isGame
                             )
+                        } else {
+                            Triple(totalDirectEnergyWh, 0f, 0L)
+                        }
+                        val effectiveBackgroundMs = if (enableBackgroundStats) safeBgMs else 0L
 
-                            val hw = hwStatsMap[uid]
-                            val realCpuMs = if (hw != null && hw.getTotalCpuMs() > 0L) hw.getTotalCpuMs() else cpuMs
-                            val totalDirectEnergyWh = (drainMah * voltageVolts) / 1000f
+                        // 运行平均功耗计算：独立核算前台与后台，并避免微小时长除法放大
+                        val fgHours = if (foregroundMs > 0L) foregroundMs / 3600000.0 else 0.0
+                        val bgHours = if (effectiveBackgroundMs > 0L) effectiveBackgroundMs / 3600000.0 else 0.0
+                        val fgWatts = if (fgHours > 0.0 && fgEnergyWh > 0f) (fgEnergyWh / fgHours).toFloat() else 0f
+                        val bgWatts = if (bgHours > 0.0 && bgEnergyWh > 0f) (bgEnergyWh / bgHours).toFloat() else 0f
+                        val avgWatts = if (fgWatts > 0f) fgWatts else bgWatts
 
-                            // 关键突破：针对负一屏、电话等交互式系统应用，优先采用后台秒级硬件放电采样实测的真实前台壁钟工时，
-                            // 杜绝因缺失 dumpsys 显式 fg= 标签而回退为微小的 CPU 运算时间导致的严重缩水
-                            val realtimeSampleDurationMs = com.battery.analysis.manager.PowerUsageManager.getInstance(context).getAppRealtimeDurationMs(pkgName)
-                            val foregroundMs = if (realtimeSampleDurationMs > 0L) {
-                                maxOf(rawFgMs, realtimeSampleDurationMs).coerceAtMost(dischargeDurationMs)
-                            } else if (rawFgMs > 0L) {
-                                rawFgMs
-                            } else {
-                                0L
-                            }
+                        val appTemp = tempCelsius
+                        val maxTemp = tempCelsius
 
-                            // 若未开启后台统计，纯后台应用（foregroundMs <= 0L）直接跳过，杜绝后台守护组件污染前台展示列表
-                            if (!enableBackgroundStats && foregroundMs <= 0L) {
-                                continue
-                            }
+                        val realNetBytes = hw?.networkBytes ?: 0L
+                        val realWakeMs = hw?.wakelockMs ?: 0L
+                        val realGpsMs = hw?.gpsMs ?: 0L
+                        val realFgsMs = hw?.fgsMs ?: 0L
 
-                            pkgDrainMahMap[pkgName] = drainMah
-                            val backgroundMs = if (enableBackgroundStats) rawBackgroundMs else 0L
+                        val (appName, icon) = getAppMetadata(effectivePkg, pm)
+                        val newItem = AppPowerUsageItem(
+                            packageName = effectivePkg,
+                            appName = appName,
+                            icon = icon,
+                            foregroundTimeMs = foregroundMs,
+                            avgPowerWatts = avgWatts,
+                            avgTemperature = appTemp,
+                            maxTemperature = maxTemp,
+                            lastUsedTimeMs = System.currentTimeMillis(),
+                            directEnergyWh = totalDirectEnergyWh,
+                            backgroundTimeMs = effectiveBackgroundMs,
+                            foregroundEnergyWh = fgEnergyWh,
+                            backgroundEnergyWh = bgEnergyWh,
+                            cpuTimeMs = realCpuMs,
+                            networkBytes = realNetBytes,
+                            wakelockTimeMs = realWakeMs,
+                            gpsTimeMs = realGpsMs,
+                            foregroundPowerWatts = fgWatts,
+                            backgroundPowerWatts = bgWatts,
+                            fgsDurationMs = realFgsMs
+                        )
 
-                            val baseBg = if (hw != null && enableBackgroundStats) {
-                                val bgCpu = (hw.getTotalCpuMs() - foregroundMs).coerceAtLeast(0L)
-                                val directBg = hw.cpuBackgroundMs
-                                maxOf(bgCpu, directBg) + hw.wakelockMs
-                            } else {
-                                backgroundMs
-                            }
-
-                            val isGame = com.battery.analysis.manager.PowerUsageManager.getInstance(context).isGameApp(pkgName)
-                            val (fgEnergyWh, bgEnergyWh, safeBgMs) = if (enableBackgroundStats) {
-                                decoupleAppEnergyAndTimes(
-                                    totalEnergy = totalDirectEnergyWh,
-                                    foregroundMs = foregroundMs,
-                                    backgroundMs = maxOf(backgroundMs, baseBg),
-                                    cpuMs = realCpuMs,
-                                    dischargeMs = dischargeDurationMs,
-                                    isGame = isGame
-                                )
-                            } else {
-                                Triple(totalDirectEnergyWh, 0f, 0L)
-                            }
-                            val effectiveBackgroundMs = if (enableBackgroundStats) safeBgMs else 0L
-
-                            // 运行平均功耗计算：独立核算前台与后台，并避免微小时长除法放大
-                            val fgHours = if (foregroundMs > 0L) foregroundMs / 3600000.0 else 0.0
-                            val bgHours = if (effectiveBackgroundMs > 0L) effectiveBackgroundMs / 3600000.0 else 0.0
-                            val fgWatts = if (fgHours > 0.0 && fgEnergyWh > 0f) (fgEnergyWh / fgHours).toFloat() else 0f
-                            val bgWatts = if (bgHours > 0.0 && bgEnergyWh > 0f) (bgEnergyWh / bgHours).toFloat() else 0f
-                            val avgWatts = if (fgWatts > 0f) fgWatts else bgWatts
-
-                            val appTemp = tempCelsius
-                            val maxTemp = tempCelsius
-
-                            val realNetBytes = hw?.networkBytes ?: 0L
-                            val realWakeMs = hw?.wakelockMs ?: 0L
-                            val realGpsMs = hw?.gpsMs ?: 0L
-                            val realFgsMs = hw?.fgsMs ?: 0L
-
-                            val (appName, icon) = getAppMetadata(pkgName, pm)
-                            parsedAppMap[pkgName] = AppPowerUsageItem(
-                                packageName = pkgName,
-                                appName = appName,
-                                icon = icon,
-                                foregroundTimeMs = foregroundMs,
-                                avgPowerWatts = avgWatts,
-                                avgTemperature = appTemp,
-                                maxTemperature = maxTemp,
-                                lastUsedTimeMs = System.currentTimeMillis(),
-                                directEnergyWh = totalDirectEnergyWh,
-                                backgroundTimeMs = effectiveBackgroundMs,
-                                foregroundEnergyWh = fgEnergyWh,
-                                backgroundEnergyWh = bgEnergyWh,
-                                cpuTimeMs = realCpuMs,
-                                networkBytes = realNetBytes,
-                                wakelockTimeMs = realWakeMs,
-                                gpsTimeMs = realGpsMs,
-                                foregroundPowerWatts = fgWatts,
-                                backgroundPowerWatts = bgWatts,
-                                fgsDurationMs = realFgsMs
-                            )
+                        // 核心：若同一包名已存在于列表（例如卸载重装前后产生了多个不同 UID），执行物理守恒合并
+                        val existing = parsedAppMap[effectivePkg]
+                        if (existing != null) {
+                            parsedAppMap[effectivePkg] = existing.mergeWith(newItem)
+                            pkgDrainMahMap[effectivePkg] = (pkgDrainMahMap[effectivePkg] ?: 0f) + drainMah
+                        } else {
+                            parsedAppMap[effectivePkg] = newItem
+                            pkgDrainMahMap[effectivePkg] = drainMah
                         }
                     }
                 }
@@ -634,9 +661,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             }
         }.filter {
             if (enableBackgroundStats) {
-                it.foregroundTimeMs > 0L || it.backgroundTimeMs > 0L || it.energyWh > 0.001f
+                it.foregroundTimeMs > 0L || it.backgroundTimeMs > 0L || it.energyWh > 0.001f || ((it.directEnergyWh ?: 0f) > 0.001f)
             } else {
-                it.foregroundTimeMs > 0L
+                it.foregroundTimeMs > 0L || it.isUninstalledApp() || ((it.directEnergyWh ?: 0f) > 0.001f)
             }
         }.toMutableList()
 
@@ -728,6 +755,44 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     /**
      * 异步在后台线程中通过 Shizuku 执行 pm list packages -U 并合并至全局 UID 缓存，避免冷启动下拉刷新被此命令阻塞数秒。
      */
+    /**
+     * 将已知的 UID 到包名映射异步持久化至本地存储，确保进程重启后历史放电周期的 UID 映射关系依然可追溯。
+     */
+    private fun persistUidPackageMapAsync() {
+        java.util.concurrent.Executors.newSingleThreadExecutor().execute {
+            try {
+                val prefs = context.getSharedPreferences("battery_uid_pkg_cache", Context.MODE_PRIVATE)
+                val editor = prefs.edit()
+                for ((uid, pkg) in cachedUidPkgMap) {
+                    editor.putString(uid.toString(), pkg)
+                }
+                editor.apply()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /**
+     * 从本地存储中恢复历史 UID 到包名映射字典。
+     */
+    private fun restoreUidPackageMapFromPrefs() {
+        try {
+            val prefs = context.getSharedPreferences("battery_uid_pkg_cache", Context.MODE_PRIVATE)
+            val all = prefs.all
+            for ((key, value) in all) {
+                val uid = key.toIntOrNull()
+                val pkg = value as? String
+                if (uid != null && !pkg.isNullOrBlank()) {
+                    cachedUidPkgMap.putIfAbsent(uid, pkg)
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * 通过 Shizuku 异步执行 pm list packages -U 完善多用户与隐藏包名的 UID 映射，并持久化到本地。
+     */
     private fun loadUidPackageMapViaShizukuAsync() {
         java.util.concurrent.Executors.newSingleThreadExecutor().execute {
             try {
@@ -742,6 +807,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             cachedUidPkgMap[uid] = pkg
                         }
                     }
+                    persistUidPackageMapAsync()
                 }
             } catch (_: Exception) {
             }
@@ -750,7 +816,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
     /**
      * 加载全系统所有已安装应用的 UID 到包名映射表。
-     * 优先直接读取全局静态内存缓存；冷启动首次未命中时，优先利用本地 PackageManager 毫秒级极速构建基底映射，
+     * 优先直接读取全局静态内存缓存与本地持久化历史映射；冷启动首次未命中时，优先利用本地 PackageManager 毫秒级极速构建基底映射，
      * 并通过后台异步执行 pm list packages -U 完善多用户与特殊 UID 映射，彻底杜绝冷启动下拉刷新阻塞数秒。
      *
      * @return UID 到包名的映射字典 [Map<Int, String>]
@@ -763,7 +829,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             if (cachedUidPkgMap.isNotEmpty()) {
                 return cachedUidPkgMap
             }
-            // 1. 优先使用本地 PackageManager 毫秒级填充基底映射（已声明 QUERY_ALL_PACKAGES 权限）
+            // 1. 优先从本地历史缓存恢复以往已记录的 UID 映射（保障卸载前 App 的 UID 追溯）
+            restoreUidPackageMapFromPrefs()
+
+            // 2. 优先使用本地 PackageManager 毫秒级填充当前已安装应用映射（已声明 QUERY_ALL_PACKAGES 权限）
             try {
                 val apps = context.packageManager.getInstalledApplications(0)
                 for (app in apps) {
@@ -772,8 +841,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             } catch (_: Exception) {
             }
 
-            // 2. 异步在后台线程中通过 Shizuku 补充完整的 pm list packages -U（包含系统多用户与不可见包名）
+            // 3. 异步在后台线程中通过 Shizuku 补充完整的 pm list packages -U（包含系统多用户与不可见包名）
             loadUidPackageMapViaShizukuAsync()
+            persistUidPackageMapAsync()
 
             return cachedUidPkgMap
         }
@@ -861,6 +931,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * @return 若属于用户交互应用返回 true，否则返回 false
      */
     private fun isUserInstalledApp(packageName: String): Boolean {
+        if (AppPowerUsageItem.isUninstalledPackage(packageName)) {
+            return true
+        }
         val cached = userInstalledAppCache[packageName]
         if (cached != null) return cached
 
@@ -1242,7 +1315,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         return if (enableBackgroundStats) {
             existingMap.values.toMutableList()
         } else {
-            existingMap.values.filter { it.foregroundTimeMs > 0L || isAssistantScreenApp(it.packageName) }.toMutableList()
+            existingMap.values.filter {
+                it.foregroundTimeMs > 0L || isAssistantScreenApp(it.packageName) || it.isUninstalledApp() || ((it.directEnergyWh ?: 0f) > 0.001f)
+            }.toMutableList()
         }
     }
 
@@ -1602,13 +1677,34 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val cached = appMetadataCache[pkgName]
         if (cached != null) return cached
 
+        if (AppPowerUsageItem.isUninstalledPackage(pkgName)) {
+            val uidStr = if (pkgName.startsWith(AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX)) {
+                pkgName.removePrefix(AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX)
+            } else {
+                ""
+            }
+            val name = if (uidStr.isNotEmpty()) {
+                context.getString(com.battery.analysis.R.string.power_uninstalled_app_with_uid, uidStr)
+            } else {
+                context.getString(com.battery.analysis.R.string.power_uninstalled_app)
+            }
+            val pair = Pair(name, pm.defaultActivityIcon)
+            appMetadataCache[pkgName] = pair
+            return pair
+        }
+
         val pair = try {
             val appInfo = pm.getApplicationInfo(pkgName, 0)
             val appName = pm.getApplicationLabel(appInfo).toString()
             val icon = pm.getApplicationIcon(appInfo)
             Pair(appName, icon)
         } catch (_: Exception) {
-            Pair(pkgName.substringAfterLast('.'), pm.defaultActivityIcon)
+            val fallbackName = if (pkgName.contains(".")) {
+                context.getString(com.battery.analysis.R.string.power_uninstalled_app_with_pkg, pkgName.substringAfterLast('.'))
+            } else {
+                context.getString(com.battery.analysis.R.string.power_uninstalled_app)
+            }
+            Pair(fallbackName, pm.defaultActivityIcon)
         }
         appMetadataCache[pkgName] = pair
         return pair
@@ -1713,7 +1809,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         private val REGEX_SCREEN_OFF_DISCHARGE_MAH = Pattern.compile("Screen off discharge:\\s*([\\d.]+)\\s*mAh", Pattern.CASE_INSENSITIVE)
         private val REGEX_SCREEN_OFF_DISCHARGE_AMOUNT = Pattern.compile("Amount discharged while screen off:\\s*(\\d+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_IDLE_DRAIN = Pattern.compile("(?:Idle|Device standby):\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
-        private val REGEX_UID_POWER = Pattern.compile("Uid\\s+([\\w]+)(?:\\s*\\(([^\\)]+)\\))?:\\s*([\\d.]+)(?:\\s*\\((.*?)\\))?", Pattern.CASE_INSENSITIVE)
+        private val REGEX_UID_POWER = Pattern.compile("(?:Uid\\s+([\\w]+)|(?:Uid\\s+)?\\(?uninstalled\\)?)(?:\\s*\\(([^\\)]+)\\))?:\\s*([\\d.]+)(?:\\s*\\((.*?)\\))?", Pattern.CASE_INSENSITIVE)
         private val REGEX_TOP_TIME = Pattern.compile("(?:top|fg)[=:]\\s*([\\d\\w\\s]+?)(?=\\s+[a-zA-Z_-]+[=:]|\\)|$)", Pattern.CASE_INSENSITIVE)
         private val REGEX_FG_TIME = Pattern.compile("fg[=:]\\s*([\\d\\w\\s]+?)(?=\\s+[a-zA-Z_-]+[=:]|\\)|$)", Pattern.CASE_INSENSITIVE)
         private val REGEX_BG_TIME = Pattern.compile("(?:bg|fgs|service)[=:]\\s*([\\d\\w\\s]+?)(?=\\s+[a-zA-Z_-]+[=:]|\\)|$)", Pattern.CASE_INSENSITIVE)

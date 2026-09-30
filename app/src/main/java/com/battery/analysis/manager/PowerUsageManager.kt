@@ -2800,7 +2800,9 @@ class PowerUsageManager private constructor(private val context: Context) {
             val maxBgForApp = (maxAllowedNormalMs - safeFg).coerceAtLeast(0L)
             val safeBg = item.backgroundTimeMs.coerceIn(0L, maxBgForApp)
             item.copy(foregroundTimeMs = safeFg, backgroundTimeMs = safeBg)
-        }.filter { it.foregroundTimeMs > 0L || isAssistantScreenApp(it.packageName) || (enableBackgroundStats && (it.backgroundTimeMs > 0L || it.energyWh > 0.001f)) }
+        }.filter {
+            it.foregroundTimeMs > 0L || isAssistantScreenApp(it.packageName) || it.isUninstalledApp() || ((it.directEnergyWh ?: 0f) > 0.001f) || (enableBackgroundStats && (it.backgroundTimeMs > 0L || it.energyWh > 0.001f))
+        }
 
         // 普通模式物理完善：
         // 各前台应用运行时屏幕始终点亮，整机放电速率即为当前亮屏平均功耗。
@@ -3115,6 +3117,9 @@ class PowerUsageManager private constructor(private val context: Context) {
      * @return 若为用户交互应用返回 true，否则返回 false
      */
     fun isUserInstalledApp(packageName: String): Boolean {
+        if (AppPowerUsageItem.isUninstalledPackage(packageName)) {
+            return true
+        }
         return try {
             val pm = context.packageManager
             val appInfo = pm.getApplicationInfo(packageName, 0)
@@ -3523,6 +3528,34 @@ class PowerUsageManager private constructor(private val context: Context) {
                                 )
                             )
                         } catch (_: PackageManager.NameNotFoundException) {
+                            val fallbackName = if (pkgName.contains(".")) {
+                                context.getString(com.battery.analysis.R.string.power_uninstalled_app_with_pkg, pkgName.substringAfterLast('.'))
+                            } else {
+                                context.getString(com.battery.analysis.R.string.power_uninstalled_app)
+                            }
+                            val avgTemp = formattedBaseTemp
+                            val maxTemp = formattedBaseTemp
+                            val serviceBgMs = bgServiceTimes[pkgName] ?: 0L
+                            val maxAllowedBg = (elapsedMs - timeMs).coerceAtLeast(0L)
+                            val effectiveFgsMs = serviceBgMs.coerceIn(0L, maxAllowedBg)
+
+                            resultList.add(
+                                AppPowerUsageItem(
+                                    packageName = pkgName,
+                                    appName = fallbackName,
+                                    icon = pm.defaultActivityIcon,
+                                    foregroundTimeMs = timeMs,
+                                    avgPowerWatts = 0f,
+                                    avgTemperature = avgTemp,
+                                    maxTemperature = maxTemp,
+                                    lastUsedTimeMs = lastUsed,
+                                    directEnergyWh = null,
+                                    backgroundTimeMs = effectiveFgsMs,
+                                    foregroundEnergyWh = 0f,
+                                    backgroundEnergyWh = 0f,
+                                    fgsDurationMs = effectiveFgsMs
+                                )
+                            )
                         }
                     }
                 }

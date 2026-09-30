@@ -71,6 +71,9 @@
     <string name="power_shizuku_btn_open">打开 Shizuku</string>
     <string name="power_drain_format">%1$.1fmAh (%2$.1f%%)</string>
     <string name="power_toast_cleared">耗电统计已重置</string>
+    <string name="power_uninstalled_app">已卸载应用</string>
+    <string name="power_uninstalled_app_with_uid">已卸载应用 (%s)</string>
+    <string name="power_uninstalled_app_with_pkg">已卸载: %s</string>
 
     <!-- 耗电重置弹窗相关 -->
     <string name="dialog_power_reset_title">重置耗电统计？</string>

@@ -64,6 +64,98 @@ data class AppPowerUsageItem(
         }
 
     /**
+     * 判断当前应用是否为已卸载应用条目。
+     *
+     * @return 若为已卸载应用返回 true，否则返回 false
+     */
+    fun isUninstalledApp(): Boolean {
+        return isUninstalledPackage(packageName)
+    }
+
+    /**
+     * 将另一项同应用实体（如卸载前与重装后的分段统计实体）的数据进行物理守恒合并。
+     * 累加前后台工时、放电能量、CPU 运算时间与硬件网络/锁/GPS 开销，并重新计算综合平均功耗。
+     *
+     * @param other 待合并的同应用功耗实体
+     * @return 包含两者累计物理开销的合并新实体 [AppPowerUsageItem]
+     */
+    fun mergeWith(other: AppPowerUsageItem): AppPowerUsageItem {
+        val mergedFgMs = this.foregroundTimeMs + other.foregroundTimeMs
+        val mergedBgMs = this.backgroundTimeMs + other.backgroundTimeMs
+        val mergedFgEnergy = this.foregroundEnergyWh + other.foregroundEnergyWh
+        val mergedBgEnergy = this.backgroundEnergyWh + other.backgroundEnergyWh
+        val mergedDirect = if (this.directEnergyWh != null || other.directEnergyWh != null) {
+            (this.directEnergyWh ?: 0f) + (other.directEnergyWh ?: 0f)
+        } else {
+            null
+        }
+        val mergedCpu = this.cpuTimeMs + other.cpuTimeMs
+        val mergedNet = this.networkBytes + other.networkBytes
+        val mergedWake = this.wakelockTimeMs + other.wakelockTimeMs
+        val mergedGps = this.gpsTimeMs + other.gpsTimeMs
+        val mergedFgs = this.fgsDurationMs + other.fgsDurationMs
+        val mergedLastUsed = maxOf(this.lastUsedTimeMs, other.lastUsedTimeMs)
+        val mergedMaxTemp = maxOf(this.maxTemperature, other.maxTemperature)
+        val mergedAvgTemp = if (this.avgTemperature > 0f && other.avgTemperature > 0f) {
+            (this.avgTemperature + other.avgTemperature) / 2f
+        } else {
+            maxOf(this.avgTemperature, other.avgTemperature)
+        }
+
+        val fgHours = if (mergedFgMs > 0L) mergedFgMs / 3600000.0 else 0.0
+        val bgHours = if (mergedBgMs > 0L) mergedBgMs / 3600000.0 else 0.0
+        val newFgWatts = if (fgHours > 0.0 && mergedFgEnergy > 0f) (mergedFgEnergy / fgHours).toFloat() else 0f
+        val newBgWatts = if (bgHours > 0.0 && mergedBgEnergy > 0f) (mergedBgEnergy / bgHours).toFloat() else 0f
+        val newAvgWatts = if (newFgWatts > 0f) newFgWatts else newBgWatts
+
+        val effectiveIcon = this.icon ?: other.icon
+        val effectiveName = if (!this.appName.startsWith("uninstalled_") && this.appName != this.packageName) {
+            this.appName
+        } else {
+            other.appName
+        }
+
+        return this.copy(
+            appName = effectiveName,
+            icon = effectiveIcon,
+            foregroundTimeMs = mergedFgMs,
+            backgroundTimeMs = mergedBgMs,
+            directEnergyWh = mergedDirect,
+            foregroundEnergyWh = mergedFgEnergy,
+            backgroundEnergyWh = mergedBgEnergy,
+            avgPowerWatts = newAvgWatts,
+            foregroundPowerWatts = newFgWatts,
+            backgroundPowerWatts = newBgWatts,
+            cpuTimeMs = mergedCpu,
+            networkBytes = mergedNet,
+            wakelockTimeMs = mergedWake,
+            gpsTimeMs = mergedGps,
+            fgsDurationMs = mergedFgs,
+            lastUsedTimeMs = mergedLastUsed,
+            avgTemperature = mergedAvgTemp,
+            maxTemperature = mergedMaxTemp
+        )
+    }
+
+    companion object {
+        /** 标识未解析出包名的已卸载应用的虚拟包名前缀 */
+        const val PACKAGE_UNINSTALLED_PREFIX = "uninstalled_uid_"
+
+        /**
+         * 判断给定包名是否为已卸载应用虚拟包名。
+         *
+         * @param packageName 待检查的应用程序包名
+         * @return 若属于已卸载应用返回 true，否则返回 false
+         */
+        fun isUninstalledPackage(packageName: String?): Boolean {
+            if (packageName.isNullOrBlank()) return false
+            return packageName.startsWith(PACKAGE_UNINSTALLED_PREFIX) ||
+                    packageName.startsWith("uninstalled_") ||
+                    packageName.startsWith("com.battery.analysis.uninstalled.")
+        }
+    }
+
+    /**
      * 格式化指定毫秒时长为人类可读字符串（如 "19m38s"、"58s"、"2h15m" 或 "350ms"）。
      * 对少于 1 秒的毫秒级运行时长精确展示（如 "350ms"），杜绝被粗暴丢弃或显示为 "0s"。
      *

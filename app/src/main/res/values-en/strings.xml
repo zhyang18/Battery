@@ -71,6 +71,9 @@
     <string name="power_shizuku_btn_open">Open Shizuku</string>
     <string name="power_drain_format">%1$.1fmAh (%2$.1f%%)</string>
     <string name="power_toast_cleared">Power stats reset</string>
+    <string name="power_uninstalled_app">Uninstalled app</string>
+    <string name="power_uninstalled_app_with_uid">Uninstalled app (%s)</string>
+    <string name="power_uninstalled_app_with_pkg">Uninstalled: %s</string>
 
     <!-- Power Reset Dialog -->
     <string name="dialog_power_reset_title">Reset Power Statistics?</string>

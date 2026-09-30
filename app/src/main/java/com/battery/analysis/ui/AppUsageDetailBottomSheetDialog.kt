@@ -209,7 +209,13 @@ class AppUsageDetailBottomSheetDialog(
         // 7. 统计时间区间、最近活跃与数据来源
         tvPeriodRange.text = periodRangeText ?: formatDefaultPeriodRange()
         tvLastUsed.text = if (item.lastUsedTimeMs > 0L) dateTimeFormatter.format(Date(item.lastUsedTimeMs)) else "--"
-        tvSource.text = if (isShizuku) "BatteryStats (系统底座)" else "UsageStats (系统事件)"
+        tvSource.text = if (item.isUninstalledApp()) {
+            if (isShizuku) "BatteryStats (已卸载应用)" else "UsageStats (已卸载应用)"
+        } else if (isShizuku) {
+            "BatteryStats (系统底座)"
+        } else {
+            "UsageStats (系统事件)"
+        }
     }
 
     /**
@@ -238,6 +244,12 @@ class AppUsageDetailBottomSheetDialog(
      * @return 应用程序数值 UID，查询失败返回 -1
      */
     private fun getAppUid(pkgName: String): Int {
+        if (pkgName.startsWith(AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX)) {
+            return pkgName.removePrefix(AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX).toIntOrNull() ?: -1
+        }
+        if (pkgName.startsWith("uninstalled_uid_")) {
+            return pkgName.removePrefix("uninstalled_uid_").toIntOrNull() ?: -1
+        }
         return try {
             context.packageManager.getApplicationInfo(pkgName, 0).uid
         } catch (_: PackageManager.NameNotFoundException) {

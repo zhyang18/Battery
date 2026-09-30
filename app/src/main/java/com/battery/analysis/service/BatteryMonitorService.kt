@@ -93,8 +93,9 @@ class BatteryMonitorService : Service() {
     private var lastNotifiedContent: String? = null
     @Volatile
     private var lastNotifiedTime: Long = 0L
+    /** 当前前台服务是否正挂载在静默渠道 [CHANNEL_ID_SILENT] 上的状态标识 */
     @Volatile
-    private var isForegroundNotificationRemoved: Boolean = false
+    private var isSilentNotificationActive: Boolean = false
 
     /**
      * 缓存的通知 PendingIntent，在 onCreate 时初始化一次并复用，
@@ -317,13 +318,13 @@ class BatteryMonitorService : Service() {
 
         // 1. 无条件第一步调用 startForeground 履行系统前台服务契约，杜绝任何提早退出导致的超时崩溃
         val isDisplayEnabled = isNotificationDisplayEnabled(this)
-        val channelId = if (isDisplayEnabled) CHANNEL_ID else CHANNEL_ID_SILENT
-        val initialNotification = buildNotification(channelId)
-        safeStartForeground(initialNotification)
-        if (!isDisplayEnabled) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            notificationManager.cancel(NOTIFICATION_ID)
+        val initialNotification = if (isDisplayEnabled) {
+            buildNotification(CHANNEL_ID)
+        } else {
+            buildSilentNotification()
         }
+        safeStartForeground(initialNotification)
+        isSilentNotificationActive = !isDisplayEnabled
 
         // 2. 履约后检查业务守卫：若未开启充放电统计或无需运行，安全退出
         if (!shouldServiceRun(this)) {
@@ -376,13 +377,13 @@ class BatteryMonitorService : Service() {
 
         // 1. 任何通过 startForegroundService 的调用或唤醒，第一步强制调用 startForeground 续期前台状态
         val isDisplayEnabled = isNotificationDisplayEnabled(this)
-        val channelId = if (isDisplayEnabled) CHANNEL_ID else CHANNEL_ID_SILENT
-        val notification = buildNotification(channelId)
-        safeStartForeground(notification)
-        if (!isDisplayEnabled) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            notificationManager.cancel(NOTIFICATION_ID)
+        val notification = if (isDisplayEnabled) {
+            buildNotification(CHANNEL_ID)
+        } else {
+            buildSilentNotification()
         }
+        safeStartForeground(notification)
+        isSilentNotificationActive = !isDisplayEnabled
 
         // 2. 检查业务守卫：若未开启充放电统计或无需运行，安全退出
         if (!shouldServiceRun(this)) {
@@ -400,9 +401,7 @@ class BatteryMonitorService : Service() {
             PowerUsageManager.getInstance(applicationContext).requestCheckpoint(force = false)
         }
 
-        if (isDisplayEnabled) {
-            updateNotification(force = true)
-        }
+        updateNotification(force = true)
         return START_STICKY
     }
 
@@ -435,6 +434,10 @@ class BatteryMonitorService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isServiceActive = false
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            notificationManager.cancel(NOTIFICATION_ID)
+        } catch (_: Exception) {}
         try {
             PowerUsageManager.getInstance(applicationContext).flushDischargeSamplesToDisk()
         } catch (_: Exception) {}
@@ -835,11 +838,40 @@ class BatteryMonitorService : Service() {
     }
 
     /**
+     * 构建后台静默前台通知对象。
+     * 当用户关闭常驻通知栏展示时使用，挂载至最低重要度渠道 [CHANNEL_ID_SILENT]（[NotificationManager.IMPORTANCE_MIN]），
+     * 状态栏不显示小图标、无声音、无震动且折叠于系统静默通知区域，既履行前台服务契约保持最高保活优先级，又杜绝打扰用户。
+     *
+     * @return 静默极简前台系统通知对象
+     */
+    private fun buildSilentNotification(): Notification {
+        val pendingIntent = cachedNotificationPendingIntent ?: PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+        ).also { cachedNotificationPendingIntent = it }
+
+        return NotificationCompat.Builder(this, CHANNEL_ID_SILENT)
+            .setSmallIcon(R.drawable.ic_bolt)
+            .setContentTitle(getString(R.string.service_notification_silent_channel_name))
+            .setContentText(getString(R.string.service_notification_silent_desc))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setContentIntent(pendingIntent)
+            .build()
+    }
+
+    /**
      * 刷新并推送最新的电池状态通知至系统通知栏。
      * 无论应用处于前台还是后台运行，均严格根据用户设置的刷新时间间隔周期性更新通知栏内容；
-     * 若用户关闭通知栏常驻显示，则立即调用 stopForeground 移除通知并取消系统通知栏展示；
-     * 若用户开启通知栏常驻显示，则挂载合法前台 Notification 并维持前台服务优先级。
-     * 具备严格的空转短路机制与内容防抖，杜绝关闭状态下每秒重复发起系统 Binder IPC 跨进程调用。
+     * 若用户关闭通知栏常驻显示，则切换至静默渠道 [CHANNEL_ID_SILENT] 保持前台服务契约且不打扰用户，并跳过高频内容刷新；
+     * 若用户开启通知栏常驻显示，则挂载实时监控 Notification 并维持前台服务优先级。
+     * 具备严格的空转短路机制与内容防抖，杜绝每秒重复发起系统 Binder IPC 跨进程调用。
      *
      * @param force 是否强制触发系统通知栏刷新（如点亮屏幕瞬间或切换开关配置后）
      */
@@ -847,15 +879,19 @@ class BatteryMonitorService : Service() {
         try {
             val isDisplayEnabled = isNotificationDisplayEnabled(this)
             if (!isDisplayEnabled) {
-                // 仅当此前尚未移除过前台通知时单次执行卸载并取消通知，后续采样直接短路 return，杜绝每秒重复触发系统 Binder IPC
-                if (!isForegroundNotificationRemoved || force) {
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    notificationManager.cancel(NOTIFICATION_ID)
-                    isForegroundNotificationRemoved = true
+                // 若处于关闭常驻显示状态：如果当前尚未切换为静默前台通知，或为强制刷新，则挂载一次静默通知以保持前台服务契约
+                // 后续所有常规采样循环直接短路 return，杜绝高频 Binder IPC 与 CPU 唤醒
+                if (!isSilentNotificationActive || force) {
+                    val silentNotification = buildSilentNotification()
+                    safeStartForeground(silentNotification)
+                    notificationManager.notify(NOTIFICATION_ID, silentNotification)
+                    isSilentNotificationActive = true
+                    lastNotifiedContent = null
                 }
                 return
             }
 
+            // 用户开启了常驻通知栏显示：从静默状态切回或内容有变时更新
             // 优化：直接使用内存缓存的屏幕交互状态，消除 pm.isInteractive 的跨进程 Binder IPC 开销
             if (!cachedIsInteractive && !force) {
                 return
@@ -863,12 +899,11 @@ class BatteryMonitorService : Service() {
 
             val singleLineInfo = computeSingleLineInfo()
             val now = SystemClock.elapsedRealtime()
-            // 非强制刷新：同时校验内容是否变化与 500ms 最小推送间隔，双重节流消除高频无意义 IPC 唤醒 SystemUI
-            if (!force && singleLineInfo == lastNotifiedContent) {
+            // 非强制刷新且当前已是显示模式：同时校验内容是否变化与 500ms 最小推送间隔，双重节流消除高频无意义 IPC 唤醒 SystemUI
+            if (!force && !isSilentNotificationActive && singleLineInfo == lastNotifiedContent) {
                 return
             }
-            // 追加时间节流：非强制刷新时，距上次推送不足 500ms 则直接跳过
-            if (!force && (now - lastNotifiedTime) < 500L) {
+            if (!force && !isSilentNotificationActive && (now - lastNotifiedTime) < 500L) {
                 return
             }
             lastNotifiedContent = singleLineInfo
@@ -877,7 +912,7 @@ class BatteryMonitorService : Service() {
             val notification = buildNotification(CHANNEL_ID, singleLineInfo)
             safeStartForeground(notification)
             notificationManager.notify(NOTIFICATION_ID, notification)
-            isForegroundNotificationRemoved = false
+            isSilentNotificationActive = false
         } catch (_: Exception) {}
     }
 
@@ -944,7 +979,7 @@ class BatteryMonitorService : Service() {
 
             val silentChannel = NotificationChannel(
                 CHANNEL_ID_SILENT,
-                getString(R.string.service_notification_channel_name),
+                getString(R.string.service_notification_silent_channel_name),
                 NotificationManager.IMPORTANCE_MIN
             ).apply {
                 description = getString(R.string.service_notification_silent_desc)
@@ -1028,8 +1063,8 @@ class BatteryMonitorService : Service() {
 
         /**
          * 动态通知正在运行的后台服务更新常驻通知栏的显示状态。
-         * 若用户关闭显示，服务将立即调用 stopForeground 移除通知；
-         * 若用户开启显示，服务将立即挂起前台通知进行展示。
+         * 若用户关闭显示，服务将切换至静默渠道以继续保持前台服务保活特权；
+         * 若用户开启显示，服务将挂起前台实时通知进行展示并恢复高频刷新。
          *
          * @param context 应用程序上下文
          */

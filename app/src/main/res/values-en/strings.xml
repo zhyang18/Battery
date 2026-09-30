@@ -553,6 +553,7 @@
 
     <!-- Background Service & Keep Alive -->
     <string name="service_notification_channel_name">Battery Realtime Monitor</string>
+    <string name="service_notification_silent_channel_name">Battery Silent Monitor</string>
     <string name="service_notification_channel_desc">Maintains background operation to accurately detect power plug/unplug and record charging stats.</string>
     <string name="service_notification_charging_title">⚡ Charging (%1$d%%) · %2$.1fW</string>
     <string name="service_notification_discharging_title">🔋 Discharging (%1$d%%)</string>

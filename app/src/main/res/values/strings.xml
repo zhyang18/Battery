@@ -554,6 +554,7 @@
 
     <!-- 后台监控服务与防杀保活 -->
     <string name="service_notification_channel_name">电池后台实时监控</string>
+    <string name="service_notification_silent_channel_name">电池后台静默监控</string>
     <string name="service_notification_channel_desc">用于保持后台运行，实时检测插拔电源并精准统计充放电数据</string>
     <string name="service_notification_charging_title">⚡ 充电中 (%1$d%%) · %2$.1fW</string>
     <string name="service_notification_discharging_title">🔋 电池放电中 (%1$d%%)</string>

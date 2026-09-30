@@ -309,6 +309,7 @@ class BatteryMonitorService : Service() {
      */
     override fun onCreate() {
         super.onCreate()
+        activeServiceRef = java.lang.ref.WeakReference(this)
         isServiceActive = true
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
@@ -433,6 +434,9 @@ class BatteryMonitorService : Service() {
      */
     override fun onDestroy() {
         super.onDestroy()
+        if (activeServiceRef?.get() === this) {
+            activeServiceRef = null
+        }
         isServiceActive = false
         try {
             stopForeground(STOP_FOREGROUND_REMOVE)
@@ -659,6 +663,9 @@ class BatteryMonitorService : Service() {
         if (isHostAppForeground) {
             lastKnownForegroundPackage = packageName
             return packageName
+        } else if (lastKnownForegroundPackage == packageName) {
+            // 用户已切离宿主本应用，立即清除缓存的本应用包名，严禁切回桌面或锁屏后继续被采样判定为本 App
+            lastKnownForegroundPackage = null
         }
 
         // 1. 无障碍服务活动窗口动态探测：
@@ -690,7 +697,7 @@ class BatteryMonitorService : Service() {
         }
 
         val now = System.currentTimeMillis()
-        if (now - lastForegroundQueryTime < FOREGROUND_CACHE_EXPIRE_MS && lastKnownForegroundPackage != null) {
+        if (now - lastForegroundQueryTime < FOREGROUND_CACHE_EXPIRE_MS && lastKnownForegroundPackage != null && lastKnownForegroundPackage != packageName) {
             return lastKnownForegroundPackage
         }
         lastForegroundQueryTime = now
@@ -729,7 +736,7 @@ class BatteryMonitorService : Service() {
                 }
 
                 // 若增量窗口内未发生任何应用切换生命周期事件，直接沿用上一已知有效应用，0 额外开销
-                if (!hasAnyEvent && lastKnownForegroundPackage != null) {
+                if (!hasAnyEvent && lastKnownForegroundPackage != null && lastKnownForegroundPackage != packageName) {
                     return lastKnownForegroundPackage
                 }
 
@@ -742,7 +749,7 @@ class BatteryMonitorService : Service() {
         }
 
         // 4. 亮屏持续运行状态保持：若本周期内无新切换事件，持续沿用上一已知有效前台应用；无法获取真实数据时如实返回 null
-        if (lastKnownForegroundPackage != null) {
+        if (lastKnownForegroundPackage != null && lastKnownForegroundPackage != packageName) {
             return lastKnownForegroundPackage
         }
         return null
@@ -1030,6 +1037,10 @@ class BatteryMonitorService : Service() {
         /** 后台电池监控服务当前是否处于活跃运行状态的全局指示器 */
         @Volatile
         private var isServiceActive: Boolean = false
+
+        /** 当前存活的服务实例弱引用，用于前台包名探测等逻辑访问上下文 */
+        @Volatile
+        private var activeServiceRef: java.lang.ref.WeakReference<BatteryMonitorService>? = null
 
         /**
          * 查询后台电池监控服务当前是否处于真实活跃运行状态。

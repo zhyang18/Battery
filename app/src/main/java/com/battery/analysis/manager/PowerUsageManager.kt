@@ -778,6 +778,19 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
         }
         val pm = context.packageManager
+        if (packageName == com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY) {
+            val defaultHome = getDefaultHomeLauncherPackage()
+            val homeIcon = if (!defaultHome.isNullOrEmpty()) {
+                try {
+                    val ai = pm.getApplicationInfo(defaultHome, 0)
+                    pm.getApplicationIcon(ai)
+                } catch (_: Exception) {
+                    null
+                }
+            } else null
+            val finalIcon = homeIcon ?: pm.defaultActivityIcon
+            return Triple(finalIcon, "系统界面 / 桌面待机", 1000)
+        }
         val (icon, name, uid) = try {
             val ai = pm.getApplicationInfo(packageName, 0)
             val rawName = pm.getApplicationLabel(ai).toString()
@@ -1303,11 +1316,11 @@ class PowerUsageManager private constructor(private val context: Context) {
                         PowerDischargePoint(
                             timestamp = obj.optLong("ts", 0L),
                             elapsedHours = obj.optDouble("elapsed", 0.0).toFloat(),
-                            batteryLevel = obj.optInt("lvl", 100),
-                            voltageVolts = obj.optDouble("volt", 3.85).toFloat(),
-                            temperature = obj.optDouble("temp", 30.0).toFloat(),
-                            powerWatts = obj.optDouble("pwr", 2.0).toFloat(),
-                            isScreenOn = obj.optBoolean("screenOn", true),
+                            batteryLevel = obj.optInt("lvl", 0),
+                            voltageVolts = obj.optDouble("volt", 0.0).toFloat(),
+                            temperature = obj.optDouble("temp", 0.0).toFloat(),
+                            powerWatts = obj.optDouble("pwr", 0.0).toFloat(),
+                            isScreenOn = obj.optBoolean("screenOn", false),
                             packageName = pkgName
                         )
                     )
@@ -1325,8 +1338,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                 dischargeAccumulator.screenOffDurationMs = accObj.optLong("offMs", 0L)
                 dischargeAccumulator.lastSampleTs = accObj.optLong("lastTs", 0L)
                 dischargeAccumulator.lastSampleWatts = accObj.optDouble("lastW", 0.0).toFloat()
-                dischargeAccumulator.lastSampleScreenOn = accObj.optBoolean("lastOn", true)
-                dischargeAccumulator.lastSampleTemp = accObj.optDouble("lastT", 25.0).toFloat()
+                dischargeAccumulator.lastSampleScreenOn = accObj.optBoolean("lastOn", false)
+                dischargeAccumulator.lastSampleTemp = accObj.optDouble("lastT", 0.0).toFloat()
 
                 appRealtimeEnergyMap.clear()
                 val appsArray = accObj.optJSONArray("apps")
@@ -2275,15 +2288,23 @@ class PowerUsageManager private constructor(private val context: Context) {
      */
     fun getCurrentBatteryStatus(): BatteryStatusSnapshot {
         val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-        val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, 65) ?: 65
+        val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+        val rawLevel = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
         val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100
-        val percent = if (scale > 0) (level * 100 / scale) else level
+        val percent = if (rawLevel >= 0 && scale > 0) {
+            rawLevel * 100 / scale
+        } else {
+            val cap = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+            if (cap in 0..100) cap else 0
+        }
 
-        val rawVoltage = intent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 3972) ?: 3972
-        val voltageVolts = com.battery.analysis.util.BatteryUnitNormalizer.normalizeVoltageVolts(rawVoltage.toLong())
+        val rawVoltage = intent?.getIntExtra(BatteryManager.EXTRA_VOLTAGE, -1) ?: -1
+        val voltageVolts = if (rawVoltage > 0) {
+            com.battery.analysis.util.BatteryUnitNormalizer.normalizeVoltageVolts(rawVoltage.toLong())
+        } else 0f
 
-        val rawTemp = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 305) ?: 305
-        val tempCelsius = rawTemp / 10f
+        val rawTemp = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+        val tempCelsius = if (rawTemp > -100) rawTemp / 10f else 0f
 
         val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_DISCHARGING)
             ?: BatteryManager.BATTERY_STATUS_DISCHARGING
@@ -2299,7 +2320,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                 ChargingStatsManager.getInstance(context).checkCurrentSystemChargingState().first)
 
         // 精确计算当前剩余能量（优先硬件计数器，其次多级真实容量推算）
-        val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val hardwareEnergyNwh = bm?.getLongProperty(BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER)
         val hardwareChargeCounterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
 
@@ -3693,37 +3713,44 @@ class PowerUsageManager private constructor(private val context: Context) {
                                 acc.maxTempCelsius = if (currentMax == null) stepMax else maxOf(currentMax, stepMax)
                             }
                         }
-                        // 若重叠分配后仍有剩余未覆盖的时间切片，且采样点自带包名，则归入该采样点包名
+                        // 若重叠分配后仍有剩余未覆盖的时间切片，且处于亮屏状态，优先归入采样点包名，否则归集为系统界面与桌面待机
                         val remainingMs = dt - allocatedOverlapMs
                         if (remainingMs > 0L) {
                             val fallbackPkg = curr.packageName?.takeIf { it.isNotEmpty() } ?: prev.packageName?.takeIf { it.isNotEmpty() }
-                            if (fallbackPkg != null && !com.battery.analysis.service.KeepAliveAccessibilityService.isIgnoredSystemComponent(fallbackPkg) && !overlappingIntervals.any { it.packageName == fallbackPkg }) {
-                                val acc = appSliceMap.getOrPut(fallbackPkg) { SliceAccumulator() }
-                                val dEnergyWs = avgPower * (remainingMs / 1000.0)
-                                acc.sampledDurationMs += remainingMs
-                                acc.sampledEnergyWs += dEnergyWs
-                                acc.tempDurationMs += remainingMs
-                                acc.weightedTempSum += avgT * remainingMs
-                                val currentMax = acc.maxTempCelsius
-                                acc.maxTempCelsius = if (currentMax == null) stepMax else maxOf(currentMax, stepMax)
+                            val effectivePkg = if (fallbackPkg != null && !com.battery.analysis.service.KeepAliveAccessibilityService.isIgnoredSystemComponent(fallbackPkg) && !overlappingIntervals.any { it.packageName == fallbackPkg }) {
+                                fallbackPkg
+                            } else {
+                                com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY
                             }
+                            val acc = appSliceMap.getOrPut(effectivePkg) { SliceAccumulator() }
+                            val dEnergyWs = avgPower * (remainingMs / 1000.0)
+                            acc.sampledDurationMs += remainingMs
+                            acc.sampledEnergyWs += dEnergyWs
+                            acc.tempDurationMs += remainingMs
+                            acc.weightedTempSum += avgT * remainingMs
+                            val currentMax = acc.maxTempCelsius
+                            acc.maxTempCelsius = if (currentMax == null) stepMax else maxOf(currentMax, stepMax)
                         }
                     } else {
-                        // 2. 无重叠区间时（如 UsageStats 未采集到或未授权）：仅在屏幕点亮时使用采样点前台包名
+                        // 2. 无重叠区间时（如 UsageStats 未采集到或未授权）：亮屏状态下使用采样点前台包名，未命中第三方应用时如实归集为“系统界面 / 桌面待机”
                         val matchedPkg = curr.packageName?.takeIf { it.isNotEmpty() }
                             ?: prev.packageName?.takeIf { it.isNotEmpty() }
                             ?: appIntervals.firstOrNull { midTs in it.startTs..it.endTs }?.packageName
 
-                        if (matchedPkg != null && !com.battery.analysis.service.KeepAliveAccessibilityService.isIgnoredSystemComponent(matchedPkg)) {
-                            val acc = appSliceMap.getOrPut(matchedPkg) { SliceAccumulator() }
-                            val dEnergyWs = avgPower * (dt / 1000.0)
-                            acc.sampledDurationMs += dt
-                            acc.sampledEnergyWs += dEnergyWs
-                            acc.tempDurationMs += dt
-                            acc.weightedTempSum += avgT * dt
-                            val currentMax = acc.maxTempCelsius
-                            acc.maxTempCelsius = if (currentMax == null) stepMax else maxOf(currentMax, stepMax)
+                        val effectivePkg = if (matchedPkg != null && !com.battery.analysis.service.KeepAliveAccessibilityService.isIgnoredSystemComponent(matchedPkg)) {
+                            matchedPkg
+                        } else {
+                            com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY
                         }
+
+                        val acc = appSliceMap.getOrPut(effectivePkg) { SliceAccumulator() }
+                        val dEnergyWs = avgPower * (dt / 1000.0)
+                        acc.sampledDurationMs += dt
+                        acc.sampledEnergyWs += dEnergyWs
+                        acc.tempDurationMs += dt
+                        acc.weightedTempSum += avgT * dt
+                        val currentMax = acc.maxTempCelsius
+                        acc.maxTempCelsius = if (currentMax == null) stepMax else maxOf(currentMax, stepMax)
                     }
                 }
                 prev = curr
@@ -3895,8 +3922,9 @@ class PowerUsageManager private constructor(private val context: Context) {
         val allSamplePkgs = (appSliceMap.keys + realtimeAccMap.keys).toSet()
         for (pkg in allSamplePkgs) {
             if (existingPkgs.contains(pkg)) continue
-            if (com.battery.analysis.service.KeepAliveAccessibilityService.isIgnoredSystemComponent(pkg)) continue
-            if (!isInteractiveSystemApp(pkg) && !isUserInstalledApp(pkg)) continue
+            val isStandbyPkg = pkg == com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY
+            if (!isStandbyPkg && com.battery.analysis.service.KeepAliveAccessibilityService.isIgnoredSystemComponent(pkg)) continue
+            if (!isStandbyPkg && !isInteractiveSystemApp(pkg) && !isUserInstalledApp(pkg)) continue
 
             val realtimeAcc = realtimeAccMap[pkg]
             val sliceAcc = appSliceMap[pkg]
@@ -3907,8 +3935,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                 sliceAcc?.sampledDurationMs ?: 0L
             }
             if (durationMs <= 0L) continue
-            // 严格要求：负一屏只要有真实工时即展示；普通应用或其它系统组件必须有至少 2 秒的真实持续运行工时，杜绝 1 秒幽灵切片
-            if (!isAssistantScreenApp(pkg) && durationMs < 2000L) continue
+            // 严格要求：负一屏与系统界面待机只要有真实工时即展示；普通应用或其它系统组件必须有至少 2 秒的真实持续运行工时，杜绝 1 秒幽灵切片
+            if (!isAssistantScreenApp(pkg) && !isStandbyPkg && durationMs < 2000L) continue
 
             val energyWs = if (realtimeAcc != null && realtimeAcc.energyJoules > 0.0) {
                 realtimeAcc.energyJoules
@@ -4172,13 +4200,21 @@ class PowerUsageManager private constructor(private val context: Context) {
                                 appIntervals.add(AppActivityInterval(finalFgPkg, activeStart, endTime))
                             }
                         }
-                        finalFgPkg = realPkg
-                        finalFgStartTs = if (finalFgStartTs > 0L) finalFgStartTs else (screenOnStart ?: startTime)
+                        // 严禁将刚打开的宿主本 App 或缺乏明确事件的应用回溯到放电周期起点 startTime 虚构整个放电时序
+                        if (realPkg != context.packageName) {
+                            finalFgPkg = realPkg
+                            finalFgStartTs = if (finalFgStartTs > 0L) finalFgStartTs else (screenOnStart ?: (endTime - 30_000L).coerceAtLeast(startTime))
+                        } else if (finalFgStartTs > 0L) {
+                            finalFgPkg = realPkg
+                        } else {
+                            finalFgPkg = null
+                            finalFgStartTs = 0L
+                        }
                     }
                 }
             }
 
-            if (finalFgPkg != null) {
+            if (finalFgPkg != null && finalFgStartTs > 0L) {
                 val activeStart = maxOf(finalFgStartTs, startTime)
                 val activeEnd = endTime
                 if (activeEnd > activeStart) {
@@ -4340,26 +4376,9 @@ class PowerUsageManager private constructor(private val context: Context) {
         val (appIntervals, screenIntervals) = queryUsageIntervals(startTs, now)
 
         // 应用图标与名称缓存，优先利用已解析好的 appItems
-        val pm = context.packageManager
         val appInfoMap = mutableMapOf<String, Pair<android.graphics.drawable.Drawable?, String>>()
         for (item in appItems) {
             appInfoMap[item.packageName] = Pair(item.icon, item.appName)
-        }
-        if (!appInfoMap.containsKey(context.packageName)) {
-            val (icon, name, _) = getAppInfo(context.packageName)
-            appInfoMap[context.packageName] = Pair(icon, name)
-        }
-
-        // 确定放电周期的前台主力应用（时长最长的主活跃应用，优先选择有桌面入口的用户三方应用）
-        val candidateApps = appItems.filter { it.foregroundTimeMs > 0 }
-        val userApps = candidateApps.filter { isUserInstalledApp(it.packageName) }
-        val primaryPkg = (userApps.maxByOrNull { it.foregroundTimeMs }
-            ?: candidateApps.maxByOrNull { it.foregroundTimeMs })?.packageName
-        val otherApps = candidateApps.filter { it.packageName != primaryPkg && isUserInstalledApp(it.packageName) }
-
-        if (!primaryPkg.isNullOrEmpty() && !appInfoMap.containsKey(primaryPkg)) {
-            val (icon, name, _) = getAppInfo(primaryPkg)
-            appInfoMap[primaryPkg] = Pair(icon, name)
         }
 
         // 优先采用放电期间后台精准采集的秒级瞬时物理数据点（包含瞬时实时功率、温度、电压与电量）
@@ -4385,8 +4404,13 @@ class PowerUsageManager private constructor(private val context: Context) {
                         break
                     }
                 }
+                // 若区间未覆盖但物理采样点自带真实记录包名，且非忽略系统组件
+                if (matchedPkg == null && !s.packageName.isNullOrEmpty() && !com.battery.analysis.service.KeepAliveAccessibilityService.isIgnoredSystemComponent(s.packageName)) {
+                    matchedPkg = s.packageName
+                }
+                // 若仍未命中前台三方应用且当前处于亮屏状态，如实归集为系统界面 / 桌面待机
                 if (matchedPkg == null && isScreenOn) {
-                    matchedPkg = primaryPkg
+                    matchedPkg = com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY
                 }
 
                 val icons = mutableListOf<android.graphics.drawable.Drawable>()
@@ -4417,11 +4441,26 @@ class PowerUsageManager private constructor(private val context: Context) {
                 )
             }
 
-            // 若最新采样点距今超过 2 秒，自动闭合注入当前瞬时终点
+            // 若最新采样点距今超过 2 秒，自动闭合注入当前瞬时终点（屏幕状态读取真实硬件状态）
             val lastSample = sortedSamples.last()
             if (now > lastSample.timestamp + 2000L) {
                 val currentStatus = getCurrentBatteryStatus()
+                val isInteractive = (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isInteractive == true
                 val latestWatts = if (lastSample.powerWatts > 0f) lastSample.powerWatts else defaultAvgWatts
+                val endIcons = mutableListOf<android.graphics.drawable.Drawable>()
+                val endNames = mutableListOf<String>()
+                if (isInteractive) {
+                    val endPkg = sortedSamples.lastOrNull()?.packageName?.takeIf { !com.battery.analysis.service.KeepAliveAccessibilityService.isIgnoredSystemComponent(it) }
+                        ?: com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY
+                    val info = appInfoMap.getOrPut(endPkg) {
+                        val (icon, name, _) = getAppInfo(endPkg)
+                        Pair(icon, name)
+                    }
+                    if (info.first != null) {
+                        endIcons.add(info.first!!)
+                        endNames.add(info.second)
+                    }
+                }
                 points.add(
                     PowerDischargePoint(
                         timestamp = now,
@@ -4430,9 +4469,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                         voltageVolts = currentStatus.voltageVolts,
                         temperature = currentStatus.temperature,
                         powerWatts = latestWatts,
-                        activeAppIcons = emptyList(),
-                        isScreenOn = true,
-                        activeAppNames = emptyList()
+                        activeAppIcons = endIcons,
+                        isScreenOn = isInteractive,
+                        activeAppNames = endNames
                     )
                 )
             }
@@ -4446,7 +4485,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         val stepNamesMap = mutableMapOf<Int, MutableList<String>>()
         val isScreenOnArray = BooleanArray(steps + 1) { false }
 
-        // A. 依据系统事件探测亮屏区间
+        // A. 依据系统事件探测真实亮屏区间，未采集到则真实反映，绝不人为从后往前倒序伪造
         for (i in 0..steps) {
             stepIconsMap[i] = mutableListOf()
             stepNamesMap[i] = mutableListOf()
@@ -4464,81 +4503,26 @@ class PowerUsageManager private constructor(private val context: Context) {
             isScreenOnArray[i] = isScreenOn
         }
 
-        // B. 校准亮屏指示条总占比，保证与权威 screenOnDurationMs 吻合
-        // 仅当息屏时间极短（<= 3000ms）时全亮屏；若已精确探测到亮屏与息屏区间，保留真实物理切片状态
+        // B. 仅当息屏时间极短（<= 3000ms）时视为全亮屏；若已精确探测到亮屏与息屏区间，严格保留真实物理切片状态
         if ((durationMs - screenOnDurationMs) <= 3000L) {
             for (i in 0..steps) isScreenOnArray[i] = true
-        } else if (screenIntervals.isEmpty()) {
-            val screenOnCount = isScreenOnArray.count { it }
-            val effectiveScreenOnMs = if (screenOnDurationMs >= 0L) {
-                screenOnDurationMs
-            } else {
-                candidateApps.sumOf { it.foregroundTimeMs }
-            }
-            val targetScreenOnSteps = if (duration > 0L) {
-                ((effectiveScreenOnMs.toFloat() / duration) * (steps + 1)).roundToInt().coerceIn(0, steps + 1)
-            } else {
-                0
-            }
-            if (screenOnCount < targetScreenOnSteps) {
-                for (i in (steps downTo 0)) {
-                    if (!isScreenOnArray[i]) {
-                        isScreenOnArray[i] = true
-                        if (isScreenOnArray.count { it } >= targetScreenOnSteps) break
-                    }
-                }
-            }
         }
 
-        // 3. 为每个切片按真实时序精准分配前台活跃应用（严格遵循单前台原则与实际使用时长连续平铺）
+        // 3. 为每个切片按系统真实活跃区间严格匹配前台应用，未检测到前台事件时忠实保留为 null，绝不虚构主力应用填充或扩散平铺
         val assignedPkgArray = arrayOfNulls<String>(steps + 1)
-
-        // A. 基础填充：所有处于亮屏状态的时间切片，默认均由主力前台应用（如持续亮屏使用的“电池检测”）连续充盈
-        for (i in 0..steps) {
-            if (isScreenOnArray[i]) {
-                assignedPkgArray[i] = primaryPkg
-            }
-        }
-
-        // B. 依据系统事件高精度区间，替换特定时间段内明确运行的其他前台应用
         for (i in 0..steps) {
             if (!isScreenOnArray[i]) continue
             val slotStart = (startTs + i * stepSpan).toLong()
             val slotEnd = (startTs + (i + 1) * stepSpan).toLong().coerceAtMost(now)
 
             for (interval in appIntervals) {
-                if (interval.packageName != primaryPkg && (isUserInstalledApp(interval.packageName))) {
-                    if (max(interval.startTs, slotStart) < kotlin.math.min(interval.endTs, slotEnd)) {
-                        assignedPkgArray[i] = interval.packageName
-                        break
-                    }
+                if (max(interval.startTs, slotStart) < kotlin.math.min(interval.endTs, slotEnd)) {
+                    assignedPkgArray[i] = interval.packageName
+                    break
                 }
             }
-        }
-
-        // C. 辅助应用（如短暂使用的桌面、录制器）依据其实际前台耗时比例，在对应时段分配独立切片
-        for (otherApp in otherApps) {
-            val pkg = otherApp.packageName
-            val currentAssignedCount = assignedPkgArray.count { it == pkg }
-            val targetStepsCount = max(1, ((otherApp.foregroundTimeMs.toFloat() / duration) * steps).roundToInt())
-            val neededSteps = targetStepsCount - currentAssignedCount
-            if (neededSteps > 0) {
-                val lastUsed = otherApp.lastUsedTimeMs
-                val centerRatio = if (lastUsed in startTs..now) {
-                    ((lastUsed - startTs).toFloat() / duration).coerceIn(0.05f, 0.95f)
-                } else {
-                    0.5f
-                }
-                val centerStep = (centerRatio * steps).roundToInt().coerceIn(0, steps)
-                var allocated = 0
-                for (offset in 0..steps) {
-                    val stepIdx = if (offset % 2 == 0) (centerStep - offset / 2).coerceIn(0, steps) else (centerStep + (offset + 1) / 2).coerceIn(0, steps)
-                    if (isScreenOnArray[stepIdx] && assignedPkgArray[stepIdx] == primaryPkg) {
-                        assignedPkgArray[stepIdx] = pkg
-                        allocated++
-                        if (allocated >= neededSteps) break
-                    }
-                }
+            if (assignedPkgArray[i] == null) {
+                assignedPkgArray[i] = com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY
             }
         }
 
@@ -5290,7 +5274,6 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         // 4. 构建 App 活动时间轴事件列表
         val appMap = fullPackage.appList.associateBy { it.packageName }
-        val pm = context.packageManager
         val appEvents = mutableListOf<AppTimelineEvent>()
 
         // 预先批量一次性查询时间轴全区间内的双通道网络流量，过滤掉无流量 UID 的高频跨进程 IPC
@@ -5301,7 +5284,11 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         for (interval in appIntervals) {
-            val pkg = interval.packageName
+            val pkg = if (isHomeLauncher(interval.packageName)) {
+                com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY
+            } else {
+                interval.packageName
+            }
             val item = appMap[pkg]
             val duration = (interval.endTs - interval.startTs).coerceAtLeast(0L)
             val info = getAppInfo(pkg)
@@ -5355,11 +5342,14 @@ class PowerUsageManager private constructor(private val context: Context) {
             )
         }
 
-        // 5. 实时监控状态闭合校准：确保最新时刻（endTs / now）若处于亮屏状态，前台应用事件与 endTs 完全闭合对齐
+        // 5. 补全亮屏期间未运行第三方应用的空白空隙为“系统界面 / 桌面待机”时间轴事件
+        fillStandbyEventsForUncoveredScreenOn(screenEvents, appEvents, appMap, fullPackage)
+
+        // 6. 实时监控状态闭合校准：确保最新时刻（endTs / now）若处于亮屏状态且存在真实前台事件，平滑顺延至 endTs
         if (!isHistory && endTs >= now - 120_000L && screenEvents.any { it.isScreenOn && it.endTime >= endTs - 10_000L }) {
             val lastAppEvent = appEvents.maxByOrNull { it.endTime }
             if (lastAppEvent != null && lastAppEvent.endTime < endTs && lastAppEvent.endTime >= endTs - 60_000L) {
-                // 若末尾最后一个事件与当前时间接近，直接闭合其 endTime 到 endTs
+                // 若末尾最后一个真实前台应用事件与当前时间接近（60 秒内），平滑顺延其 endTime 至 endTs
                 val idx = appEvents.indexOf(lastAppEvent)
                 if (idx >= 0) {
                     appEvents[idx] = lastAppEvent.copy(
@@ -5367,44 +5357,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                         durationMs = max(0L, endTs - lastAppEvent.startTime)
                     )
                 }
-            } else if (lastAppEvent == null || lastAppEvent.endTime < endTs - 10_000L) {
-                // 若时序末尾缺失前台事件，查询系统当前置顶应用进行对齐闭合
-                val currentPkg = ShizukuForegroundAppDetector.getForegroundPackageName(context)
-                    ?: KeepAliveAccessibilityService.currentForegroundPackage
-
-                val defaultHome = getDefaultHomeLauncherPackage()
-                if (!currentPkg.isNullOrEmpty() && currentPkg != defaultHome) {
-                    val fallbackStart = maxOf(lastAppEvent?.endTime ?: startTs, endTs - 60_000L, startTs)
-                    if (endTs > fallbackStart) {
-                        val item = appMap[currentPkg]
-                        val info = getAppInfo(currentPkg)
-                        val appName = item?.appName ?: info.second
-                        val icon = item?.icon ?: info.first
-                        val uid = info.third
-                        appEvents.add(
-                            AppTimelineEvent(
-                                packageName = currentPkg,
-                                uid = uid,
-                                appName = appName,
-                                icon = icon,
-                                startTime = fallbackStart,
-                                endTime = endTs,
-                                durationMs = endTs - fallbackStart,
-                                screenOn = true,
-                                energyMwh = null,
-                                averagePowerMw = fullPackage.overviewStats.avgPowerWatts * 1000.0,
-                                peakPowerMw = fullPackage.overviewStats.avgPowerWatts * 1000.0,
-                                cpuTimeMs = 0L,
-                                networkBytes = 0L,
-                                wakelockTimeMs = 0L,
-                                gpsTimeMs = 0L,
-                                confidence = ConfidenceLevel.HIGH,
-                                source = EnergySource.BATTERY_STATS
-                            )
-                        )
-                    }
-                }
             }
+            // 若末尾原本缺失前台事件或整个周期无前台事件，严格如实保持为空，绝不凭空捏造事件闭合
         }
 
         return BatteryTimelineState(
@@ -5420,6 +5374,113 @@ class PowerUsageManager private constructor(private val context: Context) {
             selectedMetric = metric,
             totalEnergyWh = totalEnergyWh
         )
+    }
+
+    /**
+     * 补全亮屏时间段内未命中第三方前台应用的时间空隙，生成系统界面与桌面待机时间轴事件。
+     * 严格忠实反映亮屏期间未运行三方应用时（如处于系统桌面、负一屏或锁屏）的系统界面待机真实能耗与时长。
+     *
+     * @param screenEvents 屏幕点亮与熄屏状态事件列表
+     * @param appEvents 已构建的应用前台活动事件列表
+     * @param appMap 包含“系统界面 / 桌面待机”统计项的应用映射表
+     * @param fullPackage 完整放电周期能耗数据包
+     */
+    private fun fillStandbyEventsForUncoveredScreenOn(
+        screenEvents: List<ScreenEvent>,
+        appEvents: MutableList<AppTimelineEvent>,
+        appMap: Map<String, AppPowerUsageItem>,
+        fullPackage: FullPowerDataPackage
+    ) {
+        val standbyItem = appMap[com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY]
+        val standbyInfo = getAppInfo(com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY)
+        val standbyName = standbyItem?.appName ?: standbyInfo.second
+        val standbyIcon = standbyItem?.icon ?: standbyInfo.first
+        val standbyUid = standbyInfo.third
+        val standbyAvgMw = standbyItem?.let { it.avgPowerWatts * 1000.0 }
+            ?: (fullPackage.overviewStats.screenOnPowerWatts * 1000.0)
+
+        // 筛选出所有有效亮屏事件区间
+        val onEvents = screenEvents.filter { it.isScreenOn && it.endTime > it.startTime }
+        if (onEvents.isEmpty()) return
+
+        for (onEvent in onEvents) {
+            val onStart = onEvent.startTime
+            val onEnd = onEvent.endTime
+
+            // 筛选出该亮屏区间内与其有交集的已有应用事件（排除桌面待机本身以防重复累加）
+            val overlaps = appEvents.filter {
+                it.packageName != com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY &&
+                it.startTime < onEnd && it.endTime > onStart
+            }.sortedBy { it.startTime }
+
+            var curCursor = onStart
+            for (overlap in overlaps) {
+                val appStart = maxOf(overlap.startTime, onStart)
+                val appEnd = minOf(overlap.endTime, onEnd)
+                if (appStart > curCursor + 500L) {
+                    val gapDuration = appStart - curCursor
+                    val gapEnergyMwh = if (standbyItem != null && standbyItem.foregroundTimeMs > 0L) {
+                        (standbyItem.energyWh * 1000.0 * gapDuration) / standbyItem.foregroundTimeMs
+                    } else {
+                        (standbyAvgMw * gapDuration) / 3600000.0
+                    }
+                    appEvents.add(
+                        AppTimelineEvent(
+                            packageName = com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY,
+                            uid = standbyUid,
+                            appName = standbyName,
+                            icon = standbyIcon,
+                            startTime = curCursor,
+                            endTime = appStart,
+                            durationMs = gapDuration,
+                            screenOn = true,
+                            energyMwh = gapEnergyMwh,
+                            averagePowerMw = standbyAvgMw,
+                            peakPowerMw = standbyAvgMw,
+                            cpuTimeMs = 0L,
+                            networkBytes = 0L,
+                            wakelockTimeMs = 0L,
+                            gpsTimeMs = 0L,
+                            confidence = ConfidenceLevel.HIGH,
+                            source = EnergySource.ESTIMATED
+                        )
+                    )
+                }
+                curCursor = maxOf(curCursor, appEnd)
+            }
+
+            if (onEnd > curCursor + 500L) {
+                val gapDuration = onEnd - curCursor
+                val gapEnergyMwh = if (standbyItem != null && standbyItem.foregroundTimeMs > 0L) {
+                    (standbyItem.energyWh * 1000.0 * gapDuration) / standbyItem.foregroundTimeMs
+                } else {
+                    (standbyAvgMw * gapDuration) / 3600000.0
+                }
+                appEvents.add(
+                    AppTimelineEvent(
+                        packageName = com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY,
+                        uid = standbyUid,
+                        appName = standbyName,
+                        icon = standbyIcon,
+                        startTime = curCursor,
+                        endTime = onEnd,
+                        durationMs = gapDuration,
+                        screenOn = true,
+                        energyMwh = gapEnergyMwh,
+                        averagePowerMw = standbyAvgMw,
+                        peakPowerMw = standbyAvgMw,
+                        cpuTimeMs = 0L,
+                        networkBytes = 0L,
+                        wakelockTimeMs = 0L,
+                        gpsTimeMs = 0L,
+                        confidence = ConfidenceLevel.HIGH,
+                        source = EnergySource.ESTIMATED
+                    )
+                )
+            }
+        }
+        // 补充完成后重新按照事件起始时间正序排列
+        appEvents.sortBy { it.startTime }
     }
 
     /**

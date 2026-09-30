@@ -141,6 +141,9 @@ data class AppPowerUsageItem(
         /** 标识未解析出包名的已卸载应用的虚拟包名前缀 */
         const val PACKAGE_UNINSTALLED_PREFIX = "uninstalled_uid_"
 
+        /** 标识亮屏状态下系统桌面、锁屏或未识别前台交互界面的系统级功耗归集条目包名 */
+        const val PACKAGE_SYSTEM_UI_STANDBY = "system:launcher_or_ui"
+
         /**
          * 判断给定包名是否为已卸载应用虚拟包名。
          *
@@ -152,6 +155,16 @@ data class AppPowerUsageItem(
             return packageName.startsWith(PACKAGE_UNINSTALLED_PREFIX) ||
                     packageName.startsWith("uninstalled_") ||
                     packageName.startsWith("com.battery.analysis.uninstalled.")
+        }
+
+        /**
+         * 判断给定包名是否为系统界面/桌面待机系统级条目。
+         *
+         * @param packageName 待检查的应用程序包名
+         * @return 若属于系统界面/桌面待机条目返回 true，否则返回 false
+         */
+        fun isSystemUiStandbyPackage(packageName: String?): Boolean {
+            return packageName == PACKAGE_SYSTEM_UI_STANDBY
         }
     }
 

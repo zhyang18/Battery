@@ -128,8 +128,8 @@ data class PowerUsageRecord(
                 val appName = obj.optString("name", pkgName)
                 val timeMs = obj.optLong("time", 0L)
                 val powerW = obj.optDouble("power", 0.0).toFloat()
-                val avgTemp = obj.optDouble("avgTemp", 30.0).toFloat()
-                val maxTemp = obj.optDouble("maxTemp", 35.0).toFloat()
+                val avgTemp = obj.optDouble("avgTemp", 0.0).toFloat()
+                val maxTemp = obj.optDouble("maxTemp", 0.0).toFloat()
                 val lastUsed = obj.optLong("lastUsed", 0L)
                 val icon: Drawable? = try {
                     pm.getApplicationIcon(pkgName)
@@ -274,13 +274,13 @@ data class PowerUsageRecord(
      * @return 格式化后的时长与电量变化字符串
      */
     fun getFormattedDurationAndLevel(): String {
-        var startLevel = 100
+        var startLevel = levelPercent
         val endLevel = levelPercent
 
         try {
             val jsonArray = JSONArray(trendPointsJson)
             if (jsonArray.length() > 0) {
-                startLevel = jsonArray.getJSONObject(0).optInt("lvl", 100)
+                startLevel = jsonArray.getJSONObject(0).optInt("lvl", endLevel)
             }
         } catch (_: Exception) {}
 

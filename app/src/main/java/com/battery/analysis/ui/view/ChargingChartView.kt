@@ -495,7 +495,8 @@ class ChargingChartView @JvmOverloads constructor(
 
         var maxChargeP = 0f
         var maxDischargeP = 0f
-        var maxT = 45f
+        var minT = Float.MAX_VALUE
+        var maxT = Float.MIN_VALUE
         var minVolt = Float.MAX_VALUE
         var maxVolt = Float.MIN_VALUE
         for (p in dataPoints) {
@@ -505,7 +506,10 @@ class ChargingChartView @JvmOverloads constructor(
                 val absP = abs(p.powerWatts)
                 if (absP > maxDischargeP) maxDischargeP = absP
             }
-            if (p.temperature > maxT) maxT = p.temperature
+            if (p.temperature > 0f) {
+                if (p.temperature < minT) minT = p.temperature
+                if (p.temperature > maxT) maxT = p.temperature
+            }
             if (p.voltageVolts > 0.5f) {
                 if (p.voltageVolts < minVolt) minVolt = p.voltageVolts
                 if (p.voltageVolts > maxVolt) maxVolt = p.voltageVolts
@@ -516,7 +520,10 @@ class ChargingChartView @JvmOverloads constructor(
 
         val safeMaxChargeP = (maxChargeP * 1.15f).coerceAtLeast(5f)
         val safeMaxDischargeP = (maxDischargeP * 1.15f).coerceAtLeast(3f)
-        maxT = (maxT * 1.15f).coerceAtLeast(40f)
+
+        val safeMinT = if (minT < Float.MAX_VALUE) minT - 1f else 15f
+        val safeMaxT = if (maxT > Float.MIN_VALUE) (maxT + 1f).coerceAtLeast(safeMinT + 2f) else 45f
+        val tempRange = (safeMaxT - safeMinT).coerceAtLeast(1f)
 
         val safeMinVolt = if (minVolt < Float.MAX_VALUE) minVolt * 0.98f else 3.4f
         val safeMaxVolt = if (maxVolt > Float.MIN_VALUE) maxVolt * 1.02f else 4.5f
@@ -559,7 +566,11 @@ class ChargingChartView @JvmOverloads constructor(
             levelPoints.add(obtainPointF(levelPointPool, i, x, levelY))
 
             // 温度曲线：映射至中层区间 (0.35 ~ 0.65)
-            val tempNorm = (((p.temperature - 20f) / (maxT - 20f)).coerceIn(0f, 1f) * 0.30f + 0.35f)
+            val tempNorm = if (p.temperature > 0f) {
+                (((p.temperature - safeMinT) / tempRange).coerceIn(0f, 1f) * 0.30f + 0.35f)
+            } else {
+                0.35f
+            }
             val tempY = chartTop + chartHeight * (1f - tempNorm)
             tempPoints.add(obtainPointF(tempPointPool, i, x, tempY))
 

@@ -347,6 +347,10 @@ class BatteryTimelineView @JvmOverloads constructor(
     private var isCurveCacheValid = false
     private var cachedRawSamples = emptyList<BatterySample>()
     private var cachedMaxScaleW = 15.0
+    private var cachedMinTemp = 15.0
+    private var cachedMaxTemp = 45.0
+    private var cachedMinVoltV = 3.4f
+    private var cachedMaxVoltV = 4.4f
 
     /**
      * 将曲线与图表绘制缓存标记为失效，触发下一次绘制前的按需重新预计算。
@@ -846,6 +850,50 @@ class BatteryTimelineView @JvmOverloads constructor(
             else -> kotlin.math.ceil(maxRawPowerW / 10.0) * 10.0
         }
 
+        // 动态自适应温度量程计算（基于底层真实硬件物理数据，杜绝硬编码与虚拟钳位截断）
+        val validTempSamples = (if (rawSamples.isNotEmpty()) rawSamples else timelineState.batterySamples)
+            .filter { it.temperatureC > 0.0 }
+        if (validTempSamples.isNotEmpty()) {
+            val minT = validTempSamples.minOf { it.temperatureC }
+            val maxT = validTempSamples.maxOf { it.temperatureC }
+            val rangeT = maxT - minT
+            if (rangeT < 1.0) {
+                // 极差过小时居中平滑展开，上下预留 1.5℃ 视野，避免除以 0 导致曲线畸变
+                cachedMinTemp = minT - 1.5
+                cachedMaxTemp = maxT + 1.5
+            } else {
+                // 留出 10% 呼吸裕量
+                val marginT = rangeT * 0.1
+                cachedMinTemp = minT - marginT
+                cachedMaxTemp = maxT + marginT
+            }
+        } else {
+            cachedMinTemp = 15.0
+            cachedMaxTemp = 45.0
+        }
+
+        // 动态自适应电压量程计算（基于底层真实硬件物理数据，兼容高压单电芯与多电芯串联）
+        val validVoltSamples = (if (rawSamples.isNotEmpty()) rawSamples else timelineState.batterySamples)
+            .filter { it.voltageMv > 500 }
+        if (validVoltSamples.isNotEmpty()) {
+            val minV = validVoltSamples.minOf { it.voltageMv } / 1000f
+            val maxV = validVoltSamples.maxOf { it.voltageMv } / 1000f
+            val rangeV = maxV - minV
+            if (rangeV < 0.05f) {
+                // 极差过小时居中平滑展开，上下预留 0.05V 视野，避免除以 0
+                cachedMinVoltV = minV - 0.05f
+                cachedMaxVoltV = maxV + 0.05f
+            } else {
+                // 留出 8% 呼吸裕量
+                val marginV = rangeV * 0.08f
+                cachedMinVoltV = minV - marginV
+                cachedMaxVoltV = maxV + marginV
+            }
+        } else {
+            cachedMinVoltV = 3.4f
+            cachedMaxVoltV = 4.4f
+        }
+
         val metrics = timelineState.selectedMetrics
         if (metrics.contains(TimelineMetric.POWER)) {
             buildPowerCurveCache(cachedPowerCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, cachedMaxScaleW, rawSamples)
@@ -1115,7 +1163,8 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         val contentRight = contentLeft + contentWidth
         val firstSample = downsampled.first()
-        val firstNorm = (((firstSample.temperatureC - 15.0) / 30.0).coerceIn(0.0, 1.0) * 0.40 + 0.45).toFloat()
+        val tempRange = (cachedMaxTemp - cachedMinTemp).coerceAtLeast(0.1)
+        val firstNorm = (((firstSample.temperatureC - cachedMinTemp) / tempRange) * 0.40 + 0.45).toFloat()
         val firstY = topPadding + (1f - firstNorm) * availableH
 
         cache.path.moveTo(contentLeft, firstY)
@@ -1127,7 +1176,7 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         for (s in downsampled) {
             val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
-            val norm = (((s.temperatureC - 15.0) / 30.0).coerceIn(0.0, 1.0) * 0.40 + 0.45).toFloat()
+            val norm = (((s.temperatureC - cachedMinTemp) / tempRange) * 0.40 + 0.45).toFloat()
             val y = topPadding + (1f - norm) * availableH
 
             if (x > lastX) {
@@ -1208,7 +1257,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         val contentRight = contentLeft + contentWidth
         val firstSample = downsampled.first()
         val firstVoltV = firstSample.voltageMv / 1000f
-        val firstNorm = (((firstVoltV - 3.4f) / 1.0f).coerceIn(0f, 1f) * 0.35f + 0.35f)
+        val voltRange = (cachedMaxVoltV - cachedMinVoltV).coerceAtLeast(0.01f)
+        val firstNorm = (((firstVoltV - cachedMinVoltV) / voltRange) * 0.35f + 0.35f)
         val firstY = topPadding + (1f - firstNorm) * availableH
 
         cache.path.moveTo(contentLeft, firstY)
@@ -1221,7 +1271,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         for (s in downsampled) {
             val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
             val voltV = s.voltageMv / 1000f
-            val norm = (((voltV - 3.4f) / 1.0f).coerceIn(0f, 1f) * 0.35f + 0.35f)
+            val norm = (((voltV - cachedMinVoltV) / voltRange) * 0.35f + 0.35f)
             val y = topPadding + (1f - norm) * availableH
 
             if (x > lastX) {
@@ -1667,7 +1717,8 @@ class BatteryTimelineView @JvmOverloads constructor(
 
                 // 温度指标高亮点
                 if (selected.contains(TimelineMetric.TEMPERATURE)) {
-                    val tempNorm = (((curSample.temperatureC - 15.0) / 30.0).coerceIn(0.0, 1.0) * 0.40 + 0.45).toFloat()
+                    val tempRange = (cachedMaxTemp - cachedMinTemp).coerceAtLeast(0.1)
+                    val tempNorm = (((curSample.temperatureC - cachedMinTemp) / tempRange) * 0.40 + 0.45).toFloat()
                     val tempY = topPadding + (1f - tempNorm) * availableH
                     drawHighLightDot(canvas, clampedX, tempY, colorTemp)
                 }
@@ -1675,7 +1726,8 @@ class BatteryTimelineView @JvmOverloads constructor(
                 // 电压指标高亮点
                 if (selected.contains(TimelineMetric.VOLTAGE)) {
                     val voltV = curSample.voltageMv / 1000f
-                    val voltNorm = (((voltV - 3.4f) / 1.0f).coerceIn(0f, 1f) * 0.35f + 0.35f)
+                    val voltRange = (cachedMaxVoltV - cachedMinVoltV).coerceAtLeast(0.01f)
+                    val voltNorm = (((voltV - cachedMinVoltV) / voltRange) * 0.35f + 0.35f)
                     val voltY = topPadding + (1f - voltNorm) * availableH
                     drawHighLightDot(canvas, clampedX, voltY, colorVoltage)
                 }

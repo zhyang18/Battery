@@ -17,8 +17,8 @@ object AppLifecycleTracker : Application.ActivityLifecycleCallbacks {
     /** 耗电统计上次刷新时间戳持久化存储键名 */
     private const val KEY_LAST_DISCHARGE_REFRESH_TIME = "last_discharge_refresh_time"
 
-    /** 耗电统计防重复刷新最小时间门限阈值（60,000毫秒，即 1 分钟） */
-    const val REFRESH_INTERVAL_THRESHOLD_MS = 60_000L
+    /** 耗电统计防重复刷新最小时间门限阈值（120,000毫秒，即 2 分钟） */
+    const val REFRESH_INTERVAL_THRESHOLD_MS = 120_000L
 
     /** 应用程序全局上下文引用缓存 */
     private var applicationContext: Application? = null

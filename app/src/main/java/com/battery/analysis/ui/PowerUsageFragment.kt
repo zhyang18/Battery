@@ -1352,11 +1352,11 @@ class PowerUsageFragment : Fragment() {
 
     /**
      * 将当前或最新的充电统计数据包渲染更新至充电专属界面各卡片与三合一图表中。
-     * 采用增量追加模式更新折线图，杜绝每 1.5 秒对 1500 个点执行全量重排与贝塞尔曲线重算。
+     * 忠实同步底层管理器采样数据，确保图表完整呈现自充电起始点以来的全量走势，杜绝截断与时间轴错乱。
      *
-     * @param summary 充电会话汇总数据实体，若为空则由管理器内存获取
-     * @param points 采样点历史列表，若为空则由管理器内存获取
-     * @param latestPoint 最近一次采样的物理指标点，若为空则由最新点或兜底合成
+     * @param summary 充电会话汇总数据实体 [ChargingSessionSummary]，若为空则由管理器内存获取
+     * @param points 采样点历史列表 [List<ChargingSamplePoint>]，若为空则由管理器内存获取
+     * @param latestPoint 最近一次采样的物理指标点 [ChargingSamplePoint]，可为空
      */
     private fun renderChargingData(
         summary: ChargingSessionSummary = chargingManager.getCurrentSummary(),
@@ -1376,20 +1376,15 @@ class PowerUsageFragment : Fragment() {
             currentMa = if (liveSnapshot.voltageVolts > 0.5f && summary.maxPowerWatts > 0f) (summary.maxPowerWatts * 1000f / liveSnapshot.voltageVolts) else 0f
         )
 
-        // 1. 增量更新三合一走势折线图 (功率: 绿, 电量: 蓝, 温度: 红)，消除每 1.5 秒全量重绘 1500 点
+        // 1. 同步更新三合一走势折线图 (功率: 绿/橙, 电量: 蓝, 温度: 红, 电压: 黄)
         val currentChartPointsCount = chargingView.chargingChartView.getPointsCount()
         val isNewSession = summary.startTimestamp != lastRenderedSessionStart
-        if (isNewSession || currentChartPointsCount == 0 || points.size < currentChartPointsCount || lastRenderedPointsCount == -1) {
+        if (isNewSession || currentChartPointsCount == 0 || points.size != currentChartPointsCount || lastRenderedPointsCount == -1) {
             chargingView.chargingChartView.setData(points)
+            val forceAppRefresh = isNewSession || lastRenderedPointsCount == -1
             lastRenderedPointsCount = points.size
             lastRenderedSessionStart = summary.startTimestamp
-
-            refreshChargingAppEvents(force = true)
-        } else if (points.size > currentChartPointsCount) {
-            val newPoints = points.subList(currentChartPointsCount, points.size)
-            chargingView.chargingChartView.appendPoints(newPoints)
-            lastRenderedPointsCount = points.size
-            refreshChargingAppEvents(force = false)
+            refreshChargingAppEvents(force = forceAppRefresh)
         }
 
         // 2. 填充整合版大卡片：环形进度条与中心大字

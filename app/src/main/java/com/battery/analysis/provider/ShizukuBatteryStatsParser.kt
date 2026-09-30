@@ -494,8 +494,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                                 0L
                             }
 
-                            // 若未开启后台统计，纯后台应用（foregroundMs <= 0L 且非负一屏应用）直接跳过，杜绝后台守护组件污染前台展示列表
-                            if (!enableBackgroundStats && foregroundMs <= 0L && !isAssistantScreenApp(pkgName)) {
+                            // 若未开启后台统计，纯后台应用（foregroundMs <= 0L）直接跳过，杜绝后台守护组件污染前台展示列表
+                            if (!enableBackgroundStats && foregroundMs <= 0L) {
                                 continue
                             }
 
@@ -800,7 +800,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     }
 
     /**
-     * 判断指定包名是否属于负一屏系统组件（如荣耀 hiboard、华为 hiboard、小米 personalassistant、OPPO assistantscreen 等）。
+     * 判断指定包名是否属于负一屏系统组件（如荣耀/华为 hiboard、小米 personalassistant、OPPO assistantscreen、vivo assistant 等）。
+     * 严格排除 YOYO 建议 / 智慧感知后台服务（com.hihonor.intelligent / com.huawei.intelligent）。
      *
      * @param packageName 待检查的应用程序包名
      * @return 若属于负一屏前台界面返回 true，否则返回 false
@@ -810,8 +811,6 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val lower = packageName.lowercase()
         return lower == "com.hihonor.hiboard" ||
                 lower == "com.huawei.hiboard" ||
-                lower == "com.hihonor.intelligent" ||
-                lower == "com.huawei.intelligent" ||
                 lower == "com.miui.personalassistant" ||
                 lower == "com.coloros.assistantscreen" ||
                 lower == "com.vivo.assistant" ||

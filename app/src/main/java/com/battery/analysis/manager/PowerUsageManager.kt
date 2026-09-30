@@ -782,15 +782,13 @@ class PowerUsageManager private constructor(private val context: Context) {
             val ai = pm.getApplicationInfo(packageName, 0)
             val rawName = pm.getApplicationLabel(ai).toString()
             val friendlyName = when (packageName) {
-                "com.hihonor.hiboard", "com.huawei.hiboard",
-                "com.hihonor.intelligent", "com.huawei.intelligent" -> "负一屏"
+                "com.hihonor.hiboard", "com.huawei.hiboard" -> "负一屏"
                 else -> rawName
             }
             Triple(pm.getApplicationIcon(ai), friendlyName, ai.uid)
         } catch (_: Exception) {
             val fallbackName = when (packageName) {
-                "com.hihonor.hiboard", "com.huawei.hiboard",
-                "com.hihonor.intelligent", "com.huawei.intelligent" -> "负一屏"
+                "com.hihonor.hiboard", "com.huawei.hiboard" -> "负一屏"
                 else -> packageName.substringAfterLast('.')
             }
             Triple(null, fallbackName, 10000)
@@ -3088,19 +3086,20 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 检查指定包名是否为负一屏组件（如荣耀 hiboard、华为 hiboard、小米 personalassistant、OPPO assistantscreen 等）。
-     * 严格排除 YOYO 建议后台引擎（com.hihonor.intelligent / com.huawei.intelligent），确保仅识别真实负一屏界面。
+     * 检查指定包名是否属于负一屏前台交互界面组件。
+     * 包含荣耀/华为 hiboard（负一屏全屏渲染主进程）、小米 personalassistant、OPPO assistantscreen、
+     * vivo assistant 等各大 OEM 真实负一屏界面。
+     * 严格排除 YOYO 建议 / 智慧感知后台服务（com.hihonor.intelligent / com.huawei.intelligent），
+     * 杜绝桌面常驻建议卡片和后台引擎被误识别为负一屏全屏应用。
      *
      * @param packageName 待检查的应用程序包名
-     * @return 若属于负一屏组件返回 true，否则返回 false
+     * @return 若属于真实负一屏交互界面组件返回 true，否则返回 false
      */
     fun isAssistantScreenApp(packageName: String?): Boolean {
         if (packageName.isNullOrBlank()) return false
         val lower = packageName.lowercase()
         return lower == "com.hihonor.hiboard" ||
                 lower == "com.huawei.hiboard" ||
-                lower == "com.hihonor.intelligent" ||
-                lower == "com.huawei.intelligent" ||
                 lower == "com.miui.personalassistant" ||
                 lower == "com.coloros.assistantscreen" ||
                 lower == "com.vivo.assistant" ||
@@ -3349,28 +3348,16 @@ class PowerUsageManager private constructor(private val context: Context) {
             e.printStackTrace()
         }
 
-        // 关键融合：若系统 UsageStats 缺失负一屏独立前台生命周期，但硬件物理采样已记录真实工时，
-        // 将其实打实补充进结果映射表，并从桌面时长中如实扣除，杜绝负一屏工时被系统事件缺陷吞噬
+        // 关键融合：若系统 UsageStats 缺失负一屏或交互系统组件的前台记录，但硬件物理采样已记录真实工时，
+        // 将其实打实补充进结果映射表，忠实反映真实工时，绝不人为削弱或篡改桌面启动器的正常活跃时长
         val realtimeMap = synchronized(this) { appRealtimeEnergyMap.toMap() }
-        var totalAssistantDiff = 0L
         for ((pkg, acc) in realtimeMap) {
             if (com.battery.analysis.service.KeepAliveAccessibilityService.isIgnoredSystemComponent(pkg)) continue
             if ((isAssistantScreenApp(pkg) || isInteractiveSystemApp(pkg)) && acc.durationMs > 0L) {
                 val currentMs = resultMap[pkg] ?: 0L
                 if (acc.durationMs > currentMs) {
-                    val diff = acc.durationMs - currentMs
                     resultMap[pkg] = acc.durationMs
-                    if (isAssistantScreenApp(pkg)) {
-                        totalAssistantDiff += diff
-                    }
                 }
-            }
-        }
-        if (totalAssistantDiff > 0L) {
-            val launcherKey = resultMap.keys.firstOrNull { isHomeLauncher(it) }
-            if (launcherKey != null) {
-                val curLauncher = resultMap[launcherKey] ?: 0L
-                resultMap[launcherKey] = (curLauncher - totalAssistantDiff).coerceAtLeast(0L)
             }
         }
 
@@ -3544,7 +3531,6 @@ class PowerUsageManager private constructor(private val context: Context) {
             // 补充在硬件瞬时采样中记录、但系统 UsageStats 缺失的交互式系统组件（如负一屏、电话等）
             val realtimeAccMap = synchronized(this) { appRealtimeEnergyMap.toMap() }
             val existingPkgs = resultList.map { it.packageName }.toSet()
-            var totalAssistantDeduction = 0L
 
             for ((pkg, acc) in realtimeAccMap) {
                 if (com.battery.analysis.service.KeepAliveAccessibilityService.isIgnoredSystemComponent(pkg)) continue
@@ -3575,21 +3561,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                                 fgsDurationMs = 0L
                             )
                         )
-                        if (isAssistantScreenApp(pkg)) {
-                            totalAssistantDeduction += safeDuration
-                        }
                     } catch (_: Exception) {
                     }
-                }
-            }
-
-            // 物理守恒：从系统桌面 Launcher 的前台时长中扣减负一屏的实际工时
-            if (totalAssistantDeduction > 0L) {
-                val launcherIdx = resultList.indexOfFirst { isHomeLauncher(it.packageName) }
-                if (launcherIdx >= 0) {
-                    val launcherItem = resultList[launcherIdx]
-                    val adjustedFg = (launcherItem.foregroundTimeMs - totalAssistantDeduction).coerceAtLeast(0L)
-                    resultList[launcherIdx] = launcherItem.copy(foregroundTimeMs = adjustedFg)
                 }
             }
         }
@@ -3956,51 +3929,6 @@ class PowerUsageManager private constructor(private val context: Context) {
             existingPkgs.add(pkg)
         }
 
-        // 5. 负一屏与桌面时间的物理守恒扣减校准：
-        // 针对各大定制 ROM 将负一屏浏览时间直接记入系统桌面 Launcher 的情况，如实从桌面扣减负一屏实际工时
-        val launcherIdx = mappedItems.indexOfFirst { isHomeLauncher(it.packageName) }
-        val launcherItem = if (launcherIdx >= 0) mappedItems[launcherIdx] else null
-
-        if (launcherItem != null && launcherItem.foregroundTimeMs > 0L) {
-            var totalAssistantDeductionMs = 0L
-
-            for (i in 0 until mappedItems.size) {
-                val item = mappedItems[i]
-                if (isAssistantScreenApp(item.packageName)) {
-                    if (item.foregroundTimeMs > 0L) {
-                        totalAssistantDeductionMs += item.foregroundTimeMs
-                    } else if (item.energyWh > 0.0001f && screenOnWatts > 0.05f) {
-                        // 底层 dumpsys 记录了负一屏独立能耗但 UsageStats 缺失前台事件时，按整机亮屏功耗推导其实际交互工时
-                        val inferredFgMs = ((item.energyWh / screenOnWatts) * 3600000.0).toLong()
-                            .coerceIn(1000L, launcherItem.foregroundTimeMs)
-                        if (inferredFgMs > 0L) {
-                            val fgHours = inferredFgMs / 3600000f
-                            val fgWatts = (item.energyWh / fgHours).toFloat()
-                            mappedItems[i] = item.copy(
-                                foregroundTimeMs = inferredFgMs,
-                                foregroundPowerWatts = fgWatts,
-                                avgPowerWatts = fgWatts,
-                                foregroundEnergyWh = item.energyWh,
-                                directEnergyWh = item.energyWh
-                            )
-                            totalAssistantDeductionMs += inferredFgMs
-                        }
-                    }
-                }
-            }
-
-            if (totalAssistantDeductionMs > 0L) {
-                val adjustedLauncherFgMs = (launcherItem.foregroundTimeMs - totalAssistantDeductionMs).coerceAtLeast(0L)
-                val adjustedLauncherFgHours = adjustedLauncherFgMs / 3600000f
-                val adjustedLauncherEnergy = launcherItem.foregroundPowerWatts * adjustedLauncherFgHours
-                mappedItems[launcherIdx] = launcherItem.copy(
-                    foregroundTimeMs = adjustedLauncherFgMs,
-                    foregroundEnergyWh = adjustedLauncherEnergy,
-                    directEnergyWh = adjustedLauncherEnergy
-                )
-            }
-        }
-
         // 6. 负一屏同构条目聚合（如荣耀 hiboard 与 intelligent 协同运作时，统一聚合为一个完整“负一屏”主条目）
         val assistantItems = mappedItems.filter { isAssistantScreenApp(it.packageName) }
         val consolidatedItems = if (assistantItems.size > 1) {
@@ -4200,7 +4128,6 @@ class PowerUsageManager private constructor(private val context: Context) {
             if (isNearCurrentTime && (screenOnStart != null || isInteractive)) {
                 val realPkg = ShizukuForegroundAppDetector.getForegroundPackageName(context)
                     ?: KeepAliveAccessibilityService.currentForegroundPackage
-                    ?: context.packageName
 
                 if (!realPkg.isNullOrEmpty() && realPkg != defaultHome) {
                     if (finalFgPkg == realPkg) {
@@ -4395,10 +4322,9 @@ class PowerUsageManager private constructor(private val context: Context) {
         val userApps = candidateApps.filter { isUserInstalledApp(it.packageName) }
         val primaryPkg = (userApps.maxByOrNull { it.foregroundTimeMs }
             ?: candidateApps.maxByOrNull { it.foregroundTimeMs })?.packageName
-            ?: context.packageName
         val otherApps = candidateApps.filter { it.packageName != primaryPkg && isUserInstalledApp(it.packageName) }
 
-        if (!appInfoMap.containsKey(primaryPkg)) {
+        if (!primaryPkg.isNullOrEmpty() && !appInfoMap.containsKey(primaryPkg)) {
             val (icon, name, _) = getAppInfo(primaryPkg)
             appInfoMap[primaryPkg] = Pair(icon, name)
         }
@@ -5047,18 +4973,18 @@ class PowerUsageManager private constructor(private val context: Context) {
             val pkg = pt.packageName
             val isAssistantOrSpecial = !pkg.isNullOrEmpty() && (isAssistantScreenApp(pkg) || isInteractiveSystemApp(pkg)) && pt.isScreenOn
             if (isAssistantOrSpecial && pkg != null) {
-                if (curPkg == pkg && pt.timestamp <= segEnd + 15_000L) {
+                if (curPkg == pkg && pt.timestamp <= segEnd + 3000L) {
                     segEnd = pt.timestamp
                 } else {
                     if (curPkg != null && segEnd > segStart) {
                         assistantSegments.add(AppActivityInterval(curPkg, segStart, segEnd))
                     }
                     curPkg = pkg
-                    segStart = pt.timestamp - 1500L
+                    segStart = pt.timestamp - 1000L
                     segEnd = pt.timestamp + 500L
                 }
-            } else if (pt.isScreenOn && !pkg.isNullOrEmpty() && !isHomeLauncher(pkg)) {
-                // 收到其它明确的三方应用亮屏点：切断负一屏区间
+            } else if (pt.isScreenOn && !pkg.isNullOrEmpty()) {
+                // 收到桌面启动器或其它明确的三方应用亮屏点：立即切断负一屏区间，杜绝负一屏跨越桌面持续渗透
                 if (curPkg != null && segEnd > segStart) {
                     assistantSegments.add(AppActivityInterval(curPkg, segStart, segEnd))
                 }
@@ -5412,7 +5338,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                 // 若时序末尾缺失前台事件，查询系统当前置顶应用进行对齐闭合
                 val currentPkg = ShizukuForegroundAppDetector.getForegroundPackageName(context)
                     ?: KeepAliveAccessibilityService.currentForegroundPackage
-                    ?: context.packageName
 
                 val defaultHome = getDefaultHomeLauncherPackage()
                 if (!currentPkg.isNullOrEmpty() && currentPkg != defaultHome) {

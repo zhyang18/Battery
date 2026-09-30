@@ -368,29 +368,25 @@ class ChargingChartView @JvmOverloads constructor(
     }
 
     /**
-     * 向现有采样数据集末尾实时追加单点并高效局部重绘。
+     * 向现有采样数据集末尾实时追加单点并执行重绘。
+     * 忠实保留全量采样历史数据，严禁人为截断导致充电早期数据丢失或时间轴错乱。
      *
-     * @param point 最新的采样物理点
+     * @param point 最新的采样物理点实体 [ChargingSamplePoint]
      */
     fun appendPoint(point: ChargingSamplePoint) {
         dataPoints.add(point)
-        if (dataPoints.size > 1500) {
-            dataPoints.removeAt(0)
-        }
         invalidate()
     }
 
     /**
-     * 向现有采样数据集末尾批量追加新采样点并执行单次高效重绘，消除逐点高频重绘开销。
+     * 向现有采样数据集末尾批量追加新采样点并执行重绘。
+     * 忠实保留全量采样历史数据，严禁人为截断导致充电早期数据丢失或时间轴错乱。
      *
-     * @param newPoints 待追加的新采样数据点列表
+     * @param newPoints 待追加的新采样数据点列表 [List<ChargingSamplePoint>]
      */
     fun appendPoints(newPoints: List<ChargingSamplePoint>) {
         if (newPoints.isEmpty()) return
         dataPoints.addAll(newPoints)
-        while (dataPoints.size > 1500) {
-            dataPoints.removeAt(0)
-        }
         invalidate()
     }
 
@@ -494,8 +490,8 @@ class ChargingChartView @JvmOverloads constructor(
 
         // 3. 统计各维度数据范围（分别统计充电正功率与放电负功率）
         val minTs = dataPoints.first().timestamp
-        val maxTs = if (dataPoints.size > 1) dataPoints.last().timestamp else (minTs + 60000L)
-        val tsRange = (maxTs - minTs).coerceAtLeast(60000L).toFloat()
+        val maxTs = if (dataPoints.size > 1) maxOf(dataPoints.last().timestamp, minTs + 60000L) else (minTs + 60000L)
+        val tsRange = (maxTs - minTs).toFloat()
 
         var maxChargeP = 0f
         var maxDischargeP = 0f
@@ -553,7 +549,8 @@ class ChargingChartView @JvmOverloads constructor(
             val x = if (dataPoints.size == 1) {
                 paddingLeft + chartWidth / 2f
             } else {
-                paddingLeft + chartWidth * ((p.timestamp - minTs).toFloat() / tsRange)
+                val ratio = ((p.timestamp - minTs).toFloat() / tsRange).coerceIn(0f, 1f)
+                paddingLeft + chartWidth * ratio
             }
 
             // 电量曲线：映射至顶部区间 (0.05 ~ 0.45)，防止与中间温度和底部功率重叠
@@ -615,7 +612,9 @@ class ChargingChartView @JvmOverloads constructor(
             powerPaint.color = colorPowerCharge
         }
 
-        // 平滑绘制四色曲线（功率、电量、温度、电压），根据选中的指标动态显示/隐藏
+        // 平滑绘制四色曲线（功率、电量、温度、电压），根据选中的指标动态显示/隐藏，并执行图表内部区域裁剪保护
+        canvas.save()
+        canvas.clipRect(paddingLeft, chartTop, w - paddingRight, chartBottom)
         if (selectedMetrics.contains(TimelineMetric.POWER)) {
             drawSmoothCurve(canvas, powerPoints, powerPath, powerPaint)
         }
@@ -628,6 +627,7 @@ class ChargingChartView @JvmOverloads constructor(
         if (selectedMetrics.contains(TimelineMetric.VOLTAGE)) {
             drawSmoothCurve(canvas, voltagePoints, voltagePath, voltagePaint)
         }
+        canvas.restore()
 
         // 6. 在曲线的关键位置绘制峰谷值小数字
         drawPeakAndValleyBadges(canvas, chartTop, chartBottom, paddingLeft, w - paddingRight)
@@ -758,7 +758,7 @@ class ChargingChartView @JvmOverloads constructor(
         if (appEvents.isEmpty() || dataPoints.isEmpty()) return
 
         val minTs = dataPoints.first().timestamp
-        val maxTs = if (dataPoints.size > 1) dataPoints.last().timestamp else (minTs + 60000L)
+        val maxTs = if (dataPoints.size > 1) maxOf(dataPoints.last().timestamp, minTs + 60000L) else (minTs + 60000L)
         if (maxTs <= minTs) return
 
         val slotSizePx = dp11

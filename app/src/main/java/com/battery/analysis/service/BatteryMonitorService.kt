@@ -658,11 +658,32 @@ class BatteryMonitorService : Service() {
             return packageName
         }
 
-        // 1. 无障碍服务事件驱动：仅在事件处于 5 秒时效窗口内时优先采纳（纯内存读取，0 Binder IPC，0 轮询）
-        val accessibilityPkg = KeepAliveAccessibilityService.getValidForegroundPackage(5000L)
+        // 1. 无障碍服务活动窗口动态探测：
+        // 实时探测当前系统活动窗口：若当前活动窗口明确是负一屏，持续认定为负一屏，保证静止阅读看卡片期间 100% 稳定采样！
+        val activeWindowPkg = KeepAliveAccessibilityService.getActiveWindowPackage()
+        if (activeWindowPkg != null) {
+            if (KeepAliveAccessibilityService.isAssistantScreenPackage(activeWindowPkg)) {
+                lastKnownForegroundPackage = activeWindowPkg
+                lastForegroundQueryTime = System.currentTimeMillis()
+                return activeWindowPkg
+            } else if (KeepAliveAccessibilityService.isAssistantScreenPackage(lastKnownForegroundPackage)) {
+                // 用户此前在负一屏，但当前活动窗口已经变回桌面或其他 App，立即解除负一屏前台状态！
+                lastKnownForegroundPackage = null
+            }
+        }
+
+        // 2. 无障碍服务事件驱动：仅在事件处于有效时效窗口内时优先采纳（纯内存读取，0 Binder IPC，0 轮询）
+        val accessibilityPkg = KeepAliveAccessibilityService.getValidForegroundPackage(3000L)
         if (!accessibilityPkg.isNullOrEmpty()) {
             lastKnownForegroundPackage = accessibilityPkg
             return accessibilityPkg
+        }
+
+        // 关键自愈：若此前记录的前台包名为负一屏，但当前无障碍服务已未检测到任何负一屏活跃事件且当前活动窗口不在负一屏，
+        // 明确表明用户已离开负一屏回到桌面或退出，必须立即清空负一屏历史缓存，
+        // 绝不允许继续沿用负一屏旧记录，彻底根除桌面停留时间被无限记入负一屏的恶性缺陷
+        if (lastKnownForegroundPackage != null && KeepAliveAccessibilityService.isAssistantScreenPackage(lastKnownForegroundPackage)) {
+            lastKnownForegroundPackage = null
         }
 
         val now = System.currentTimeMillis()
@@ -710,12 +731,6 @@ class BatteryMonitorService : Service() {
                 }
 
                 if (!latestResumedPkg.isNullOrEmpty()) {
-                    // 若此前已处于负一屏长效会话中且新事件为桌面 Launcher，不轻易打断负一屏
-                    val isCurrentAssistant = lastKnownForegroundPackage != null && KeepAliveAccessibilityService.isAssistantScreenPackage(lastKnownForegroundPackage)
-                    val isNewHome = latestResumedPkg.lowercase().contains("launcher") || latestResumedPkg.lowercase().contains("home")
-                    if (isCurrentAssistant && isNewHome) {
-                        return lastKnownForegroundPackage
-                    }
                     lastKnownForegroundPackage = latestResumedPkg
                     return latestResumedPkg
                 }

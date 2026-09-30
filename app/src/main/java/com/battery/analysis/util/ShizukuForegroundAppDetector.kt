@@ -293,35 +293,16 @@ object ShizukuForegroundAppDetector {
     private var lastAssistantCheckResult: String? = null
 
     /**
-     * 当顶层处于桌面 Home 时，进一步探测当前聚焦的是桌面主屏还是负一屏（如荣耀 hiboard / 华为 intelligent 等）。
-     * 优先采用无障碍服务毫秒级事件缓存；次选 dumpsys window 真实窗口焦点查询（增加 1.2 秒短效缓存保护 CPU）。
+     * 当顶层处于桌面 Home 任务时，校验当前获得用户输入焦点的窗口是否为全屏展开的独立负一屏（如荣耀/华为 hiboard、小米 personalassistant 等）。
+     * 负一屏与桌面为独立应用（不同包名与 UID），桌面绝不隶属于负一屏。
+     * 仅当 WindowManager 的真实输入焦点窗口 [mCurrentFocus] 确属于负一屏组件时才认定为负一屏，
+     * 绝不依赖任何无障碍旧缓存，杜绝桌面正常使用时被无端篡改为负一屏。
      *
      * @param defaultHomePkg 默认桌面包名
-     * @return 实际聚焦的前台包名（若负一屏处于聚焦状态则返回负一屏包名，否则返回桌面包名）
+     * @return 实际聚焦的前台包名（若负一屏正处于焦点状态则返回负一屏包名，否则如实返回桌面包名）
      */
     private fun detectAssistantOrHomePackage(defaultHomePkg: String): String {
-        // 1. 优先复用无障碍服务毫秒级事件缓存（0 Binder IPC，0 进程 Fork）
-        val accessibilityPkg = com.battery.analysis.service.KeepAliveAccessibilityService.getValidForegroundPackage(4000L)
-        if (!accessibilityPkg.isNullOrEmpty()) {
-            val lower = accessibilityPkg.lowercase()
-            val isAssistant = lower == "com.hihonor.hiboard" ||
-                    lower == "com.huawei.hiboard" ||
-                    lower == "com.hihonor.intelligent" ||
-                    lower == "com.huawei.intelligent" ||
-                    lower == "com.miui.personalassistant" ||
-                    lower == "com.coloros.assistantscreen" ||
-                    lower == "com.vivo.assistant" ||
-                    lower.contains("hiboard") ||
-                    lower.contains("personalassistant") ||
-                    lower.contains("assistantscreen")
-            if (isAssistant) {
-                lastAssistantCheckResult = accessibilityPkg
-                lastAssistantCheckTs = System.currentTimeMillis()
-                return accessibilityPkg
-            }
-        }
-
-        // 2. 检查 1.2 秒短效缓存，杜绝高频频繁 Fork shell 进程
+        // 1. 检查 1.2 秒短效内存缓存，杜绝高频频繁 Fork shell 进程
         val now = System.currentTimeMillis()
         if (now - lastAssistantCheckTs < 1200L && lastAssistantCheckResult != null) {
             return lastAssistantCheckResult ?: defaultHomePkg
@@ -330,44 +311,42 @@ object ShizukuForegroundAppDetector {
         try {
             val method = getNewProcessMethod()
             if (method != null) {
-                // 重点：排除 mFocusedApp（Activity 级别永远显示桌面），严格匹配当前输入焦点窗口 mCurrentFocus 或 mFocusedWindow
+                // 重点：排除 mFocusedApp（Activity 级别可能显示桌面），严格匹配当前真实输入焦点窗口 mCurrentFocus
                 val proc = method.invoke(
                     null,
-                    arrayOf("sh", "-c", "dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedWindow' | head -n 3"),
+                    arrayOf("sh", "-c", "dumpsys window 2>/dev/null | grep -E 'mCurrentFocus' | head -n 1"),
                     null,
                     null
                 ) as? Process
                 if (proc != null) {
-                    val lines = proc.inputStream.bufferedReader().use { it.readLines() }
+                    val line = proc.inputStream.bufferedReader().use { it.readLine() }
                     proc.safeDestroy()
-                    for (line in lines) {
-                        val trimmed = line.trim()
-                        if (trimmed.isEmpty() || trimmed.contains("=null")) continue
-                        val match = Regex("([a-zA-Z0-9._]+)/[a-zA-Z0-9._]+").find(trimmed)
+                    if (!line.isNullOrBlank() && !line.contains("=null")) {
+                        // 扩展正则：支持含连字符 (-) 的包名段（部分 OEM 负一屏包名含连字符），
+                        // 只捕获 '/' 前的完整包名，无需同时捕获类名
+                        val match = Regex("([a-zA-Z0-9._-]+)/").find(line.trim())
                         val winPkg = match?.groupValues?.getOrNull(1)
                         if (!winPkg.isNullOrEmpty()) {
                             val lower = winPkg.lowercase()
                             val isAssistant = lower == "com.hihonor.hiboard" ||
                                     lower == "com.huawei.hiboard" ||
-                                    lower == "com.hihonor.intelligent" ||
-                                    lower == "com.huawei.intelligent" ||
                                     lower == "com.miui.personalassistant" ||
                                     lower == "com.coloros.assistantscreen" ||
                                     lower == "com.vivo.assistant" ||
                                     lower.contains("hiboard") ||
                                     lower.contains("personalassistant") ||
                                     lower.contains("assistantscreen")
-                            if (isAssistant) {
-                                lastAssistantCheckResult = winPkg
-                                lastAssistantCheckTs = now
-                                return winPkg
-                            }
+                            val finalPkg = if (isAssistant) winPkg else defaultHomePkg
+                            lastAssistantCheckResult = finalPkg
+                            lastAssistantCheckTs = now
+                            return finalPkg
                         }
                     }
                 }
             }
         } catch (_: Throwable) {
         }
+
         lastAssistantCheckResult = defaultHomePkg
         lastAssistantCheckTs = now
         return defaultHomePkg
@@ -391,6 +370,8 @@ object ShizukuForegroundAppDetector {
             lower == "com.android.permissioncontroller" ||
             lower == "com.google.android.permissioncontroller" ||
             lower.contains("permissioncontroller") ||
+            lower == "com.hihonor.intelligent" ||
+            lower == "com.huawei.intelligent" ||
             lower == "com.hihonor.gamemanager" ||
             lower == "com.hihonor.gamecenter" ||
             lower == "com.android.server.telecom" ||

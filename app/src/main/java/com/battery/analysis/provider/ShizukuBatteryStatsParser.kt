@@ -462,30 +462,46 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                     val uid = convertUidStringToNumeric(uidRaw)
                     // 只要产生了有效放电记录（> 0.001 mAh），即纳入统计
                     if (uid > 0 && drainMah > 0.001f) {
-                        // 优先提取 dumpsys 直接携带的包名，次查 Shizuku 提权映射表，次选系统 pm
+                        // 优先提取 dumpsys 直接携带的包名，次查 Shizuku 提权映射表，次选系统 pm 及 Shizuku 特权兜底
                         val pkgName = if (!directPkg.isNullOrEmpty() && directPkg.contains(".")) {
                             directPkg
                         } else {
-                            uidPkgMap[uid] ?: pm.getPackagesForUid(uid)?.firstOrNull()
+                            uidPkgMap[uid]
+                                ?: pm.getPackagesForUid(uid)?.firstOrNull()
+                                ?: pm.getNameForUid(uid)?.let { if (it.contains(":")) it.substringAfter(":") else it }
+                                ?: resolvePackageNameForUid(uid)
                         }
 
                         if (!pkgName.isNullOrEmpty()) {
-                            val (foregroundMs, rawBackgroundMs, cpuMs) = parseAppTimesFromDetails(
+                            val (rawFgMs, rawBackgroundMs, cpuMs) = parseAppTimesFromDetails(
                                 extraDetails,
                                 dischargeDurationMs,
                                 isHistoricalDumpsys
                             )
-                            // 若未开启后台统计，纯后台应用（foregroundMs <= 0L）直接跳过不展示且不加入列表
-                            if (!enableBackgroundStats && foregroundMs <= 0L) {
+
+                            val hw = hwStatsMap[uid]
+                            val realCpuMs = if (hw != null && hw.getTotalCpuMs() > 0L) hw.getTotalCpuMs() else cpuMs
+                            val totalDirectEnergyWh = (drainMah * voltageVolts) / 1000f
+
+                            // 关键突破：针对负一屏、电话等交互式系统应用，优先采用后台秒级硬件放电采样实测的真实前台壁钟工时，
+                            // 杜绝因缺失 dumpsys 显式 fg= 标签而回退为微小的 CPU 运算时间导致的严重缩水
+                            val realtimeSampleDurationMs = com.battery.analysis.manager.PowerUsageManager.getInstance(context).getAppRealtimeDurationMs(pkgName)
+                            val foregroundMs = if (realtimeSampleDurationMs > 0L) {
+                                maxOf(rawFgMs, realtimeSampleDurationMs).coerceAtMost(dischargeDurationMs)
+                            } else if (rawFgMs > 0L) {
+                                rawFgMs
+                            } else {
+                                0L
+                            }
+
+                            // 若未开启后台统计，纯后台应用（foregroundMs <= 0L 且非负一屏应用）直接跳过，杜绝后台守护组件污染前台展示列表
+                            if (!enableBackgroundStats && foregroundMs <= 0L && !isAssistantScreenApp(pkgName)) {
                                 continue
                             }
 
                             pkgDrainMahMap[pkgName] = drainMah
                             val backgroundMs = if (enableBackgroundStats) rawBackgroundMs else 0L
-                            val totalDirectEnergyWh = (drainMah * voltageVolts) / 1000f
 
-                            val hw = hwStatsMap[uid]
-                            val realCpuMs = if (hw != null && hw.getTotalCpuMs() > 0L) hw.getTotalCpuMs() else cpuMs
                             val baseBg = if (hw != null && enableBackgroundStats) {
                                 val bgCpu = (hw.getTotalCpuMs() - foregroundMs).coerceAtLeast(0L)
                                 val directBg = hw.cpuBackgroundMs
@@ -784,7 +800,29 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     }
 
     /**
-     * 检查指定包名是否为用户具有明确前台交互的系统级组件（如负一屏、系统分享、命令行 Shell、文档选择器与应用安装器）。
+     * 判断指定包名是否属于负一屏系统组件（如荣耀 hiboard、华为 hiboard、小米 personalassistant、OPPO assistantscreen 等）。
+     *
+     * @param packageName 待检查的应用程序包名
+     * @return 若属于负一屏前台界面返回 true，否则返回 false
+     */
+    fun isAssistantScreenApp(packageName: String?): Boolean {
+        if (packageName.isNullOrBlank()) return false
+        val lower = packageName.lowercase()
+        return lower == "com.hihonor.hiboard" ||
+                lower == "com.huawei.hiboard" ||
+                lower == "com.hihonor.intelligent" ||
+                lower == "com.huawei.intelligent" ||
+                lower == "com.miui.personalassistant" ||
+                lower == "com.coloros.assistantscreen" ||
+                lower == "com.vivo.assistant" ||
+                lower.contains("hiboard") ||
+                lower.contains("personalassistant") ||
+                lower.contains("assistantscreen")
+    }
+
+    /**
+     * 检查指定包名是否为用户具有明确前台交互 UI 的系统级组件（如系统设置、相机、图库、通话界面与文档选择器）。
+     * 严格排除 ADB Shell、权限控制器、YOYO建议等无独立前台交互界面的系统后台守护进程。
      *
      * @param packageName 待检查的应用程序包名
      * @return 若属于用户前台交互系统组件返回 true，否则返回 false
@@ -792,41 +830,29 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     fun isInteractiveSystemApp(packageName: String): Boolean {
         if (packageName.isBlank()) return false
         val lower = packageName.lowercase()
-        // 电话与通话相关组件
-        val isPhoneApp = lower == "com.android.phone" ||
-                lower == "com.android.incallui" ||
-                lower == "com.android.server.telecom" ||
+        // 排除系统底层守护、ADB Shell、权限控制器、YOYO 建议后台服务、游戏管家等
+        if (com.battery.analysis.service.KeepAliveAccessibilityService.isIgnoredSystemComponent(packageName)) {
+            return false
+        }
+        // 电话通话前台界面
+        val isInCallApp = lower == "com.android.incallui" ||
                 lower == "com.google.android.dialer" ||
                 lower == "com.samsung.android.incallui" ||
                 lower.contains(".incallui") ||
-                lower.contains(".dialer") ||
-                lower.contains(".telecom") ||
-                lower.contains("telephony") ||
-                (lower.contains("phone") && !lower.contains("wallpaper") && !lower.contains("theme"))
-        // 负一屏与智慧助手
-        val isAssistantOrScreen = lower.contains("intelligent") ||
-                lower.contains("assistant") ||
-                lower.contains("hiboard") ||
-                lower.contains("personalassistant") ||
-                lower.contains("assistantscreen") ||
-                lower.contains("quicksearchbox") ||
-                lower == "com.google.android.googlequicksearchbox" ||
-                lower == "com.vivo.assistant" ||
-                lower == "com.coloros.cosa"
+                lower.contains(".dialer")
+        // 负一屏界面
+        val isAssistant = isAssistantScreenApp(packageName)
         // 核心系统工具与前台组件
         val isSystemUtility = lower.contains("settings") ||
                 lower.contains("camera") ||
                 lower.contains("gallery") ||
                 lower.contains("share") ||
                 lower.contains("intentresolver") ||
-                lower == "com.android.shell" ||
-                lower.contains(".shell") ||
                 lower.contains("documentsui") ||
                 lower.contains("packageinstaller") ||
-                lower.contains("permissioncontroller") ||
                 lower.contains("filemanager")
 
-        return isPhoneApp || isAssistantOrScreen || isSystemUtility
+        return isInCallApp || isAssistant || isSystemUtility
     }
 
     /**
@@ -1217,7 +1243,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         return if (enableBackgroundStats) {
             existingMap.values.toMutableList()
         } else {
-            existingMap.values.filter { it.foregroundTimeMs > 0L }.toMutableList()
+            existingMap.values.filter { it.foregroundTimeMs > 0L || isAssistantScreenApp(it.packageName) }.toMutableList()
         }
     }
 
@@ -1634,6 +1660,29 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      */
     fun resetBatteryStats() {
         executeShizukuShellCommand("dumpsys batterystats --reset")
+    }
+
+    /**
+     * 当常规 PackageManager 查询失效时，通过 Shizuku 特权命令查询特定 UID 对应的包名。
+     *
+     * @param uid 目标应用系统 UID
+     * @return 解析出的包名，失败返回 null
+     */
+    private fun resolvePackageNameForUid(uid: Int): String? {
+        if (uid <= 0) return null
+        return try {
+            val out = executeShizukuCommand("cmd package list packages -U | grep 'uid:$uid'")
+            if (out.isNotBlank()) {
+                val match = Regex("package:([^\\s]+)\\s+uid:$uid").find(out)
+                val found = match?.groupValues?.getOrNull(1)
+                if (!found.isNullOrEmpty()) {
+                    cachedUidPkgMap[uid] = found
+                    found
+                } else null
+            } else null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     companion object {

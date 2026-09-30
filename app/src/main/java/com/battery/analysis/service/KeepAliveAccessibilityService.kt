@@ -70,6 +70,95 @@ class KeepAliveAccessibilityService : AccessibilityService() {
          */
         @Volatile
         var currentForegroundPackage: String? = null
+
+        /**
+         * 最近一次前台应用包名发生有效事件的时间戳（毫秒）。
+         */
+        @Volatile
+        var lastForegroundPackageTimestamp: Long = 0L
+
+        /**
+         * 判断指定包名是否属于负一屏系统组件（包含荣耀 hiboard / intelligent、华为 hiboard / intelligent、小米 personalassistant、OPPO assistantscreen 等）。
+         *
+         * @param packageName 待检查的应用包名
+         * @return 若为负一屏界面包名返回 true，否则返回 false
+         */
+        fun isAssistantScreenPackage(packageName: String?): Boolean {
+            if (packageName.isNullOrBlank()) return false
+            val lower = packageName.lowercase()
+            return lower == "com.hihonor.hiboard" ||
+                    lower == "com.huawei.hiboard" ||
+                    lower == "com.hihonor.intelligent" ||
+                    lower == "com.huawei.intelligent" ||
+                    lower == "com.miui.personalassistant" ||
+                    lower == "com.coloros.assistantscreen" ||
+                    lower == "com.vivo.assistant" ||
+                    lower.contains("hiboard") ||
+                    lower.contains("personalassistant") ||
+                    lower.contains("assistantscreen")
+        }
+
+        /**
+         * 判断指定包名是否为无独立用户交互界面的系统后台守护服务、权限代理、ADB Shell 或系统底层组件。
+         * 此类组件绝不属于置顶前台用户交互应用，必须在无障碍事件与前台探测中严格过滤，杜绝污染前台统计列表。
+         *
+         * @param packageName 待检查的应用包名
+         * @return 若为忽略的系统底层组件返回 true，否则返回 false
+         */
+        fun isIgnoredSystemComponent(packageName: String?): Boolean {
+            if (packageName.isNullOrBlank()) return true
+            val lower = packageName.lowercase()
+            return lower == "android" ||
+                    lower == "com.android.shell" ||
+                    lower.contains(".shell") ||
+                    lower == "com.android.permissioncontroller" ||
+                    lower == "com.google.android.permissioncontroller" ||
+                    lower.contains("permissioncontroller") ||
+                    lower.startsWith("com.android.systemui") ||
+                    lower == "com.hihonor.gamemanager" ||
+                    lower == "com.hihonor.gamecenter" ||
+                    lower == "com.android.server.telecom" ||
+                    lower.contains("telephony") ||
+                    lower.contains("inputmethod") ||
+                    lower.contains("pinyin") ||
+                    lower == "com.tencent.wetype" ||
+                    lower.startsWith("com.baidu.input") ||
+                    lower.startsWith("com.iflytek.inputmethod")
+        }
+
+        /**
+         * 获取在有效时效窗口内的前台应用包名。
+         * 针对负一屏静止阅读（10~60秒无手指滑动）的真实使用特征，负一屏应用自动享受 60 秒前台会话保持；普通应用采用常规时效。
+         *
+         * @param defaultMaxAgeMs 默认最大有效时效窗口（毫秒）
+         * @return 处于时效窗口内的前台应用包名，过期或未记录时返回 null
+         */
+        fun getValidForegroundPackage(defaultMaxAgeMs: Long = 5000L): String? {
+            val pkg = currentForegroundPackage
+            val ts = lastForegroundPackageTimestamp
+            val now = System.currentTimeMillis()
+            if (pkg.isNullOrEmpty()) return null
+
+            val isAssistant = isAssistantScreenPackage(pkg)
+            val maxAllowedAge = if (isAssistant) 60_000L else defaultMaxAgeMs
+
+            return if ((now - ts) <= maxAllowedAge) {
+                pkg
+            } else {
+                null
+            }
+        }
+
+        /**
+         * 当设备灭屏时通知无障碍服务，及时切断负一屏前台会话。
+         */
+        fun notifyScreenOff() {
+            val current = currentForegroundPackage
+            if (current != null && isAssistantScreenPackage(current)) {
+                currentForegroundPackage = null
+                lastForegroundPackageTimestamp = 0L
+            }
+        }
     }
 
     /**
@@ -98,37 +187,62 @@ class KeepAliveAccessibilityService : AccessibilityService() {
         if (event == null) return
         val pkg = event.packageName?.toString() ?: return
         val lower = pkg.lowercase()
+        val now = System.currentTimeMillis()
 
-        // 过滤底层输入法与 SystemUI 纯遮罩
-        if (pkg.startsWith("com.android.systemui") ||
-            lower.contains("inputmethod") ||
-            lower.contains("pinyin") ||
-            lower == "com.tencent.wetype" ||
-            pkg == "android"
-        ) {
+        // 1. 检查是否为负一屏长效会话进行中
+        val current = currentForegroundPackage
+        val assistantStillActive = current != null && isAssistantScreenPackage(current) && (now - lastForegroundPackageTimestamp < 60_000L)
+
+        // 2. 严格过滤系统后台守护、权限控制器、YOYO建议后台服务、输入法与无界面底层服务
+        if (isIgnoredSystemComponent(pkg)) {
+            // 若当前处于负一屏激活状态，负一屏附属卡片或系统后台广播触发的事件绝不能切断负一屏，
+            // 且视作负一屏内部内容渲染刷新，维持负一屏长效会话
+            if (assistantStillActive) {
+                lastForegroundPackageTimestamp = now
+            }
             return
         }
 
-        when (event.eventType) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                currentForegroundPackage = pkg
+        // 3. 负一屏判定：荣耀 hiboard、华为 hiboard、小米 personalassistant、OPPO assistantscreen 等
+        if (isAssistantScreenPackage(pkg)) {
+            currentForegroundPackage = pkg
+            lastForegroundPackageTimestamp = now
+            return
+        }
+
+        // 4. 电话/通话界面判定
+        val isPhone = lower == "com.android.phone" ||
+                lower == "com.android.incallui" ||
+                lower == "com.google.android.dialer" ||
+                lower == "com.samsung.android.incallui" ||
+                lower.contains(".incallui") ||
+                lower.contains(".dialer")
+
+        if (isPhone) {
+            currentForegroundPackage = pkg
+            lastForegroundPackageTimestamp = now
+            return
+        }
+
+        // 5. 桌面 Launcher 交互判定
+        val isLauncher = lower.contains("launcher") || lower.contains("home")
+        if (isLauncher) {
+            // 若当前正在活跃浏览负一屏，桌面底座发出的窗口改变、滚动或内容变动事件绝不覆盖负一屏；
+            // 仅当桌面发生显式点击（TYPE_VIEW_CLICKED）说明用户回到了桌面主屏并点击操作，才切回桌面
+            if (assistantStillActive && event.eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) {
+                return
             }
-            AccessibilityEvent.TYPE_WINDOWS_CHANGED,
-            AccessibilityEvent.TYPE_VIEW_SCROLLED,
-            AccessibilityEvent.TYPE_VIEW_FOCUSED,
-            AccessibilityEvent.TYPE_VIEW_CLICKED -> {
-                // 若此前记录为负一屏（hiboard/intelligent），当桌面产生任何触摸/滑动/聚焦事件时，立即纠偏回系统桌面
-                val current = currentForegroundPackage
-                val isCurrentAssistant = current != null && (
-                    current.contains("hiboard", ignoreCase = true) ||
-                    current.contains("intelligent", ignoreCase = true) ||
-                    current.contains("personalassistant", ignoreCase = true)
-                )
-                val isEventLauncher = lower.contains("launcher") || lower.contains("home")
-                if (isCurrentAssistant && isEventLauncher) {
-                    currentForegroundPackage = pkg
-                }
-            }
+            currentForegroundPackage = pkg
+            lastForegroundPackageTimestamp = now
+            return
+        }
+
+        // 6. 其它独立三方应用或系统应用（如微信、今日头条、系统设置）：
+        // 严格要求必须是窗口状态发生改变（TYPE_WINDOW_STATE_CHANGED），才代表真正的前台应用切换，
+        // 杜绝无界面后台服务或悬浮窗口通过 TYPE_WINDOWS_CHANGED / TYPE_VIEW_SCROLLED 误切前台
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            currentForegroundPackage = pkg
+            lastForegroundPackageTimestamp = now
         }
     }
 

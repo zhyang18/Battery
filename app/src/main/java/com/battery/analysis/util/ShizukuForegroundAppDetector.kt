@@ -225,9 +225,12 @@ object ShizukuForegroundAppDetector {
                     val topActivity = extractTopActivity(rootTask)
                     val pkg = normalizeForegroundPackage(topActivity?.packageName)
                     if (!pkg.isNullOrEmpty()) {
+                        if (isHome || isHomePackage(pkg)) {
+                            return detectAssistantOrHomePackage(pkg)
+                        }
                         return pkg
                     } else if (isHome) {
-                        cachedHomePackage?.let { return it }
+                        cachedHomePackage?.let { return detectAssistantOrHomePackage(it) }
                     }
                 }
             } catch (_: Throwable) {
@@ -256,9 +259,12 @@ object ShizukuForegroundAppDetector {
                 val topActivity = extractTopActivity(topTask)
                 val pkg = normalizeForegroundPackage(topActivity?.packageName)
                 if (!pkg.isNullOrEmpty()) {
+                    if (isHome || isHomePackage(pkg)) {
+                        return detectAssistantOrHomePackage(pkg)
+                    }
                     return pkg
                 } else if (isHome) {
-                    cachedHomePackage?.let { return it }
+                    cachedHomePackage?.let { return detectAssistantOrHomePackage(it) }
                 }
             }
         } catch (e: Throwable) {
@@ -269,16 +275,126 @@ object ShizukuForegroundAppDetector {
     }
 
     /**
-     * 规范化并清洗前台应用包名，仅过滤输入法键盘与系统底层 SystemUI 遮罩层，完整保留电话、负一屏、系统设置等前台交互组件。
+     * 判断指定包名是否属于系统桌面启动器。
+     *
+     * @param pkg 目标包名
+     * @return 若为桌面包名返回 true，否则返回 false
+     */
+    private fun isHomePackage(pkg: String): Boolean {
+        val cached = cachedHomePackage
+        if (!cached.isNullOrEmpty() && cached.equals(pkg, ignoreCase = true)) return true
+        val lower = pkg.lowercase()
+        return lower.contains("launcher") || lower.contains("home")
+    }
+
+    @Volatile
+    private var lastAssistantCheckTs = 0L
+    @Volatile
+    private var lastAssistantCheckResult: String? = null
+
+    /**
+     * 当顶层处于桌面 Home 时，进一步探测当前聚焦的是桌面主屏还是负一屏（如荣耀 hiboard / 华为 intelligent 等）。
+     * 优先采用无障碍服务毫秒级事件缓存；次选 dumpsys window 真实窗口焦点查询（增加 1.2 秒短效缓存保护 CPU）。
+     *
+     * @param defaultHomePkg 默认桌面包名
+     * @return 实际聚焦的前台包名（若负一屏处于聚焦状态则返回负一屏包名，否则返回桌面包名）
+     */
+    private fun detectAssistantOrHomePackage(defaultHomePkg: String): String {
+        // 1. 优先复用无障碍服务毫秒级事件缓存（0 Binder IPC，0 进程 Fork）
+        val accessibilityPkg = com.battery.analysis.service.KeepAliveAccessibilityService.getValidForegroundPackage(4000L)
+        if (!accessibilityPkg.isNullOrEmpty()) {
+            val lower = accessibilityPkg.lowercase()
+            val isAssistant = lower == "com.hihonor.hiboard" ||
+                    lower == "com.huawei.hiboard" ||
+                    lower == "com.hihonor.intelligent" ||
+                    lower == "com.huawei.intelligent" ||
+                    lower == "com.miui.personalassistant" ||
+                    lower == "com.coloros.assistantscreen" ||
+                    lower == "com.vivo.assistant" ||
+                    lower.contains("hiboard") ||
+                    lower.contains("personalassistant") ||
+                    lower.contains("assistantscreen")
+            if (isAssistant) {
+                lastAssistantCheckResult = accessibilityPkg
+                lastAssistantCheckTs = System.currentTimeMillis()
+                return accessibilityPkg
+            }
+        }
+
+        // 2. 检查 1.2 秒短效缓存，杜绝高频频繁 Fork shell 进程
+        val now = System.currentTimeMillis()
+        if (now - lastAssistantCheckTs < 1200L && lastAssistantCheckResult != null) {
+            return lastAssistantCheckResult ?: defaultHomePkg
+        }
+
+        try {
+            val method = getNewProcessMethod()
+            if (method != null) {
+                // 重点：排除 mFocusedApp（Activity 级别永远显示桌面），严格匹配当前输入焦点窗口 mCurrentFocus 或 mFocusedWindow
+                val proc = method.invoke(
+                    null,
+                    arrayOf("sh", "-c", "dumpsys window 2>/dev/null | grep -E 'mCurrentFocus|mFocusedWindow' | head -n 3"),
+                    null,
+                    null
+                ) as? Process
+                if (proc != null) {
+                    val lines = proc.inputStream.bufferedReader().use { it.readLines() }
+                    proc.safeDestroy()
+                    for (line in lines) {
+                        val trimmed = line.trim()
+                        if (trimmed.isEmpty() || trimmed.contains("=null")) continue
+                        val match = Regex("([a-zA-Z0-9._]+)/[a-zA-Z0-9._]+").find(trimmed)
+                        val winPkg = match?.groupValues?.getOrNull(1)
+                        if (!winPkg.isNullOrEmpty()) {
+                            val lower = winPkg.lowercase()
+                            val isAssistant = lower == "com.hihonor.hiboard" ||
+                                    lower == "com.huawei.hiboard" ||
+                                    lower == "com.hihonor.intelligent" ||
+                                    lower == "com.huawei.intelligent" ||
+                                    lower == "com.miui.personalassistant" ||
+                                    lower == "com.coloros.assistantscreen" ||
+                                    lower == "com.vivo.assistant" ||
+                                    lower.contains("hiboard") ||
+                                    lower.contains("personalassistant") ||
+                                    lower.contains("assistantscreen")
+                            if (isAssistant) {
+                                lastAssistantCheckResult = winPkg
+                                lastAssistantCheckTs = now
+                                return winPkg
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+        }
+        lastAssistantCheckResult = defaultHomePkg
+        lastAssistantCheckTs = now
+        return defaultHomePkg
+    }
+
+    /**
+     * 规范化并清洗前台应用包名，过滤输入法键盘、系统底层遮罩层、Shell 以及权限控制器等系统后台守护组件。
+     * 完整保留电话通话、负一屏、系统设置等用户直接前台交互组件。
      *
      * @param rawPkg 原始提取到的组件包名
-     * @return 规范化后的前台主应用包名，若为系统底层遮罩或输入法则返回 null
+     * @return 规范化后的前台主应用包名，若为系统底层遮罩或忽略组件则返回 null
      */
     fun normalizeForegroundPackage(rawPkg: String?): String? {
         if (rawPkg.isNullOrEmpty()) return null
         val lower = rawPkg.lowercase()
-        // 过滤系统 SystemUI 与各类输入法键盘遮罩层
+        // 过滤系统底层、SystemUI、输入法以及无独立前台交互的系统后台组件
         if (rawPkg.startsWith("com.android.systemui") ||
+            rawPkg == "android" ||
+            lower == "com.android.shell" ||
+            lower.contains(".shell") ||
+            lower == "com.android.permissioncontroller" ||
+            lower == "com.google.android.permissioncontroller" ||
+            lower.contains("permissioncontroller") ||
+            lower == "com.hihonor.gamemanager" ||
+            lower == "com.hihonor.gamecenter" ||
+            lower == "com.android.server.telecom" ||
+            lower.contains("telephony") ||
             lower.contains("inputmethod") ||
             lower.contains("pinyin") ||
             lower == "com.tencent.wetype" ||

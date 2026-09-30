@@ -139,6 +139,8 @@ class BatteryMonitorService : Service() {
                 Intent.ACTION_SCREEN_OFF -> {
                     // 屏幕熄灭瞬间：
                     cachedIsInteractive = false
+                    KeepAliveAccessibilityService.notifyScreenOff()
+                    lastKnownForegroundPackage = null
 
                     // 1. 在灭屏瞬间立即采样并记录息屏物理采样点，截断亮屏放电状态，消除休眠大断层被误判为亮屏能耗的问题
                     if (!cachedIsCharging) {
@@ -656,8 +658,8 @@ class BatteryMonitorService : Service() {
             return packageName
         }
 
-        // 1. 无障碍服务事件驱动：纯内存变量读取，0 Binder IPC，0 轮询
-        val accessibilityPkg = KeepAliveAccessibilityService.currentForegroundPackage
+        // 1. 无障碍服务事件驱动：仅在事件处于 5 秒时效窗口内时优先采纳（纯内存读取，0 Binder IPC，0 轮询）
+        val accessibilityPkg = KeepAliveAccessibilityService.getValidForegroundPackage(5000L)
         if (!accessibilityPkg.isNullOrEmpty()) {
             lastKnownForegroundPackage = accessibilityPkg
             return accessibilityPkg
@@ -691,7 +693,7 @@ class BatteryMonitorService : Service() {
                 while (events.hasNextEvent()) {
                     events.getNextEvent(event)
                     val pkg = event.packageName
-                    if (pkg.isNullOrEmpty() || pkg.startsWith("com.android.systemui")) continue
+                    if (pkg.isNullOrEmpty() || KeepAliveAccessibilityService.isIgnoredSystemComponent(pkg)) continue
                     hasAnyEvent = true
 
                     if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
@@ -708,6 +710,12 @@ class BatteryMonitorService : Service() {
                 }
 
                 if (!latestResumedPkg.isNullOrEmpty()) {
+                    // 若此前已处于负一屏长效会话中且新事件为桌面 Launcher，不轻易打断负一屏
+                    val isCurrentAssistant = lastKnownForegroundPackage != null && KeepAliveAccessibilityService.isAssistantScreenPackage(lastKnownForegroundPackage)
+                    val isNewHome = latestResumedPkg.lowercase().contains("launcher") || latestResumedPkg.lowercase().contains("home")
+                    if (isCurrentAssistant && isNewHome) {
+                        return lastKnownForegroundPackage
+                    }
                     lastKnownForegroundPackage = latestResumedPkg
                     return latestResumedPkg
                 }

@@ -39,6 +39,7 @@ import com.battery.analysis.ui.view.ChargingChartView
 import com.battery.analysis.timeline.presentation.AppEnergyDetailBottomSheetDialog
 import com.battery.analysis.timeline.presentation.TimelineMetric
 import com.battery.analysis.util.BatteryEnergyCalculator
+import com.battery.analysis.util.BubbleTooltipHelper
 import android.os.PowerManager
 import com.battery.analysis.provider.NormalApiProvider
 import kotlinx.coroutines.Dispatchers
@@ -247,11 +248,11 @@ class PowerUsageFragment : Fragment() {
         const val PREFS_POWER_STATS = "power_stats_prefs"
 
         /** 核心功耗指标卡片行类型：亮屏行 */
-        private const val ROW_SCREEN_ON = 0
+        const val ROW_SCREEN_ON = 0
         /** 核心功耗指标卡片行类型：息屏行 */
-        private const val ROW_SCREEN_OFF = 1
+        const val ROW_SCREEN_OFF = 1
         /** 核心功耗指标卡片行类型：全局行 */
-        private const val ROW_GLOBAL = 2
+        const val ROW_GLOBAL = 2
 
         /**
          * 存储从历史快照详情页面待载入至主页展示的快照记录实体对象。
@@ -783,8 +784,8 @@ class PowerUsageFragment : Fragment() {
         adapter.onMetricsChangedListener = { selectedMetrics ->
             adapter.overviewHolder?.binding?.batteryTimelineView?.setSelectedMetrics(selectedMetrics)
         }
-        adapter.onEnergyClickListener = {
-            showEnergyTooltip()
+        adapter.onEnergyClickListener = { anchorView, touchX, touchY ->
+            showEnergyTooltip(anchorView, touchX, touchY)
         }
         adapter.onRestoreRealtimeClickedListener = {
             restoreLivePowerData()
@@ -792,11 +793,16 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 弹出趋势图上方能量指标的详细信息 Toast 提示。
+     * 弹出趋势图上方能量指标的详细信息气泡弹窗提示。
      * 忠实呈现当前剩余能量、电池总能量、拔电时初始能量以及当前放电周期已消耗能量，
      * 缺失时如实显示未知占位符，严禁伪造假数据。
+     * 强制在能量指标所在视图上方展示，且不启用自动关闭定时器，仅在点击外部或气泡自身时关闭。
+     *
+     * @param anchorView 触发气泡弹窗的目标锚点视图
+     * @param touchX 相对 anchorView 的点击 X 坐标（可选）
+     * @param touchY 相对 anchorView 的点击 Y 坐标（可选）
      */
-    private fun showEnergyTooltip() {
+    private fun showEnergyTooltip(anchorView: View, touchX: Float? = null, touchY: Float? = null) {
         val snapshot = lastRenderedPackage?.batterySnapshot
         val overview = lastRenderedPackage?.overviewStats
         val totalCapMah = powerManager.getEffectiveDeviceCapacityMah()
@@ -823,7 +829,37 @@ class PowerUsageFragment : Fragment() {
         val consumedStr = consumedWh?.let { String.format(Locale.getDefault(), "%.3fWh", it) } ?: "--"
 
         val message = getString(R.string.power_tooltip_energy, currentStr, totalStr, unplugStr, consumedStr)
-        Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
+        showBubbleTooltip(anchorView, message, touchX, touchY ?: 0f, autoDismissMs = 0L, forceAbove = true)
+    }
+
+    /**
+     * 在目标锚点视图附近弹出气泡提示框并自动纳管生命周期以防内存泄漏。
+     *
+     * @param anchorView 触发气泡弹窗的目标锚点视图
+     * @param message 待呈现的提示内容
+     * @param touchX 相对 anchorView 的点击 X 坐标（可选）
+     * @param touchY 相对 anchorView 的点击 Y 坐标（可选）
+     * @param autoDismissMs 自动关闭倒计时毫秒数（<= 0 时不自动关闭）
+     * @param forceAbove 是否强制在锚点视图上方展示
+     */
+    private fun showBubbleTooltip(
+        anchorView: View,
+        message: CharSequence,
+        touchX: Float? = null,
+        touchY: Float? = null,
+        autoDismissMs: Long = 2800L,
+        forceAbove: Boolean = false
+    ) {
+        BubbleTooltipHelper.showBubble(
+            anchorView = anchorView,
+            message = message,
+            touchX = touchX,
+            touchY = touchY,
+            autoDismissMs = autoDismissMs,
+            forceAbove = forceAbove
+        )?.also {
+            trackPopup(it)
+        }
     }
 
     /**
@@ -998,10 +1034,23 @@ class PowerUsageFragment : Fragment() {
             }
         }
 
-        // 核心功耗指标卡片（唯一实例常驻吸顶，三行：亮屏 / 息屏 / 全局）点击弹出详细数据 Toast
-        binding.layoutMetricScreenOnRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_ON) }
-        binding.layoutMetricScreenOffRow.setOnClickListener { showMetricRowDetailToast(ROW_SCREEN_OFF) }
-        binding.layoutMetricGlobalRow.setOnClickListener { showMetricRowDetailToast(ROW_GLOBAL) }
+        // 核心功耗指标卡片（唯一实例常驻吸顶，三行：亮屏 / 息屏 / 全局）点击弹出气泡弹框
+        binding.layoutMetricScreenOnRow.setOnClickListener { showMetricRowDetailBubble(binding.layoutMetricScreenOnRow, ROW_SCREEN_ON) }
+        binding.layoutMetricScreenOffRow.setOnClickListener { showMetricRowDetailBubble(binding.layoutMetricScreenOffRow, ROW_SCREEN_OFF) }
+        binding.layoutMetricGlobalRow.setOnClickListener { showMetricRowDetailBubble(binding.layoutMetricGlobalRow, ROW_GLOBAL) }
+
+        // 列表内放电速度概览卡片（作为 RecyclerView 子项可滚动）点击弹出对应模块名称气泡弹框
+        adapter.onMetricModuleClickedListener = { anchorView, rowType ->
+            val message = when (rowType) {
+                ROW_SCREEN_ON -> getString(R.string.power_screen_on_discharge_speed)
+                ROW_SCREEN_OFF -> getString(R.string.power_screen_off_discharge_speed)
+                ROW_GLOBAL -> getString(R.string.power_global_discharge_speed)
+                else -> null
+            }
+            if (message != null) {
+                showBubbleTooltip(anchorView, message)
+            }
+        }
     }
 
     /**
@@ -1034,80 +1083,19 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 弹出核心功耗指标卡片各行（亮屏、息屏、全局）的真实物理数据提示 Toast。
-     * 根据行分类动态提取已加载的瞬时/累积数据，按照“时间、平均功耗、能量焦耳、续航时间”精准格式化并呈现。
-     * 焦耳转换严格按照 1 Wh = 3600 J 物理公式无损计算，忠实反映底层硬件真实数据。
+     * 弹出核心功耗指标卡片各行（亮屏、息屏、全局）的说明气泡弹框。
      *
+     * @param anchorView 触发气泡弹窗的目标锚点视图
      * @param rowType 行分类标识（[ROW_SCREEN_ON] 为亮屏行，[ROW_SCREEN_OFF] 为息屏行，[ROW_GLOBAL] 为全局行）
      */
-    private fun showMetricRowDetailToast(rowType: Int) {
-        val overview = lastRenderedPackage?.overviewStats ?: return
-        val totalDurationMs = if (overview.totalDurationMs > 0L) overview.totalDurationMs else parseDurationTextToMs(overview.totalDurationText)
-
+    private fun showMetricRowDetailBubble(anchorView: View, rowType: Int) {
         val message = when (rowType) {
-            ROW_SCREEN_ON -> {
-                val onDurationMs = if (overview.screenOnDurationMs > 0L) overview.screenOnDurationMs else parseDurationTextToMs(overview.screenOnDurationText)
-                val onDurationStr = formatCardDuration(onDurationMs, overview.screenOnDurationText)
-                val onDurationRatioStr = if (totalDurationMs > 0L) {
-                    val ratio = (onDurationMs.toDouble() / totalDurationMs.toDouble() * 100.0).coerceIn(0.0, 100.0)
-                    String.format(Locale.getDefault(), "%.1f%%", ratio)
-                } else {
-                    "0.0%"
-                }
-                val timeText = if (onDurationRatioStr != "0.0%") "$onDurationStr($onDurationRatioStr)" else onDurationStr
-                val powerText = if (overview.screenOnPowerWatts >= 0.05f) {
-                    String.format(Locale.getDefault(), "%.2fW", overview.screenOnPowerWatts)
-                } else {
-                    "--"
-                }
-                val onEnergy = overview.screenOnEnergyWh
-                val joules = onEnergy * 3600f
-                val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", onEnergy)})"
-                val remainingText = overview.remainingScreenOnText.ifBlank { "--" }
-//                "亮屏：时间 $timeText、平均功耗 $powerText、能量 $energyText、续航时间 $remainingText"
-                "亮屏：时间、平均功耗、能量、续航时间"
-            }
-            ROW_SCREEN_OFF -> {
-                val offDurationMs = if (overview.screenOffDurationMs > 0L) overview.screenOffDurationMs else parseDurationTextToMs(overview.screenOffDurationText)
-                val offDurationStr = formatCardDuration(offDurationMs, overview.screenOffDurationText)
-                val offDurationRatioStr = if (totalDurationMs > 0L) {
-                    val ratio = (offDurationMs.toDouble() / totalDurationMs.toDouble() * 100.0).coerceIn(0.0, 100.0)
-                    String.format(Locale.getDefault(), "%.1f%%", ratio)
-                } else {
-                    "0.0%"
-                }
-                val timeText = if (offDurationRatioStr != "0.0%") "$offDurationStr($offDurationRatioStr)" else offDurationStr
-                val powerText = if (overview.screenOffPowerWatts >= 0.05f) {
-                    String.format(Locale.getDefault(), "%.2fW", overview.screenOffPowerWatts)
-                } else {
-                    "--"
-                }
-                val offEnergy = overview.screenOffEnergyWh
-                val joules = offEnergy * 3600f
-                val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", offEnergy)})"
-                val remainingText = overview.remainingScreenOffText.ifBlank { "--" }
-//                "息屏：时间 $timeText、平均功耗 $powerText、能量 $energyText、续航时间 $remainingText"
-                "息屏：时间、平均功耗、能量、续航时间"
-            }
-            ROW_GLOBAL -> {
-                val totalDurationStr = formatCardDuration(totalDurationMs, overview.totalDurationText)
-                val timeText = "$totalDurationStr(100%)"
-                val powerText = if (overview.avgPowerWatts >= 0.05f) {
-                    String.format(Locale.getDefault(), "%.2fW", overview.avgPowerWatts)
-                } else {
-                    "--"
-                }
-                val totalEnergyWh = overview.totalEnergyWh
-                val joules = totalEnergyWh * 3600f
-                val energyText = "${String.format(Locale.getDefault(), "%.1fJ", joules)}(${String.format(Locale.getDefault(), "%.3fWh", totalEnergyWh)})"
-                val remainingText = overview.remainingCompositeText.ifBlank { "--" }
-//                "全局：时间 $timeText、平均功耗 $powerText、能量 $energyText、续航时间 $remainingText"
-                "全局：时间、平均功耗、能量、续航时间"
-            }
+            ROW_SCREEN_ON -> "亮屏：时间、平均功耗、能量、续航时间"
+            ROW_SCREEN_OFF -> "息屏：时间、平均功耗、能量、续航时间"
+            ROW_GLOBAL -> "全局：时间、平均功耗、能量、续航时间"
             else -> return
         }
-
-        Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
+        showBubbleTooltip(anchorView, message)
     }
 
     /**
@@ -1345,6 +1333,13 @@ class PowerUsageFragment : Fragment() {
         binding.tvMetricScreenOnPower.text = onPowerStr
         binding.tvMetricGlobalPower.text = avgPowerStr
         binding.tvMetricScreenOffPower.text = offPowerStr
+
+        // 刷新列表内放电速度概览卡片（包含全局放电速度、亮屏放电速度、息屏放电速度三个主要模块）
+        val totalCapacityWh = snapshot.totalEnergyWh
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
+                BatteryEnergyCalculator.calculateTotalEnergyWh(it)
+            }
+        adapter.updateOverviewStats(overview, totalCapacityWh)
 
         // 2. 刷新应用列表（DiffUtil 会自动平滑更新 AVG 和 Duration 变动的条目）
         adapter.submitList(fullPackage.appList)
@@ -1771,6 +1766,13 @@ class PowerUsageFragment : Fragment() {
         binding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(String.format(Locale.getDefault(), "%.3fWh", totalEnergy), globalEnergyRatioStr)
         binding.tvMetricGlobalPower.text = avgPowerStr
         binding.tvMetricGlobalRemaining.text = overview.remainingCompositeText
+
+        // 2.1 刷新列表内放电速度概览卡片（包含全局放电速度、亮屏放电速度、息屏放电速度三个主要模块）
+        val totalCapacityWh = snapshot.totalEnergyWh
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
+                BatteryEnergyCalculator.calculateTotalEnergyWh(it)
+            }
+        adapter.updateOverviewStats(overview, totalCapacityWh)
 
         // 3. 刷新应用场景列表
         adapter.submitList(fullPackage.appList)

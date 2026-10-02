@@ -307,14 +307,18 @@ class PowerUsageManager private constructor(private val context: Context) {
                     val offMs = dt - onMs
                     if (offMs > 0L) {
                         screenOffDurationMs += offMs
-                        val offEnergy = current.powerWatts * (offMs / 3600000.0)
-                        screenOffEnergyWh += offEnergy
                         if (offMs <= confidenceThresholdMs) {
+                            val offEnergy = current.powerWatts * (offMs / 3600000.0)
+                            screenOffEnergyWh += offEnergy
                             screenOffConfidentEnergyWh += offEnergy
                             screenOffConfidentDurationMs += offMs
                             screenOffShortIntervalPowers.add(WeightedPowerSample(current.powerWatts.toDouble(), offMs))
                         } else {
-                            screenOffLongIntervals.add(LongIntervalSample(offEnergy, offMs))
+                            // 灭屏长断层（进入深度睡眠）：仅记录断层时长供分位数待机功率外推，不将关屏瞬态高功率放大到整个休眠期
+                            val edgeMs = minOf(recordIntervalMs, offMs)
+                            val edgeEnergy = current.powerWatts * (edgeMs / 3600000.0)
+                            screenOffEnergyWh += edgeEnergy
+                            screenOffLongIntervals.add(LongIntervalSample(0.0, offMs))
                         }
                     }
                 } else if (!isPrevOn && isCurrOn) {
@@ -326,27 +330,32 @@ class PowerUsageManager private constructor(private val context: Context) {
                     val offMs = dt - onMs
                     if (offMs > 0L) {
                         screenOffDurationMs += offMs
-                        val offEnergy = prev.powerWatts * (offMs / 3600000.0)
-                        screenOffEnergyWh += offEnergy
                         if (offMs <= confidenceThresholdMs) {
+                            val offEnergy = prev.powerWatts * (offMs / 3600000.0)
+                            screenOffEnergyWh += offEnergy
                             screenOffConfidentEnergyWh += offEnergy
                             screenOffConfidentDurationMs += offMs
                             screenOffShortIntervalPowers.add(WeightedPowerSample(prev.powerWatts.toDouble(), offMs))
                         } else {
-                            screenOffLongIntervals.add(LongIntervalSample(offEnergy, offMs))
+                            // 息屏长断层后亮屏：仅记录断层时长供分位数待机功率外推
+                            val edgeMs = minOf(recordIntervalMs, offMs)
+                            val edgeEnergy = prev.powerWatts * (edgeMs / 3600000.0)
+                            screenOffEnergyWh += edgeEnergy
+                            screenOffLongIntervals.add(LongIntervalSample(0.0, offMs))
                         }
                     }
                 } else {
                     // 纯息屏切片
                     screenOffDurationMs += dt
-                    screenOffEnergyWh += segmentEnergyWh
                     if (dt <= confidenceThresholdMs) {
+                        screenOffEnergyWh += segmentEnergyWh
                         screenOffConfidentEnergyWh += segmentEnergyWh
                         screenOffConfidentDurationMs += dt
                         val intervalWatts = if (dt > 0L) (segmentEnergyWh / (dt.toDouble() / 3600000.0)) else avgWatts
                         screenOffShortIntervalPowers.add(WeightedPowerSample(intervalWatts, dt))
                     } else {
-                        screenOffLongIntervals.add(LongIntervalSample(segmentEnergyWh, dt))
+                        // 纯息屏长断层（深度睡眠，CPU 挂起停止采样）：仅记录长断层供待机分位数功率外推，不加入短样本污染置信度
+                        screenOffLongIntervals.add(LongIntervalSample(0.0, dt))
                     }
                 }
             }
@@ -561,14 +570,26 @@ class PowerUsageManager private constructor(private val context: Context) {
 
                 // 2. 硬件芯片库仑计双锚定与休眠漏电补偿：
                 // 亮屏期间 CPU 活跃且高频（1Hz）连续采样，瞬时电压电流微积分具备最高物理真值置信度；
-                // 息屏期间系统进入 Deep Sleep（深度休眠），CPU 暂停导致软件采样缺失。
-                // 硬件芯片库仑计在硬件层持续积分电荷量（physicalTotalEnergyWh 为整机物理总能量）。
-                // 当硬件物理总能量大于亮屏实测能量与息屏软件基线能量之和时，差值即为深度休眠期间硬件未被微积分完全覆盖的额外漏电；
-                // 反之，若硬件物理估算由于电量百分比跳变滞后、标称电压换算偏差或测量容差而偏小（甚至小于亮屏实测能量），
-                // 绝不可将息屏能量清零或虚构截断，必须忠实保留软件微积分/统计推断的真实物理息屏能量！
+                // 息屏期间若处于短期（如未进入深度休眠的十几秒或几分钟），硬件瞬时采样依然持续进行，baseOffWatts 拥有第一真值；
+                // 当电池百分比发生离散 1% 阶跃时，其残差主要源于亮屏高负载消耗或系统上报滞后，
+                // 绝不可将全部阶跃残差粗暴倒灌给息屏时长极短的待机能耗（否则会导致息屏瞬时计算功耗虚高爆表为数瓦并拉高全局功耗）；
+                // 仅当息屏时间较长且确实经历深度休眠、且残差折算的等效待机功耗在合理物理待机漏电范围内时，才将休眠漏电计入息屏。
+                val hasConfidentOffSampling = intOffPowerWatts > 0f || intOffEnergyWh > 0f
+                val isShortScreenOff = screenOffMs < 300_000L // 5 分钟以内的短息屏
+
                 if (physicalTotalEnergyWh > (onEnergyWh + baseOffEnergyWh)) {
-                    offEnergyWh = physicalTotalEnergyWh - onEnergyWh
-                    realTotalEnergyWh = physicalTotalEnergyWh
+                    val residualWh = physicalTotalEnergyWh - (onEnergyWh + baseOffEnergyWh)
+                    val impliedOffWatts = if (screenOffHours > 0f) (baseOffEnergyWh + residualWh) / screenOffHours else 0f
+                    if (hasConfidentOffSampling && (isShortScreenOff || (baseOffWatts > 0f && impliedOffWatts > maxOf(baseOffWatts * 2.5f, 0.8f)))) {
+                        // 证实残差为亮屏阶段电量阶跃延迟上报所致，息屏忠实采纳真实采样微积分能耗，残差补充给亮屏或整机
+                        offEnergyWh = baseOffEnergyWh
+                        onEnergyWh = physicalTotalEnergyWh - offEnergyWh
+                        realTotalEnergyWh = physicalTotalEnergyWh
+                    } else {
+                        // 经历充分长时间的息屏深度睡眠，且残差处于合理物理待机漏电范围内：
+                        offEnergyWh = baseOffEnergyWh + residualWh
+                        realTotalEnergyWh = physicalTotalEnergyWh
+                    }
                 } else {
                     offEnergyWh = baseOffEnergyWh
                     realTotalEnergyWh = onEnergyWh + offEnergyWh
@@ -614,6 +635,109 @@ class PowerUsageManager private constructor(private val context: Context) {
                 avgWatts = avgWatts,
                 realDischargedMah = realDischargedMah
             )
+        }
+
+        /**
+         * 将给定的息屏时间区间根据放电采样点序列及系统休眠统计切分为唤醒（浅红）与深度睡眠（深红）事件列表。
+         * 若在息屏区间内存在相邻物理采样点间隔超过门限的断层，判定为 CPU 挂起的深度睡眠时间段；
+         * 若物理采样点稀疏或处于智能省电零唤醒模式，灭屏初期判定为浅休眠唤醒活跃，后续主体区间判定为深度睡眠；
+         * 若息屏时间极短（<= 20秒），判定为浅休眠唤醒活跃状态。
+         *
+         * @param offStartTs 息屏开始时间戳（毫秒）
+         * @param offEndTs 息屏结束时间戳（毫秒）
+         * @param realtimeSamples 放电瞬时硬件物理采样点列表
+         * @param totalAwakeMs 放电周期息屏唤醒总时长（毫秒）
+         * @param totalDeepSleepMs 放电周期深度睡眠总时长（毫秒）
+         * @return 切分后的屏幕状态事件列表 [List<ScreenEvent>]
+         */
+        fun splitScreenOffEvents(
+            offStartTs: Long,
+            offEndTs: Long,
+            realtimeSamples: List<PowerDischargePoint> = emptyList(),
+            totalAwakeMs: Long = 0L,
+            totalDeepSleepMs: Long = 0L
+        ): List<ScreenEvent> {
+            if (offEndTs <= offStartTs) return emptyList()
+
+            val durationMs = offEndTs - offStartTs
+
+            // 1. 若息屏时间极短（<= 20 秒），系统尚未真正挂起进入深度休眠，忠实判定为息屏唤醒活跃状态（浅红）
+            if (durationMs <= 20_000L) {
+                return listOf(ScreenEvent(offStartTs, offEndTs, isScreenOn = false, isDeepSleep = false))
+            }
+
+            // 2. 筛选落入该息屏时间窗口内的真实物理采样点
+            val subSamples = realtimeSamples.filter { it.timestamp in offStartTs..offEndTs }.sortedBy { it.timestamp }
+
+            // 3. 计算灭屏初期的浅休眠唤醒过渡时长（通常为 15~30 秒，绝不超过息屏时长的三分之一）
+            val transitionAwakeMs = if (totalAwakeMs > 0L && totalDeepSleepMs > 0L) {
+                val awakeRatio = (totalAwakeMs.toDouble() / (totalAwakeMs + totalDeepSleepMs).toDouble()).coerceIn(0.05, 0.5)
+                (durationMs * awakeRatio).toLong().coerceIn(15_000L, 60_000L).coerceAtMost(durationMs / 3)
+            } else {
+                20_000L.coerceAtMost(durationMs / 3)
+            }
+
+            // 4. 若该息屏区间内无密集物理采样点（例如开启智能省电零唤醒模式，或处于无采样深度挂起状态）：
+            // 灭屏初期为浅休眠唤醒（浅红），随后直到点亮屏幕的主体时间段为深度睡眠（深红）
+            if (subSamples.size <= 1) {
+                val awakeEndTs = offStartTs + transitionAwakeMs
+                val result = mutableListOf<ScreenEvent>()
+                result.add(ScreenEvent(offStartTs, awakeEndTs, isScreenOn = false, isDeepSleep = false))
+                if (awakeEndTs < offEndTs) {
+                    result.add(ScreenEvent(awakeEndTs, offEndTs, isScreenOn = false, isDeepSleep = true))
+                }
+                return result
+            }
+
+            // 5. 若存在连续物理采样点，依据采样点断层（超过 20 秒无采样视为 CPU 挂起）精准切分
+            val result = mutableListOf<ScreenEvent>()
+            var cursor = offStartTs
+            val sleepThresholdMs = 20_000L
+
+            for (pt in subSamples) {
+                val gap = pt.timestamp - cursor
+                if (gap > sleepThresholdMs) {
+                    result.add(ScreenEvent(cursor, pt.timestamp, isScreenOn = false, isDeepSleep = true))
+                } else if (gap > 0L) {
+                    result.add(ScreenEvent(cursor, pt.timestamp, isScreenOn = false, isDeepSleep = false))
+                }
+                cursor = pt.timestamp
+            }
+
+            if (cursor < offEndTs) {
+                val tailGap = offEndTs - cursor
+                val isDeep = tailGap > sleepThresholdMs
+                result.add(ScreenEvent(cursor, offEndTs, isScreenOn = false, isDeepSleep = isDeep))
+            }
+
+            return result
+        }
+
+        /**
+         * 将毫秒时长格式化为贴合紧凑卡片显示的紧凑时间格式（如 "4m10s"、"1h20m5s"、"50s"）。
+         *
+         * @param durationMs 时长（单位：毫秒）
+         * @return 紧凑格式化时间字符串
+         */
+        fun formatCompactDuration(durationMs: Long): String {
+            if (durationMs <= 0L) return "0s"
+            val totalSecs = durationMs / 1000L
+            val hours = totalSecs / 3600L
+            val mins = (totalSecs % 3600L) / 60L
+            val secs = totalSecs % 60L
+
+            return when {
+                hours > 0L -> {
+                    if (secs > 0L) "${hours}h${mins}m${secs}s"
+                    else if (mins > 0L) "${hours}h${mins}m"
+                    else "${hours}h"
+                }
+                mins > 0L -> {
+                    if (secs > 0L) "${mins}m${secs}s"
+                    else "${mins}m"
+                }
+                else -> "${secs}s"
+            }
         }
     }
 
@@ -689,6 +813,33 @@ class PowerUsageManager private constructor(private val context: Context) {
      * 各应用前台独占运行即时物理能耗与温度映射表（包名 -> 累加器）。
      */
     private val appRealtimeEnergyMap = mutableMapOf<String, AppRealtimeEnergyAccumulator>()
+
+    /** 本地放电周期内累加的息屏唤醒时长（毫秒） */
+    @Volatile
+    private var localScreenOffAwakeDurationMs: Long = 0L
+
+    /** 本地放电周期内累加的息屏深度睡眠时长（毫秒） */
+    @Volatile
+    private var localScreenOffDeepSleepDurationMs: Long = 0L
+
+    /**
+     * 记录一次息屏区间的唤醒与深度睡眠时长增量。
+     * 由 BatteryMonitorService 在屏幕点亮瞬间差分 SystemClock.elapsedRealtime 与 uptimeMillis 触发上报。
+     *
+     * @param screenOffRealtimeMs 本次息屏实际物理总耗时（毫秒）
+     * @param screenOffAwakeMs 本次息屏期间 CPU 处于唤醒活跃状态的耗时（毫秒）
+     * @param deepSleepMs 本次息屏期间系统处于深度休眠挂起状态的耗时（毫秒）
+     */
+    fun recordScreenOffSleepInterval(
+        screenOffRealtimeMs: Long,
+        screenOffAwakeMs: Long,
+        deepSleepMs: Long
+    ) {
+        if (screenOffRealtimeMs > 0L) {
+            localScreenOffAwakeDurationMs += screenOffAwakeMs
+            localScreenOffDeepSleepDurationMs += deepSleepMs
+        }
+    }
 
     /**
      * 异步后台 I/O 线程池，用于执行大采样点序列的持久化存储，杜绝主线程与轮询线程阻塞。
@@ -1443,6 +1594,8 @@ class PowerUsageManager private constructor(private val context: Context) {
         val initHwSample = SysfsBatterySampler.sampleHardwareDischarge(context, status.voltageVolts, status.temperature)
         val initPower = initHwSample?.powerWatts ?: 0f
         resetDischargeRealtimeSamples(now, unplugLevel, status.voltageVolts, status.temperature, initPower, true)
+        localScreenOffAwakeDurationMs = 0L
+        localScreenOffDeepSleepDurationMs = 0L
 
         val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val counterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: 0
@@ -2749,13 +2902,69 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val remBackgroundStr = if (enableBackgroundStats && bgWatts >= 0.05f && energy > 0f) formatHoursToText(energy / bgWatts) else "--"
                 val bgDurationStr = if (enableBackgroundStats) formatDuration(effectiveBgMs) else "--"
 
+                // 唤醒与深度睡眠分段统计
+                val awakeMs = if (stats.screenOffAwakeDurationMs > 0L) {
+                    stats.screenOffAwakeDurationMs
+                } else if (localScreenOffAwakeDurationMs > 0L) {
+                    localScreenOffAwakeDurationMs
+                } else {
+                    0L
+                }
+                val deepSleepMs = if (stats.screenOffDeepSleepDurationMs > 0L) {
+                    stats.screenOffDeepSleepDurationMs
+                } else if (localScreenOffDeepSleepDurationMs > 0L) {
+                    localScreenOffDeepSleepDurationMs
+                } else if (screenOffMs > awakeMs) {
+                    (screenOffMs - awakeMs).coerceAtLeast(0L)
+                } else {
+                    0L
+                }
+
+                val awakeEnergyWh: Float
+                val deepSleepEnergyWh: Float
+                if (offEnergyWh > 0f && screenOffMs > 0L) {
+                    val rawSleepDrain = stats.screenOffDeepSleepDrainMah
+                    val rawAwakeDrain = stats.screenOffAwakeDrainMah
+                    val hasBothDrains = rawSleepDrain > 0f && rawAwakeDrain > 0f
+                    val totalDurationOffMs = if ((deepSleepMs + awakeMs) > 0L) (deepSleepMs + awakeMs) else screenOffMs
+                    val sleepRatio = if (hasBothDrains) {
+                        (rawSleepDrain / (rawSleepDrain + rawAwakeDrain)).coerceIn(0f, 1f)
+                    } else if (deepSleepMs > 0L && awakeMs > 0L && totalDurationOffMs > 0L) {
+                        (deepSleepMs.toFloat() / totalDurationOffMs.toFloat()).coerceIn(0f, 1f)
+                    } else if (deepSleepMs > 0L) {
+                        1f
+                    } else if (awakeMs > 0L) {
+                        0f
+                    } else {
+                        (deepSleepMs.toFloat() / screenOffMs.toFloat()).coerceIn(0f, 1f)
+                    }
+                    deepSleepEnergyWh = offEnergyWh * sleepRatio
+                    awakeEnergyWh = (offEnergyWh - deepSleepEnergyWh).coerceAtLeast(0f)
+                } else {
+                    awakeEnergyWh = 0f
+                    deepSleepEnergyWh = 0f
+                }
+
+                val awakePowerWatts = if (awakeMs > 0L && awakeEnergyWh > 0f) (awakeEnergyWh / (awakeMs / 3600000f)) else 0f
+                val deepSleepPowerWatts = if (deepSleepMs > 0L && deepSleepEnergyWh > 0f) (deepSleepEnergyWh / (deepSleepMs / 3600000f)) else 0f
+
+                val targetCapacityMah = if (stats.capacityMah > 0f) stats.capacityMah else effectiveCapacity
+                val nominalTotalWh = if (targetCapacityMah > 0f && nominalVoltageVolts > 0f) (targetCapacityMah * nominalVoltageVolts / 1000f) else realTotalEnergyWh
+                val screenOffPercent = if (nominalTotalWh > 0f && offEnergyWh > 0f) (offEnergyWh / nominalTotalWh) * 100f else 0f
+                val awakePercent = if (nominalTotalWh > 0f && awakeEnergyWh > 0f) (awakeEnergyWh / nominalTotalWh) * 100f else 0f
+                val deepSleepPercent = (screenOffPercent - awakePercent).coerceAtLeast(0f)
+
+                val screenOffDurStr = formatCompactDuration(screenOffMs)
+                val awakeDurStr = formatCompactDuration(awakeMs)
+                val deepSleepDurStr = formatCompactDuration(deepSleepMs)
+
                 val overview = PowerOverviewStats(
                     avgPowerWatts = avgWatts,
                     screenOnPowerWatts = screenOnWatts,
                     screenOffPowerWatts = screenOffWatts,
                     backgroundPowerWatts = bgWatts,
                     screenOnDurationText = screenOnStr,
-                    screenOffDurationText = screenOffStr,
+                    screenOffDurationText = screenOffDurStr,
                     totalDurationText = totalDurationStr,
                     backgroundDurationText = bgDurationStr,
                     remainingScreenOnText = remScreenOnStr,
@@ -2770,7 +2979,18 @@ class PowerUsageManager private constructor(private val context: Context) {
                     remainingLifeText = remCompositeStr,
                     screenOnDurationMs = screenOnMs,
                     screenOffDurationMs = screenOffMs,
-                    totalDurationMs = durationMs
+                    totalDurationMs = durationMs,
+                    screenOffAwakeDurationMs = awakeMs,
+                    screenOffDeepSleepDurationMs = deepSleepMs,
+                    screenOffAwakeDurationText = awakeDurStr,
+                    screenOffDeepSleepDurationText = deepSleepDurStr,
+                    screenOffAwakeEnergyWh = awakeEnergyWh,
+                    screenOffDeepSleepEnergyWh = deepSleepEnergyWh,
+                    screenOffAwakePowerWatts = awakePowerWatts,
+                    screenOffDeepSleepPowerWatts = deepSleepPowerWatts,
+                    screenOffAwakePercent = awakePercent,
+                    screenOffDeepSleepPercent = deepSleepPercent,
+                    screenOffPercent = screenOffPercent
                 )
 
                 val points = getDischargeTrendPoints(
@@ -4884,13 +5104,59 @@ class PowerUsageManager private constructor(private val context: Context) {
         val rawBgMs = screenOffMs.coerceIn(0L, totalMs)
         val bgDurationStr = formatDuration(rawBgMs)
 
+        // 唤醒与深度睡眠分段统计
+        val awakeMs = if (localScreenOffAwakeDurationMs > 0L) {
+            localScreenOffAwakeDurationMs
+        } else {
+            0L
+        }
+        val deepSleepMs = if (localScreenOffDeepSleepDurationMs > 0L) {
+            localScreenOffDeepSleepDurationMs
+        } else if (screenOffMs > awakeMs) {
+            (screenOffMs - awakeMs).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+
+        val awakeEnergyWh: Float
+        val deepSleepEnergyWh: Float
+        if (offEnergyWh > 0f && screenOffMs > 0L) {
+            val totalDurationOffMs = if ((deepSleepMs + awakeMs) > 0L) (deepSleepMs + awakeMs) else screenOffMs
+            val sleepRatio = if (deepSleepMs > 0L && awakeMs > 0L && totalDurationOffMs > 0L) {
+                (deepSleepMs.toFloat() / totalDurationOffMs.toFloat()).coerceIn(0f, 1f)
+            } else if (deepSleepMs > 0L) {
+                1f
+            } else if (awakeMs > 0L) {
+                0f
+            } else {
+                (deepSleepMs.toFloat() / screenOffMs.toFloat()).coerceIn(0f, 1f)
+            }
+            deepSleepEnergyWh = offEnergyWh * sleepRatio
+            awakeEnergyWh = (offEnergyWh - deepSleepEnergyWh).coerceAtLeast(0f)
+        } else {
+            awakeEnergyWh = 0f
+            deepSleepEnergyWh = 0f
+        }
+
+        val awakePowerWatts = if (awakeMs > 0L && awakeEnergyWh > 0f) (awakeEnergyWh / (awakeMs / 3600000f)) else 0f
+        val deepSleepPowerWatts = if (deepSleepMs > 0L && deepSleepEnergyWh > 0f) (deepSleepEnergyWh / (deepSleepMs / 3600000f)) else 0f
+
+        val nominalTotalWh = if (effectiveCapacity > 0f && nominalVoltageVolts > 0f) (effectiveCapacity * nominalVoltageVolts / 1000f) else realTotalEnergyWh
+        val screenOffPercent = if (nominalTotalWh > 0f && offEnergyWh > 0f) (offEnergyWh / nominalTotalWh) * 100f else 0f
+        val awakePercent = if (nominalTotalWh > 0f && awakeEnergyWh > 0f) (awakeEnergyWh / nominalTotalWh) * 100f else 0f
+        val deepSleepPercent = (screenOffPercent - awakePercent).coerceAtLeast(0f)
+
+        val screenOffDurStr = formatCompactDuration(screenOffMs)
+        val awakeDurStr = formatCompactDuration(awakeMs)
+        val deepSleepDurStr = formatCompactDuration(deepSleepMs)
+
         return PowerOverviewStats(
             avgPowerWatts = avgPower,
             screenOnPowerWatts = screenOnPower,
             screenOffPowerWatts = screenOffPower,
             backgroundPowerWatts = bgWatts,
             screenOnDurationText = screenOnStr,
-            screenOffDurationText = screenOffStr,
+            screenOffDurationText = screenOffDurStr,
             totalDurationText = totalStr,
             backgroundDurationText = bgDurationStr,
             remainingScreenOnText = remOnStr,
@@ -4905,7 +5171,18 @@ class PowerUsageManager private constructor(private val context: Context) {
             remainingLifeText = remCompStr,
             screenOnDurationMs = screenOnMs,
             screenOffDurationMs = screenOffMs,
-            totalDurationMs = totalMs
+            totalDurationMs = totalMs,
+            screenOffAwakeDurationMs = awakeMs,
+            screenOffDeepSleepDurationMs = deepSleepMs,
+            screenOffAwakeDurationText = awakeDurStr,
+            screenOffDeepSleepDurationText = deepSleepDurStr,
+            screenOffAwakeEnergyWh = awakeEnergyWh,
+            screenOffDeepSleepEnergyWh = deepSleepEnergyWh,
+            screenOffAwakePowerWatts = awakePowerWatts,
+            screenOffDeepSleepPowerWatts = deepSleepPowerWatts,
+            screenOffAwakePercent = awakePercent,
+            screenOffDeepSleepPercent = deepSleepPercent,
+            screenOffPercent = screenOffPercent
         )
     }
 
@@ -5211,8 +5488,12 @@ class PowerUsageManager private constructor(private val context: Context) {
         val (rawAppIntervals, screenIntervals) = queryUsageIntervals(startTs, endTs)
         val appIntervals = reconcileAssistantIntervals(rawAppIntervals, points, startTs, endTs)
 
-        // 3. 构建高精度屏幕状态区间（亮屏绿色 / 息屏红色，精确到秒）
+        // 3. 构建高精度屏幕状态区间（亮屏绿色 / 息屏浅红唤醒 / 息屏深红深度睡眠，精确到秒）
         val screenEvents = mutableListOf<ScreenEvent>()
+        val realtimeSamples = if (isHistory) emptyList() else getDischargeRealtimeSamples()
+        val totalAwakeMs = fullPackage.overviewStats.screenOffAwakeDurationMs
+        val totalDeepSleepMs = fullPackage.overviewStats.screenOffDeepSleepDurationMs
+
         val onIntervals = mutableListOf<Pair<Long, Long>>()
         for (s in screenIntervals) {
             val st = maxOf(s.startTs, startTs)
@@ -5243,19 +5524,35 @@ class PowerUsageManager private constructor(private val context: Context) {
             var cursor = startTs
             for (onSpan in mergedOn) {
                 if (onSpan.first > cursor) {
-                    // 息屏区间（精确到秒）
-                    screenEvents.add(ScreenEvent(cursor, onSpan.first, false))
+                    // 息屏区间（细分为浅红唤醒与深红深度睡眠）
+                    screenEvents.addAll(
+                        splitScreenOffEvents(
+                            offStartTs = cursor,
+                            offEndTs = onSpan.first,
+                            realtimeSamples = realtimeSamples,
+                            totalAwakeMs = totalAwakeMs,
+                            totalDeepSleepMs = totalDeepSleepMs
+                        )
+                    )
                 }
                 val onStart = maxOf(onSpan.first, cursor)
                 if (onSpan.second > onStart) {
-                    // 亮屏区间（精确到秒）
+                    // 亮屏区间（精确到秒，绿色）
                     screenEvents.add(ScreenEvent(onStart, onSpan.second, true))
                 }
                 cursor = maxOf(cursor, onSpan.second)
             }
             if (cursor < endTs) {
-                // 尾部息屏区间
-                screenEvents.add(ScreenEvent(cursor, endTs, false))
+                // 尾部息屏区间（细分为浅红唤醒与深红深度睡眠）
+                screenEvents.addAll(
+                    splitScreenOffEvents(
+                        offStartTs = cursor,
+                        offEndTs = endTs,
+                        realtimeSamples = realtimeSamples,
+                        totalAwakeMs = totalAwakeMs,
+                        totalDeepSleepMs = totalDeepSleepMs
+                    )
+                )
             }
         } else if (points.isNotEmpty()) {
             // 回退到 points 中的亮/息屏标记
@@ -5264,12 +5561,36 @@ class PowerUsageManager private constructor(private val context: Context) {
             for (i in 1 until points.size) {
                 val pt = points[i]
                 if (pt.isScreenOn != currentScreenOn) {
-                    screenEvents.add(ScreenEvent(segmentStart, pt.timestamp, currentScreenOn))
+                    if (currentScreenOn) {
+                        screenEvents.add(ScreenEvent(segmentStart, pt.timestamp, true))
+                    } else {
+                        screenEvents.addAll(
+                            splitScreenOffEvents(
+                                offStartTs = segmentStart,
+                                offEndTs = pt.timestamp,
+                                realtimeSamples = realtimeSamples,
+                                totalAwakeMs = totalAwakeMs,
+                                totalDeepSleepMs = totalDeepSleepMs
+                            )
+                        )
+                    }
                     segmentStart = pt.timestamp
                     currentScreenOn = pt.isScreenOn
                 }
             }
-            screenEvents.add(ScreenEvent(segmentStart, endTs, currentScreenOn))
+            if (currentScreenOn) {
+                screenEvents.add(ScreenEvent(segmentStart, endTs, true))
+            } else {
+                screenEvents.addAll(
+                    splitScreenOffEvents(
+                        offStartTs = segmentStart,
+                        offEndTs = endTs,
+                        realtimeSamples = realtimeSamples,
+                        totalAwakeMs = totalAwakeMs,
+                        totalDeepSleepMs = totalDeepSleepMs
+                    )
+                )
+            }
         }
 
         // 4. 构建 App 活动时间轴事件列表
@@ -5481,6 +5802,33 @@ class PowerUsageManager private constructor(private val context: Context) {
         appEvents.sortBy { it.startTime }
     }
 
+
+
+    /**
+     * 将唤醒或深度睡眠时长毫秒数格式化为贴合界面的自然中文显示文本（如 "50 分钟"、"6 时 3 分"）。
+     *
+     * @param durationMs 时长（毫秒）
+     * @return 格式化后的中文时长文本
+     */
+    private fun formatSleepAwakeDuration(durationMs: Long): String {
+        if (durationMs <= 0L) return "0 分钟"
+        val totalSecs = durationMs / 1000L
+        if (totalSecs < 60L) {
+            return "${totalSecs.coerceAtLeast(1L)} 秒"
+        }
+        val totalMins = totalSecs / 60L
+        if (totalMins < 60L) {
+            return "$totalMins 分钟"
+        }
+        val hours = totalMins / 60L
+        val mins = totalMins % 60L
+        return if (mins > 0L) {
+            "$hours 时 $mins 分"
+        } else {
+            "$hours 小时"
+        }
+    }
+
     /**
      * 加权功率样本数据类，用于按切片持续时长加权统计功率分位数。
      *
@@ -5591,11 +5939,22 @@ data class BatteryStatusSnapshot(
  * @property screenOnDurationMs 亮屏持续实际物理毫秒数
  * @property screenOffDurationMs 息屏持续实际物理毫秒数
  * @property totalDurationMs 放电总周期实际物理毫秒数
+ * @property screenOffAwakeDurationMs 息屏期间处于唤醒活跃状态的实际物理毫秒数
+ * @property screenOffDeepSleepDurationMs 息屏期间处于深度休眠挂起状态的实际物理毫秒数
+ * @property screenOffAwakeDurationText 息屏唤醒时长格式化文本（如 "50 分钟"）
+ * @property screenOffDeepSleepDurationText 深度睡眠时长格式化文本（如 "6 时 3 分"）
+ * @property screenOffAwakeEnergyWh 息屏唤醒期间消耗能量（单位：瓦时 Wh）
+ * @property screenOffDeepSleepEnergyWh 深度睡眠期间消耗能量（单位：瓦时 Wh）
+ * @property screenOffAwakePowerWatts 息屏唤醒期间平均放电功耗（单位：W）
+ * @property screenOffDeepSleepPowerWatts 深度睡眠期间平均放电功耗（单位：W）
+ * @property screenOffAwakePercent 息屏唤醒消耗能量占整机总容量百分比
+ * @property screenOffDeepSleepPercent 深度睡眠消耗能量占整机总容量百分比
+ * @property screenOffPercent 息屏消耗总能量占整机总容量百分比
  */
 data class PowerOverviewStats(
     val avgPowerWatts: Float,
-    val screenOnPowerWatts: Float = 1.65f,
-    val screenOffPowerWatts: Float = 0.15f,
+    val screenOnPowerWatts: Float = 0f,
+    val screenOffPowerWatts: Float = 0f,
     val backgroundPowerWatts: Float = 0f,
     val screenOnDurationText: String = "",
     val screenOffDurationText: String = "",
@@ -5613,7 +5972,18 @@ data class PowerOverviewStats(
     val remainingLifeText: String = "",
     val screenOnDurationMs: Long = 0L,
     val screenOffDurationMs: Long = 0L,
-    val totalDurationMs: Long = 0L
+    val totalDurationMs: Long = 0L,
+    val screenOffAwakeDurationMs: Long = 0L,
+    val screenOffDeepSleepDurationMs: Long = 0L,
+    val screenOffAwakeDurationText: String = "",
+    val screenOffDeepSleepDurationText: String = "",
+    val screenOffAwakeEnergyWh: Float = 0f,
+    val screenOffDeepSleepEnergyWh: Float = 0f,
+    val screenOffAwakePowerWatts: Float = 0f,
+    val screenOffDeepSleepPowerWatts: Float = 0f,
+    val screenOffAwakePercent: Float = 0f,
+    val screenOffDeepSleepPercent: Float = 0f,
+    val screenOffPercent: Float = 0f
 )
 
 /**

@@ -73,7 +73,7 @@ object TimelineEventMerger {
     }
 
     /**
-     * 合并屏幕亮灭状态时间区间，消除细微闪烁断点。
+     * 合并屏幕亮灭与休眠状态时间区间，消除细微闪烁断点。
      *
      * @param screenEvents 原始屏幕状态事件列表 [List<ScreenEvent>]
      * @return 合并后的屏幕状态事件列表 [List<ScreenEvent>]
@@ -86,7 +86,10 @@ object TimelineEventMerger {
         var current = sorted[0]
         for (i in 1 until sorted.size) {
             val next = sorted[i]
-            if (current.isScreenOn == next.isScreenOn && next.startTime <= current.endTime + 2000L) {
+            if (current.isScreenOn == next.isScreenOn &&
+                current.isDeepSleep == next.isDeepSleep &&
+                next.startTime <= current.endTime + 2000L
+            ) {
                 current = current.copy(endTime = max(current.endTime, next.endTime))
             } else {
                 result.add(current)

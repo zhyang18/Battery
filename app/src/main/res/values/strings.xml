@@ -37,6 +37,14 @@
     <string name="power_header_global">全局</string>
     <string name="power_header_screen_off">息屏</string>
     <string name="power_header_background">后台</string>
+    <string name="power_global_discharge_speed">全局放电速度</string>
+    <string name="power_screen_on_discharge_speed">亮屏放电速度</string>
+    <string name="power_screen_off_discharge_speed">息屏放电速度</string>
+    <string name="power_metric_screen_off">息屏</string>
+    <string name="power_metric_awake">唤醒</string>
+    <string name="power_metric_deep_sleep">深度睡眠</string>
+    <string name="power_metric_no_record">暂无记录</string>
+    <string name="power_remaining_prefix">续航 %s</string>
     <string name="power_value_format">%s</string>
     <string name="power_value_format_with_energy">%1$s (%2$s)</string>
     <string name="power_wh_format">%.3fWh</string>

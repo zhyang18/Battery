@@ -34,6 +34,17 @@ sealed class PowerUsageItem {
     ) : PowerUsageItem()
 
     /**
+     * 放电速度核心概览卡片条目（包含全局放电速度、亮屏放电速度与息屏放电速度三个主要模块）。
+     */
+    data object DischargeSpeedMetrics : PowerUsageItem()
+
+    /**
+     * 息屏唤醒与深度睡眠耗电指标双卡片条目。
+     */
+    data object SleepAwakeMetrics : PowerUsageItem()
+
+
+    /**
      * 耗电模式下的核心概览卡片条目（包含能量、温度、电压、充电状态指示，以及时间轴图表和指标切换器）。
      */
     data object UsageOverview : PowerUsageItem()

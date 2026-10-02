@@ -30,6 +30,7 @@ import com.battery.analysis.model.PowerUsageRecord
 import com.battery.analysis.timeline.presentation.AppEnergyDetailBottomSheetDialog
 import com.battery.analysis.timeline.presentation.BatteryTimelineState
 import com.battery.analysis.util.BatteryEnergyCalculator
+import com.battery.analysis.util.BubbleTooltipHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -249,17 +250,22 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             showAndTrackDialog(dialog)
         }
 
-        hBinding.batteryTimelineView.setOnEnergyClickListener {
-            showEnergyTooltip()
+        hBinding.batteryTimelineView.setOnEnergyClickListener { view, touchX, touchY ->
+            showEnergyTooltip(view, touchX, touchY)
         }
     }
 
     /**
-     * 弹出快照趋势图上方能量指标的详细信息 Toast 提示。
+     * 弹出快照趋势图上方能量指标的详细信息气泡弹窗提示。
      * 忠实呈现当前快照剩余能量、电池总能量、拔电时初始能量以及该放电周期已消耗能量，
      * 缺失时如实显示未知占位符，严禁伪造假数据。
+     * 强制在能量指标所在视图上方展示，且不启用自动关闭定时器，仅在点击外部或气泡自身时关闭。
+     *
+     * @param anchorView 触发气泡弹窗的目标锚点视图
+     * @param touchX 相对 anchorView 的点击 X 坐标（可选）
+     * @param touchY 相对 anchorView 的点击 Y 坐标（可选）
      */
-    private fun showEnergyTooltip() {
+    private fun showEnergyTooltip(anchorView: View, touchX: Float? = null, touchY: Float? = null) {
         val record = currentRecord
         val powerManager = PowerUsageManager.getInstance(this)
         val totalCapMah = powerManager.getEffectiveDeviceCapacityMah()
@@ -288,7 +294,37 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         val consumedStr = consumedWh?.let { String.format(Locale.getDefault(), "%.3fWh", it) } ?: "--"
 
         val message = getString(R.string.power_tooltip_energy, currentStr, totalStr, unplugStr, consumedStr)
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        showBubbleTooltip(anchorView, message, touchX, touchY ?: 0f, autoDismissMs = 0L, forceAbove = true)
+    }
+
+    /**
+     * 在目标锚点视图附近弹出气泡提示框并自动纳管生命周期以防内存泄漏。
+     *
+     * @param anchorView 触发气泡弹窗的目标锚点视图
+     * @param message 待呈现的提示内容
+     * @param touchX 相对 anchorView 的点击 X 坐标（可选）
+     * @param touchY 相对 anchorView 的点击 Y 坐标（可选）
+     * @param autoDismissMs 自动关闭倒计时毫秒数（<= 0 时不自动关闭）
+     * @param forceAbove 是否强制在锚点视图上方展示
+     */
+    private fun showBubbleTooltip(
+        anchorView: View,
+        message: CharSequence,
+        touchX: Float? = null,
+        touchY: Float? = null,
+        autoDismissMs: Long = 2800L,
+        forceAbove: Boolean = false
+    ) {
+        BubbleTooltipHelper.showBubble(
+            anchorView = anchorView,
+            message = message,
+            touchX = touchX,
+            touchY = touchY,
+            autoDismissMs = autoDismissMs,
+            forceAbove = forceAbove
+        )?.also {
+            trackPopup(it)
+        }
     }
 
     /**
@@ -478,15 +514,15 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         hBinding.tvMetricGlobalPower.text = avgPowerStr
         hBinding.tvMetricGlobalRemaining.text = record.remainingCompositeText
 
-        // 指标卡片三行点击提示（亮屏 / 息屏 / 全局）
+        // 指标卡片三行点击气泡提示（亮屏 / 息屏 / 全局）
         hBinding.layoutMetricScreenOnRow.setOnClickListener {
-            Toast.makeText(this, "亮屏：时间、平均功耗、能量、续航时间", Toast.LENGTH_SHORT).show()
+            showBubbleTooltip(hBinding.layoutMetricScreenOnRow, "亮屏：时间、平均功耗、能量、续航时间")
         }
         hBinding.layoutMetricScreenOffRow.setOnClickListener {
-            Toast.makeText(this, "息屏：时间、平均功耗、能量、续航时间", Toast.LENGTH_SHORT).show()
+            showBubbleTooltip(hBinding.layoutMetricScreenOffRow, "息屏：时间、平均功耗、能量、续航时间")
         }
         hBinding.layoutMetricGlobalRow.setOnClickListener {
-            Toast.makeText(this, "全局：时间、平均功耗、能量、续航时间", Toast.LENGTH_SHORT).show()
+            showBubbleTooltip(hBinding.layoutMetricGlobalRow, "全局：时间、平均功耗、能量、续航时间")
         }
     }
 

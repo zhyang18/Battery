@@ -77,6 +77,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * @property screenOnDurationMs 自断开充电以来的真实亮屏时长（毫秒）
      * @property screenOffDurationMs 自断开充电以来的真实息屏时长（毫秒）
      * @property screenOffDrainMah 自断开充电以来的真实息屏放电量（mAh）
+     * @property screenOffAwakeDurationMs 息屏期间 CPU 处于唤醒活跃状态的真实时长（毫秒）
+     * @property screenOffDeepSleepDurationMs 息屏期间系统进入深度睡眠挂起状态的真实时长（毫秒）
+     * @property screenOffAwakeDrainMah 息屏唤醒期间消耗的电量（mAh）
+     * @property screenOffDeepSleepDrainMah 深度睡眠期间消耗的电量（mAh）
      * @property screenDrainMah 自断开充电以来的真实屏幕硬件放电量（mAh）
      * @property appList 解析得到的应用耗电实体列表
      * @property historyLevelPoints 解析得到的系统权威电量历史时间点与电量百分比序列列表 [List<Pair<Long, Int>>]
@@ -90,6 +94,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val screenOnDurationMs: Long,
         val screenOffDurationMs: Long = 0L,
         val screenOffDrainMah: Float = 0f,
+        val screenOffAwakeDurationMs: Long = 0L,
+        val screenOffDeepSleepDurationMs: Long = 0L,
+        val screenOffAwakeDrainMah: Float = 0f,
+        val screenOffDeepSleepDrainMah: Float = 0f,
         val appList: List<AppPowerUsageItem>,
         val screenDrainMah: Float = 0f,
         val historyLevelPoints: List<Pair<Long, Int>> = emptyList(),
@@ -150,7 +158,15 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         }
 
         if (rawOutput.isBlank()) {
-            return BatteryStatsResult(4500f, 0f, 0L, 0L, 0L, 0f, emptyList())
+            return BatteryStatsResult(
+                capacityMah = 4500f,
+                computedDrainMah = 0f,
+                dischargeDurationMs = 0L,
+                screenOnDurationMs = 0L,
+                screenOffDurationMs = 0L,
+                screenOffDrainMah = 0f,
+                appList = emptyList()
+            )
         }
 
         val hwStats = if (enableBackgroundStats) {
@@ -251,12 +267,38 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         }
 
         var screenOffDurationMs = 0L
+        var screenOffAwakeDurationMs = 0L
+        var screenOffDeepSleepDurationMs = 0L
         var screenOffDrainMah = 0f
+        var screenOffAwakeDrainMah = 0f
+        var screenOffDeepSleepDrainMah = 0f
 
-        val screenOffMatcher = REGEX_SCREEN_OFF_TIME.matcher(rawText)
-        if (screenOffMatcher.find()) {
-            val screenOffStr = screenOffMatcher.group(1) ?: ""
-            screenOffDurationMs = parseDurationStringToMs(screenOffStr)
+        val realtimeUptimeMatcher = REGEX_SCREEN_OFF_REALTIME_UPTIME.matcher(rawText)
+        if (realtimeUptimeMatcher.find()) {
+            val realtimeStr = realtimeUptimeMatcher.group(1)?.trim() ?: ""
+            val uptimeStr = realtimeUptimeMatcher.group(2)?.trim() ?: ""
+            screenOffDurationMs = parseDurationStringToMs(realtimeStr)
+            screenOffAwakeDurationMs = parseDurationStringToMs(uptimeStr)
+            screenOffDeepSleepDurationMs = (screenOffDurationMs - screenOffAwakeDurationMs).coerceAtLeast(0L)
+        } else {
+            val screenOffMatcher = REGEX_SCREEN_OFF_TIME.matcher(rawText)
+            if (screenOffMatcher.find()) {
+                val screenOffStr = screenOffMatcher.group(1) ?: ""
+                screenOffDurationMs = parseDurationStringToMs(screenOffStr)
+            }
+        }
+
+        if (screenOffAwakeDurationMs <= 0L) {
+            val awakeMatcher = REGEX_SCREEN_OFF_AWAKE_ALONE.matcher(rawText)
+            if (awakeMatcher.find()) {
+                screenOffAwakeDurationMs = parseDurationStringToMs(awakeMatcher.group(1) ?: "")
+            }
+        }
+        if (screenOffDeepSleepDurationMs <= 0L) {
+            val sleepMatcher = REGEX_SCREEN_OFF_SLEEPING_ALONE.matcher(rawText)
+            if (sleepMatcher.find()) {
+                screenOffDeepSleepDurationMs = parseDurationStringToMs(sleepMatcher.group(1) ?: "")
+            }
         }
         if (screenOffDurationMs <= 0L) {
             val simpleOffMatcher = REGEX_SCREEN_OFF_SIMPLE.matcher(rawText)
@@ -267,6 +309,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         }
         if (screenOffDurationMs <= 0L && dischargeDurationMs > screenOnDurationMs) {
             screenOffDurationMs = (dischargeDurationMs - screenOnDurationMs).coerceAtLeast(0L)
+        }
+        if (screenOffDurationMs > 0L && screenOffDeepSleepDurationMs <= 0L && screenOffAwakeDurationMs > 0L) {
+            screenOffDeepSleepDurationMs = (screenOffDurationMs - screenOffAwakeDurationMs).coerceAtLeast(0L)
         }
 
         // 匹配系统底层真实息屏放电量 (mAh)
@@ -284,11 +329,34 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 }
             }
         }
-        if (screenOffDrainMah <= 0f) {
-            val idleMatcher = REGEX_IDLE_DRAIN.matcher(rawText)
-            if (idleMatcher.find()) {
-                screenOffDrainMah = idleMatcher.group(1)?.toFloatOrNull() ?: 0f
+        val idleMatcher = REGEX_IDLE_DRAIN.matcher(rawText)
+        val rawIdleDrain = if (idleMatcher.find()) {
+            idleMatcher.group(1)?.toFloatOrNull() ?: 0f
+        } else {
+            0f
+        }
+        if (screenOffDrainMah <= 0f && rawIdleDrain > 0f) {
+            screenOffDrainMah = rawIdleDrain
+        }
+        val totalOffMs = if (screenOffDurationMs > 0L) {
+            screenOffDurationMs
+        } else {
+            screenOffDeepSleepDurationMs + screenOffAwakeDurationMs
+        }
+        if (screenOffDrainMah > 0f && totalOffMs > 0L) {
+            if (screenOffDeepSleepDurationMs > 0L && screenOffAwakeDurationMs > 0L) {
+                val sleepRatio = (screenOffDeepSleepDurationMs.toFloat() / totalOffMs.toFloat()).coerceIn(0f, 1f)
+                screenOffDeepSleepDrainMah = screenOffDrainMah * sleepRatio
+                screenOffAwakeDrainMah = (screenOffDrainMah - screenOffDeepSleepDrainMah).coerceAtLeast(0f)
+            } else if (screenOffAwakeDurationMs > 0L) {
+                screenOffAwakeDrainMah = screenOffDrainMah
+                screenOffDeepSleepDrainMah = 0f
+            } else {
+                screenOffDeepSleepDrainMah = screenOffDrainMah
+                screenOffAwakeDrainMah = 0f
             }
+        } else if (rawIdleDrain > 0f) {
+            screenOffDeepSleepDrainMah = rawIdleDrain
         }
 
         // 4. 逐行提取 Estimated power use 中的各 Uid 耗电及 Battery History 真实电量轨迹点序列
@@ -748,6 +816,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             screenOnDurationMs = screenOnDurationMs,
             screenOffDurationMs = screenOffDurationMs,
             screenOffDrainMah = screenOffDrainMah,
+            screenOffAwakeDurationMs = screenOffAwakeDurationMs,
+            screenOffDeepSleepDurationMs = screenOffDeepSleepDurationMs,
+            screenOffAwakeDrainMah = screenOffAwakeDrainMah,
+            screenOffDeepSleepDrainMah = screenOffDeepSleepDrainMah,
             appList = validatedList,
             screenDrainMah = screenDrainMah,
             historyLevelPoints = filteredHistoryPoints,
@@ -1803,6 +1875,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         private val REGEX_DISCHARGE_TIME = Pattern.compile("Discharge:\\s*([^\\n\\(]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_SCREEN_ON = Pattern.compile("Screen on:\\s*([^\\n\\(]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_SCREEN_OFF_TIME = Pattern.compile("Time on battery screen off:\\s*([^\\n\\(]+)", Pattern.CASE_INSENSITIVE)
+        private val REGEX_SCREEN_OFF_REALTIME_UPTIME = Pattern.compile("Time on battery screen off:\\s*([^\\n\\(,]+?)(?:\\s*\\([^)]+\\))?\\s*realtime,\\s*([^\\n\\(]+?)(?:\\s*\\([^)]+\\))?\\s*uptime", Pattern.CASE_INSENSITIVE)
+        private val REGEX_SCREEN_OFF_AWAKE_ALONE = Pattern.compile("Screen off was also awake:\\s*([^\\n\\(]+)", Pattern.CASE_INSENSITIVE)
+        private val REGEX_SCREEN_OFF_SLEEPING_ALONE = Pattern.compile("Screen off was also sleeping:\\s*([^\\n\\(]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_SCREEN_OFF_SIMPLE = Pattern.compile("Screen off:\\s*([^\\n\\(]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_SCREEN_OFF_DISCHARGE_MAH = Pattern.compile("Screen off discharge:\\s*([\\d.]+)\\s*mAh", Pattern.CASE_INSENSITIVE)
         private val REGEX_SCREEN_OFF_DISCHARGE_AMOUNT = Pattern.compile("Amount discharged while screen off:\\s*(\\d+)", Pattern.CASE_INSENSITIVE)

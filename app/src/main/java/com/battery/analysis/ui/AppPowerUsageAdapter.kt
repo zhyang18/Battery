@@ -10,18 +10,26 @@ import androidx.recyclerview.widget.RecyclerView
 import com.battery.analysis.R
 import com.battery.analysis.databinding.ItemAppPowerUsageBinding
 import com.battery.analysis.databinding.ItemPowerChargingContentBinding
+import com.battery.analysis.databinding.ItemPowerDischargeSpeedBinding
 import com.battery.analysis.databinding.ItemPowerFirstTimeSetupBinding
 import com.battery.analysis.databinding.ItemPowerSceneHeaderBinding
 import com.battery.analysis.databinding.ItemPowerShizukuGuideBinding
+import com.battery.analysis.databinding.ItemPowerSleepAwakeMetricsBinding
 import com.battery.analysis.databinding.ItemPowerSnapshotBannerBinding
 import com.battery.analysis.databinding.ItemPowerUsageOverviewBinding
 import com.battery.analysis.databinding.LayoutChargingStatsBinding
+import com.battery.analysis.manager.PowerOverviewStats
+import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.AppPowerUsageItem
 import com.battery.analysis.model.PowerUsageItem
 import com.battery.analysis.timeline.presentation.BatteryTimelineState
 import com.battery.analysis.timeline.util.DrawableBitmapCache
 import com.google.android.material.shape.CornerFamily
 import com.google.android.material.shape.ShapeAppearanceModel
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.AbsoluteSizeSpan
+import androidx.core.text.HtmlCompat
 import java.util.Locale
 
 /**
@@ -49,6 +57,10 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         const val TYPE_APP_USAGE = 6
         /** 视图类型：充电统计卡片（三合一走势折线图） */
         const val TYPE_CHARGING_CONTENT = 7
+        /** 视图类型：放电速度概览卡片（包含全局、亮屏、息屏放电速度三个主要模块） */
+        const val TYPE_DISCHARGE_SPEED = 8
+        /** 视图类型：唤醒与深度睡眠耗电指标双卡片 */
+        const val TYPE_SLEEP_AWAKE_METRICS = 9
     }
 
     // 当前供 RecyclerView 绑定的完整平铺条目数据列表
@@ -95,8 +107,14 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     private var cachedVoltageVolts: Float = 0f
     private var cachedIsCharging: Boolean = false
     private var cachedTimelineState: BatteryTimelineState? = null
+    // 放电速度概览卡片最新缓存数据
+    private var cachedOverviewStats: PowerOverviewStats? = null
 
     // 弱保持当前活跃的卡片 ViewHolder 引用以提供平滑桥接
+    var dischargeSpeedHolder: DischargeSpeedViewHolder? = null
+        private set
+    var sleepAwakeHolder: SleepAwakeViewHolder? = null
+        private set
     var overviewHolder: UsageOverviewViewHolder? = null
         private set
     var sceneHeaderHolder: SceneHeaderViewHolder? = null
@@ -120,7 +138,8 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     // MetricSelectorView 与 Charging 图表的外部监听器保持
     var onMetricsChangedListener: ((Set<com.battery.analysis.timeline.presentation.TimelineMetric>) -> Unit)? = null
-    var onEnergyClickListener: (() -> Unit)? = null
+    var onEnergyClickListener: ((View, Float, Float) -> Unit)? = null
+    var onMetricModuleClickedListener: ((View, Int) -> Unit)? = null
 
     // ==================== ViewHolder 定义 ====================
 
@@ -150,6 +169,22 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      * @param binding 视图绑定对象
      */
     inner class ShizukuGuideViewHolder(val binding: ItemPowerShizukuGuideBinding) :
+        RecyclerView.ViewHolder(binding.root)
+
+    /**
+     * 放电速度概览卡片 ViewHolder（展示全局、亮屏、息屏放电速度三个主要模块）。
+     *
+     * @param binding 放电速度概览卡片视图绑定对象
+     */
+    inner class DischargeSpeedViewHolder(val binding: ItemPowerDischargeSpeedBinding) :
+        RecyclerView.ViewHolder(binding.root)
+
+    /**
+     * 息屏唤醒与深度睡眠双卡片 ViewHolder（展示唤醒与深度睡眠耗电占比与能量）。
+     *
+     * @param binding 唤醒与深度睡眠卡片视图绑定对象
+     */
+    inner class SleepAwakeViewHolder(val binding: ItemPowerSleepAwakeMetricsBinding) :
         RecyclerView.ViewHolder(binding.root)
 
     /**
@@ -209,6 +244,8 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             is PowerUsageItem.FirstTimeSetup -> TYPE_FIRST_TIME_SETUP
             is PowerUsageItem.SnapshotBanner -> TYPE_SNAPSHOT_BANNER
             is PowerUsageItem.ShizukuGuide -> TYPE_SHIZUKU_GUIDE
+            is PowerUsageItem.DischargeSpeedMetrics -> TYPE_DISCHARGE_SPEED
+            is PowerUsageItem.SleepAwakeMetrics -> TYPE_SLEEP_AWAKE_METRICS
             is PowerUsageItem.UsageOverview -> TYPE_USAGE_OVERVIEW
             is PowerUsageItem.SceneHeader -> TYPE_SCENE_HEADER
             is PowerUsageItem.AppUsage -> TYPE_APP_USAGE
@@ -239,6 +276,14 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 val binding = ItemPowerShizukuGuideBinding.inflate(inflater, parent, false)
                 ShizukuGuideViewHolder(binding)
             }
+            TYPE_DISCHARGE_SPEED -> {
+                val binding = ItemPowerDischargeSpeedBinding.inflate(inflater, parent, false)
+                DischargeSpeedViewHolder(binding).also { dischargeSpeedHolder = it }
+            }
+            TYPE_SLEEP_AWAKE_METRICS -> {
+                val binding = ItemPowerSleepAwakeMetricsBinding.inflate(inflater, parent, false)
+                SleepAwakeViewHolder(binding).also { sleepAwakeHolder = it }
+            }
             TYPE_USAGE_OVERVIEW -> {
                 val binding = ItemPowerUsageOverviewBinding.inflate(inflater, parent, false)
                 UsageOverviewViewHolder(binding).also {
@@ -246,8 +291,8 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                     it.binding.metricSelectorView.setOnMetricsChangedListener { metrics ->
                         onMetricsChangedListener?.invoke(metrics)
                     }
-                    it.binding.batteryTimelineView.setOnEnergyClickListener {
-                        onEnergyClickListener?.invoke()
+                    it.binding.batteryTimelineView.setOnEnergyClickListener { view, x, y ->
+                        onEnergyClickListener?.invoke(view, x, y)
                     }
                 }
             }
@@ -301,6 +346,16 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             }
             is PowerUsageItem.ShizukuGuide -> {
                 bindShizukuGuide(holder as ShizukuGuideViewHolder, item)
+            }
+            is PowerUsageItem.DischargeSpeedMetrics -> {
+                val speedHolder = holder as DischargeSpeedViewHolder
+                dischargeSpeedHolder = speedHolder
+                bindDischargeSpeed(speedHolder)
+            }
+            is PowerUsageItem.SleepAwakeMetrics -> {
+                val sleepHolder = holder as SleepAwakeViewHolder
+                sleepAwakeHolder = sleepHolder
+                bindSleepAwakeMetrics(sleepHolder)
             }
             is PowerUsageItem.UsageOverview -> {
                 bindUsageOverview(holder as UsageOverviewViewHolder)
@@ -403,6 +458,250 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         holder.binding.btnShizukuAction.setOnClickListener {
             onShizukuActionClickedListener?.invoke()
         }
+    }
+
+    /**
+     * 绑定放电速度核心概览卡片（呈现亮屏放电速度、息屏放电速度、全局放电速度三个主要模块的每小时放电占比百分比）。
+     *
+     * @param holder 放电速度概览卡片 ViewHolder
+     */
+    private fun bindDischargeSpeed(holder: DischargeSpeedViewHolder) {
+        val overview = cachedOverviewStats
+        with(holder.binding) {
+            if (overview == null) {
+                tvModuleScreenOnSpeed.text = "--"
+                tvModuleScreenOffSpeed.text = "--"
+                tvModuleGlobalSpeed.text = "--"
+            } else {
+                val totalDurationMs = if (overview.totalDurationMs > 0L) overview.totalDurationMs else parseDurationTextToMs(overview.totalDurationText)
+                val onDurationMs = if (overview.screenOnDurationMs > 0L) overview.screenOnDurationMs else parseDurationTextToMs(overview.screenOnDurationText)
+                val offDurationMs = if (overview.screenOffDurationMs > 0L) overview.screenOffDurationMs else parseDurationTextToMs(overview.screenOffDurationText)
+
+                // 核心指标计算：每小时放电占比百分比（%/h），以硬件微积分真值真实换算
+                val onRate = calculateDischargeRatePercentPerHour(overview.screenOnPowerWatts, cachedTotalEnergyWh, onDurationMs)
+                val offRate = calculateDischargeRatePercentPerHour(overview.screenOffPowerWatts, cachedTotalEnergyWh, offDurationMs)
+                val globalRate = calculateDischargeRatePercentPerHour(overview.avgPowerWatts, cachedTotalEnergyWh, totalDurationMs)
+
+                // 模块 1：亮屏放电速度
+                tvModuleScreenOnSpeed.text = formatDischargeRateSpannable(onRate)
+
+                // 模块 2：息屏放电速度
+                tvModuleScreenOffSpeed.text = formatDischargeRateSpannable(offRate)
+
+                // 模块 3：全局放电速度（最后显示）
+                tvModuleGlobalSpeed.text = formatDischargeRateSpannable(globalRate)
+            }
+
+            layoutModuleScreenOn.setOnClickListener {
+                onMetricModuleClickedListener?.invoke(layoutModuleScreenOn, PowerUsageFragment.ROW_SCREEN_ON)
+            }
+            layoutModuleScreenOff.setOnClickListener {
+                onMetricModuleClickedListener?.invoke(layoutModuleScreenOff, PowerUsageFragment.ROW_SCREEN_OFF)
+            }
+            layoutModuleGlobal.setOnClickListener {
+                onMetricModuleClickedListener?.invoke(layoutModuleGlobal, PowerUsageFragment.ROW_GLOBAL)
+            }
+        }
+    }
+
+    /**
+     * 绑定息屏、唤醒与深度睡眠三状态指标卡片数据。
+     * 包含息屏总耗电、息屏唤醒活跃耗电与深度睡眠挂起耗电三个等宽紧凑卡片，
+     * 严格遵循物理能量守恒定律，采用 4m10s 紧凑时间格式与 16sp 粗体百分比对齐。
+     *
+     * @param holder 息屏、唤醒与深度睡眠卡片 ViewHolder
+     */
+    private fun bindSleepAwakeMetrics(holder: SleepAwakeViewHolder) {
+        val overview = cachedOverviewStats
+        with(holder.binding) {
+            val noRecordText = root.context.getString(R.string.power_metric_no_record)
+            if (overview == null) {
+                tvScreenOffPercent.text = "--"
+                tvScreenOffSubtitle.text = noRecordText
+                tvAwakePercent.text = "--"
+                tvAwakeSubtitle.text = noRecordText
+                tvSleepPercent.text = "--"
+                tvSleepSubtitle.text = noRecordText
+                return
+            }
+
+            // 1. 息屏卡片
+            if (overview.screenOffDurationMs <= 0L && overview.screenOffEnergyWh <= 0f) {
+                tvScreenOffPercent.text = "--"
+                tvScreenOffSubtitle.text = noRecordText
+            } else {
+                val offPercent = if (overview.screenOffPercent > 0f) {
+                    overview.screenOffPercent
+                } else {
+                    overview.screenOffAwakePercent + overview.screenOffDeepSleepPercent
+                }
+                tvScreenOffPercent.text = if (offPercent > 0f) String.format(Locale.US, "%.1f%%", offPercent) else "--"
+
+                val durText = if (overview.screenOffDurationMs > 0L) {
+                    PowerUsageManager.formatCompactDuration(overview.screenOffDurationMs)
+                } else {
+                    overview.screenOffDurationText.ifBlank { "0s" }
+                }
+                val energyText = String.format(Locale.US, "%.3fWh", overview.screenOffEnergyWh)
+                tvScreenOffSubtitle.text = "$durText $energyText"
+            }
+
+            // 2. 唤醒卡片
+            if (overview.screenOffAwakeDurationMs <= 0L && overview.screenOffAwakeEnergyWh <= 0f) {
+                tvAwakePercent.text = "--"
+                tvAwakeSubtitle.text = noRecordText
+            } else {
+                val awakePercentStr = if (overview.screenOffAwakePercent > 0f) {
+                    String.format(Locale.US, "%.1f%%", overview.screenOffAwakePercent)
+                } else {
+                    "--"
+                }
+                tvAwakePercent.text = awakePercentStr
+
+                val durText = if (overview.screenOffAwakeDurationMs > 0L) {
+                    PowerUsageManager.formatCompactDuration(overview.screenOffAwakeDurationMs)
+                } else {
+                    overview.screenOffAwakeDurationText.ifBlank { "0s" }
+                }
+                val energyText = String.format(Locale.US, "%.3fWh", overview.screenOffAwakeEnergyWh)
+                val subtitleHtml = "<font color=\"#FFA4A4\">$durText</font> <font color=\"#FFA4A4\">$energyText</font>"
+                tvAwakeSubtitle.text = HtmlCompat.fromHtml(subtitleHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
+            }
+
+            // 3. 深度睡眠卡片
+            if (overview.screenOffDeepSleepDurationMs <= 0L && overview.screenOffDeepSleepEnergyWh <= 0f) {
+                tvSleepPercent.text = "--"
+                tvSleepSubtitle.text = noRecordText
+            } else {
+                val sleepPercentStr = if (overview.screenOffDeepSleepPercent > 0f) {
+                    String.format(Locale.US, "%.1f%%", overview.screenOffDeepSleepPercent)
+                } else {
+                    "--"
+                }
+                tvSleepPercent.text = sleepPercentStr
+
+                val durText = if (overview.screenOffDeepSleepDurationMs > 0L) {
+                    PowerUsageManager.formatCompactDuration(overview.screenOffDeepSleepDurationMs)
+                } else {
+                    overview.screenOffDeepSleepDurationText.ifBlank { "0s" }
+                }
+                val energyText = String.format(Locale.US, "%.3fWh", overview.screenOffDeepSleepEnergyWh)
+                val subtitleHtml = "<font color=\"#B71C1C\">$durText</font> <font color=\"#B71C1C\">$energyText</font>"
+                tvSleepSubtitle.text = HtmlCompat.fromHtml(subtitleHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
+            }
+        }
+    }
+
+    /**
+     * 将放电速度数值与单位转换为复合富文本，数值部分保持较大字号（16sp），
+     * 单位部分（"%/h"）缩小至 11sp，以图文混排高质感样式呈现。
+     *
+     * @param rate 放电速率百分比数值（单位：%/h），若为空或非正数则返回 "--"
+     * @return 格式化后的富文本对象 [CharSequence]
+     */
+    private fun formatDischargeRateSpannable(rate: Float?): CharSequence {
+        if (rate == null || rate <= 0f) {
+            return "--"
+        }
+        val numberStr = String.format(Locale.getDefault(), "%.1f", rate)
+        val unitStr = "%/h"
+        val fullText = "$numberStr$unitStr"
+        val spannable = SpannableString(fullText)
+        spannable.setSpan(
+            AbsoluteSizeSpan(11, true),
+            numberStr.length,
+            fullText.length,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        return spannable
+    }
+
+    /**
+     * 根据放电平均功耗与电池总容量能量计算每小时放电百分比速率（%/h）。
+     *
+     * 遵循物理学定义：
+     * 功率 P (W) = 能量 E (Wh) / 时间 t (h)；
+     * 每小时放电百分比 Rate (%/h) = (P (W) / 电池总容量 E_total (Wh)) * 100%。
+     * 严禁编写任何假数据或虚拟钳位，当功率或电池总能量无效时返回 null。
+     *
+     * @param powerWatts 放电平均功率（单位：W）
+     * @param totalCapacityWh 电池标称/满充总能量容量（单位：Wh）
+     * @param durationMs 对应时段实际持续时长（毫秒）
+     * @return 计算得到的每小时放电百分比（单位：%/h），若数据缺失或非正数则返回 null
+     */
+    private fun calculateDischargeRatePercentPerHour(
+        powerWatts: Float,
+        totalCapacityWh: Float?,
+        durationMs: Long
+    ): Float? {
+        if (totalCapacityWh == null || totalCapacityWh <= 0f) {
+            return null
+        }
+        if (powerWatts <= 0f || durationMs <= 0L) {
+            return null
+        }
+        val rate = (powerWatts / totalCapacityWh) * 100f
+        return if (rate > 0f) rate else null
+    }
+
+    /**
+     * 将毫秒时长按友好格式转化为紧凑展示文本。
+     *
+     * @param ms 持续物理毫秒值
+     * @param fallbackText 当毫秒值为 0 或无效时的备用文本
+     * @return 格式化后的紧凑时长字符串（如 "0m0s"、"13m44s"）
+     */
+    private fun formatCardDuration(ms: Long, fallbackText: String): String {
+        if (ms <= 0L) {
+            return if (fallbackText.isNotBlank()) fallbackText else "--"
+        }
+        val totalSec = ms / 1000L
+        val days = totalSec / 86400L
+        val hours = (totalSec % 86400L) / 3600L
+        val minutes = (totalSec % 3600L) / 60L
+        val seconds = totalSec % 60L
+        return when {
+            days > 0L -> String.format(Locale.getDefault(), "%dd%02dh", days, hours)
+            hours > 0L -> String.format(Locale.getDefault(), "%dh%02dm", hours, minutes)
+            else -> "${minutes}m${seconds}s"
+        }
+    }
+
+    /**
+     * 从时长文本字符串中解析出物理毫秒值。
+     *
+     * @param text 格式化时长字符串
+     * @return 解析出的物理毫秒数，无法解析时返回 0L
+     */
+    private fun parseDurationTextToMs(text: String): Long {
+        if (text.isBlank() || text == "--") return 0L
+        var totalMs = 0L
+        val dayMatch = Regex("(\\d+)d").find(text)
+        val hourMatch = Regex("(\\d+)h").find(text)
+        val minMatch = Regex("(\\d+)m").find(text)
+        val secMatch = Regex("(\\d+)s").find(text)
+        val colonMatch = Regex("(\\d+):(\\d+)(?::(\\d+))?").find(text)
+
+        if (colonMatch != null) {
+            val parts = colonMatch.destructured
+            if (parts.component3().isNotEmpty()) {
+                val h = parts.component1().toLongOrNull() ?: 0L
+                val m = parts.component2().toLongOrNull() ?: 0L
+                val s = parts.component3().toLongOrNull() ?: 0L
+                return (h * 3600L + m * 60L + s) * 1000L
+            } else {
+                val m = parts.component1().toLongOrNull() ?: 0L
+                val s = parts.component2().toLongOrNull() ?: 0L
+                return (m * 60L + s) * 1000L
+            }
+        }
+
+        dayMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 86400000L }
+        hourMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 3600000L }
+        minMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 60000L }
+        secMatch?.groupValues?.get(1)?.toLongOrNull()?.let { totalMs += it * 1000L }
+
+        return totalMs
     }
 
     /**
@@ -620,6 +919,8 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         if (showShizukuGuide) {
             items.add(PowerUsageItem.ShizukuGuide(shizukuGuideTitle, shizukuGuideDesc, shizukuGuideActionText))
         }
+        items.add(PowerUsageItem.DischargeSpeedMetrics)
+        items.add(PowerUsageItem.SleepAwakeMetrics)
         items.add(PowerUsageItem.UsageOverview)
         items.add(PowerUsageItem.SceneHeader(displayAppItems.size, showBackgroundStats))
         for (app in displayAppItems) {
@@ -778,6 +1079,21 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     fun updateTimelineState(timelineState: BatteryTimelineState) {
         cachedTimelineState = timelineState
         overviewHolder?.binding?.batteryTimelineView?.setState(timelineState)
+    }
+
+    /**
+     * 更新放电核心指标数据并刷新放电速度卡片视图。
+     *
+     * @param overviewStats 最新的放电核心指标数据实体
+     * @param totalCapacityWh 设备有效满充总能量容量（单位：Wh），若为 null 则尝试复用已缓存容量
+     */
+    fun updateOverviewStats(overviewStats: PowerOverviewStats?, totalCapacityWh: Float? = null) {
+        cachedOverviewStats = overviewStats
+        if (totalCapacityWh != null && totalCapacityWh > 0f) {
+            cachedTotalEnergyWh = totalCapacityWh
+        }
+        dischargeSpeedHolder?.let { bindDischargeSpeed(it) }
+        sleepAwakeHolder?.let { bindSleepAwakeMetrics(it) }
     }
 
     /**

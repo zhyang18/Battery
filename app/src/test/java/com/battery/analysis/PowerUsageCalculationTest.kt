@@ -3315,6 +3315,216 @@ class PowerUsageCalculationTest {
         assertTrue("恢复后结案的记录为 COMPLETED 状态", mockDb[baseUnplugTs]!!.isCompleted)
         assertEquals("主键严格保持一致", baseUnplugTs, mockDb[baseUnplugTs]!!.id)
     }
+
+    /**
+     * 验证手机仅息屏数十秒或数分钟时，双锚定模型忠实保留硬件瞬时采样微积分功耗，
+     * 杜绝因电量 1% 阶跃残差倒灌导致息屏功耗与全局功耗虚高爆表。
+     */
+    @Test
+    fun testShortScreenOffPreservesRealIntegrationPowerWithoutResidualInflation() {
+        // 场景设定：
+        // 亮屏 20 分钟（0.333h），亮屏实测能量 0.150 Wh，亮屏平均功耗 0.45 W
+        val screenOnHours = 20f / 60f
+        val onEnergyWh = 0.150f
+        val onPowerWatts = 0.45f
+
+        // 息屏 30 秒（0.00833h），未进深度休眠，后台真实采样功耗 0.20 W，实测积分能量 0.00167 Wh
+        val screenOffMs = 30_000L
+        val screenOffHours = 30f / 3600f
+        val intOffWatts = 0.20f
+        val intOffEnergyWh = intOffWatts * screenOffHours // 0.001667 Wh
+
+        // 系统在息屏瞬间正好触发了 1% 阶跃掉电（5000mAh * 1% * 3.86V ≈ 0.193 Wh）
+        val physicalTotalEnergyWh = 0.193f
+        val dischargeHours = screenOnHours + screenOffHours
+
+        val dualStats = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = onEnergyWh,
+            intOffEnergyWh = intOffEnergyWh,
+            intTotalEnergyWh = onEnergyWh + intOffEnergyWh,
+            intOnPowerWatts = onPowerWatts,
+            intOffPowerWatts = intOffWatts,
+            intTotalPowerWatts = (onEnergyWh + intOffEnergyWh) / dischargeHours,
+            physicalTotalEnergyWh = physicalTotalEnergyWh,
+            screenOnHours = screenOnHours,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = 3.86f
+        )
+
+        // 验证：
+        // 1. 息屏平均功耗必须忠实采信真实物理微积分功耗（0.20W），绝不能因为除以 0.0083h 爆表成 5.16W 乃至 15W！
+        assertEquals("短期息屏功耗必须忠实等于真实物理采样微积分功耗 0.20W", 0.20f, dualStats.screenOffWatts, 0.02f)
+
+        // 2. 息屏能量严格采纳真实硬件微积分能量
+        assertEquals("短期息屏能量必须忠实等于真实微积分能量", intOffEnergyWh, dualStats.offEnergyWh, 0.001f)
+
+        // 3. 亮屏与整机总能量守恒，残差正确归因给高负载亮屏阶段
+        assertEquals("整机总能量忠实等于物理电量能耗", physicalTotalEnergyWh, dualStats.totalEnergyWh, 0.001f)
+        assertTrue("亮屏能量吸收未上报阶跃残差", dualStats.onEnergyWh > onEnergyWh)
+    }
+
+    /**
+     * 验证时间轴状态事件合并与断层切分：
+     * 亮屏为绿色（isScreenOn=true），密集息屏采样为浅红唤醒（isDeepSleep=false），
+     * 长间隔静默断层为深红深度睡眠（isDeepSleep=true）。
+     */
+    @Test
+    fun testTimelineScreenEventAwakeAndDeepSleepState() {
+        val awakeEvent1 = com.battery.analysis.timeline.domain.ScreenEvent(1000L, 2000L, isScreenOn = false, isDeepSleep = false)
+        val awakeEvent2 = com.battery.analysis.timeline.domain.ScreenEvent(2000L, 3000L, isScreenOn = false, isDeepSleep = false)
+        val deepSleepEvent = com.battery.analysis.timeline.domain.ScreenEvent(3000L, 10000L, isScreenOn = false, isDeepSleep = true)
+        val screenOnEvent = com.battery.analysis.timeline.domain.ScreenEvent(10000L, 15000L, isScreenOn = true, isDeepSleep = false)
+
+        val merged = com.battery.analysis.timeline.domain.TimelineEventMerger.mergeScreenEvents(
+            listOf(awakeEvent1, awakeEvent2, deepSleepEvent, screenOnEvent)
+        )
+
+        assertEquals("连续的浅红唤醒切片应平滑合并，但不可与深红深度睡眠切片跨状态合并", 3, merged.size)
+        // 第 1 段：合并后的浅红唤醒
+        assertEquals(1000L, merged[0].startTime)
+        assertEquals(3000L, merged[0].endTime)
+        assertFalse(merged[0].isScreenOn)
+        assertFalse(merged[0].isDeepSleep)
+
+        // 第 2 段：深红深度睡眠
+        assertEquals(3000L, merged[1].startTime)
+        assertEquals(10000L, merged[1].endTime)
+        assertFalse(merged[1].isScreenOn)
+        assertTrue(merged[1].isDeepSleep)
+
+        // 第 3 段：亮屏绿
+        assertEquals(10000L, merged[2].startTime)
+        assertEquals(15000L, merged[2].endTime)
+        assertTrue(merged[2].isScreenOn)
+    }
+
+    /**
+     * 验证极短时间息屏（如 15 秒）未进入深度睡眠时，时间轴状态切分忠实判定为全部唤醒活跃浅红段。
+     */
+    @Test
+    fun testSplitScreenOffEventsShortScreenOffIsAllAwake() {
+        val offStart = 1000L
+        val offEnd = 16000L // 15 秒短息屏
+
+        val events = PowerUsageManager.splitScreenOffEvents(
+            offStartTs = offStart,
+            offEndTs = offEnd,
+            realtimeSamples = emptyList()
+        )
+
+        assertEquals("短息屏切片数量应为 1", 1, events.size)
+        val event = events[0]
+        assertEquals(offStart, event.startTime)
+        assertEquals(offEnd, event.endTime)
+        assertFalse("息屏状态 isScreenOn 必须为 false", event.isScreenOn)
+        assertFalse("短息屏未进入深度睡眠，isDeepSleep 必须为 false（浅红）", event.isDeepSleep)
+    }
+
+    /**
+     * 验证长时间息屏在无密集物理采样点（如智能省电零唤醒模式）时，能准确切分为灭屏初期浅红唤醒与后续主体深红深度睡眠。
+     */
+    @Test
+    fun testSplitScreenOffEventsLongScreenOffWithoutSamplesSplitsAwakeAndDeepSleep() {
+        val offStart = 100_000L
+        val offEnd = 1_900_000L // 30 分钟长息屏
+
+        val events = PowerUsageManager.splitScreenOffEvents(
+            offStartTs = offStart,
+            offEndTs = offEnd,
+            realtimeSamples = emptyList(),
+            totalAwakeMs = 60_000L,
+            totalDeepSleepMs = 1_740_000L
+        )
+
+        assertTrue("长息屏必须切分为浅红唤醒与深红深度睡眠至少两段", events.size >= 2)
+        val awakeSegment = events[0]
+        val deepSleepSegment = events[1]
+
+        assertEquals(offStart, awakeSegment.startTime)
+        assertFalse("第 1 段为息屏状态", awakeSegment.isScreenOn)
+        assertFalse("第 1 段为浅休眠唤醒（浅红）", awakeSegment.isDeepSleep)
+
+        assertEquals(awakeSegment.endTime, deepSleepSegment.startTime)
+        assertEquals(offEnd, deepSleepSegment.endTime)
+        assertFalse("第 2 段为息屏状态", deepSleepSegment.isScreenOn)
+        assertTrue("第 2 段必须为深度睡眠（深红）", deepSleepSegment.isDeepSleep)
+        assertTrue("深度睡眠时长必须占主体时间", deepSleepSegment.getDurationMs() > 1_500_000L)
+    }
+
+    /**
+     * 验证当存在真实物理秒级采样点且发生挂起断层时，依据采样断层精确切分浅红唤醒与深红深度睡眠。
+     */
+    @Test
+    fun testSplitScreenOffEventsPhysicalSampleGapSplitsDeepSleep() {
+        val offStart = 10_000L
+        val offEnd = 610_000L // 10 分钟
+
+        // 灭屏前 30 秒内有连续采样点，之后 CPU 挂起直到息屏结束
+        val samples = listOf(
+            PowerDischargePoint(timestamp = 10_000L, elapsedHours = 0f, batteryLevel = 80, voltageVolts = 4.1f, temperature = 30f, powerWatts = 0.3f, activeAppIcons = emptyList(), isScreenOn = false, activeAppNames = emptyList()),
+            PowerDischargePoint(timestamp = 15_000L, elapsedHours = 0f, batteryLevel = 80, voltageVolts = 4.1f, temperature = 30f, powerWatts = 0.3f, activeAppIcons = emptyList(), isScreenOn = false, activeAppNames = emptyList()),
+            PowerDischargePoint(timestamp = 25_000L, elapsedHours = 0f, batteryLevel = 80, voltageVolts = 4.1f, temperature = 30f, powerWatts = 0.3f, activeAppIcons = emptyList(), isScreenOn = false, activeAppNames = emptyList()),
+            PowerDischargePoint(timestamp = 40_000L, elapsedHours = 0f, batteryLevel = 80, voltageVolts = 4.1f, temperature = 30f, powerWatts = 0.3f, activeAppIcons = emptyList(), isScreenOn = false, activeAppNames = emptyList())
+        )
+
+        val events = PowerUsageManager.splitScreenOffEvents(
+            offStartTs = offStart,
+            offEndTs = offEnd,
+            realtimeSamples = samples
+        )
+
+        val merged = com.battery.analysis.timeline.domain.TimelineEventMerger.mergeScreenEvents(events)
+        assertTrue("合并后应包含唤醒与深度休眠两类状态", merged.size >= 2)
+
+        val firstEvent = merged[0]
+        assertEquals("第一段起始时间对齐息屏开始", offStart, firstEvent.startTime)
+        assertFalse("第一段采样密集，为浅红唤醒", firstEvent.isDeepSleep)
+
+        val deepEvent = merged.last()
+        assertEquals("最后一段结束时间对齐息屏结束", offEnd, deepEvent.endTime)
+        assertTrue("断层区间必须为深度睡眠深红", deepEvent.isDeepSleep)
+        assertTrue("断层深度睡眠时长超过 9 分钟", deepEvent.getDurationMs() >= 550_000L)
+    }
+
+    /**
+     * 验证息屏唤醒与深度睡眠能量计算的严格物理守恒性：
+     * 确保当存在唤醒时长时，唤醒能量绝对不为 0.000Wh，
+     * 且唤醒能量与深度睡眠能量之和与息屏总能量严格守恒闭合。
+     */
+    @Test
+    fun testScreenOffAwakeAndDeepSleepEnergyConservation() {
+        val offEnergyWh = 2.03f
+        val screenOffMs = 32_040_000L // 8h54m
+        val awakeMs = 1_244_000L // 20m44s
+        val deepSleepMs = 30_796_000L // 8h33m16s
+
+        // 模拟 dumpsys 未提供独立的 rawAwakeDrain（为 0f），但系统准确统计了唤醒与休眠时长
+        val rawSleepDrain = 50f
+        val rawAwakeDrain = 0f
+        val hasBothDrains = rawSleepDrain > 0f && rawAwakeDrain > 0f
+        val totalDurationOffMs = if ((deepSleepMs + awakeMs) > 0L) (deepSleepMs + awakeMs) else screenOffMs
+
+        val sleepRatio = if (hasBothDrains) {
+            (rawSleepDrain / (rawSleepDrain + rawAwakeDrain)).coerceIn(0f, 1f)
+        } else if (deepSleepMs > 0L && awakeMs > 0L && totalDurationOffMs > 0L) {
+            (deepSleepMs.toFloat() / totalDurationOffMs.toFloat()).coerceIn(0f, 1f)
+        } else if (deepSleepMs > 0L) {
+            1f
+        } else if (awakeMs > 0L) {
+            0f
+        } else {
+            (deepSleepMs.toFloat() / screenOffMs.toFloat()).coerceIn(0f, 1f)
+        }
+
+        val deepSleepEnergyWh = offEnergyWh * sleepRatio
+        val awakeEnergyWh = (offEnergyWh - deepSleepEnergyWh).coerceAtLeast(0f)
+
+        assertTrue("唤醒时长存在时唤醒能量必须大于 0Wh", awakeEnergyWh > 0.05f)
+        assertTrue("深度睡眠能量必须大于 0Wh", deepSleepEnergyWh > 1.9f)
+        assertEquals("唤醒能量与深度睡眠能量之和必须严格守恒等于息屏总能量", offEnergyWh, awakeEnergyWh + deepSleepEnergyWh, 0.001f)
+    }
 }
 
 

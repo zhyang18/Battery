@@ -93,6 +93,14 @@ class BatteryMonitorService : Service() {
     private var lastNotifiedContent: String? = null
     @Volatile
     private var lastNotifiedTime: Long = 0L
+    /** 上次屏幕熄灭时的 elapsedRealtime（毫秒），用于亮屏时差分计算总休眠时长 */
+    @Volatile
+    private var lastScreenOffRealtime: Long = 0L
+
+    /** 上次屏幕熄灭时的 uptimeMillis（毫秒），用于亮屏时差分计算息屏唤醒时长与深度睡眠时长 */
+    @Volatile
+    private var lastScreenOffUptime: Long = 0L
+
     /** 当前前台服务是否正挂载在静默渠道 [CHANNEL_ID_SILENT] 上的状态标识 */
     @Volatile
     private var isSilentNotificationActive: Boolean = false
@@ -132,14 +140,28 @@ class BatteryMonitorService : Service() {
                     handlePowerDisconnected(appContext)
                 }
                 Intent.ACTION_SCREEN_ON -> {
-                    // 屏幕点亮瞬间：标记屏幕状态、恢复轮询协程并强制刷新一次通知
+                    // 屏幕点亮瞬间：标记屏幕状态、结算本次息屏的唤醒与深度睡眠时长、恢复轮询协程并强制刷新一次通知
                     cachedIsInteractive = true
+                    if (lastScreenOffRealtime > 0L) {
+                        val screenOffRealtimeMs = (SystemClock.elapsedRealtime() - lastScreenOffRealtime).coerceAtLeast(0L)
+                        val screenOffUptimeMs = (SystemClock.uptimeMillis() - lastScreenOffUptime).coerceAtLeast(0L)
+                        val deepSleepMs = (screenOffRealtimeMs - screenOffUptimeMs).coerceAtLeast(0L)
+                        PowerUsageManager.getInstance(appContext).recordScreenOffSleepInterval(
+                            screenOffRealtimeMs = screenOffRealtimeMs,
+                            screenOffAwakeMs = screenOffUptimeMs,
+                            deepSleepMs = deepSleepMs
+                        )
+                        lastScreenOffRealtime = 0L
+                        lastScreenOffUptime = 0L
+                    }
                     startMonitorSamplingLoop()
                     updateNotification(force = true)
                 }
                 Intent.ACTION_SCREEN_OFF -> {
                     // 屏幕熄灭瞬间：
                     cachedIsInteractive = false
+                    lastScreenOffRealtime = SystemClock.elapsedRealtime()
+                    lastScreenOffUptime = SystemClock.uptimeMillis()
                     KeepAliveAccessibilityService.notifyScreenOff()
                     lastKnownForegroundPackage = null
 
@@ -150,7 +172,7 @@ class BatteryMonitorService : Service() {
                             context = this@BatteryMonitorService,
                             fallbackVoltageVolts = cachedVoltageVolts,
                             fallbackTempCelsius = cachedTemperature,
-                            allowProcessFork = true
+                            allowProcessFork = false
                         )
                         val pWatts = hwSample?.powerWatts ?: (cachedScreenOffDischargePowerWatts ?: 0f)
                         val curVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
@@ -158,7 +180,9 @@ class BatteryMonitorService : Service() {
                         if (hwSample?.voltageVolts != null) cachedVoltageVolts = curVolt
                         if (hwSample?.temperatureCelsius != null) cachedTemperature = curTemp
                         if (hwSample?.powerWatts != null) {
-                            cachedScreenOffDischargePowerWatts = pWatts
+                            if (pWatts < 1.0f) {
+                                cachedScreenOffDischargePowerWatts = pWatts
+                            }
                             cachedDischargePowerWatts = pWatts
                         }
                         powerManager.recordDischargeRealtimeSample(
@@ -248,7 +272,9 @@ class BatteryMonitorService : Service() {
                             if (hwSample?.voltageVolts != null) cachedVoltageVolts = curVolt
                             if (hwSample?.temperatureCelsius != null) cachedTemperature = curTemp
                             if (hwSample?.powerWatts != null) {
-                                cachedScreenOffDischargePowerWatts = pWatts
+                                if (pWatts < 1.0f) {
+                                    cachedScreenOffDischargePowerWatts = pWatts
+                                }
                                 cachedDischargePowerWatts = pWatts
                             }
 
@@ -962,7 +988,9 @@ class BatteryMonitorService : Service() {
                     if (cachedIsInteractive) {
                         cachedScreenOnDischargePowerWatts = hwSample.powerWatts
                     } else {
-                        cachedScreenOffDischargePowerWatts = hwSample.powerWatts
+                        if (hwSample.powerWatts < 1.0f) {
+                            cachedScreenOffDischargePowerWatts = hwSample.powerWatts
+                        }
                     }
                 }
             }
@@ -1012,7 +1040,8 @@ class BatteryMonitorService : Service() {
         const val KEY_CHARGE_DISCHARGE_STATS_ENABLED = "pref_charge_discharge_stats_enabled"
         const val INTERVAL_NEVER = -1L
         const val DEFAULT_SCREEN_ON_INTERVAL_MS = 1000L
-        const val DEFAULT_SCREEN_OFF_INTERVAL_MS = 0L
+        /** 息屏放电采样默认间隔（毫秒）：默认为 1 秒（1000L）高频精准采集 */
+        const val DEFAULT_SCREEN_OFF_INTERVAL_MS = 1000L
 
         /** 宿主应用（MainActivity）当前是否处于最前台可见活跃状态的全局内存指示器 */
         @Volatile
@@ -1160,7 +1189,7 @@ class BatteryMonitorService : Service() {
          * 获取配置的息屏待机状态下放电监控采样间隔（毫秒）。
          *
          * @param context 应用程序上下文
-         * @return 采样间隔毫秒数（0L 为智能省电，-1L 为不采样）
+         * @return 采样间隔毫秒数（默认 1000L 为 1 秒，0L 为智能省电，-1L 为不采样）
          */
         fun getScreenOffIntervalMs(context: Context): Long {
             val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)

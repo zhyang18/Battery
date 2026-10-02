@@ -25,8 +25,8 @@ import kotlin.math.max
 
 /**
  * 充电过程三合一（功率、电量、温度）动态折线图自定义控件。
- * 在同一图表内采用三种不同高辨识度颜色平滑曲线呈现充电瞬时功率、电池电量与电池温度，
- * 支持动态采样实时绘制、曲线峰谷值小数字标注、顶部固定探查看板与手势标尺探查。
+ * 在同一图表内采用三种不同高辨识度颜色直线连接呈现充电瞬时功率、电池电量与电池温度，
+ * 支持动态采样实时绘制、折线峰谷值小数字标注、顶部固定探查看板与手势标尺探查。
  *
  * @param context Android 上下文环境
  * @param attrs XML 属性集合
@@ -623,20 +623,20 @@ class ChargingChartView @JvmOverloads constructor(
             powerPaint.color = colorPowerCharge
         }
 
-        // 平滑绘制四色曲线（功率、电量、温度、电压），根据选中的指标动态显示/隐藏，并执行图表内部区域裁剪保护
+        // 直线绘制四色折线（功率、电量、温度、电压），根据选中的指标动态显示/隐藏，并执行图表内部区域裁剪保护
         canvas.save()
         canvas.clipRect(paddingLeft, chartTop, w - paddingRight, chartBottom)
         if (selectedMetrics.contains(TimelineMetric.POWER)) {
-            drawSmoothCurve(canvas, powerPoints, powerPath, powerPaint)
+            drawStraightLine(canvas, powerPoints, powerPath, powerPaint)
         }
         if (selectedMetrics.contains(TimelineMetric.BATTERY)) {
-            drawSmoothCurve(canvas, levelPoints, levelPath, levelPaint)
+            drawStraightLine(canvas, levelPoints, levelPath, levelPaint)
         }
         if (selectedMetrics.contains(TimelineMetric.TEMPERATURE)) {
-            drawSmoothCurve(canvas, tempPoints, tempPath, tempPaint)
+            drawStraightLine(canvas, tempPoints, tempPath, tempPaint)
         }
         if (selectedMetrics.contains(TimelineMetric.VOLTAGE)) {
-            drawSmoothCurve(canvas, voltagePoints, voltagePath, voltagePaint)
+            drawStraightLine(canvas, voltagePoints, voltagePath, voltagePaint)
         }
         canvas.restore()
 
@@ -949,14 +949,14 @@ class ChargingChartView @JvmOverloads constructor(
     }
 
     /**
-     * 采用三次贝塞尔平滑插值算法将点集连接成平滑曲线并绘制。
+     * 将点集以直线线段逐点连接并绘制折线。
      *
      * @param canvas 画布
      * @param points 待绘制的屏幕坐标点集
-     * @param path 曲线复用 Path
+     * @param path 折线复用 Path
      * @param paint 绘制画笔
      */
-    private fun drawSmoothCurve(canvas: Canvas, points: List<PointF>, path: Path, paint: Paint) {
+    private fun drawStraightLine(canvas: Canvas, points: List<PointF>, path: Path, paint: Paint) {
         if (points.isEmpty()) return
         path.reset()
         path.moveTo(points[0].x, points[0].y)
@@ -966,18 +966,8 @@ class ChargingChartView @JvmOverloads constructor(
             return
         }
 
-        for (i in 0 until points.size - 1) {
-            val p0 = if (i > 0) points[i - 1] else points[i]
-            val p1 = points[i]
-            val p2 = points[i + 1]
-            val p3 = if (i + 2 < points.size) points[i + 2] else p2
-
-            val ctrl1X = p1.x + (p2.x - p0.x) * 0.18f
-            val ctrl1Y = p1.y + (p2.y - p0.y) * 0.18f
-            val ctrl2X = p2.x - (p3.x - p1.x) * 0.18f
-            val ctrl2Y = p2.y - (p3.y - p1.y) * 0.18f
-
-            path.cubicTo(ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, p2.x, p2.y)
+        for (i in 1 until points.size) {
+            path.lineTo(points[i].x, points[i].y)
         }
         canvas.drawPath(path, paint)
     }

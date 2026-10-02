@@ -65,8 +65,12 @@ class BatteryTimelineView @JvmOverloads constructor(
     fun interface OnEnergyClickListener {
         /**
          * 当用户点击顶部固定看板上的能量指标文本时触发。
+         *
+         * @param view 触发点击事件的视图实例 [View]
+         * @param touchX 相对视图的触摸 X 坐标
+         * @param touchY 相对视图的触摸 Y 坐标
          */
-        fun onEnergyClick()
+        fun onEnergyClick(view: View, touchX: Float, touchY: Float)
     }
 
     /**
@@ -234,7 +238,17 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     private val screenOffBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.parseColor("#FF3B30") // 息屏红（精确到秒）
+        color = Color.parseColor("#FFA4A4") // 息屏唤醒浅红（兼容引用）
+    }
+
+    private val screenOffAwakeBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#FFA4A4") // 息屏唤醒浅红（精确到秒，柔和浅红）
+    }
+
+    private val screenOffDeepSleepBarPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#B71C1C") // 息屏深度睡眠暗红（精确到秒，经典暗红）
     }
 
     private val iconBadgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -940,10 +954,10 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         val contentRight = contentLeft + contentWidth
 
-        // 功耗纵向区间严格限制不超过整图表高度的 0.85（按 0.85f 比例映射，顶部留出 1/4 空间）
+        // 功耗纵向区间严格限制不超过整图表高度的 0.95（按 0.95f 比例映射，顶部留出 0.05 空间）
         fun calcPowerY(powerW: Float): Float {
             val ratio = (powerW / maxScaleW.toFloat()).coerceIn(0f, 1f)
-            return topPadding + (1f - ratio * 0.85f) * availableH
+            return topPadding + (1f - ratio * 0.95f) * availableH
         }
 
         val firstSample = downsampled.first()
@@ -1523,34 +1537,45 @@ class BatteryTimelineView @JvmOverloads constructor(
             return
         }
 
-        // 1. 底层先绘制完整圆角底条（默认全铺息屏红）
+        // 1. 底层先绘制完整圆角底条（默认全铺深度睡眠深红）
         tempRectF.set(contentLeft, top, contentRight, bottom)
-        canvas.drawRoundRect(tempRectF, dp1_5, dp1_5, screenOffBarPaint)
+        canvas.drawRoundRect(tempRectF, dp1_5, dp1_5, screenOffDeepSleepBarPaint)
 
-        // 2. 精确绘制每个亮屏分段（亮屏绿色段覆盖在息屏红色底条之上，彻底废除 clipPath 恢复 GPU 硬件加速批处理）
-        for (event in mergedScreens) {
-            if (!event.isScreenOn) continue
-            if (event.endTime < visibleStart || event.startTime > visibleEnd) continue
-
-            val left = (contentLeft + TimelineScaleCalculator.timeToX(event.startTime, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
-            val right = (contentLeft + TimelineScaleCalculator.timeToX(event.endTime, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
+        // 绘制指定分段的辅助函数
+        val drawSegment = { left: Float, right: Float, paint: Paint ->
             if (right > left) {
                 tempRectF.set(left, top, right, bottom)
                 val isAtLeft = left <= contentLeft + dp0_5
                 val isAtRight = right >= contentRight - dp0_5
                 if (isAtLeft && isAtRight) {
-                    canvas.drawRoundRect(tempRectF, dp1_5, dp1_5, screenOnBarPaint)
+                    canvas.drawRoundRect(tempRectF, dp1_5, dp1_5, paint)
                 } else if (isAtLeft) {
                     tempPath.reset()
                     tempPath.addRoundRect(tempRectF, floatArrayOf(dp1_5, dp1_5, 0f, 0f, 0f, 0f, dp1_5, dp1_5), Path.Direction.CW)
-                    canvas.drawPath(tempPath, screenOnBarPaint)
+                    canvas.drawPath(tempPath, paint)
                 } else if (isAtRight) {
                     tempPath.reset()
                     tempPath.addRoundRect(tempRectF, floatArrayOf(0f, 0f, dp1_5, dp1_5, dp1_5, dp1_5, 0f, 0f), Path.Direction.CW)
-                    canvas.drawPath(tempPath, screenOnBarPaint)
+                    canvas.drawPath(tempPath, paint)
                 } else {
-                    canvas.drawRect(tempRectF, screenOnBarPaint)
+                    canvas.drawRect(tempRectF, paint)
                 }
+            }
+        }
+
+        // 2. 依次精确绘制亮屏（亮绿）、息屏深度睡眠（深红）与息屏唤醒（浅红）三色段
+        for (event in mergedScreens) {
+            if (event.endTime < visibleStart || event.startTime > visibleEnd) continue
+
+            val left = (contentLeft + TimelineScaleCalculator.timeToX(event.startTime, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
+            val right = (contentLeft + TimelineScaleCalculator.timeToX(event.endTime, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
+
+            if (event.isScreenOn) {
+                drawSegment(left, right, screenOnBarPaint)
+            } else if (event.isDeepSleep) {
+                drawSegment(left, right, screenOffDeepSleepBarPaint)
+            } else {
+                drawSegment(left, right, screenOffAwakeBarPaint)
             }
         }
     }
@@ -1843,7 +1868,7 @@ class BatteryTimelineView @JvmOverloads constructor(
      */
     private fun handleSingleTap(x: Float, y: Float): Boolean {
         if (energyTouchRect.contains(x, y)) {
-            onEnergyClickListener?.onEnergyClick()
+            onEnergyClickListener?.onEnergyClick(this, x, y)
             return true
         }
 

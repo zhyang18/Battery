@@ -348,18 +348,17 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 // 优先采信系统内核根据 PowerProfile 统计的底层纯待机放电量（Idle / Device standby）
                 screenOffDeepSleepDrainMah = rawIdleDrain.coerceAtMost(screenOffDrainMah)
                 screenOffAwakeDrainMah = (screenOffDrainMah - screenOffDeepSleepDrainMah).coerceAtLeast(0f)
-            } else if (screenOffDeepSleepDurationMs > 0L && screenOffAwakeDurationMs > 0L) {
-                // 基于物理第一性原理功耗比率加权（唤醒活跃功耗通常是休眠底噪的 15 倍以上，杜绝时间等权均分导致的虚高）
-                val sleepWeight = screenOffDeepSleepDurationMs.toDouble()
-                val awakeWeight = screenOffAwakeDurationMs.toDouble() * 15.0
-                val sleepRatio = (sleepWeight / (sleepWeight + awakeWeight)).toFloat().coerceIn(0f, 1f)
-                screenOffDeepSleepDrainMah = screenOffDrainMah * sleepRatio
-                screenOffAwakeDrainMah = (screenOffDrainMah - screenOffDeepSleepDrainMah).coerceAtLeast(0f)
-            } else if (screenOffAwakeDurationMs > 0L) {
+            } else if (screenOffDeepSleepDurationMs <= 0L && screenOffAwakeDurationMs > 0L) {
+                // 全程无深度休眠，全部息屏放电量归属唤醒
                 screenOffAwakeDrainMah = screenOffDrainMah
                 screenOffDeepSleepDrainMah = 0f
-            } else {
+            } else if (screenOffAwakeDurationMs <= 0L && screenOffDeepSleepDurationMs > 0L) {
+                // 全程无息屏唤醒，全部息屏放电量归属休眠
                 screenOffDeepSleepDrainMah = screenOffDrainMah
+                screenOffAwakeDrainMah = 0f
+            } else {
+                // 底层 dumpsys 未上报独立待机电量且同时存在唤醒与休眠时长时，如实保持未获取，绝不私自捏造经验比例
+                screenOffDeepSleepDrainMah = 0f
                 screenOffAwakeDrainMah = 0f
             }
         } else if (rawIdleDrain > 0f) {

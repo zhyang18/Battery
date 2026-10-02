@@ -3725,6 +3725,117 @@ class PowerUsageCalculationTest {
         assertEquals(1000L, merged[0].startTs)
         assertEquals(10000L, merged[0].endTs)
     }
+
+    /**
+     * 验证当缺失物理采样点且系统底层未上报待机细分电量时，
+     * 分解算法忠实将 isDecomposedAvailable 置为 false，且绝不伪造或粗暴均分能量。
+     */
+    @Test
+    fun testScreenOffAwakeAndDeepSleepEnergyDecomposedUnavailableWhenNoData() {
+        val offEnergyWh = 1.85f
+        val screenOffMs = 18_000_000L // 5 小时
+        val awakeMs = 1_800_000L // 30 分钟
+        val deepSleepMs = 16_200_000L // 4.5 小时
+
+        val decomposed = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = offEnergyWh,
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            rawSleepDrainMah = 0f,
+            rawAwakeDrainMah = 0f,
+            samples = emptyList(),
+            nominalVoltageVolts = 3.85f
+        )
+
+        assertFalse("无底层细分数据且无采样点时，细分可用性必须标记为 false", decomposed.isDecomposedAvailable)
+        assertEquals("未获取时唤醒能耗为 0", 0f, decomposed.awakeEnergyWh, 0.0001f)
+        assertEquals("未获取时深度休眠能耗为 0", 0f, decomposed.deepSleepEnergyWh, 0.0001f)
+    }
+
+    /**
+     * 验证当息屏期间所有物理采样点均处于高功耗唤醒活跃态（如 2.5W~4.0W）时，
+     * 待机底噪门禁生效，绝不将高负荷采样误当休眠底噪，防止将唤醒能耗虚增吞没为深度睡眠。
+     */
+    @Test
+    fun testScreenOffAwakeAndDeepSleepEnergyRejectsHighPowerSamplesAsBaseline() {
+        val offEnergyWh = 2.0f
+        val screenOffMs = 7_200_000L // 2 小时
+        val awakeMs = 1_800_000L // 30 分钟
+        val deepSleepMs = 5_400_000L // 1.5 小时
+
+        // 构造均为高功耗后台唤醒的采样样本（均大于 0.25W）
+        val highPowerSamples = listOf(
+            PowerDischargePoint(1000L, 0f, 80, 4.0f, 35f, 2.5f, emptyList(), false),
+            PowerDischargePoint(2000L, 0f, 80, 4.0f, 35f, 3.0f, emptyList(), false),
+            PowerDischargePoint(3000L, 0f, 80, 4.0f, 35f, 2.8f, emptyList(), false),
+            PowerDischargePoint(4000L, 0f, 80, 4.0f, 35f, 3.5f, emptyList(), false)
+        )
+
+        val decomposed = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = offEnergyWh,
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            rawSleepDrainMah = 0f,
+            rawAwakeDrainMah = 0f,
+            samples = highPowerSamples,
+            nominalVoltageVolts = 4.0f
+        )
+
+        // 因为所有采样点都大于 0.25W，不能视作静止休眠底噪，且无底层 dumpsys 待机数据，应判定为不可分解
+        assertFalse("全是高功耗活跃样本时待机门禁生效，不可作为休眠底噪，返回不可分解", decomposed.isDecomposedAvailable)
+    }
+
+    /**
+     * 验证 PowerUsageRecord 在包含息屏唤醒与深度休眠细分指标时的 JSON 序列化与反序列化完全无损恢复。
+     */
+    @Test
+    fun testPowerUsageRecordSerializationWithScreenOffDetails() {
+        val record = com.battery.analysis.model.PowerUsageRecord(
+            id = 123456789L,
+            recordTime = "2026-10-02 21:00",
+            levelPercent = 85,
+            voltageVolts = 4.2f,
+            temperature = 30f,
+            energyWh = 18.5f,
+            isCharging = false,
+            avgPowerWatts = 0.8f,
+            screenOnPowerWatts = 1.5f,
+            screenOffPowerWatts = 0.2f,
+            screenOnDurationText = "1h",
+            screenOffDurationText = "4h",
+            totalDurationText = "5h",
+            remainingScreenOnText = "10h",
+            remainingCompositeText = "15h",
+            remainingScreenOffText = "40h",
+            isShizukuRealData = true,
+            appCount = 5,
+            trendPointsJson = "[]",
+            appListJson = "[]",
+            screenOffEnergyWh = 0.8f,
+            screenOffAwakeEnergyWh = 0.65f,
+            screenOffDeepSleepEnergyWh = 0.15f,
+            screenOffAwakeDurationMs = 1_800_000L,
+            screenOffDeepSleepDurationMs = 12_600_000L,
+            screenOffAwakeDrainMah = 150f,
+            screenOffDeepSleepDrainMah = 35f,
+            isScreenOffDecomposedAvailable = true
+        )
+
+        val jsonStr = record.toJsonString()
+        val restored = com.battery.analysis.model.PowerUsageRecord.fromJsonString(jsonStr)
+
+        org.junit.Assert.assertNotNull("反序列化对象不可为空", restored)
+        assertEquals("息屏总能量一致", 0.8f, restored!!.screenOffEnergyWh, 0.001f)
+        assertEquals("息屏唤醒能量一致", 0.65f, restored.screenOffAwakeEnergyWh, 0.001f)
+        assertEquals("深度休眠能量一致", 0.15f, restored.screenOffDeepSleepEnergyWh, 0.001f)
+        assertEquals("息屏唤醒时长一致", 1_800_000L, restored.screenOffAwakeDurationMs)
+        assertEquals("深度休眠时长一致", 12_600_000L, restored.screenOffDeepSleepDurationMs)
+        assertEquals("息屏唤醒电荷量一致", 150f, restored.screenOffAwakeDrainMah, 0.001f)
+        assertEquals("深度休眠电荷量一致", 35f, restored.screenOffDeepSleepDrainMah, 0.001f)
+        assertTrue("细分可用性标记一致", restored.isScreenOffDecomposedAvailable)
+    }
 }
 
 

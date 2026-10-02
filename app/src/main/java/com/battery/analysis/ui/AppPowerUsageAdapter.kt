@@ -566,7 +566,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 tvAwakeSubtitle.text = noRecordText
                 tvAwakeMah.text = "--"
             } else {
-                val awakePercentStr = if (overview.screenOffAwakePercent > 0f) {
+                val awakePercentStr = if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakePercent > 0f) {
                     String.format(Locale.US, "%.1f%%", overview.screenOffAwakePercent)
                 } else {
                     "--"
@@ -578,13 +578,17 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 } else {
                     overview.screenOffAwakeDurationText.ifBlank { "0s" }
                 }
-                val energyText = String.format(Locale.US, "%.3fWh", overview.screenOffAwakeEnergyWh)
+                val energyText = if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakeEnergyWh > 0f) {
+                    String.format(Locale.US, "%.3fWh", overview.screenOffAwakeEnergyWh)
+                } else {
+                    "--"
+                }
                 val subtitleHtml = "<font color=\"#FFA4A4\">$durText</font> <font color=\"#FFA4A4\">$energyText</font>"
                 tvAwakeSubtitle.text = HtmlCompat.fromHtml(subtitleHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
 
-                val awakeDrainMah = if (overview.screenOffAwakeDrainMah > 0f) {
+                val awakeDrainMah = if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakeDrainMah > 0f) {
                     overview.screenOffAwakeDrainMah
-                } else if (overview.screenOffAwakeEnergyWh > 0f) {
+                } else if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakeEnergyWh > 0f) {
                     (overview.screenOffAwakeEnergyWh * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
                 } else {
                     0f
@@ -604,7 +608,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 tvSleepSubtitle.text = noRecordText
                 tvSleepMah.text = "--"
             } else {
-                val sleepPercentStr = if (overview.screenOffDeepSleepPercent > 0f) {
+                val sleepPercentStr = if (overview.isScreenOffDecomposedAvailable && overview.screenOffDeepSleepPercent > 0f) {
                     String.format(Locale.US, "%.1f%%", overview.screenOffDeepSleepPercent)
                 } else {
                     "--"
@@ -616,13 +620,17 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 } else {
                     overview.screenOffDeepSleepDurationText.ifBlank { "0s" }
                 }
-                val energyText = String.format(Locale.US, "%.3fWh", overview.screenOffDeepSleepEnergyWh)
+                val energyText = if (overview.isScreenOffDecomposedAvailable && overview.screenOffDeepSleepEnergyWh > 0f) {
+                    String.format(Locale.US, "%.3fWh", overview.screenOffDeepSleepEnergyWh)
+                } else {
+                    "--"
+                }
                 val subtitleHtml = "<font color=\"#B71C1C\">$durText</font> <font color=\"#B71C1C\">$energyText</font>"
                 tvSleepSubtitle.text = HtmlCompat.fromHtml(subtitleHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
 
-                val sleepDrainMah = if (overview.screenOffDeepSleepDrainMah > 0f) {
+                val sleepDrainMah = if (overview.isScreenOffDecomposedAvailable && overview.screenOffDeepSleepDrainMah > 0f) {
                     overview.screenOffDeepSleepDrainMah
-                } else if (overview.screenOffDeepSleepEnergyWh > 0f) {
+                } else if (overview.isScreenOffDecomposedAvailable && overview.screenOffDeepSleepEnergyWh > 0f) {
                     (overview.screenOffDeepSleepEnergyWh * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
                 } else {
                     0f

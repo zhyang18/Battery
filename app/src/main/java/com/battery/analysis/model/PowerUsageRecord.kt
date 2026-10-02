@@ -42,6 +42,13 @@ import org.json.JSONObject
  * @property backgroundEnergyWh 后台服务总消耗物理能量（单位：瓦时 Wh）
  * @property isCompleted 是否已结束放电并正式归档（true 为已完成，false 为进行中 RUNNING 检查点草稿）
  * @property lastCheckpointTime 最近一次 Checkpoint 检查点增量持久化时间戳（毫秒）
+ * @property screenOffAwakeEnergyWh 息屏唤醒期间消耗能量（单位：瓦时 Wh）
+ * @property screenOffDeepSleepEnergyWh 深度睡眠期间消耗能量（单位：瓦时 Wh）
+ * @property screenOffAwakeDurationMs 息屏唤醒实际持续物理毫秒数
+ * @property screenOffDeepSleepDurationMs 深度睡眠实际持续物理毫秒数
+ * @property screenOffAwakeDrainMah 息屏唤醒期间消耗电荷量（单位：毫安时 mAh）
+ * @property screenOffDeepSleepDrainMah 深度睡眠期间消耗电荷量（单位：毫安时 mAh）
+ * @property isScreenOffDecomposedAvailable 息屏唤醒与休眠细分是否具备底层依据并成功分解
  */
 data class PowerUsageRecord(
     val id: Long = System.currentTimeMillis(),
@@ -72,7 +79,14 @@ data class PowerUsageRecord(
     val screenOffEnergyWh: Float = 0f,
     val backgroundEnergyWh: Float = 0f,
     val isCompleted: Boolean = true,
-    val lastCheckpointTime: Long = 0L
+    val lastCheckpointTime: Long = 0L,
+    val screenOffAwakeEnergyWh: Float = 0f,
+    val screenOffDeepSleepEnergyWh: Float = 0f,
+    val screenOffAwakeDurationMs: Long = 0L,
+    val screenOffDeepSleepDurationMs: Long = 0L,
+    val screenOffAwakeDrainMah: Float = 0f,
+    val screenOffDeepSleepDrainMah: Float = 0f,
+    val isScreenOffDecomposedAvailable: Boolean = true
 ) {
 
     /**
@@ -115,7 +129,16 @@ data class PowerUsageRecord(
             screenOffEnergyWh = screenOffEnergyWh,
             backgroundEnergyWh = backgroundEnergyWh,
             usedDurationText = "$screenOnDurationText / $totalDurationText",
-            remainingLifeText = remainingCompositeText
+            remainingLifeText = remainingCompositeText,
+            screenOffAwakeEnergyWh = screenOffAwakeEnergyWh,
+            screenOffDeepSleepEnergyWh = screenOffDeepSleepEnergyWh,
+            screenOffAwakeDurationMs = screenOffAwakeDurationMs,
+            screenOffDeepSleepDurationMs = screenOffDeepSleepDurationMs,
+            screenOffAwakeDrainMah = screenOffAwakeDrainMah,
+            screenOffDeepSleepDrainMah = screenOffDeepSleepDrainMah,
+            isScreenOffDecomposedAvailable = isScreenOffDecomposedAvailable,
+            screenOffAwakeDurationText = if (screenOffAwakeDurationMs > 0L) com.battery.analysis.manager.PowerUsageManager.formatCompactDuration(screenOffAwakeDurationMs) else "",
+            screenOffDeepSleepDurationText = if (screenOffDeepSleepDurationMs > 0L) com.battery.analysis.manager.PowerUsageManager.formatCompactDuration(screenOffDeepSleepDurationMs) else ""
         )
 
         // 反序列化应用列表
@@ -490,7 +513,14 @@ data class PowerUsageRecord(
                 screenOffEnergyWh = overview.screenOffEnergyWh,
                 backgroundEnergyWh = overview.backgroundEnergyWh,
                 isCompleted = isCompleted,
-                lastCheckpointTime = lastCheckpointTime
+                lastCheckpointTime = lastCheckpointTime,
+                screenOffAwakeEnergyWh = overview.screenOffAwakeEnergyWh,
+                screenOffDeepSleepEnergyWh = overview.screenOffDeepSleepEnergyWh,
+                screenOffAwakeDurationMs = overview.screenOffAwakeDurationMs,
+                screenOffDeepSleepDurationMs = overview.screenOffDeepSleepDurationMs,
+                screenOffAwakeDrainMah = overview.screenOffAwakeDrainMah,
+                screenOffDeepSleepDrainMah = overview.screenOffDeepSleepDrainMah,
+                isScreenOffDecomposedAvailable = overview.isScreenOffDecomposedAvailable
             )
         }
 
@@ -532,7 +562,14 @@ data class PowerUsageRecord(
                     screenOffEnergyWh = obj.optDouble("screenOffEnergyWh", 0.0).toFloat(),
                     backgroundEnergyWh = obj.optDouble("backgroundEnergyWh", 0.0).toFloat(),
                     isCompleted = obj.optBoolean("isCompleted", true),
-                    lastCheckpointTime = obj.optLong("lastCheckpointTime", 0L)
+                    lastCheckpointTime = obj.optLong("lastCheckpointTime", 0L),
+                    screenOffAwakeEnergyWh = obj.optDouble("screenOffAwakeEnergyWh", 0.0).toFloat(),
+                    screenOffDeepSleepEnergyWh = obj.optDouble("screenOffDeepSleepEnergyWh", 0.0).toFloat(),
+                    screenOffAwakeDurationMs = obj.optLong("screenOffAwakeDurationMs", 0L),
+                    screenOffDeepSleepDurationMs = obj.optLong("screenOffDeepSleepDurationMs", 0L),
+                    screenOffAwakeDrainMah = obj.optDouble("screenOffAwakeDrainMah", 0.0).toFloat(),
+                    screenOffDeepSleepDrainMah = obj.optDouble("screenOffDeepSleepDrainMah", 0.0).toFloat(),
+                    isScreenOffDecomposedAvailable = obj.optBoolean("isScreenOffDecomposedAvailable", true)
                 )
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -577,6 +614,13 @@ data class PowerUsageRecord(
         obj.put("backgroundEnergyWh", backgroundEnergyWh.toDouble())
         obj.put("isCompleted", isCompleted)
         obj.put("lastCheckpointTime", lastCheckpointTime)
+        obj.put("screenOffAwakeEnergyWh", screenOffAwakeEnergyWh.toDouble())
+        obj.put("screenOffDeepSleepEnergyWh", screenOffDeepSleepEnergyWh.toDouble())
+        obj.put("screenOffAwakeDurationMs", screenOffAwakeDurationMs)
+        obj.put("screenOffDeepSleepDurationMs", screenOffDeepSleepDurationMs)
+        obj.put("screenOffAwakeDrainMah", screenOffAwakeDrainMah.toDouble())
+        obj.put("screenOffDeepSleepDrainMah", screenOffDeepSleepDrainMah.toDouble())
+        obj.put("isScreenOffDecomposedAvailable", isScreenOffDecomposedAvailable)
         return obj.toString()
     }
 }

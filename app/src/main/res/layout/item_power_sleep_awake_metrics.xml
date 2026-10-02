@@ -68,6 +68,19 @@
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="10.5sp"
                 tools:text="45m20s 0.543Wh" />
+
+            <!-- 第三行：息屏消耗电荷量 -->
+            <TextView
+                android:id="@+id/tv_screen_off_mah"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:letterSpacing="-0.01"
+                android:singleLine="true"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="10.5sp"
+                tools:text="141.0 mAh" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
@@ -129,6 +142,19 @@
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="10.5sp"
                 tools:text="4m10s 0.123Wh" />
+
+            <!-- 第三行：唤醒消耗电荷量（浅红高亮） -->
+            <TextView
+                android:id="@+id/tv_awake_mah"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:letterSpacing="-0.01"
+                android:singleLine="true"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="10.5sp"
+                tools:text="32.0 mAh" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
@@ -189,6 +215,19 @@
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="10.5sp"
                 tools:text="41m10s 0.420Wh" />
+
+            <!-- 第三行：深度睡眠消耗电荷量（深红/暗红高亮） -->
+            <TextView
+                android:id="@+id/tv_sleep_mah"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:letterSpacing="-0.01"
+                android:singleLine="true"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="10.5sp"
+                tools:text="109.0 mAh" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 </LinearLayout>

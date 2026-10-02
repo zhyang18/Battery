@@ -56,17 +56,21 @@ class HistoryDbHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAM
      * @param newVersion 新版本号
      */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion < 2) {
-            try {
+        db.beginTransaction()
+        try {
+            if (oldVersion < 2) {
                 db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_CATEGORY TEXT NOT NULL DEFAULT '系统api'")
                 db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_NOTE TEXT")
-            } catch (e: Exception) {
-                e.printStackTrace()
             }
+            try {
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_battery_history_category ON $TABLE_NAME ($COL_CATEGORY, $COL_ID DESC)")
+            } catch (_: Exception) {}
+            db.setTransactionSuccessful()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            db.endTransaction()
         }
-        try {
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_battery_history_category ON $TABLE_NAME ($COL_CATEGORY, $COL_ID DESC)")
-        } catch (_: Exception) {}
     }
 
     /**

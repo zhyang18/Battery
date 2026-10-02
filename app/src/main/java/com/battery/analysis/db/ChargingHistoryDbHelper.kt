@@ -94,12 +94,16 @@ class ChargingHistoryDbHelper private constructor(context: Context) :
      * @param newVersion 新版本号
      */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion < 2) {
-            try {
+        db.beginTransaction()
+        try {
+            if (oldVersion < 2) {
                 db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_SAMPLE_POINTS_JSON TEXT")
-            } catch (e: Exception) {
-                e.printStackTrace()
             }
+            db.setTransactionSuccessful()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            db.endTransaction()
         }
     }
 

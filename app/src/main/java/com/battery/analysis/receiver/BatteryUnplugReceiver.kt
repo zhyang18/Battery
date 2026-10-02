@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import com.battery.analysis.manager.AppUpgradeManager
 import com.battery.analysis.manager.ChargingStatsManager
 import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.PowerUsageRecord
@@ -36,6 +37,10 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
      */
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
+        if (action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            handlePackageReplaced(context)
+            return
+        }
         if (!BatteryMonitorService.isChargeDischargeStatsEnabled(context)) {
             return
         }
@@ -199,6 +204,38 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
                 // 2. 若用户开启了后台常驻服务与开机自启，恢复启动前台监控服务
                 if (BatteryMonitorService.isServiceEnabled(appContext) &&
                     BatteryMonitorService.isBootAutoStartEnabled(appContext)) {
+                    BatteryMonitorService.start(appContext)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                pendingResult.finish()
+                wakeLock?.release()
+            }
+        }
+    }
+
+    /**
+     * 处理应用程序自身被覆盖升级安装完成事件（ACTION_MY_PACKAGE_REPLACED）。
+     * 执行全量数据版本迁移流水线，恢复并封顶升级前被中断的会话，并自愈拉活前台常驻服务与心跳对齐。
+     *
+     * @param context 应用程序上下文
+     */
+    private fun handlePackageReplaced(context: Context) {
+        val appContext = context.applicationContext
+        val wakeLock = acquireWakeLock(appContext, "battery:package_replaced")
+        val pendingResult = goAsync()
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                // 1. 触发应用升级数据无缝迁移流水线（版本对比、孤儿会话封顶与配置迁移）
+                AppUpgradeManager.getInstance(appContext).checkAndPerformMigration()
+
+                // 2. 执行充放电状态自愈对齐（恢复或对齐升级安装期间的硬件状态）
+                ChargingStatsManager.getInstance(appContext).checkAndReconcileChargingState()
+                PowerUsageManager.getInstance(appContext).checkAndReconcileDischargeState()
+
+                // 3. 若用户开启了后台常驻监控服务，无缝自愈拉起前台服务持续采样
+                if (BatteryMonitorService.isServiceEnabled(appContext)) {
                     BatteryMonitorService.start(appContext)
                 }
             } catch (e: Exception) {

@@ -66,22 +66,30 @@ class PowerUsageDbHelper private constructor(context: Context) :
      * @param newVersion 新版本号
      */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        if (oldVersion < 2) {
-            try {
-                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_BACKGROUND_POWER_WATTS REAL DEFAULT 0")
-                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_BACKGROUND_DURATION TEXT DEFAULT ''")
-                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_REM_BACKGROUND TEXT DEFAULT ''")
-                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_SCREEN_ON_ENERGY_WH REAL DEFAULT 0")
-                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_TOTAL_ENERGY_WH REAL DEFAULT 0")
-                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_SCREEN_OFF_ENERGY_WH REAL DEFAULT 0")
-                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_BACKGROUND_ENERGY_WH REAL DEFAULT 0")
-            } catch (_: Exception) {}
-        }
-        if (oldVersion < 3) {
-            try {
-                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_IS_COMPLETED INTEGER NOT NULL DEFAULT 1")
-                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_LAST_CHECKPOINT_TIME INTEGER DEFAULT 0")
-            } catch (_: Exception) {}
+        db.beginTransaction()
+        try {
+            if (oldVersion < 2) {
+                try {
+                    db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_BACKGROUND_POWER_WATTS REAL DEFAULT 0")
+                    db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_BACKGROUND_DURATION TEXT DEFAULT ''")
+                    db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_REM_BACKGROUND TEXT DEFAULT ''")
+                    db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_SCREEN_ON_ENERGY_WH REAL DEFAULT 0")
+                    db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_TOTAL_ENERGY_WH REAL DEFAULT 0")
+                    db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_SCREEN_OFF_ENERGY_WH REAL DEFAULT 0")
+                    db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_BACKGROUND_ENERGY_WH REAL DEFAULT 0")
+                } catch (_: Exception) {}
+            }
+            if (oldVersion < 3) {
+                try {
+                    db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_IS_COMPLETED INTEGER NOT NULL DEFAULT 1")
+                    db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_LAST_CHECKPOINT_TIME INTEGER DEFAULT 0")
+                } catch (_: Exception) {}
+            }
+            db.setTransactionSuccessful()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            db.endTransaction()
         }
     }
 

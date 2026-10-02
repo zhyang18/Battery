@@ -111,6 +111,9 @@ class MainActivity : AppCompatActivity() {
         // 0. 初始化并应用保存的语言配置
         com.battery.analysis.manager.LanguageManager.initLanguage(this)
 
+        // 检测应用是否覆盖升级安装，自动执行数据迁移与断点孤儿会话封顶
+        com.battery.analysis.manager.AppUpgradeManager.getInstance(this).checkAndPerformMigration()
+
         val savedThemeMode = prefs.getInt("theme_mode", AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
         AppCompatDelegate.setDefaultNightMode(savedThemeMode)
 

@@ -7,7 +7,7 @@ import android.os.Bundle
 /**
  * 全局应用生命周期状态追踪器。
  * 通过监听全局 Activity 的启动与停止，精确判定应用是处于前台、后台还是正在经历前后台切换（冷启动与后台唤醒）。
- * 同时统一维护耗电统计上次刷新的时间戳，支撑“冷启动或后台启动 1 分钟内防重复刷新、应用内切换或返回不刷新”的业务策略。
+ * 同时统一维护耗电统计上次刷新的时间戳，支撑“冷启动或后台启动 2 分钟内防重复刷新、应用内切换或返回不刷新”的业务策略。
  */
 object AppLifecycleTracker : Application.ActivityLifecycleCallbacks {
 
@@ -17,8 +17,8 @@ object AppLifecycleTracker : Application.ActivityLifecycleCallbacks {
     /** 耗电统计上次刷新时间戳持久化存储键名 */
     private const val KEY_LAST_DISCHARGE_REFRESH_TIME = "last_discharge_refresh_time"
 
-    /** 耗电统计防重复刷新最小时间门限阈值（60,000毫秒，即 1 分钟） */
-    const val REFRESH_INTERVAL_THRESHOLD_MS = 60_000L
+    /** 耗电统计防重复刷新最小时间门限阈值（120,000毫秒，即 2 分钟） */
+    const val REFRESH_INTERVAL_THRESHOLD_MS = 120_000L
 
     /** 应用程序全局上下文引用缓存 */
     private var applicationContext: Application? = null
@@ -61,8 +61,8 @@ object AppLifecycleTracker : Application.ActivityLifecycleCallbacks {
      * 1. 若当前界面尚未加载过任何数据且无法获取缓存（首屏初次冷启动且未渲染），必须执行刷新；
      * 2. 若当前仅仅是在 App 内部页面跳转返回或底部页签切换（未切出后台），不刷新；
      * 3. 若为冷启动或从后台启动重新进入前台：
-     *    - 距离上次刷新时间超过 1 分钟（60,000ms）或从未刷新过，正常刷新；
-     *    - 距离上次刷新时间在 1 分钟内，不刷新。
+     *    - 距离上次刷新时间超过 2 分钟（120,000ms）或从未刷新过，正常刷新；
+     *    - 距离上次刷新时间在 2 分钟内，不刷新。
      *
      * @param hasRenderedData 当前界面是否已持有有效且渲染完毕的耗电数据包（包含从持久化缓存恢复的数据）
      * @return 若满足刷新时机返回 true，否则返回 false
@@ -81,7 +81,7 @@ object AppLifecycleTracker : Application.ActivityLifecycleCallbacks {
             // 无论是否刷新，消费本次切前台事件
             hasForegroundTransition = false
 
-            // 上次刷新距今超过 1 分钟（或从未刷新过），允许正常刷新
+            // 上次刷新距今超过 2 分钟（或从未刷新过），允许正常刷新
             return lastDischargeRefreshTimeMillis <= 0L || timeSinceLastRefresh > REFRESH_INTERVAL_THRESHOLD_MS
         }
 

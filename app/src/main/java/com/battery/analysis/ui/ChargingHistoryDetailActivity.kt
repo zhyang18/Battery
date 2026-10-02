@@ -187,10 +187,22 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
         binding.chargingChartView.setData(samplePoints)
 
         // 异步查询该充电历史时间段内的前台应用事件，在走势图上展示应用小图标
-        if (record.startTimestamp > 0L && record.endTimestamp > record.startTimestamp) {
+        val effectiveStartTs = when {
+            record.startTimestamp > 0L -> record.startTimestamp
+            samplePoints.isNotEmpty() && samplePoints.first().timestamp > 0L -> samplePoints.first().timestamp
+            record.endTimestamp > 0L && record.durationMs > 0L -> (record.endTimestamp - record.durationMs).coerceAtLeast(0L)
+            else -> 0L
+        }
+        val effectiveEndTs = when {
+            record.endTimestamp > effectiveStartTs -> record.endTimestamp
+            samplePoints.isNotEmpty() && samplePoints.last().timestamp > effectiveStartTs -> samplePoints.last().timestamp
+            record.id > effectiveStartTs -> record.id
+            else -> 0L
+        }
+        if (effectiveStartTs > 0L && effectiveEndTs > effectiveStartTs) {
             lifecycleScope.launch(Dispatchers.IO) {
                 val powerManager = PowerUsageManager.getInstance(applicationContext)
-                val events = powerManager.queryChargingAppTimelineEvents(record.startTimestamp, record.endTimestamp)
+                val events = powerManager.queryChargingAppTimelineEvents(effectiveStartTs, effectiveEndTs)
                 withContext(Dispatchers.Main) {
                     binding.chargingChartView.setAppEvents(events)
                 }

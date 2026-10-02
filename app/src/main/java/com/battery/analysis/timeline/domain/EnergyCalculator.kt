@@ -99,22 +99,12 @@ object EnergyCalculator {
             )
         }
 
-        // 2. 否则基于客观时间占比估算（MEDIUM / ESTIMATED），杜绝使用写死的人工权重倍率
-        val timeRatio = if (totalDurationMs > 0L) {
-            (appDurationMs.toDouble() / totalDurationMs.toDouble()).coerceIn(0.0, 1.0)
-        } else {
-            0.0
-        }
-
-        val estimatedEnergyMwh = totalSystemEnergyMwh * timeRatio
-        val avgPowerMw = calculateAveragePowerMw(estimatedEnergyMwh, appDurationMs)
-        val peakPowerMw = avgPowerMw
-
+        // 2. 若底层无独立权威放电量，严格遵循真实物理数据原则，不拿系统总耗能按时间比例伪造兜底
         return EnergyEstimate(
-            energyMwh = estimatedEnergyMwh,
-            averagePowerMw = avgPowerMw,
-            peakPowerMw = peakPowerMw,
-            confidence = ConfidenceLevel.MEDIUM,
+            energyMwh = 0.0,
+            averagePowerMw = 0.0,
+            peakPowerMw = 0.0,
+            confidence = ConfidenceLevel.LOW,
             source = EnergySource.ESTIMATED
         )
     }

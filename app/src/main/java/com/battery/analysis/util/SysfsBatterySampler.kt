@@ -152,20 +152,29 @@ object SysfsBatterySampler {
         val prevUah = lastCoulombChargeUah
         val prevTime = lastCoulombTimestampMs
 
+        if (prevTime <= 0L || prevUah <= 0L) {
+            lastCoulombChargeUah = chargeUah
+            lastCoulombTimestampMs = now
+            return null
+        }
+
+        val deltaUah = Math.abs(chargeUah - prevUah)
+        if (deltaUah == 0L) {
+            // 电荷尚未发生离散步进，保持 prevTime 记录步进起始时间
+            return null
+        }
+
+        // 仅在电荷量真实发生跳变时更新基准时间与电荷量
+        val dtMs = now - prevTime
         lastCoulombChargeUah = chargeUah
         lastCoulombTimestampMs = now
 
-        if (prevTime <= 0L || prevUah <= 0L) {
-            return null
-        }
-        val dtMs = now - prevTime
-        if (dtMs in 800L..60_000L) {
-            val deltaUah = Math.abs(chargeUah - prevUah)
-            if (deltaUah > 0L) {
-                val ma = (deltaUah * 3600f) / dtMs
-                if (ma > 0f) {
-                    return ma
-                }
+        // 步进周期在有效合理窗口（3秒 ~ 5分钟）内推算真实放电电流
+        if (dtMs in 3_000L..300_000L) {
+            val ma = (deltaUah * 3600f) / dtMs
+            // 物理放电保护：手机正常瞬时放电电流绝不会超过 4000mA（约 16W），若超出说明属于跨周期阶跃，不作为瞬时物理电流
+            if (ma in 10f..4000f) {
+                return ma
             }
         }
         return null
@@ -966,14 +975,14 @@ object SysfsBatterySampler {
     }
 
     /**
-     * 将原始电流绝对值（uA 或 mA）归一化为毫安（mA）。
-     * 约定：绝对值 >= 10000 视为微安 (uA)，除以 1000；否则视为毫安 (mA)。
+     * 将原始电流绝对值（uA、mA 或 0.1uA）规范化为标准毫安（mA）。
+     * 统一委托给 [BatteryUnitNormalizer.normalizeCurrentMa] 执行多机型自适应归一化。
      *
      * @param absVal 电流绝对值
-     * @return 毫安值
+     * @return 归一化后的毫安值 (mA)
      */
     private fun normalizeCurrentToMa(absVal: Long): Float {
-        return if (absVal >= 10_000L) absVal / 1000f else absVal.toFloat()
+        return BatteryUnitNormalizer.normalizeCurrentMa(absVal)
     }
 
     /**

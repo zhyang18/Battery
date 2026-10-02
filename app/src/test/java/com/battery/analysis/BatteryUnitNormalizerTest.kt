@@ -34,6 +34,8 @@ class BatteryUnitNormalizerTest {
      */
     @Test
     fun testNormalizeCurrentDischarging() {
+        BatteryUnitNormalizer.resetUnitDetectionForTest()
+
         // 标准微安 (350,000 uA -> 350 mA)
         val normalCur = BatteryUnitNormalizer.normalizeCurrentMa(350_000L, isCharging = false)
         assertEquals(350f, normalCur, 0.01f)
@@ -49,6 +51,48 @@ class BatteryUnitNormalizerTest {
         // 负数放电输入测试
         val negativeCur = BatteryUnitNormalizer.normalizeCurrentMa(-350_000L, isCharging = false)
         assertEquals(350f, negativeCur, 0.01f)
+    }
+
+    /**
+     * 测试原生以毫安（mA）为单位上报的设备（如荣耀/华为机型，亮屏放电 267mA）。
+     * 验证其电流忠实识别为 267mA，瞬时功率准确计算为 1.09W，绝不再被误除以 1000 缩水为 0.00W。
+     */
+    @Test
+    fun testNormalizeCurrentMilliampereDevices() {
+        BatteryUnitNormalizer.resetUnitDetectionForTest()
+
+        // 模拟荣耀设备亮屏放电读取 267 (mA)
+        val curMa = BatteryUnitNormalizer.normalizeCurrentMa(267L, isCharging = false)
+        assertEquals("毫安设备放电电流应准确保留为 267mA", 267f, curMa, 0.01f)
+
+        // 计算 4.081V 电压下的功率
+        val powerWatts = BatteryUnitNormalizer.calculatePowerWatts(4.081f, curMa, isCharging = false)
+        assertEquals("瞬时功率应准确计算为 1.09W（与系统悬浮条一致）", 1.09f, powerWatts, 0.02f)
+
+        // 模拟重载放电 1200mA
+        val heavyMa = BatteryUnitNormalizer.normalizeCurrentMa(1200L, isCharging = false)
+        assertEquals("毫安设备重载电流应准确为 1200mA", 1200f, heavyMa, 0.01f)
+    }
+
+    /**
+     * 测试微安（uA）机型（如高通/Pixel）在亮屏大数确立后，息屏待机低电流（如 5000 uA = 5mA）
+     * 能够准确自适应除以 1000 恢复真实 5mA 待机，杜绝被误算为 5000mA（20W 放电）。
+     */
+    @Test
+    fun testQualcommSleepCurrentPreservedWithoutInflation() {
+        BatteryUnitNormalizer.resetUnitDetectionForTest()
+
+        // 阶段 1：亮屏正常使用，高通上报微安大数 300,000 uA (300mA)
+        val onCur = BatteryUnitNormalizer.normalizeCurrentMa(300_000L, isCharging = false)
+        assertEquals("亮屏大数归一化为 300mA", 300f, onCur, 0.01f)
+        assertEquals(BatteryUnitNormalizer.CurrentUnitMode.MICROAMPERES, BatteryUnitNormalizer.getDetectedUnitMode())
+
+        // 阶段 2：锁屏进入息屏待机，高通上报 5,000 uA (5mA)
+        val sleepCur = BatteryUnitNormalizer.normalizeCurrentMa(5_000L, isCharging = false)
+        assertEquals("微安设备待机 5000uA 应准确折算为 5mA 绝不膨胀为 5000mA", 5f, sleepCur, 0.01f)
+
+        val sleepWatts = BatteryUnitNormalizer.calculatePowerWatts(4.0f, sleepCur, isCharging = false)
+        assertEquals("待机功耗准确计算为 0.02W 绝非 20W", 0.02f, sleepWatts, 0.005f)
     }
 
     /**

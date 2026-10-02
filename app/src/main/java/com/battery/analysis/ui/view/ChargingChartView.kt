@@ -403,6 +403,15 @@ class ChargingChartView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * 获取当前图表中持有的前台应用时间轴事件数量。
+     *
+     * @return 前台应用时间轴事件总数
+     */
+    fun getAppEventsCount(): Int {
+        return appEvents.size
+    }
+
     // 激活展示的指标多选集合（默认全选五维：电量、功率、温度、电压、应用）
     private var selectedMetrics: Set<TimelineMetric> = setOf(
         TimelineMetric.BATTERY,
@@ -814,10 +823,11 @@ class ChargingChartView @JvmOverloads constructor(
                 drawOverflowBadge(canvas, item)
             } else {
                 val event = item.event
-                val bmp = DrawableBitmapCache.getOrConvertBitmap(
+                val bmp = DrawableBitmapCache.getOrLoadBitmap(
+                    context,
                     event.packageName,
-                    event.icon,
-                    iconRenderSize
+                    iconRenderSize,
+                    event.icon
                 )
                 if (bmp != null && !bmp.isRecycled) {
                     iconSrcRect.set(0, 0, bmp.width, bmp.height)
@@ -915,7 +925,7 @@ class ChargingChartView @JvmOverloads constructor(
         val iconTop = headerTop + (headerBottom - headerTop - iconSize) / 2f
         if (curApp != null) {
             val renderIconSize = iconSize.toInt().coerceAtLeast(1)
-            val bmp = DrawableBitmapCache.getOrConvertBitmap(curApp.packageName, curApp.icon, renderIconSize)
+            val bmp = DrawableBitmapCache.getOrLoadBitmap(context, curApp.packageName, renderIconSize, curApp.icon)
             if (bmp != null && !bmp.isRecycled) {
                 iconSrcRect.set(0, 0, bmp.width, bmp.height)
                 iconDstRect.set(iconLeft, iconTop, iconLeft + iconSize, iconTop + iconSize)
@@ -1285,10 +1295,11 @@ class ChargingChartView @JvmOverloads constructor(
             val curIconLeft = boxLeft + paddingH + col * (iconSize + iconGap)
             val curIconTop = boxTop + paddingV + row * (iconSize + iconGap)
 
-            val bmp = DrawableBitmapCache.getOrConvertBitmap(
+            val bmp = DrawableBitmapCache.getOrLoadBitmap(
+                context,
                 event.packageName,
-                event.icon,
-                renderIconSize
+                renderIconSize,
+                event.icon
             )
             if (bmp != null && !bmp.isRecycled) {
                 iconSrcRect.set(0, 0, bmp.width, bmp.height)

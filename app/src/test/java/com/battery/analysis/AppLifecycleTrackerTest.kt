@@ -8,7 +8,7 @@ import org.junit.Test
 
 /**
  * 全局应用生命周期状态追踪器 [AppLifecycleTracker] 单元测试套件。
- * 验证应用内部切页、子页面返回、切出后台切回以及冷启动在 1 分钟时效门限前后的刷新判定策略。
+ * 验证应用内部切页、子页面返回、切出后台切回以及冷启动在 2 分钟时效门限前后的刷新判定策略。
  */
 class AppLifecycleTrackerTest {
 
@@ -55,71 +55,71 @@ class AppLifecycleTrackerTest {
     }
 
     /**
-     * 测试从后台重新切回前台（前后台切换）且在 1 分钟内时，不触发耗电统计刷新。
+     * 测试从后台重新切回前台（前后台切换）且在 2 分钟内时，不触发耗电统计刷新。
      */
     @Test
-    fun testForegroundTransitionWithinOneMinuteDoesNotRefresh() {
+    fun testForegroundTransitionWithinTwoMinutesDoesNotRefresh() {
         val now = System.currentTimeMillis()
-        // 模拟上次刷新在 30 秒前
+        // 模拟上次刷新在 60 秒前（在 120 秒内）
         AppLifecycleTracker.resetForTest(
-            refreshTime = now - 30_000L,
+            refreshTime = now - 60_000L,
             startedCount = 1,
             hasTransition = true
         )
 
         val shouldRefresh = AppLifecycleTracker.shouldRefreshPowerStats(hasRenderedData = true)
-        assertFalse("从后台切回前台在 1 分钟之内时不应触发刷新", shouldRefresh)
+        assertFalse("从后台切回前台在 2 分钟之内时不应触发刷新", shouldRefresh)
     }
 
     /**
-     * 测试从后台重新切回前台且距上次刷新已超过 1 分钟时，必须正常触发数据刷新。
+     * 测试从后台重新切回前台且距上次刷新已超过 2 分钟时，必须正常触发数据刷新。
      */
     @Test
-    fun testForegroundTransitionAfterOneMinuteMustRefresh() {
+    fun testForegroundTransitionAfterTwoMinutesMustRefresh() {
         val now = System.currentTimeMillis()
-        // 模拟上次刷新在 75 秒前（超过 60 秒）
+        // 模拟上次刷新在 135 秒前（超过 120 秒）
         AppLifecycleTracker.resetForTest(
-            refreshTime = now - 75_000L,
+            refreshTime = now - 135_000L,
             startedCount = 1,
             hasTransition = true
         )
 
         val shouldRefresh = AppLifecycleTracker.shouldRefreshPowerStats(hasRenderedData = true)
-        assertTrue("从后台切回前台超过 1 分钟后必须正常触发数据刷新", shouldRefresh)
+        assertTrue("从后台切回前台超过 2 分钟后必须正常触发数据刷新", shouldRefresh)
     }
 
     /**
-     * 测试冷启动进入应用，在持有本地持久化缓存且距上次刷新在 1 分钟内时，不触发重复刷新。
+     * 测试冷启动进入应用，在持有本地持久化缓存且距上次刷新在 2 分钟内时，不触发重复刷新。
      */
     @Test
-    fun testColdStartWithinOneMinuteWithCachedDataDoesNotRefresh() {
+    fun testColdStartWithinTwoMinutesWithCachedDataDoesNotRefresh() {
         val now = System.currentTimeMillis()
-        // 模拟冷启动：hasForegroundTransition 为 true，上次刷新在 20 秒前
+        // 模拟冷启动：hasForegroundTransition 为 true，上次刷新在 90 秒前（在 120 秒内）
         AppLifecycleTracker.resetForTest(
-            refreshTime = now - 20_000L,
+            refreshTime = now - 90_000L,
             startedCount = 1,
             hasTransition = true
         )
 
         val shouldRefresh = AppLifecycleTracker.shouldRefreshPowerStats(hasRenderedData = true)
-        assertFalse("冷启动在 1 分钟内持有有效缓存时不应触发重复刷新", shouldRefresh)
+        assertFalse("冷启动在 2 分钟内持有有效缓存时不应触发重复刷新", shouldRefresh)
     }
 
     /**
-     * 测试冷启动进入应用且距上次刷新超过 1 分钟时，必须正常触发全量刷新。
+     * 测试冷启动进入应用且距上次刷新超过 2 分钟时，必须正常触发全量刷新。
      */
     @Test
-    fun testColdStartAfterOneMinuteMustRefresh() {
+    fun testColdStartAfterTwoMinutesMustRefresh() {
         val now = System.currentTimeMillis()
-        // 模拟冷启动：hasForegroundTransition 为 true，上次刷新在 120 秒前
+        // 模拟冷启动：hasForegroundTransition 为 true，上次刷新在 150 秒前（超过 120 秒）
         AppLifecycleTracker.resetForTest(
-            refreshTime = now - 120_000L,
+            refreshTime = now - 150_000L,
             startedCount = 1,
             hasTransition = true
         )
 
         val shouldRefresh = AppLifecycleTracker.shouldRefreshPowerStats(hasRenderedData = true)
-        assertTrue("冷启动超过 1 分钟后必须正常触发全量刷新", shouldRefresh)
+        assertTrue("冷启动超过 2 分钟后必须正常触发全量刷新", shouldRefresh)
     }
 
     /**

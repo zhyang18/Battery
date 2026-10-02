@@ -1278,22 +1278,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         }
 
         // 2. 补充 dumpsys 遗漏但系统事件中确实在前台运行的用户应用
-        val knownFgHours = existingMap.values.sumOf { it.foregroundTimeMs } / 3600000.0
-        val knownFgEnergyWh = existingMap.values.sumOf { it.foregroundEnergyWh.toDouble() }
-        val sysAvgWatts = if (dischargeMs > 0L) {
-            val totalMah = pkgDrainMahMap.values.sum()
-            if (totalMah > 0f) (totalMah * voltage / 1000f) / (dischargeMs / 3600000f) else 0f
-        } else {
-            0f
-        }
-        val baselineWatts = if (knownFgHours > 0.02 && knownFgEnergyWh > 0.0) {
-            (knownFgEnergyWh / knownFgHours).toFloat()
-        } else if (sysAvgWatts > 0f) {
-            sysAvgWatts
-        } else {
-            0f
-        }
-
+        // 严格遵循真实物理数据原则：严禁使用整机平均功耗对单应用进行伪造保底，
+        // 应用能耗与平均功耗仅来源于其自身在底层硬件解析出的放电电量。
         for ((pkgName, fgTime) in preciseTimes) {
             val safeFgTime = fgTime.coerceAtMost(dischargeMs)
             if (safeFgTime > 0L && isUserInstalledApp(pkgName) && !existingMap.containsKey(pkgName)) {
@@ -1314,14 +1300,17 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                     0L
                 }
 
-                val fgEnergy = (baselineWatts * (safeFgTime / 3600000f)).coerceAtLeast(0f)
+                val rawDrainMah = pkgDrainMahMap[pkgName] ?: 0f
+                val fgEnergy = if (rawDrainMah > 0f) (rawDrainMah * voltage / 1000f) else 0f
+                val fgHours = safeFgTime / 3600000.0
+                val fgWatts = if (fgHours > 0.0 && fgEnergy > 0f) (fgEnergy / fgHours).toFloat() else 0f
 
                 existingMap[pkgName] = AppPowerUsageItem(
                     packageName = pkgName,
                     appName = appName,
                     icon = null,
                     foregroundTimeMs = safeFgTime,
-                    avgPowerWatts = baselineWatts,
+                    avgPowerWatts = fgWatts,
                     avgTemperature = cycleAvgTemp,
                     maxTemperature = cycleMaxTemp,
                     lastUsedTimeMs = endTime,
@@ -1333,7 +1322,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                     networkBytes = netBytes,
                     wakelockTimeMs = realWake,
                     gpsTimeMs = realGps,
-                    foregroundPowerWatts = baselineWatts,
+                    foregroundPowerWatts = fgWatts,
                     backgroundPowerWatts = 0f,
                     fgsDurationMs = hw?.fgsMs ?: 0L
                 )

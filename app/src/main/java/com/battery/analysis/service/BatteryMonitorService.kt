@@ -174,7 +174,7 @@ class BatteryMonitorService : Service() {
                             fallbackTempCelsius = cachedTemperature,
                             allowProcessFork = false
                         )
-                        val pWatts = hwSample?.powerWatts ?: (cachedScreenOffDischargePowerWatts ?: 0f)
+                        val pWatts = hwSample?.powerWatts ?: 0f
                         val curVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
                         val curTemp = hwSample?.temperatureCelsius ?: cachedTemperature
                         if (hwSample?.voltageVolts != null) cachedVoltageVolts = curVolt
@@ -265,8 +265,7 @@ class BatteryMonitorService : Service() {
                                 fallbackTempCelsius = cachedTemperature,
                                 allowProcessFork = true
                             )
-                            // 息屏待机状态：严格使用息屏专属功率缓存，彻底杜绝亮屏高功耗跨状态污染
-                            val pWatts = hwSample?.powerWatts ?: (cachedScreenOffDischargePowerWatts ?: 0f)
+                            val pWatts = hwSample?.powerWatts ?: 0f
                             val curVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
                             val curTemp = hwSample?.temperatureCelsius ?: cachedTemperature
                             if (hwSample?.voltageVolts != null) cachedVoltageVolts = curVolt
@@ -613,12 +612,7 @@ class BatteryMonitorService : Service() {
                             fallbackTempCelsius = cachedTemperature,
                             allowProcessFork = false // 亮屏 1 秒高频采样严格禁止 Fork 进程，杜绝拉高 CPU 频率
                         )
-                        // 若本次采样未能获取有效功率，严格复用对应屏幕状态的历史缓存（避免息屏错误复用亮屏高功耗）
-                        val pWatts = hwSample?.powerWatts ?: if (isInteractive) {
-                            cachedScreenOnDischargePowerWatts ?: 0f
-                        } else {
-                            cachedScreenOffDischargePowerWatts ?: 0f
-                        }
+                        val pWatts = hwSample?.powerWatts ?: 0f
                         val currentVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
                         val currentTemp = hwSample?.temperatureCelsius ?: cachedTemperature
                         val currentPkg = if (isInteractive) getForegroundPackageName() else null

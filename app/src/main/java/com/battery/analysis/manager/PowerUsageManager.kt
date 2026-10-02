@@ -436,7 +436,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
             val baselinePercentile = 0.30 + (0.50 - 0.30) * confidenceScore
             val baselinePowerWatts = computeWeightedPercentilePower(screenOffShortIntervalPowers, baselinePercentile)
-                ?: return screenOffEnergyWh
+                ?: return screenOffConfidentEnergyWh
 
             var extrapolatedLongGapEnergyWh = 0.0
             for (interval in screenOffLongIntervals) {
@@ -4230,7 +4230,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             val sampledWatts = if (durationMs > 0L && energyWs > 0.0) {
                 (energyWs / (durationMs / 1000.0)).toFloat()
             } else {
-                screenOnWatts
+                0f
             }
             val finalFgWatts = (Math.round(sampledWatts * 100f) / 100f).coerceAtLeast(0f)
             val finalFgEnergy = (finalFgWatts * fgHours).coerceAtLeast(0f)
@@ -5681,7 +5681,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
             val directWh = item?.energyWh?.toDouble()
             val directMwh = directWh?.times(1000.0)
-            val avgMw = item?.let { it.avgPowerWatts * 1000.0 } ?: (fullPackage.overviewStats.avgPowerWatts * 1000.0)
+            val avgMw = item?.let { it.avgPowerWatts * 1000.0 } ?: 0.0
             val peakMw = avgMw // 无瞬时时序切片时峰值等于平均功率
 
             val appCpuMs = if (duration > 0L && item != null && item.foregroundTimeMs > 0L) {
@@ -5778,8 +5778,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         val standbyInfo = getAppInfo(com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY)
         val standbyName = standbyItem?.appName ?: standbyInfo.second
         val standbyUid = standbyInfo.third
-        val standbyAvgMw = standbyItem?.let { it.avgPowerWatts * 1000.0 }
-            ?: (fullPackage.overviewStats.screenOnPowerWatts * 1000.0)
+        val standbyAvgMw = standbyItem?.let { it.avgPowerWatts * 1000.0 } ?: 0.0
 
         // 筛选出所有有效亮屏事件区间
         val onEvents = screenEvents.filter { it.isScreenOn && it.endTime > it.startTime }

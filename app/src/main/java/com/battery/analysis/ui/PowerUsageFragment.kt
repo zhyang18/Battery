@@ -566,7 +566,7 @@ class PowerUsageFragment : Fragment() {
                 if (com.battery.analysis.manager.AppLifecycleTracker.shouldRefreshPowerStats(hasAvailableData)) {
                     loadData()
                 } else if (lastRenderedPackage == null && hasCache) {
-                    // 处于防刷新周期内（如冷启动 1 分钟内或视图重建），从本地/内存缓存直接快速还原数据，免除重复解析与闪烁
+                    // 处于防刷新周期内（如冷启动 2 分钟内或视图重建），从本地/内存缓存直接快速还原数据，免除重复解析与闪烁
                     powerManager.getCachedPowerPackage()?.let { cached ->
                         renderFullPowerData(cached, markAsRefreshed = false)
                     }
@@ -1381,6 +1381,9 @@ class PowerUsageFragment : Fragment() {
             lastRenderedSessionStart = summary.startTimestamp
             refreshChargingAppEvents(force = forceAppRefresh)
         }
+        if (chargingView.chargingChartView.getAppEventsCount() == 0 && lastLoadedChargingAppEvents.isNotEmpty()) {
+            chargingView.chargingChartView.setAppEvents(lastLoadedChargingAppEvents)
+        }
 
         // 2. 填充整合版大卡片：环形进度条与中心大字
         chargingView.circleProgressLevel.setProgress(currentPoint.batteryLevel)
@@ -1460,6 +1463,7 @@ class PowerUsageFragment : Fragment() {
     }
 
     private var lastQueryAppEventsTime = 0L
+    private var lastLoadedChargingAppEvents: List<com.battery.analysis.timeline.domain.AppTimelineEvent> = emptyList()
 
     /**
      * 异步查询并刷新充电期间的前台活跃应用事件列表到充电趋势图表中。
@@ -1474,7 +1478,12 @@ class PowerUsageFragment : Fragment() {
             return
         }
         val summary = chargingManager.getCurrentSummary()
-        val startTs = summary.startTimestamp
+        val samplePoints = chargingManager.getSamplePoints()
+        val startTs = when {
+            summary.startTimestamp > 0L -> summary.startTimestamp
+            samplePoints.isNotEmpty() && samplePoints.first().timestamp > 0L -> samplePoints.first().timestamp
+            else -> 0L
+        }
         if (startTs <= 0L) return
         val endTs = if (summary.endTimestamp > startTs) summary.endTimestamp else now
         lastQueryAppEventsTime = now
@@ -1483,6 +1492,7 @@ class PowerUsageFragment : Fragment() {
             val appEvents = powerManager.queryChargingAppTimelineEvents(startTs, endTs)
             withContext(Dispatchers.Main) {
                 if (_binding != null) {
+                    lastLoadedChargingAppEvents = appEvents
                     adapter.getChargingBinding()?.chargingChartView?.setAppEvents(appEvents)
                 }
             }
@@ -1592,6 +1602,7 @@ class PowerUsageFragment : Fragment() {
 
         btnConfirm.setOnClickListener {
             chargingManager.resetChargingStats()
+            lastLoadedChargingAppEvents = emptyList()
             adapter.getChargingBinding()?.chargingChartView?.clearData()
             renderChargingData()
             Toast.makeText(requireContext(), getString(R.string.charging_reset_success), Toast.LENGTH_SHORT).show()

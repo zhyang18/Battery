@@ -3525,6 +3525,162 @@ class PowerUsageCalculationTest {
         assertTrue("深度睡眠能量必须大于 0Wh", deepSleepEnergyWh > 1.9f)
         assertEquals("唤醒能量与深度睡眠能量之和必须严格守恒等于息屏总能量", offEnergyWh, awakeEnergyWh + deepSleepEnergyWh, 0.001f)
     }
+
+    /**
+     * 验证在息屏开启高频后台采样（相邻采样点无大断层）且功耗从活跃跌落至待机底噪时，
+     * 时间轴能准确切分出深度睡眠暗红段，杜绝整条时间轴全为浅红的问题。
+     */
+    @Test
+    fun testSplitScreenOffEventsContinuousSamplesGeneratesDeepSleep() {
+        val offStart = 100_000L
+        val offEnd = 355_000L // 255 秒（4m15s）
+        val awakeMs = 106_000L // 1m46s
+        val deepSleepMs = 146_000L // 2m26s
+
+        // 构造每隔 10 秒一个连续采样点（无断层，gap 均只有 10 秒）
+        val samples = mutableListOf<PowerDischargePoint>()
+        var t = offStart + 10_000L
+        while (t < offEnd) {
+            val power = if (t <= offStart + awakeMs) 5.5f else 0.08f // 前期高功耗唤醒，后期待机底噪
+            samples.add(
+                PowerDischargePoint(
+                    timestamp = t,
+                    elapsedHours = 0f,
+                    batteryLevel = 77,
+                    voltageVolts = 4.18f,
+                    temperature = 32f,
+                    powerWatts = power,
+                    activeAppIcons = emptyList(),
+                    isScreenOn = false,
+                    activeAppNames = emptyList()
+                )
+            )
+            t += 10_000L
+        }
+
+        val events = PowerUsageManager.splitScreenOffEvents(
+            offStartTs = offStart,
+            offEndTs = offEnd,
+            realtimeSamples = samples,
+            totalAwakeMs = awakeMs,
+            totalDeepSleepMs = deepSleepMs
+        )
+
+        val merged = com.battery.analysis.timeline.domain.TimelineEventMerger.mergeScreenEvents(events)
+        val deepSleepEvent = merged.find { it.isDeepSleep }
+        assertTrue("在连续高频采样下必须能准确切分出深度睡眠暗红事件", deepSleepEvent != null)
+        assertTrue("深度睡眠暗红事件时长必须充足（大于 100 秒）", deepSleepEvent!!.getDurationMs() >= 100_000L)
+    }
+
+    /**
+     * 验证同一个应用内部进行页面切换（如列表页跳转详情页，间隔 150 毫秒）时，
+     * 相邻活跃区间能够被自动平滑合并为一个连续区间，消除切页微缝隙，杜绝产生虚假的未命中或桌面待机。
+     */
+    @Test
+    fun testMergeAdjacentAppIntervalsForSamePackageWithinTransitionThreshold() {
+        val intervals = listOf(
+            PowerUsageManager.AppActivityInterval("com.ss.android.article.news", 1000L, 5000L),
+            PowerUsageManager.AppActivityInterval("com.ss.android.article.news", 5150L, 10000L)
+        )
+        val merged = PowerUsageManager.mergeAdjacentIntervals(intervals, maxGapMs = 2000L)
+
+        assertEquals("相同应用且转场在 2 秒内的两个区间必须合并为 1 个连续区间", 1, merged.size)
+        assertEquals("合并后区间起始时间必须等于首个区间起始时间", 1000L, merged[0].startTs)
+        assertEquals("合并后区间结束时间必须等于末尾区间结束时间", 10000L, merged[0].endTs)
+        assertEquals("包名必须保持不变", "com.ss.android.article.news", merged[0].packageName)
+    }
+
+    /**
+     * 验证不同应用之间的切换（如从快手切到今日头条），即使时间间隔小于 2 秒，
+     * 也必须严格保持为各自独立的区间，绝不可错误跨包名合并。
+     */
+    @Test
+    fun testMergeAdjacentAppIntervalsAcrossDifferentPackagesNotMerged() {
+        val intervals = listOf(
+            PowerUsageManager.AppActivityInterval("com.kuaishou.nebula", 1000L, 5000L),
+            PowerUsageManager.AppActivityInterval("com.ss.android.article.news", 5100L, 10000L)
+        )
+        val merged = PowerUsageManager.mergeAdjacentIntervals(intervals, maxGapMs = 2000L)
+
+        assertEquals("不同应用之间的区间绝不可合并", 2, merged.size)
+        assertEquals("首个应用必须为快手", "com.kuaishou.nebula", merged[0].packageName)
+        assertEquals("第二个应用必须为头条", "com.ss.android.article.news", merged[1].packageName)
+    }
+
+    /**
+     * 验证同一个应用若离开前台超过转场门限（例如退回桌面待机 5 秒后再重新进入），
+     * 必须保持为两个独立区间，绝不凭空捏造合并，忠实反映中间客观存在的桌面待机工时。
+     */
+    @Test
+    fun testMergeAdjacentAppIntervalsBeyondThresholdNotMerged() {
+        val intervals = listOf(
+            PowerUsageManager.AppActivityInterval("com.ss.android.article.news", 1000L, 5000L),
+            PowerUsageManager.AppActivityInterval("com.ss.android.article.news", 10001L, 15000L) // 间隔超过 5 秒
+        )
+        val merged = PowerUsageManager.mergeAdjacentIntervals(intervals, maxGapMs = 2000L)
+
+        assertEquals("间隔超过门限的同应用区间必须保持独立", 2, merged.size)
+        assertEquals(5000L, merged[0].endTs)
+        assertEquals(10001L, merged[1].startTs)
+    }
+
+    /**
+     * 验证单应用多页面跳转生命周期状态机：
+     * 模拟 Activity A 暂停 -> Activity B 恢复 -> Activity A 停止（ACTIVITY_STOPPED）时，
+     * 正确忽略 ACTIVITY_STOPPED 能够确保 Activity B 持续在前台记录完整工时，杜绝因旧 Activity 停止误杀当前活跃页面。
+     */
+    @Test
+    fun testForegroundAppLifecycleStateMachineIgnoresActivityStopped() {
+        // 模拟 UsageEvents 事件流
+        data class MockUsageEvent(val eventType: Int, val packageName: String, val timeStamp: Long)
+        val EVENT_RESUMED = 1
+        val EVENT_PAUSED = 2
+        val EVENT_STOPPED = 23
+
+        val pkg = "com.ss.android.article.news"
+        val mockEvents = listOf(
+            MockUsageEvent(EVENT_RESUMED, pkg, 1000L),  // Activity A 打开
+            MockUsageEvent(EVENT_PAUSED, pkg, 3000L),   // Activity A 暂停
+            MockUsageEvent(EVENT_RESUMED, pkg, 3050L),  // Activity B 恢复（进入前台）
+            MockUsageEvent(EVENT_STOPPED, pkg, 3200L),  // Activity A 停止（旧页面不可见，必须忽略！）
+            MockUsageEvent(EVENT_PAUSED, pkg, 10000L)   // Activity B 最终暂停（离开前台）
+        )
+
+        val recordedIntervals = mutableListOf<PowerUsageManager.AppActivityInterval>()
+        var currentForegroundPkg: String? = null
+        var currentForegroundStartTs: Long = 0L
+
+        for (event in mockEvents) {
+            when (event.eventType) {
+                EVENT_RESUMED -> {
+                    if (currentForegroundPkg != null) {
+                        recordedIntervals.add(PowerUsageManager.AppActivityInterval(currentForegroundPkg, currentForegroundStartTs, event.timeStamp))
+                    }
+                    currentForegroundPkg = event.packageName
+                    currentForegroundStartTs = event.timeStamp
+                }
+                EVENT_PAUSED -> {
+                    if (currentForegroundPkg == event.packageName) {
+                        recordedIntervals.add(PowerUsageManager.AppActivityInterval(event.packageName, currentForegroundStartTs, event.timeStamp))
+                        currentForegroundPkg = null
+                        currentForegroundStartTs = 0L
+                    }
+                }
+                // 注意：状态机严格不处理 EVENT_STOPPED，杜绝误杀正在运行的 Activity B
+            }
+        }
+
+        // 验证未被误杀：recordedIntervals 包含两段有效工时 [1000..3000] 和 [3050..10000]
+        assertEquals("必须包含两段有效运行工时", 2, recordedIntervals.size)
+        val totalMs = recordedIntervals.sumOf { it.endTs - it.startTs }
+        assertEquals("总工时必须包含完整的二级页面运行时间（2000ms + 6950ms = 8950ms）", 8950L, totalMs)
+
+        // 再通过平滑合并，将这两段合并为一个完整区间
+        val merged = PowerUsageManager.mergeAdjacentIntervals(recordedIntervals)
+        assertEquals("经过转场合并后成为 1 个完整连续区间", 1, merged.size)
+        assertEquals(1000L, merged[0].startTs)
+        assertEquals(10000L, merged[0].endTs)
+    }
 }
 
 

@@ -60,7 +60,7 @@ class PowerUsageManager private constructor(private val context: Context) {
      * @property startTs 前台活跃起始时间戳（毫秒）
      * @property endTs 前台活跃结束时间戳（毫秒）
      */
-    private data class AppActivityInterval(
+    internal data class AppActivityInterval(
         val packageName: String,
         val startTs: Long,
         val endTs: Long
@@ -638,10 +638,15 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         /**
-         * 将给定的息屏时间区间根据放电采样点序列及系统休眠统计切分为唤醒（浅红）与深度睡眠（深红）事件列表。
-         * 若在息屏区间内存在相邻物理采样点间隔超过门限的断层，判定为 CPU 挂起的深度睡眠时间段；
-         * 若物理采样点稀疏或处于智能省电零唤醒模式，灭屏初期判定为浅休眠唤醒活跃，后续主体区间判定为深度睡眠；
-         * 若息屏时间极短（<= 20秒），判定为浅休眠唤醒活跃状态。
+         * 将给定的息屏时间区间根据放电采样点序列、瞬时硬件功耗特征及系统底层休眠统计，
+         * 精准切分为息屏唤醒（浅红）与深度睡眠（暗红）事件列表。
+         *
+         * 遵循硬件物理第一性原理：
+         * 1. 若息屏极短（<= 15秒）或底层统计表明当前无深度睡眠，判定为唤醒活跃状态（浅红）；
+         * 2. 若存在采样断层（相邻物理采样点间隔超过 20 秒），断层区间为 CPU 挂起的深度睡眠时间段（暗红）；
+         * 3. 若开启了息屏后台连续采样，结合瞬时采样功率（待机底噪 <= 0.25W 为休眠，活跃功耗 > 0.25W 为唤醒）
+         *    与系统底层硬件时钟权威统计的休眠时间比例进行精准时序切分，杜绝因连续采样导致深度睡眠被错误覆盖；
+         * 4. 若物理采样点稀疏或处于零唤醒模式，灭屏初期按唤醒时长权重判定为过渡唤醒，后续主体区间判定为深度睡眠。
          *
          * @param offStartTs 息屏开始时间戳（毫秒）
          * @param offEndTs 息屏结束时间戳（毫秒）
@@ -661,26 +666,28 @@ class PowerUsageManager private constructor(private val context: Context) {
 
             val durationMs = offEndTs - offStartTs
 
-            // 1. 若息屏时间极短（<= 20 秒），系统尚未真正挂起进入深度休眠，忠实判定为息屏唤醒活跃状态（浅红）
-            if (durationMs <= 20_000L) {
+            // 1. 若息屏时间极短（<= 15 秒），系统尚未真正挂起进入深度休眠，忠实判定为息屏唤醒活跃状态（浅红）
+            if (durationMs <= 15_000L || (totalDeepSleepMs <= 0L && totalAwakeMs > 0L)) {
                 return listOf(ScreenEvent(offStartTs, offEndTs, isScreenOn = false, isDeepSleep = false))
             }
-
-            // 2. 筛选落入该息屏时间窗口内的真实物理采样点
-            val subSamples = realtimeSamples.filter { it.timestamp in offStartTs..offEndTs }.sortedBy { it.timestamp }
-
-            // 3. 计算灭屏初期的浅休眠唤醒过渡时长（通常为 15~30 秒，绝不超过息屏时长的三分之一）
-            val transitionAwakeMs = if (totalAwakeMs > 0L && totalDeepSleepMs > 0L) {
-                val awakeRatio = (totalAwakeMs.toDouble() / (totalAwakeMs + totalDeepSleepMs).toDouble()).coerceIn(0.05, 0.5)
-                (durationMs * awakeRatio).toLong().coerceIn(15_000L, 60_000L).coerceAtMost(durationMs / 3)
-            } else {
-                20_000L.coerceAtMost(durationMs / 3)
+            if (totalAwakeMs <= 0L && totalDeepSleepMs > 0L) {
+                return listOf(ScreenEvent(offStartTs, offEndTs, isScreenOn = false, isDeepSleep = true))
             }
 
-            // 4. 若该息屏区间内无密集物理采样点（例如开启智能省电零唤醒模式，或处于无采样深度挂起状态）：
-            // 灭屏初期为浅休眠唤醒（浅红），随后直到点亮屏幕的主体时间段为深度睡眠（深红）
+            // 2. 计算本次放电周期的唤醒与休眠时间权重（基于系统底层硬件时钟统计）
+            val awakeRatio = if (totalAwakeMs > 0L && totalDeepSleepMs > 0L) {
+                (totalAwakeMs.toDouble() / (totalAwakeMs + totalDeepSleepMs).toDouble()).coerceIn(0.02, 0.95)
+            } else {
+                0.2
+            }
+            val targetAwakeMs = (durationMs * awakeRatio).toLong().coerceIn(10_000L, (durationMs - 5_000L).coerceAtLeast(10_000L))
+
+            // 3. 筛选落入该息屏时间窗口内的真实物理采样点
+            val subSamples = realtimeSamples.filter { it.timestamp in offStartTs..offEndTs }.sortedBy { it.timestamp }
+
+            // 4. 若无采样点或仅有 1 个采样点，依据灭屏初期浅休眠唤醒过渡、随后直到点亮为主体深度睡眠切分
             if (subSamples.size <= 1) {
-                val awakeEndTs = offStartTs + transitionAwakeMs
+                val awakeEndTs = (offStartTs + targetAwakeMs).coerceAtMost(offEndTs - 5_000L)
                 val result = mutableListOf<ScreenEvent>()
                 result.add(ScreenEvent(offStartTs, awakeEndTs, isScreenOn = false, isDeepSleep = false))
                 if (awakeEndTs < offEndTs) {
@@ -689,7 +696,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 return result
             }
 
-            // 5. 若存在连续物理采样点，依据采样点断层（超过 20 秒无采样视为 CPU 挂起）精准切分
+            // 5. 若存在连续物理采样点，结合采样断层（CPU 挂起）、瞬时功率（<= 0.25W 待机底噪）与硬件时钟权重精细标记
             val result = mutableListOf<ScreenEvent>()
             var cursor = offStartTs
             val sleepThresholdMs = 20_000L
@@ -697,17 +704,36 @@ class PowerUsageManager private constructor(private val context: Context) {
             for (pt in subSamples) {
                 val gap = pt.timestamp - cursor
                 if (gap > sleepThresholdMs) {
+                    // 明显的硬件挂起断层：标记为深度休眠
                     result.add(ScreenEvent(cursor, pt.timestamp, isScreenOn = false, isDeepSleep = true))
                 } else if (gap > 0L) {
-                    result.add(ScreenEvent(cursor, pt.timestamp, isScreenOn = false, isDeepSleep = false))
+                    // 短时间连续采样：
+                    // 若功耗极低（<= 0.25W 待机底噪）且已渡过灭屏初期的过渡期，判定为深度睡眠；
+                    // 否则若处于活跃功耗（> 0.25W）或灭屏初期，判定为唤醒活跃
+                    val elapsedFromStart = cursor - offStartTs
+                    val isSleep = (pt.powerWatts in 0.0001f..0.25f && elapsedFromStart >= targetAwakeMs) ||
+                            (pt.powerWatts in 0.0001f..0.15f)
+                    result.add(ScreenEvent(cursor, pt.timestamp, isScreenOn = false, isDeepSleep = isSleep))
                 }
                 cursor = pt.timestamp
             }
 
             if (cursor < offEndTs) {
                 val tailGap = offEndTs - cursor
-                val isDeep = tailGap > sleepThresholdMs
+                val isDeep = tailGap > sleepThresholdMs || (cursor - offStartTs) >= targetAwakeMs
                 result.add(ScreenEvent(cursor, offEndTs, isScreenOn = false, isDeepSleep = isDeep))
+            }
+
+            // 6. 最终物理守恒校验：
+            // 当底层硬件明确统计存在深度休眠（totalDeepSleepMs > 0L）且息屏时长大于 20 秒时，
+            // 若逐点判定未能产生深度睡眠事件（例如因高频轮询采样且功率临界导致的漏判），
+            // 则强制依据系统真实时钟比例将主体区间（后半段）确立为深度睡眠，杜绝休眠暗红段被整条浅红覆盖
+            if (totalDeepSleepMs > 0L && durationMs > 20_000L && result.none { it.isDeepSleep }) {
+                val splitTs = (offStartTs + targetAwakeMs).coerceIn(offStartTs + 5_000L, offEndTs - 5_000L)
+                return listOf(
+                    ScreenEvent(offStartTs, splitTs, isScreenOn = false, isDeepSleep = false),
+                    ScreenEvent(splitTs, offEndTs, isScreenOn = false, isDeepSleep = true)
+                )
             }
 
             return result
@@ -738,6 +764,43 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
                 else -> "${secs}s"
             }
+        }
+
+        /**
+         * 将同一个应用在短时间转场（如内部切页动画、子页面跳转，<= 2 秒）内的连续前台活跃区间进行无缝平滑合并。
+         * 消除应用内部切页转场过程中产生的短暂微断层，杜绝转场缝隙被误判为未命中或桌面待机。
+         *
+         * @param intervals 原始应用活跃区间列表
+         * @param maxGapMs 允许合并的最大相邻转场间隔（单位：毫秒，默认 2000L）
+         * @return 经过平滑合并后的应用活跃区间列表 [List<AppActivityInterval>]
+         */
+        internal fun mergeAdjacentIntervals(
+            intervals: List<AppActivityInterval>,
+            maxGapMs: Long = 2000L
+        ): List<AppActivityInterval> {
+            if (intervals.size <= 1) return intervals
+            val sorted = intervals.sortedWith(compareBy({ it.packageName }, { it.startTs }))
+            val merged = mutableListOf<AppActivityInterval>()
+            var current: AppActivityInterval? = null
+
+            for (interval in sorted) {
+                val cur = current
+                if (cur == null) {
+                    current = interval
+                } else if (cur.packageName == interval.packageName && interval.startTs <= cur.endTs + maxGapMs) {
+                    // 同一个包名且在转场阈值内，平滑合并
+                    current = AppActivityInterval(
+                        packageName = cur.packageName,
+                        startTs = cur.startTs,
+                        endTs = maxOf(cur.endTs, interval.endTs)
+                    )
+                } else {
+                    merged.add(cur)
+                    current = interval
+                }
+            }
+            current?.let { merged.add(it) }
+            return merged.sortedBy { it.startTs }
         }
     }
 
@@ -3520,16 +3583,15 @@ class PowerUsageManager private constructor(private val context: Context) {
                             lastActivePkgBeforeScreenOff = pkg
                         }
                     }
-                    UsageEvents.Event.ACTIVITY_PAUSED,
-                    UsageEvents.Event.ACTIVITY_STOPPED -> {
+                    UsageEvents.Event.ACTIVITY_PAUSED -> {
                         if (currentForegroundPkg == pkg) {
                             val activeStart = maxOf(currentForegroundStartTs, startTime)
                             val activeEnd = minOf(ts, endTime)
                             if (activeEnd > activeStart) {
                                 resultMap[pkg] = (resultMap[pkg] ?: 0L) + (activeEnd - activeStart)
                             }
-                            // 切出当前应用后置空前台，等待下一 RESUMED 事件或系统桌面显式 Resume 事件，
-                            // 严禁盲目将暂停时间强行赋给桌面启动器，彻底杜绝高德小窗导航或应用内切换时桌面时长虚高；
+                            // 切出当前应用后置空前台，等待下一 RESUMED 事件或系统桌面显式 Resume 事件；
+                            // 严禁监听 ACTIVITY_STOPPED，避免应用内多 Activity 切页转场时旧 Activity 停止导致当前前台状态被误杀置空；
                             // 同时保留 lastActivePkgBeforeScreenOff，以便在息屏后重新点亮时无缝恢复该应用
                             currentForegroundPkg = null
                             currentForegroundStartTs = 0L
@@ -4328,8 +4390,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                             lastActivePkgBeforeScreenOff = pkg
                         }
                     }
-                    UsageEvents.Event.ACTIVITY_PAUSED,
-                    UsageEvents.Event.ACTIVITY_STOPPED -> {
+                    UsageEvents.Event.ACTIVITY_PAUSED -> {
                         if (currentForegroundPkg == pkg) {
                             val activeStart = maxOf(currentForegroundStartTs, startTime)
                             val activeEnd = minOf(ts, endTime)
@@ -4337,6 +4398,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                                 appIntervals.add(AppActivityInterval(pkg, activeStart, activeEnd))
                             }
                             // 暂存应用切换断点，保留暂停时间戳，不盲目判定为系统桌面，杜绝应用内部切换 Activity 导致时序断流；
+                            // 严禁监听 ACTIVITY_STOPPED，避免应用内多 Activity 切页转场时旧 Activity 停止导致当前前台状态被误杀置空；
                             // 同时保留 lastActivePkgBeforeScreenOff，以便在息屏后重新点亮时无缝恢复该应用
                             currentForegroundPkg = null
                             currentForegroundStartTs = ts
@@ -4451,7 +4513,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             e.printStackTrace()
         }
 
-        val result = Pair(appIntervals, screenIntervals)
+        val mergedAppIntervals = mergeAdjacentIntervals(appIntervals)
+        val result = Pair(mergedAppIntervals, screenIntervals)
         synchronized(this) {
             cachedUsageIntervalsStart = startTime
             cachedUsageIntervalsEnd = endTime

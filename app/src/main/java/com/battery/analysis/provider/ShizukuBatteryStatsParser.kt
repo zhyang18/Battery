@@ -344,8 +344,15 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             screenOffDeepSleepDurationMs + screenOffAwakeDurationMs
         }
         if (screenOffDrainMah > 0f && totalOffMs > 0L) {
-            if (screenOffDeepSleepDurationMs > 0L && screenOffAwakeDurationMs > 0L) {
-                val sleepRatio = (screenOffDeepSleepDurationMs.toFloat() / totalOffMs.toFloat()).coerceIn(0f, 1f)
+            if (rawIdleDrain > 0f) {
+                // 优先采信系统内核根据 PowerProfile 统计的底层纯待机放电量（Idle / Device standby）
+                screenOffDeepSleepDrainMah = rawIdleDrain.coerceAtMost(screenOffDrainMah)
+                screenOffAwakeDrainMah = (screenOffDrainMah - screenOffDeepSleepDrainMah).coerceAtLeast(0f)
+            } else if (screenOffDeepSleepDurationMs > 0L && screenOffAwakeDurationMs > 0L) {
+                // 基于物理第一性原理功耗比率加权（唤醒活跃功耗通常是休眠底噪的 15 倍以上，杜绝时间等权均分导致的虚高）
+                val sleepWeight = screenOffDeepSleepDurationMs.toDouble()
+                val awakeWeight = screenOffAwakeDurationMs.toDouble() * 15.0
+                val sleepRatio = (sleepWeight / (sleepWeight + awakeWeight)).toFloat().coerceIn(0f, 1f)
                 screenOffDeepSleepDrainMah = screenOffDrainMah * sleepRatio
                 screenOffAwakeDrainMah = (screenOffDrainMah - screenOffDeepSleepDrainMah).coerceAtLeast(0f)
             } else if (screenOffAwakeDurationMs > 0L) {

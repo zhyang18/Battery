@@ -3493,6 +3493,10 @@ class PowerUsageCalculationTest {
      * 确保当存在唤醒时长时，唤醒能量绝对不为 0.000Wh，
      * 且唤醒能量与深度睡眠能量之和与息屏总能量严格守恒闭合。
      */
+    /**
+     * 验证息屏唤醒活跃能耗与深度休眠挂起能耗的物理守恒分解逻辑。
+     * 确保唤醒能耗与深度睡眠能耗之和 100% 守恒等于息屏总能量，且各状态能量大于等于 0。
+     */
     @Test
     fun testScreenOffAwakeAndDeepSleepEnergyConservation() {
         val offEnergyWh = 2.03f
@@ -3500,30 +3504,70 @@ class PowerUsageCalculationTest {
         val awakeMs = 1_244_000L // 20m44s
         val deepSleepMs = 30_796_000L // 8h33m16s
 
-        // 模拟 dumpsys 未提供独立的 rawAwakeDrain（为 0f），但系统准确统计了唤醒与休眠时长
-        val rawSleepDrain = 50f
-        val rawAwakeDrain = 0f
-        val hasBothDrains = rawSleepDrain > 0f && rawAwakeDrain > 0f
-        val totalDurationOffMs = if ((deepSleepMs + awakeMs) > 0L) (deepSleepMs + awakeMs) else screenOffMs
+        val decomposed = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = offEnergyWh,
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            rawSleepDrainMah = 50f,
+            rawAwakeDrainMah = 0f,
+            nominalVoltageVolts = 3.85f
+        )
 
-        val sleepRatio = if (hasBothDrains) {
-            (rawSleepDrain / (rawSleepDrain + rawAwakeDrain)).coerceIn(0f, 1f)
-        } else if (deepSleepMs > 0L && awakeMs > 0L && totalDurationOffMs > 0L) {
-            (deepSleepMs.toFloat() / totalDurationOffMs.toFloat()).coerceIn(0f, 1f)
-        } else if (deepSleepMs > 0L) {
-            1f
-        } else if (awakeMs > 0L) {
-            0f
-        } else {
-            (deepSleepMs.toFloat() / screenOffMs.toFloat()).coerceIn(0f, 1f)
-        }
+        assertTrue("唤醒时长存在时唤醒能量必须大于 0Wh", decomposed.awakeEnergyWh > 0.05f)
+        assertTrue("深度睡眠能量必须大于 0Wh", decomposed.deepSleepEnergyWh > 0.1f)
+        assertEquals(
+            "唤醒能量与深度睡眠能量之和必须严格守恒等于息屏总能量",
+            offEnergyWh,
+            decomposed.awakeEnergyWh + decomposed.deepSleepEnergyWh,
+            0.001f
+        )
+    }
 
-        val deepSleepEnergyWh = offEnergyWh * sleepRatio
-        val awakeEnergyWh = (offEnergyWh - deepSleepEnergyWh).coerceAtLeast(0f)
+    /**
+     * 验证在息屏期间发生高功耗后台唤醒（如 15W~19W 尖峰）时，
+     * 深度睡眠能量忠实反映物理待机底噪（0.03W 左右），绝不因深度休眠时间长而被粗暴均分虚增至 1.6W+。
+     */
+    @Test
+    fun testScreenOffDeepSleepEnergyDoesNotInflateUnderHighAwakePower() {
+        // 场景严格对应用户实测：
+        // 息屏总耗能 1.743Wh，总息屏时长 2h51m (171分钟)
+        val offEnergyWh = 1.743f
+        val screenOffMs = (171L * 60_000L) // 2h51m
+        val awakeMs = (12L * 60_000L) // 12m
+        val deepSleepMs = screenOffMs - awakeMs // 2h39m (159m = 2.65h)
 
-        assertTrue("唤醒时长存在时唤醒能量必须大于 0Wh", awakeEnergyWh > 0.05f)
-        assertTrue("深度睡眠能量必须大于 0Wh", deepSleepEnergyWh > 1.9f)
-        assertEquals("唤醒能量与深度睡眠能量之和必须严格守恒等于息屏总能量", offEnergyWh, awakeEnergyWh + deepSleepEnergyWh, 0.001f)
+        // 构造采样点：包含息屏静止待机底噪采样（0.03W）
+        val samples = listOf(
+            PowerDischargePoint(1000L, 0f, 70, 4.0f, 30f, 0.03f, emptyList(), false),
+            PowerDischargePoint(2000L, 0f, 70, 4.0f, 30f, 0.03f, emptyList(), false),
+            PowerDischargePoint(3000L, 0f, 70, 4.0f, 30f, 0.03f, emptyList(), false),
+            PowerDischargePoint(4000L, 0f, 70, 4.0f, 30f, 15.0f, emptyList(), false) // 唤醒尖峰
+        )
+
+        val decomposed = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = offEnergyWh,
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            samples = samples,
+            nominalVoltageVolts = 4.0f
+        )
+
+        // 深度睡眠能量应接近 0.03W * 2.65h ≈ 0.08Wh，绝不能虚高到 1.6Wh+（原 Bug 算成了 1.618Wh）
+        assertTrue("深度睡眠能量必须接近待机底噪（< 0.15Wh），杜绝被时间占比虚增为 1.6Wh", decomposed.deepSleepEnergyWh < 0.15f)
+        assertTrue("深度睡眠平均功耗必须在正常待机底噪（<= 0.05W）范围内", decomposed.deepSleepWatts <= 0.05f)
+
+        // 唤醒能量吸纳后台高功耗尖峰的大部分电能（> 1.5Wh）
+        assertTrue("唤醒能量吸收绝大部分后台尖峰耗电（> 1.5Wh）", decomposed.awakeEnergyWh > 1.5f)
+
+        // 严格能量守恒
+        assertEquals(
+            "能量守恒：唤醒能量与深度休眠能量之和严格等于息屏总能耗",
+            offEnergyWh,
+            decomposed.awakeEnergyWh + decomposed.deepSleepEnergyWh,
+            0.001f
+        )
     }
 
     /**

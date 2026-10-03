@@ -44,6 +44,12 @@
     <string name="power_metric_awake">唤醒</string>
     <string name="power_metric_deep_sleep">深度睡眠</string>
     <string name="power_metric_no_record">暂无记录</string>
+    <string name="power_discharge_full_label">满电续航</string>
+    <string name="power_discharge_full_duration_format">%s 满电续航</string>
+    <string name="power_discharge_full_duration_no_data">--</string>
+    <string name="power_screen_on_discharge_speed_tip">当前亮屏放电速度\n7天亮屏统计放电速度\n满电亮屏使用时间</string>
+    <string name="power_screen_off_discharge_speed_tip">当前息屏放电速度\n7天息屏统计放电速度\n满电息屏使用时间</string>
+    <string name="power_global_discharge_speed_tip">当前全局放电速度\n7天全局统计放电速度\n满电全局使用时间</string>
     <string name="power_remaining_prefix">续航 %s</string>
     <string name="power_value_format">%s</string>
     <string name="power_value_format_with_energy">%1$s (%2$s)</string>

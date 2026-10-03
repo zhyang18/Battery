@@ -72,7 +72,7 @@ class PowerUsageManager private constructor(private val context: Context) {
      * @property startTs 屏幕点亮起始时间戳（毫秒）
      * @property endTs 屏幕关闭熄灭时间戳（毫秒）
      */
-    private data class ScreenInteractiveInterval(
+    internal data class ScreenInteractiveInterval(
         val startTs: Long,
         val endTs: Long
     )
@@ -589,39 +589,45 @@ class PowerUsageManager private constructor(private val context: Context) {
                 // 息屏期间若处于短期（如未进入深度休眠的十几秒或几分钟），硬件瞬时采样依然持续进行，baseOffWatts 拥有第一真值；
                 // 当电池百分比发生离散 1% 阶跃时，其残差主要源于亮屏高负载消耗或系统上报滞后，
                 // 绝不可将全部阶跃残差粗暴倒灌给息屏时长极短的待机能耗（否则会导致息屏瞬时计算功耗虚高爆表为数瓦并拉高全局功耗）；
-                // 仅当息屏时间较长且确实经历深度休眠、且残差折算的等效待机功耗在合理物理待机漏电范围内时，才将休眠漏电计入息屏。
-                val hasConfidentOffSampling = intOffPowerWatts > 0f || intOffEnergyWh > 0f
                 val isShortScreenOff = screenOffMs < 300_000L // 5 分钟以内的短息屏
 
                 if (physicalTotalEnergyWh > (onEnergyWh + baseOffEnergyWh)) {
                     val residualWh = physicalTotalEnergyWh - (onEnergyWh + baseOffEnergyWh)
                     val impliedOffWatts = if (screenOffHours > 0f) (baseOffEnergyWh + residualWh) / screenOffHours else 0f
-                    if (hasConfidentOffSampling && (isShortScreenOff || (baseOffWatts > 0f && impliedOffWatts > maxOf(baseOffWatts * 2.5f, 0.8f)))) {
-                        // 证实残差为亮屏阶段电量阶跃延迟上报所致，息屏忠实采纳真实采样微积分能耗，残差补充给亮屏或整机
+                    // 仅当息屏采样严重缺失（待机测得功耗低于物理底噪 0.03W）、经历充分长时间的息屏深度睡眠（>=5分钟）、
+                    // 且残差折算的等效待机功耗在合理物理待机漏电范围内（<= 0.8W）时，才将残差补偿为深度休眠漏电；
+                    // 若息屏已具备有效待机测得功耗（>= 0.03W）或属于短息屏，息屏坚守实测真值，残差归属亮屏高负载放电与电量阶跃滞后
+                    val isDeepSleepMissingSamples = baseOffWatts < 0.03f && !isShortScreenOff && impliedOffWatts in 0.015f..0.8f
+
+                    if (isDeepSleepMissingSamples) {
+                        offEnergyWh = baseOffEnergyWh + residualWh
+                        realTotalEnergyWh = physicalTotalEnergyWh
+                    } else {
                         offEnergyWh = baseOffEnergyWh
                         onEnergyWh = physicalTotalEnergyWh - offEnergyWh
                         realTotalEnergyWh = physicalTotalEnergyWh
-                    } else {
-                        // 经历充分长时间的息屏深度睡眠，且残差处于合理物理待机漏电范围内：
-                        offEnergyWh = baseOffEnergyWh + residualWh
-                        realTotalEnergyWh = physicalTotalEnergyWh
                     }
                 } else if (physicalTotalEnergyWh > 0f) {
-                    // 物理守恒天花板双向约束：
-                    // 当微积分与长断层外推估算的总能耗超出底层实际物理放电量 physicalTotalEnergyWh 时，
-                    // 亮屏微积分在 CPU 活跃高频（1Hz）采样下具备最高真值置信度；
-                    // 息屏长断层外推受唤醒尖峰污染偏大，其能耗在物理上严格受限于实际放电量残差上限，杜绝整机总放电击穿物理天花板
-                    if (onEnergyWh < physicalTotalEnergyWh) {
-                        val maxAllowedOffEnergyWh = (physicalTotalEnergyWh - onEnergyWh).coerceAtLeast(0f)
-                        if (baseOffEnergyWh > maxAllowedOffEnergyWh) {
-                            offEnergyWh = maxAllowedOffEnergyWh
-                            realTotalEnergyWh = physicalTotalEnergyWh
-                        } else {
-                            offEnergyWh = baseOffEnergyWh
-                            realTotalEnergyWh = onEnergyWh + offEnergyWh
-                        }
+                    val residualOffWh = (physicalTotalEnergyWh - onEnergyWh).coerceAtLeast(0f)
+                    val impliedResidualOffWatts = if (screenOffHours > 0f) residualOffWh / screenOffHours else 0f
+
+                    // 息屏长断层外推膨胀防护与物理底噪保护：
+                    // 仅当息屏时间较长（>=5分钟）、息屏原计算功耗偏高（> 0.15W，受唤醒尖峰污染外推膨胀）、
+                    // 且物理剩余放电残差折算的等效待机功耗仍处于健康合理的待机区间（0.05W ~ 0.15W）时，
+                    // 才将虚高外推收敛至物理剩余放电残差上限；
+                    // 一旦亮屏微积分累加导致剩余残差过小（< 0.05W），说明整机放电已被亮屏占用，
+                    // 严禁将息屏能耗无底线倒扣压榨乃至归零，忠实保留息屏能耗基线，整机能耗由亮屏微积分与息屏能耗自然累加
+                    val canSafelyClampOffExtrapolation = screenOffMs >= 300_000L &&
+                            baseOffWatts > 0.15f &&
+                            impliedResidualOffWatts in 0.05f..0.15f &&
+                            residualOffWh < baseOffEnergyWh
+
+                    if (canSafelyClampOffExtrapolation) {
+                        offEnergyWh = residualOffWh
+                        realTotalEnergyWh = physicalTotalEnergyWh
                     } else {
-                        // 亮屏微积分自身已占满或略微超出实际物理放电量：保持亮屏微积分真值，息屏保持微积分
+                        // 亮屏放电累加突破底层离散量化阶跃、或息屏处于健康待机区间：
+                        // 忠实保留息屏能耗，整机能耗等于亮屏微积分与息屏能耗之和，杜绝息屏能耗递减归零
                         offEnergyWh = baseOffEnergyWh
                         realTotalEnergyWh = onEnergyWh + offEnergyWh
                     }
@@ -740,7 +746,15 @@ class PowerUsageManager private constructor(private val context: Context) {
             val isDecomposedAvailable: Boolean
 
             // 1. 优先采信系统内核根据硬件芯片寄存器与电源配置模型权威统计的原生待机放电量（Idle / Device standby）
-            if (rawSleepDrainMah > 0f) {
+            val impliedSleepWattsFromKernel = if (deepSleepHours > 0.0 && rawSleepDrainMah > 0f) {
+                (rawSleepDrainMah * nominalVoltageVolts / 1000f) / deepSleepHours
+            } else {
+                0.0
+            }
+            // 物理底噪门禁：若经历显著深度睡眠（>= 1分钟），系统上报的待机电量折算功率不应低于正常手机芯片底噪极限（0.015W）
+            val isKernelSleepDrainPlausible = rawSleepDrainMah > 0f && (deepSleepMs < 60_000L || impliedSleepWattsFromKernel >= 0.015)
+
+            if (isKernelSleepDrainPlausible) {
                 val hwSleepWh = (rawSleepDrainMah * nominalVoltageVolts / 1000f)
                 if (rawAwakeDrainMah > 0f) {
                     val hwAwakeWh = (rawAwakeDrainMah * nominalVoltageVolts / 1000f)
@@ -753,20 +767,26 @@ class PowerUsageManager private constructor(private val context: Context) {
                 awakeEnergyWh = (offEnergyWh - deepSleepEnergyWh).coerceAtLeast(0f)
                 isDecomposedAvailable = true
             } else {
-                // 2. 无系统原生细分时，从真实物理采样点序列中提取纯净静止待机底噪（P10 低位分位数，杜绝唤醒活跃尖峰污染）
+                // 2. 无系统原生有效细分时，从真实物理采样点序列中提取纯净静止待机底噪（杜绝唤醒活跃尖峰污染）
                 val validOffSamples = samples.filter { !it.isScreenOn && it.powerWatts > 0f }
                 val baselineSleepWatts: Float? = if (validOffSamples.size >= 3) {
                     val sortedPowers = validOffSamples.map { it.powerWatts }.sorted()
                     val p10Index = (sortedPowers.size * 0.10).toInt().coerceIn(0, sortedPowers.size - 1)
                     val candidateWatts = sortedPowers[p10Index]
-                    // 待机底噪物理门禁：深度休眠 CPU 处于挂起态，正常待机底噪不超过 0.15W；若超过说明均为高功耗唤醒活跃采样
-                    if (candidateWatts <= 0.15f) {
+                    // 待机底噪物理门禁：深度休眠 CPU 处于挂起态，正常待机底噪通常在 0.015W ~ 0.15W；若超过说明均为高功耗唤醒活跃采样
+                    if (candidateWatts in 0.015f..0.15f) {
                         candidateWatts
+                    } else if (candidateWatts < 0.015f) {
+                        sortedPowers.firstOrNull { it in 0.015f..0.15f } ?: (if (candidateWatts > 0f) candidateWatts else null)
                     } else {
                         // 若 P10 超过 0.15W，检查是否存在有效待机区间样本（取最小值判断是否确实采到了待机底噪）
                         val minPower = sortedPowers.first()
                         if (minPower <= 0.15f) minPower else null
                     }
+                } else if (validOffSamples.isNotEmpty()) {
+                    // 若因系统深度休眠挂起导致息屏期间仅有极少采样点（1~2个），检查是否存在符合待机底噪（<= 0.15W）的实测点
+                    val validPowers = validOffSamples.map { it.powerWatts }.filter { it <= 0.15f }
+                    validPowers.minOrNull()
                 } else {
                     null
                 }
@@ -795,6 +815,57 @@ class PowerUsageManager private constructor(private val context: Context) {
                 deepSleepWatts = calcSleepWatts,
                 isDecomposedAvailable = isDecomposedAvailable
             )
+        }
+
+        /**
+         * 在系统处于亮屏交互态（isInteractive = true）时，动态延伸屏幕点亮区间至最新查询终点，
+         * 消除短时内存缓存导致的亮屏区间截断与息屏时间虚增回缩跳变。
+         *
+         * @param screens 原始屏幕点亮时间区间列表
+         * @param startTime 查询起始时间戳（毫秒）
+         * @param cachedEnd 缓存记录的检索终点时间戳（毫秒）
+         * @param newEndTime 最新的检索终点时间戳（毫秒）
+         * @return 动态延伸补正后的屏幕点亮时间区间列表 [List<ScreenInteractiveInterval>]
+         */
+        internal fun adjustScreenIntervalsForInteractiveScreen(
+            screens: List<ScreenInteractiveInterval>,
+            startTime: Long,
+            cachedEnd: Long,
+            newEndTime: Long
+        ): List<ScreenInteractiveInterval> {
+            if (newEndTime <= cachedEnd) return screens
+            return if (screens.isNotEmpty()) {
+                val last = screens.last()
+                if (last.endTs >= cachedEnd - 1000L) {
+                    screens.dropLast(1) + ScreenInteractiveInterval(last.startTs, newEndTime)
+                } else {
+                    screens + ScreenInteractiveInterval(cachedEnd, newEndTime)
+                }
+            } else {
+                listOf(ScreenInteractiveInterval(startTime, newEndTime))
+            }
+        }
+
+        /**
+         * 在系统处于亮屏交互态时，动态延伸末尾前台应用活动区间至最新查询终点，保持前台工时单调平滑。
+         *
+         * @param apps 原始应用前台活动区间列表
+         * @param cachedEnd 缓存记录的检索终点时间戳（毫秒）
+         * @param newEndTime 最新的检索终点时间戳（毫秒）
+         * @return 动态延伸补正后的应用活动时间区间列表 [List<AppActivityInterval>]
+         */
+        internal fun adjustAppIntervalsForInteractiveScreen(
+            apps: List<AppActivityInterval>,
+            cachedEnd: Long,
+            newEndTime: Long
+        ): List<AppActivityInterval> {
+            if (newEndTime <= cachedEnd || apps.isEmpty()) return apps
+            val last = apps.last()
+            return if (last.endTs >= cachedEnd - 1000L) {
+                apps.dropLast(1) + AppActivityInterval(last.packageName, last.startTs, newEndTime)
+            } else {
+                apps
+            }
         }
 
         /**
@@ -2898,7 +2969,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
 
                 val screenOnStr = formatDuration(screenOnMs)
-                val screenOffStr = formatDuration(screenOffMs)
                 val totalDurationStr = formatDuration(durationMs)
                 val durationStr = "$screenOnStr / $totalDurationStr"
 
@@ -2995,7 +3065,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val intTotalEnergyWh: Float
                 val intTotalPowerWatts: Float
                 val intOnEnergyWh: Float
-                var intOnPowerWatts: Float
                 val intOffEnergyWh: Float
                 val intOffPowerWatts: Float
 
@@ -3021,7 +3090,6 @@ class PowerUsageManager private constructor(private val context: Context) {
                     }
                 } else {
                     intOnEnergyWh = dischargeStats?.screenOnDisplayEnergyWh ?: 0f
-                    intOnPowerWatts = dischargeStats?.screenOnPowerWatts ?: 0f
                     val hwSnapOffEnergy = localScreenOffHwEnergyWh
                     val impliedHwWatts = if (screenOffHours > 0f) hwSnapOffEnergy / screenOffHours else 0f
                     if (hwSnapOffEnergy > 0.005f && impliedHwWatts in 0.02f..1.5f) {
@@ -3051,7 +3119,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
 
                 intTotalEnergyWh = intOnEnergyWh + safeIntOffEnergyWh
-                intOnPowerWatts = if (screenOnHours > 0f) intOnEnergyWh / screenOnHours else 0f
+                val intOnPowerWatts = if (screenOnHours > 0f) intOnEnergyWh / screenOnHours else 0f
                 intTotalPowerWatts = if (dischargeHours > 0f) intTotalEnergyWh / dischargeHours else 0f
 
                 val hasValidHardwareIntegration = hasAccData || (dischargeStats != null &&
@@ -4575,6 +4643,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         // 单次下拉刷新过程中，以近乎相同的 (startTs, now) 时间窗口重复调用本方法 3 次时，
         // 直接复用已提取并归并好的区间对象，杜绝重复跨进程拉取数万条系统事件
         val now = System.currentTimeMillis()
+        val isInteractive = (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isInteractive == true
         synchronized(this) {
             val cachedResult = cachedUsageIntervalsResult
             if (cachedResult != null &&
@@ -4582,6 +4651,20 @@ class PowerUsageManager private constructor(private val context: Context) {
                 kotlin.math.abs(startTime - cachedUsageIntervalsStart) <= 3_000L &&
                 kotlin.math.abs(endTime - cachedUsageIntervalsEnd) <= 3_000L
             ) {
+                if (isInteractive && endTime > cachedUsageIntervalsEnd) {
+                    val adjustedScreens = adjustScreenIntervalsForInteractiveScreen(
+                        screens = cachedResult.second,
+                        startTime = startTime,
+                        cachedEnd = cachedUsageIntervalsEnd,
+                        newEndTime = endTime
+                    )
+                    val adjustedApps = adjustAppIntervalsForInteractiveScreen(
+                        apps = cachedResult.first,
+                        cachedEnd = cachedUsageIntervalsEnd,
+                        newEndTime = endTime
+                    )
+                    return Pair(adjustedApps, adjustedScreens)
+                }
                 return cachedResult
             }
         }
@@ -4695,9 +4778,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             var finalFgPkg = currentForegroundPkg
             var finalFgStartTs = currentForegroundStartTs
 
-            val now = System.currentTimeMillis()
             val isNearCurrentTime = abs(endTime - now) <= 120_000L
-            val isInteractive = (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isInteractive == true
 
             // 若查询终点接近当前真实时刻且屏幕亮屏，校准当前系统的真实前台置顶应用（消除系统 UsageStats 缓冲区异步写入延迟）
             if (isNearCurrentTime && (screenOnStart != null || isInteractive)) {
@@ -4735,7 +4816,20 @@ class PowerUsageManager private constructor(private val context: Context) {
                     appIntervals.add(AppActivityInterval(finalFgPkg, activeStart, activeEnd))
                 }
             }
-            if (screenOnStart != null && endTime > screenOnStart) {
+            if (isInteractive && endTime > startTime) {
+                if (screenOnStart != null && endTime > screenOnStart) {
+                    val activeStart = maxOf(screenOnStart, startTime)
+                    if (endTime > activeStart) {
+                        screenIntervals.add(ScreenInteractiveInterval(activeStart, endTime))
+                    }
+                } else if (screenIntervals.isEmpty() || screenIntervals.last().endTs < endTime) {
+                    val lastEnd = if (screenIntervals.isNotEmpty()) screenIntervals.last().endTs else startTime
+                    val activeStart = maxOf(lastEnd, startTime)
+                    if (endTime > activeStart) {
+                        screenIntervals.add(ScreenInteractiveInterval(activeStart, endTime))
+                    }
+                }
+            } else if (screenOnStart != null && endTime > screenOnStart) {
                 val activeStart = maxOf(screenOnStart, startTime)
                 if (endTime > activeStart) {
                     screenIntervals.add(ScreenInteractiveInterval(activeStart, endTime))
@@ -5241,7 +5335,6 @@ class PowerUsageManager private constructor(private val context: Context) {
         val screenOffMs = (totalMs - screenOnMs).coerceAtLeast(0L)
 
         val screenOnStr = formatDuration(screenOnMs)
-        val screenOffStr = formatDuration(screenOffMs)
         val totalStr = formatDuration(totalMs)
 
         val effectiveCapacity = getEffectiveDeviceCapacityMah()
@@ -5303,7 +5396,6 @@ class PowerUsageManager private constructor(private val context: Context) {
         val intTotalEnergyWh: Float
         val intTotalPowerWatts: Float
         val intOnEnergyWh: Float
-        var intOnPowerWatts: Float
         val intOffEnergyWh: Float
         val intOffPowerWatts: Float
 
@@ -5329,7 +5421,6 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
         } else {
             intOnEnergyWh = dischargeStats?.screenOnDisplayEnergyWh ?: 0f
-            intOnPowerWatts = dischargeStats?.screenOnPowerWatts ?: 0f
             val hwSnapOffEnergy = localScreenOffHwEnergyWh
             val impliedHwWatts = if (screenOffHours > 0f) hwSnapOffEnergy / screenOffHours else 0f
             if (hwSnapOffEnergy > 0.005f && impliedHwWatts in 0.02f..1.5f) {
@@ -5359,7 +5450,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         intTotalEnergyWh = intOnEnergyWh + safeIntOffEnergyWh
-        intOnPowerWatts = if (screenOnHours > 0f) intOnEnergyWh / screenOnHours else 0f
+        val intOnPowerWatts = if (screenOnHours > 0f) intOnEnergyWh / screenOnHours else 0f
         intTotalPowerWatts = if (dischargeHours > 0f) intTotalEnergyWh / dischargeHours else 0f
 
         val hasValidHardwareIntegration = hasAccData || (dischargeStats != null &&

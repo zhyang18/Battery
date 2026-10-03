@@ -4193,6 +4193,191 @@ class PowerUsageCalculationTest {
 
         assertEquals("量化未步进的 0.1mAh 必须被过滤为 0f", 0f, validHwMah, 0.0001f)
     }
+
+    /**
+     * 验证在亮屏使用状态下持续手动刷新时，息屏能量保持恒定不递减至 0，
+     * 亮屏能量正常累加，整机总能量平滑递增而非被锁死在旧的宏观放电量上限。
+     */
+    @Test
+    fun testScreenOffEnergyPreservedWhileScreenOnRefreshed() {
+        val screenOffMs = 25L * 60_000L + 30_000L // 25分30秒息屏
+        val screenOffHours = screenOffMs / 3600000f
+        val baseOffWatts = 0.10f // 待机真实底噪 0.10W
+        val intOffEnergyWh = baseOffWatts * screenOffHours // 约 0.0425Wh
+        val physicalTotalEnergyWh = 0.200f // 假设电量掉电 1% 对应的初始宏观放电量 0.200Wh
+        val nominalVoltageVolts = 3.85f
+
+        // 第一次刷新：亮屏使用 2 分钟，消耗 0.100Wh
+        val screenOnHours1 = 2f / 60f
+        val onEnergyWh1 = 0.100f
+        val dischargeHours1 = screenOffHours + screenOnHours1
+        val stats1 = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = onEnergyWh1,
+            intOffEnergyWh = intOffEnergyWh,
+            intTotalEnergyWh = onEnergyWh1 + intOffEnergyWh,
+            intOnPowerWatts = onEnergyWh1 / screenOnHours1,
+            intOffPowerWatts = baseOffWatts,
+            intTotalPowerWatts = (onEnergyWh1 + intOffEnergyWh) / dischargeHours1,
+            physicalTotalEnergyWh = physicalTotalEnergyWh,
+            screenOnHours = screenOnHours1,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours1,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = nominalVoltageVolts
+        )
+
+        // 第二次刷新：亮屏使用累积到 5 分钟，亮屏能耗上升到 0.220Wh（已超过初始 physicalTotalEnergyWh）
+        val screenOnHours2 = 5f / 60f
+        val onEnergyWh2 = 0.220f
+        val dischargeHours2 = screenOffHours + screenOnHours2
+        val stats2 = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = onEnergyWh2,
+            intOffEnergyWh = intOffEnergyWh,
+            intTotalEnergyWh = onEnergyWh2 + intOffEnergyWh,
+            intOnPowerWatts = onEnergyWh2 / screenOnHours2,
+            intOffPowerWatts = baseOffWatts,
+            intTotalPowerWatts = (onEnergyWh2 + intOffEnergyWh) / dischargeHours2,
+            physicalTotalEnergyWh = physicalTotalEnergyWh,
+            screenOnHours = screenOnHours2,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours2,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = nominalVoltageVolts
+        )
+
+        // 验证 1：息屏能量绝对不因亮屏使用而递减或归零，始终保持息屏基线能耗（~0.0425Wh）
+        assertEquals("刷新 1 时息屏能耗保持真值", intOffEnergyWh, stats1.offEnergyWh, 0.001f)
+        assertEquals("刷新 2 时息屏能耗杜绝递减归零，坚守真值", intOffEnergyWh, stats2.offEnergyWh, 0.001f)
+
+        // 验证 2：亮屏能量忠实递增
+        assertTrue("亮屏能量吸收阶跃残差且不低于瞬时微积分值", stats1.onEnergyWh >= onEnergyWh1)
+        assertEquals(0.220f, stats2.onEnergyWh, 0.001f)
+        assertTrue("亮屏能量随使用平滑增加", stats2.onEnergyWh > stats1.onEnergyWh)
+
+        // 验证 3：整机能量平滑递增（亮屏能量 + 息屏能量），杜绝锁死在 physicalTotalEnergyWh
+        assertEquals(stats1.onEnergyWh + stats1.offEnergyWh, stats1.totalEnergyWh, 0.001f)
+        assertEquals(stats2.onEnergyWh + stats2.offEnergyWh, stats2.totalEnergyWh, 0.001f)
+        assertTrue("整机能量随亮屏使用平滑上升", stats2.totalEnergyWh > stats1.totalEnergyWh)
+    }
+
+    /**
+     * 验证在亮屏交互状态下触发短时缓存时，点亮时间区间能够动态延伸至最新查询终点，
+     * 消除短时内存缓存导致的亮屏区间截断，杜绝息屏时间在 3 秒窗口内的忽大忽小跳变。
+     */
+    @Test
+    fun testScreenOffTimeDoesNotJitterDuringCacheWindow() {
+        val unplugTime = 100_000L
+        val cachedEndTime = 200_000L // 首次查询终点
+        val screenIntervals = listOf(
+            PowerUsageManager.ScreenInteractiveInterval(unplugTime, 120_000L), // 亮屏 20s
+            // 120_000L ~ 170_000L 息屏 50s
+            PowerUsageManager.ScreenInteractiveInterval(170_000L, cachedEndTime) // 亮屏 30s，持续到 cachedEndTime
+        )
+        // 此时总时长 = 100s，亮屏时长 = 20s + 30s = 50s，息屏时长 = 50s
+        val initialTotalMs = cachedEndTime - unplugTime
+        val initialOnMs = screenIntervals.sumOf { it.endTs - it.startTs }
+        val initialOffMs = initialTotalMs - initialOnMs
+        assertEquals(50_000L, initialOffMs)
+
+        // 用户在 2 秒后（cachedEndTime + 2000L）手动刷新，命中 3 秒短时缓存
+        val refreshEndTime = cachedEndTime + 2000L
+        val adjustedScreens = PowerUsageManager.adjustScreenIntervalsForInteractiveScreen(
+            screens = screenIntervals,
+            startTime = unplugTime,
+            cachedEnd = cachedEndTime,
+            newEndTime = refreshEndTime
+        )
+
+        // 计算补正后的亮屏时长与息屏时长
+        val refreshedTotalMs = refreshEndTime - unplugTime // 102s
+        val refreshedOnMs = adjustedScreens.sumOf { it.endTs - it.startTs } // 52s
+        val refreshedOffMs = refreshedTotalMs - refreshedOnMs // 50s
+
+        // 验证：息屏时长严格保持为 50s，杜绝因为亮屏区间未延伸而跳变虚增至 52s
+        assertEquals("亮屏区间动态延伸后总亮屏时长同步增加 2s", 52_000L, refreshedOnMs)
+        assertEquals("息屏时长在 3 秒短时刷新窗口内保持平稳单调，杜绝跳变", initialOffMs, refreshedOffMs)
+    }
+
+    /**
+     * 验证当系统底层 dumpsys 上报失真极小的待机放电量（如 Idle 仅 0.01mAh）时，
+     * 物理底噪门禁能够精准拦截异常，并采纳时序实测待机底噪（如 0.04W），
+     * 精确计算出深度睡眠能耗（非 0.000Wh），且深睡与唤醒能量之和严格守恒。
+     */
+    @Test
+    fun testScreenOffAwakeAndDeepSleepDecompositionWithDumpsysDistortion() {
+        val screenOffMs = 1530_000L // 25分30秒
+        val deepSleepMs = 1419_000L // 23分39秒
+        val awakeMs = 111_000L // 1分51秒
+        val totalOffEnergyWh = 0.143f // 息屏总放电 0.143Wh (37.0mAh * 3.85V / 1000)
+        val distortedSleepMah = 0.01f // dumpsys 上报失真微量 0.01mAh（折算功率仅 0.0001W）
+        val rawAwakeMah = 0f
+
+        // 模拟底层时序采样序列中包含硬件实测待机底噪（0.04W）
+        val samples = listOf(
+            PowerDischargePoint(timestamp = 1000L, elapsedHours = 0.01f, batteryLevel = 80, voltageVolts = 3.85f, powerWatts = 0.04f, temperature = 28f, isScreenOn = false),
+            PowerDischargePoint(timestamp = 60000L, elapsedHours = 0.02f, batteryLevel = 80, voltageVolts = 3.85f, powerWatts = 0.04f, temperature = 28f, isScreenOn = false),
+            PowerDischargePoint(timestamp = 120000L, elapsedHours = 0.03f, batteryLevel = 80, voltageVolts = 3.85f, powerWatts = 0.04f, temperature = 28f, isScreenOn = false)
+        )
+
+        val decomposed = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = totalOffEnergyWh,
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            rawSleepDrainMah = distortedSleepMah,
+            rawAwakeDrainMah = rawAwakeMah,
+            samples = samples,
+            nominalVoltageVolts = 3.85f
+        )
+
+        // 1. 拆解必须判定有效可用
+        assertTrue("拆解结果必须有效", decomposed.isDecomposedAvailable)
+
+        // 2. 深度休眠功耗采纳实测底噪 0.04W，杜绝失真的 0.00W
+        assertEquals(0.04f, decomposed.deepSleepWatts, 0.005f)
+
+        // 3. 深度睡眠能耗应为 0.04W * (1419s / 3600s) ≈ 0.0158Wh，绝不允许显示为 0.000Wh
+        val expectedSleepEnergy = 0.04f * (deepSleepMs / 3600000f)
+        assertEquals("深度睡眠能耗必须为合理的物理实测值", expectedSleepEnergy, decomposed.deepSleepEnergyWh, 0.001f)
+        assertTrue("深度睡眠能耗绝对不为 0.000Wh", decomposed.deepSleepEnergyWh > 0.01f)
+
+        // 4. 唤醒活跃能耗等于 0.143Wh - 0.0158Wh ≈ 0.1272Wh
+        val expectedAwakeEnergy = totalOffEnergyWh - decomposed.deepSleepEnergyWh
+        assertEquals("唤醒能耗严格对齐剩余能量", expectedAwakeEnergy, decomposed.awakeEnergyWh, 0.001f)
+
+        // 5. 唤醒与深睡能量总和严格等于息屏总能耗（物理能量守恒）
+        assertEquals("深睡与唤醒能量之和严格守恒", totalOffEnergyWh, decomposed.deepSleepEnergyWh + decomposed.awakeEnergyWh, 0.0001f)
+    }
+
+    /**
+     * 验证在无实测采样点且系统 dumpsys 上报失真微量（Idle 0.01mAh）时，
+     * 算法如实将 isDecomposedAvailable 置为 false，展示未知/未获取，
+     * 严禁捏造虚假保底比例。
+     */
+    @Test
+    fun testScreenOffAwakeAndDeepSleepReturnsUnavailableWhenNoValidData() {
+        val screenOffMs = 1530_000L // 25分30秒
+        val deepSleepMs = 1419_000L // 23分39秒
+        val awakeMs = 111_000L // 1分51秒
+        val totalOffEnergyWh = 0.143f
+        val distortedSleepMah = 0.01f
+
+        val decomposed = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = totalOffEnergyWh,
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            rawSleepDrainMah = distortedSleepMah,
+            rawAwakeDrainMah = 0f,
+            samples = emptyList(), // 无任何采样点
+            nominalVoltageVolts = 3.85f
+        )
+
+        // 验证：缺乏有效实测底噪且 dumpsys 严重失真时，忠实展示不可用，不伪造数据
+        assertFalse("无有效数据时拆解结果必须标记为不可用", decomposed.isDecomposedAvailable)
+        assertEquals(0f, decomposed.deepSleepEnergyWh, 0.0001f)
+        assertEquals(0f, decomposed.awakeEnergyWh, 0.0001f)
+    }
 }
 
 

@@ -1,5 +1,6 @@
 package com.battery.analysis.ui
 
+import android.content.Context
 import android.graphics.Color
 import android.util.Log
 import android.view.LayoutInflater
@@ -22,13 +23,17 @@ import com.battery.analysis.manager.PowerOverviewStats
 import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.AppPowerUsageItem
 import com.battery.analysis.model.PowerUsageItem
+import com.battery.analysis.model.SevenDaysDischargeStats
 import com.battery.analysis.timeline.presentation.BatteryTimelineState
 import com.battery.analysis.timeline.util.DrawableBitmapCache
 import com.google.android.material.shape.CornerFamily
 import com.google.android.material.shape.ShapeAppearanceModel
+import android.graphics.Typeface
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.AbsoluteSizeSpan
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import androidx.core.text.HtmlCompat
 import com.battery.analysis.util.BatteryEnergyCalculator
 import java.util.Locale
@@ -110,6 +115,8 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     private var cachedTimelineState: BatteryTimelineState? = null
     // 放电速度概览卡片最新缓存数据
     private var cachedOverviewStats: PowerOverviewStats? = null
+    // 过去 7 天放电统计速度与充满电使用时间最新缓存数据
+    private var cachedSevenDaysStats: SevenDaysDischargeStats? = null
 
     // 弱保持当前活跃的卡片 ViewHolder 引用以提供平滑桥接
     var dischargeSpeedHolder: DischargeSpeedViewHolder? = null
@@ -462,17 +469,20 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     }
 
     /**
-     * 绑定放电速度核心概览卡片（呈现亮屏放电速度、息屏放电速度、全局放电速度三个主要模块的每小时放电占比百分比）。
+     * 绑定放电速度核心概览三卡片（呈现亮屏、息屏、全局放电速度三个独立卡片，包含实时放电速率、7天统计放电速度与满电使用时长）。
      *
      * @param holder 放电速度概览卡片 ViewHolder
      */
     private fun bindDischargeSpeed(holder: DischargeSpeedViewHolder) {
         val overview = cachedOverviewStats
+        val sevenDays = cachedSevenDaysStats
+        val context = holder.binding.root.context
         with(holder.binding) {
+            // --- 1. 第一行：当前放电速度百分比速率 ---
             if (overview == null) {
-                tvModuleScreenOnSpeed.text = "--"
-                tvModuleScreenOffSpeed.text = "--"
-                tvModuleGlobalSpeed.text = "--"
+                tvScreenOnSpeed.text = "--"
+                tvScreenOffSpeed.text = "--"
+                tvGlobalSpeed.text = "--"
             } else {
                 val totalDurationMs = if (overview.totalDurationMs > 0L) overview.totalDurationMs else parseDurationTextToMs(overview.totalDurationText)
                 val onDurationMs = if (overview.screenOnDurationMs > 0L) overview.screenOnDurationMs else parseDurationTextToMs(overview.screenOnDurationText)
@@ -483,24 +493,56 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 val offRate = calculateDischargeRatePercentPerHour(overview.screenOffPowerWatts, cachedTotalEnergyWh, offDurationMs)
                 val globalRate = calculateDischargeRatePercentPerHour(overview.avgPowerWatts, cachedTotalEnergyWh, totalDurationMs)
 
-                // 模块 1：亮屏放电速度
-                tvModuleScreenOnSpeed.text = formatDischargeRateSpannable(onRate)
+                // 卡片 1：亮屏放电速度
+                tvScreenOnSpeed.text = formatDischargeRateSpannable(onRate)
 
-                // 模块 2：息屏放电速度
-                tvModuleScreenOffSpeed.text = formatDischargeRateSpannable(offRate)
+                // 卡片 2：息屏放电速度
+                tvScreenOffSpeed.text = formatDischargeRateSpannable(offRate)
 
-                // 模块 3：全局放电速度（最后显示）
-                tvModuleGlobalSpeed.text = formatDischargeRateSpannable(globalRate)
+                // 卡片 3：全局放电速度
+                tvGlobalSpeed.text = formatDischargeRateSpannable(globalRate)
             }
 
-            layoutModuleScreenOn.setOnClickListener {
-                onMetricModuleClickedListener?.invoke(layoutModuleScreenOn, PowerUsageFragment.ROW_SCREEN_ON)
+            // --- 2. 第二行：实际统计放电速度与时长（百分比在前，实际统计时长在后） ---
+            tvScreenOn7daysSpeed.text = formatSecondaryDischargeRateSpannable(
+                context = context,
+                rate = sevenDays?.screenOnDischargeRatePercentPerHour,
+                durationMs = sevenDays?.screenOnDurationMs
+            )
+            tvScreenOff7daysSpeed.text = formatSecondaryDischargeRateSpannable(
+                context = context,
+                rate = sevenDays?.screenOffDischargeRatePercentPerHour,
+                durationMs = sevenDays?.screenOffDurationMs
+            )
+            tvGlobal7daysSpeed.text = formatSecondaryDischargeRateSpannable(
+                context = context,
+                rate = sevenDays?.globalDischargeRatePercentPerHour,
+                durationMs = sevenDays?.globalDurationMs
+            )
+
+            // --- 3. 第三行：充满电使用时间（时长在前，满电标签在后） ---
+            tvScreenOnFullDuration.text = formatFullDurationTextWithSuffix(
+                context = context,
+                ms = sevenDays?.fullChargeScreenOnDurationMs
+            )
+            tvScreenOffFullDuration.text = formatFullDurationTextWithSuffix(
+                context = context,
+                ms = sevenDays?.fullChargeScreenOffDurationMs
+            )
+            tvGlobalFullDuration.text = formatFullDurationTextWithSuffix(
+                context = context,
+                ms = sevenDays?.fullChargeGlobalDurationMs
+            )
+
+            // 卡片点击事件监听
+            cardScreenOnSpeed.setOnClickListener {
+                onMetricModuleClickedListener?.invoke(cardScreenOnSpeed, PowerUsageFragment.ROW_SCREEN_ON)
             }
-            layoutModuleScreenOff.setOnClickListener {
-                onMetricModuleClickedListener?.invoke(layoutModuleScreenOff, PowerUsageFragment.ROW_SCREEN_OFF)
+            cardScreenOffSpeed.setOnClickListener {
+                onMetricModuleClickedListener?.invoke(cardScreenOffSpeed, PowerUsageFragment.ROW_SCREEN_OFF)
             }
-            layoutModuleGlobal.setOnClickListener {
-                onMetricModuleClickedListener?.invoke(layoutModuleGlobal, PowerUsageFragment.ROW_GLOBAL)
+            cardGlobalSpeed.setOnClickListener {
+                onMetricModuleClickedListener?.invoke(cardGlobalSpeed, PowerUsageFragment.ROW_GLOBAL)
             }
         }
     }
@@ -644,6 +686,152 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 }
             }
         }
+    }
+
+    /**
+     * 将满电使用时间物理毫秒数格式化为紧凑易读的时长文本。
+     * 当持续时间大于等于 1 天时输出为 "XdXXh" 格式（如 5d05h）；
+     * 当持续时间大于等于 1 小时时输出为 "XhXXm" 格式（如 19h14m）；
+     * 否则输出为 "Xm" 格式（如 45m）。
+     *
+     * @param ms 充满电可用物理时长毫秒数
+     * @return 格式化后的紧凑时长字符串，数据无效时返回 "--"
+     */
+    private fun formatFullDurationText(ms: Long): String {
+        if (ms <= 0L) return "--"
+        val totalSec = ms / 1000L
+        val days = totalSec / 86400L
+        val hours = (totalSec % 86400L) / 3600L
+        val minutes = (totalSec % 3600L) / 60L
+        return when {
+            days > 0L -> String.format(Locale.getDefault(), "%dd%02dh", days, hours)
+            hours > 0L -> String.format(Locale.getDefault(), "%dh%02dm", hours, minutes)
+            else -> String.format(Locale.getDefault(), "%dm", minutes)
+        }
+    }
+
+    /**
+     * 将 7 天滑动窗口内实际有效统计时长（毫秒）格式化为紧凑时长文本。
+     * 有多少显示多少，最长不超过 7 天。
+     * 当持续时间大于等于 7 天时显示为 "7d"；
+     * 当持续时间大于等于 1 天时显示为 "XdXXh" 格式（如 1d08h、3d12h）；
+     * 当持续时间大于等于 1 小时时显示为 "XhXXm" 格式（如 4h30m、18h20m）；
+     * 否则显示为 "Xm" 格式（如 25m）。
+     *
+     * @param ms 实际有效统计时长物理毫秒数
+     * @return 格式化后的紧凑时长字符串，数据无效时返回空字符串
+     */
+    private fun formatActualStatsDurationText(ms: Long?): String {
+        if (ms == null || ms <= 0L) return ""
+        val totalSec = ms / 1000L
+        val days = totalSec / 86400L
+        val hours = (totalSec % 86400L) / 3600L
+        val minutes = (totalSec % 3600L) / 60L
+        return when {
+            days >= 7L -> "7d"
+            days > 0L -> String.format(Locale.getDefault(), "%dd%02dh", days, hours)
+            hours > 0L -> String.format(Locale.getDefault(), "%dh%02dm", hours, minutes)
+            else -> String.format(Locale.getDefault(), "%dm", minutes.coerceAtLeast(1L))
+        }
+    }
+
+    /**
+     * 将实际统计放电速度与有效时长组合格式化为复合富文本。
+     * 放电百分比数值与单位的文字样式大小完全对齐第一行放电速度百分比（数值 16sp 加粗高亮突出，"%/h" 单位 11sp 加粗微缩），
+     * 实际有效统计时长紧随其后（如 "5.2%/h 1d08h"），采用次要文本颜色与紧凑字号（10sp 常规字重）呈现。
+     * 若数据缺失则展示 "--"。
+     *
+     * @param context Android 上下文对象，用于解析系统主题次要文字颜色
+     * @param rate 统计放电速率百分比（单位：%/h）
+     * @param durationMs 7 天窗口内实际有效统计时长（单位：毫秒）
+     * @return 格式化后的富文本对象 [CharSequence]
+     */
+    private fun formatSecondaryDischargeRateSpannable(
+        context: Context,
+        rate: Float?,
+        durationMs: Long?
+    ): CharSequence {
+        if (rate == null || rate <= 0f) {
+            return "--"
+        }
+        val numberStr = String.format(Locale.getDefault(), "%.1f", rate)
+        val unitStr = "%/h"
+        val durStr = formatActualStatsDurationText(durationMs)
+        val fullText = if (durStr.isNotBlank()) "$numberStr$unitStr $durStr" else "$numberStr$unitStr"
+        val spannable = SpannableString(fullText)
+
+        // "%/h" 单位字号微缩至 11sp，与第一行放电速度单位样式及大小（11sp bold）完全一致
+        spannable.setSpan(
+            AbsoluteSizeSpan(11, true),
+            numberStr.length,
+            numberStr.length + unitStr.length,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+
+        // 时长部分保持次要紧凑字号（10sp）、常规字重与主题次要文本颜色
+        if (durStr.isNotBlank()) {
+            val durStart = numberStr.length + unitStr.length + 1
+            val typedArray = context.obtainStyledAttributes(intArrayOf(android.R.attr.textColorSecondary))
+            val secondaryColor = typedArray.getColor(0, 0x8A000000.toInt())
+            typedArray.recycle()
+
+            spannable.setSpan(
+                AbsoluteSizeSpan(10, true),
+                durStart,
+                fullText.length,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+            spannable.setSpan(
+                StyleSpan(Typeface.NORMAL),
+                durStart,
+                fullText.length,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+            spannable.setSpan(
+                ForegroundColorSpan(secondaryColor),
+                durStart,
+                fullText.length,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+        return spannable
+    }
+
+    /**
+     * 将充满电可用时长与满电说明标签组合格式化为紧凑富文本。
+     * 时长数值位于前面（如 "19h14m"），满电说明标签位于后面（如 "19h14m 满电"）。
+     * 若时长无效或数据缺失则展示 "--"。
+     *
+     * @param context Android 上下文对象
+     * @param ms 充满电可用物理时长毫秒数
+     * @return 格式化后的富文本对象 [CharSequence]
+     */
+    private fun formatFullDurationTextWithSuffix(context: Context, ms: Long?): CharSequence {
+        if (ms == null || ms <= 0L) {
+            return "--"
+        }
+        val durText = formatFullDurationText(ms)
+        if (durText == "--") return "--"
+        val label = context.getString(R.string.power_discharge_full_label)
+        val fullText = "$durText $label"
+        val spannable = SpannableString(fullText)
+
+        // 时长数值加粗突出
+        spannable.setSpan(
+            android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+            0,
+            durText.length,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        // 满电标签字号微缩至 10sp
+        val labelStart = durText.length + 1
+        spannable.setSpan(
+            AbsoluteSizeSpan(10, true),
+            labelStart,
+            fullText.length,
+            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+        )
+        return spannable
     }
 
     /**
@@ -1136,18 +1324,36 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     }
 
     /**
-     * 更新放电核心指标数据并刷新放电速度卡片视图。
+     * 更新放电核心指标数据并刷新放电速度卡片与睡眠卡片视图。
      *
      * @param overviewStats 最新的放电核心指标数据实体
      * @param totalCapacityWh 设备有效满充总能量容量（单位：Wh），若为 null 则尝试复用已缓存容量
+     * @param sevenDaysStats 过去 7 天核心放电统计指标实体（可选），若传入则一并更新
      */
-    fun updateOverviewStats(overviewStats: PowerOverviewStats?, totalCapacityWh: Float? = null) {
+    fun updateOverviewStats(
+        overviewStats: PowerOverviewStats?,
+        totalCapacityWh: Float? = null,
+        sevenDaysStats: SevenDaysDischargeStats? = null
+    ) {
         cachedOverviewStats = overviewStats
         if (totalCapacityWh != null && totalCapacityWh > 0f) {
             cachedTotalEnergyWh = totalCapacityWh
         }
+        if (sevenDaysStats != null) {
+            cachedSevenDaysStats = sevenDaysStats
+        }
         dischargeSpeedHolder?.let { bindDischargeSpeed(it) }
         sleepAwakeHolder?.let { bindSleepAwakeMetrics(it) }
+    }
+
+    /**
+     * 更新过去 7 天核心放电统计指标与充满电可用时长，并定向刷新放电速度卡片。
+     *
+     * @param stats 7 天核心放电统计实体 [SevenDaysDischargeStats]，可为 null
+     */
+    fun updateSevenDaysStats(stats: SevenDaysDischargeStats?) {
+        cachedSevenDaysStats = stats
+        dischargeSpeedHolder?.let { bindDischargeSpeed(it) }
     }
 
     /**

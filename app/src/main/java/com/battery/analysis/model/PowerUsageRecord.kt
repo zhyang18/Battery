@@ -395,6 +395,22 @@ data class PowerUsageRecord(
     }
 
     /**
+     * 获取本次放电记录的息屏持续时长（单位：毫秒）。
+     * 优先解析直接记录的息屏时长文本；若为空则尝试通过唤醒与深度睡眠时长细分项累加；若仍为空则取总时长减去亮屏时长。
+     *
+     * @return 转换后的息屏持续物理时长毫秒数
+     */
+    fun getScreenOffDurationMs(): Long {
+        val directMs = parseDurationToMillis(screenOffDurationText)
+        if (directMs > 0L) return directMs
+        val decomposedMs = screenOffAwakeDurationMs + screenOffDeepSleepDurationMs
+        if (decomposedMs > 0L) return decomposedMs
+        val totalDur = getDurationMs()
+        val onDur = getScreenOnDurationMs()
+        return (totalDur - onDur).coerceAtLeast(0L)
+    }
+
+    /**
      * 将时长文本解析还原为毫秒数。
      *
      * @param durationText 时长字符串（如 "1d2h"、"1h20m" 或 "46m30s"）

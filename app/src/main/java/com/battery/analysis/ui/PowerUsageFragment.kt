@@ -90,6 +90,7 @@ class PowerUsageFragment : Fragment() {
     // 历史快照查看模式状态
     private var isViewingSnapshot: Boolean = false
     private var currentLoadedSnapshotTime: String? = null
+    private var currentLoadedSnapshotRecord: com.battery.analysis.model.PowerUsageRecord? = null
 
     // 当前界面呈现的完整耗电数据包缓存
     private var lastRenderedPackage: FullPowerDataPackage? = null
@@ -1039,12 +1040,12 @@ class PowerUsageFragment : Fragment() {
         binding.layoutMetricScreenOffRow.setOnClickListener { showMetricRowDetailBubble(binding.layoutMetricScreenOffRow, ROW_SCREEN_OFF) }
         binding.layoutMetricGlobalRow.setOnClickListener { showMetricRowDetailBubble(binding.layoutMetricGlobalRow, ROW_GLOBAL) }
 
-        // 列表内放电速度概览卡片（作为 RecyclerView 子项可滚动）点击弹出对应模块名称气泡弹框
+        // 列表内放电速度概览卡片（作为 RecyclerView 子项可滚动）点击弹出分三行对应的模块说明气泡弹框
         adapter.onMetricModuleClickedListener = { anchorView, rowType ->
             val message = when (rowType) {
-                ROW_SCREEN_ON -> getString(R.string.power_screen_on_discharge_speed)
-                ROW_SCREEN_OFF -> getString(R.string.power_screen_off_discharge_speed)
-                ROW_GLOBAL -> getString(R.string.power_global_discharge_speed)
+                ROW_SCREEN_ON -> getString(R.string.power_screen_on_discharge_speed_tip)
+                ROW_SCREEN_OFF -> getString(R.string.power_screen_off_discharge_speed_tip)
+                ROW_GLOBAL -> getString(R.string.power_global_discharge_speed_tip)
                 else -> null
             }
             if (message != null) {
@@ -1340,6 +1341,22 @@ class PowerUsageFragment : Fragment() {
                 BatteryEnergyCalculator.calculateTotalEnergyWh(it)
             }
         adapter.updateOverviewStats(overview, totalCapacityWh)
+
+        // 异步更新过去 7 天加权放电统计速度与充满电使用时间
+        val appContext = requireContext().applicationContext
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            val stats = com.battery.analysis.util.SevenDaysDischargeCalculator.calculateSevenDaysStats(
+                context = appContext,
+                currentOverview = overview,
+                totalCapacityWh = totalCapacityWh,
+                baseTimestamp = System.currentTimeMillis()
+            )
+            withContext(Dispatchers.Main) {
+                if (isAdded && _binding != null) {
+                    adapter.updateSevenDaysStats(stats)
+                }
+            }
+        }
 
         // 2. 刷新应用列表（DiffUtil 会自动平滑更新 AVG 和 Duration 变动的条目）
         adapter.submitList(fullPackage.appList)
@@ -1785,6 +1802,27 @@ class PowerUsageFragment : Fragment() {
             }
         adapter.updateOverviewStats(overview, totalCapacityWh)
 
+        // 异步更新过去 7 天加权放电统计速度与充满电使用时间
+        val baseTs = if (isViewingSnapshot && currentLoadedSnapshotRecord != null) {
+            currentLoadedSnapshotRecord?.id ?: System.currentTimeMillis()
+        } else {
+            System.currentTimeMillis()
+        }
+        val fullDataAppContext = requireContext().applicationContext
+        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+            val stats = com.battery.analysis.util.SevenDaysDischargeCalculator.calculateSevenDaysStats(
+                context = fullDataAppContext,
+                currentOverview = if (isViewingSnapshot) null else overview,
+                totalCapacityWh = totalCapacityWh,
+                baseTimestamp = baseTs
+            )
+            withContext(Dispatchers.Main) {
+                if (isAdded && _binding != null) {
+                    adapter.updateSevenDaysStats(stats)
+                }
+            }
+        }
+
         // 3. 刷新应用场景列表
         adapter.submitList(fullPackage.appList)
 
@@ -2218,6 +2256,7 @@ class PowerUsageFragment : Fragment() {
         stopDischargePolling()
         isViewingSnapshot = true
         currentLoadedSnapshotTime = record.recordTime
+        currentLoadedSnapshotRecord = record
 
         // 确保切换至耗电模式并使核心放电容器与卡片呈现为可见状态
         applySmartChargingMode(isCharging = false, showToast = false)
@@ -2246,6 +2285,7 @@ class PowerUsageFragment : Fragment() {
     private fun restoreLivePowerData() {
         isViewingSnapshot = false
         currentLoadedSnapshotTime = null
+        currentLoadedSnapshotRecord = null
         adapter.setSnapshotBanner(visible = false)
         loadData()
         Toast.makeText(requireContext(), getString(R.string.toast_restored_realtime), Toast.LENGTH_SHORT).show()

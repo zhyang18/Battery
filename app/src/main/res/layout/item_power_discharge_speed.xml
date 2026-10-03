@@ -1,137 +1,248 @@
 <?xml version="1.0" encoding="utf-8"?>
-<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/card_discharge_speed_root"
+    android:id="@+id/layout_discharge_speed_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginTop="3dp"
     android:layout_marginBottom="3dp"
-    app:cardBackgroundColor="#14888888"
-    app:cardCornerRadius="14dp"
-    app:cardElevation="0dp"
-    app:strokeWidth="0dp">
+    android:baselineAligned="false"
+    android:orientation="horizontal"
+    android:weightSum="3">
 
-    <LinearLayout
-        android:layout_width="match_parent"
+    <!-- 卡片 1：亮屏放电速度 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/card_screen_on_speed"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:baselineAligned="false"
-        android:orientation="horizontal"
-        android:paddingHorizontal="4dp"
-        android:paddingVertical="10dp"
-        android:weightSum="3">
+        android:layout_weight="1"
+        android:layout_marginEnd="2dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="?attr/selectableItemBackground"
+        app:cardBackgroundColor="#14888888"
+        app:cardCornerRadius="14dp"
+        app:cardElevation="0dp"
+        app:strokeWidth="0dp">
 
-        <!-- 模块 1：亮屏放电速度（图标前置于数值，无多余文字行） -->
         <LinearLayout
-            android:id="@+id/layout_module_screen_on"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:background="?attr/selectableItemBackground"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:orientation="horizontal"
-            android:paddingHorizontal="2dp"
-            android:paddingVertical="4dp">
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="5dp"
+            android:paddingVertical="8dp">
 
-            <ImageView
-                android:id="@+id/iv_module_screen_on_icon"
-                android:layout_width="14dp"
-                android:layout_height="14dp"
-                android:layout_marginEnd="4dp"
-                android:contentDescription="@string/power_screen_on_discharge_speed"
-                android:src="@drawable/ic_power_screen_on" />
-
-            <!-- 每小时放电占比百分比数值 (如 9.19%/h) -->
-            <TextView
-                android:id="@+id/tv_module_screen_on_speed"
+            <!-- 第一行：放电速度百分比数值 + 亮屏标签文字（无小图标，对齐息屏卡片样式） -->
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <!-- 每小时放电占比百分比数值 (如 5.6%/h) -->
+                <TextView
+                    android:id="@+id/tv_screen_on_speed"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    tools:text="5.6%/h" />
+
+                <TextView
+                    android:id="@+id/tv_screen_on_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="3dp"
+                    android:text="@string/power_header_screen_on"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- 第二行：实际统计放电速度与时长（百分比在前，实际统计时长在后） -->
+            <TextView
+                android:id="@+id/tv_screen_on_7days_speed"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:ellipsize="end"
+                android:letterSpacing="-0.01"
+                android:singleLine="true"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="16sp"
                 android:textStyle="bold"
-                tools:text="9.19%/h" />
-        </LinearLayout>
+                tools:text="5.2%/h 1d08h" />
 
-        <!-- 细垂直分割线 -->
-        <View
-            android:layout_width="1dp"
-            android:layout_height="match_parent"
-            android:layout_marginVertical="3dp"
-            android:background="#15888888" />
-
-        <!-- 模块 2：息屏放电速度（图标前置于数值，无多余文字行） -->
-        <LinearLayout
-            android:id="@+id/layout_module_screen_off"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:background="?attr/selectableItemBackground"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:orientation="horizontal"
-            android:paddingHorizontal="2dp"
-            android:paddingVertical="4dp">
-
-            <ImageView
-                android:id="@+id/iv_module_screen_off_icon"
-                android:layout_width="14dp"
-                android:layout_height="14dp"
-                android:layout_marginEnd="4dp"
-                android:contentDescription="@string/power_screen_off_discharge_speed"
-                android:src="@drawable/ic_power_screen_off" />
-
-            <!-- 每小时放电占比百分比数值 (如 0.85%/h) -->
+            <!-- 第三行：充满电使用时间（时长在前，满电标签在后） -->
             <TextView
-                android:id="@+id/tv_module_screen_off_speed"
+                android:id="@+id/tv_screen_on_full_duration"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:letterSpacing="-0.01"
+                android:singleLine="true"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="10.5sp"
+                tools:text="19h14m 满电" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- 卡片 2：息屏放电速度 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/card_screen_off_speed"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="2dp"
+        android:layout_marginEnd="2dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="?attr/selectableItemBackground"
+        app:cardBackgroundColor="#14888888"
+        app:cardCornerRadius="14dp"
+        app:cardElevation="0dp"
+        app:strokeWidth="0dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="5dp"
+            android:paddingVertical="8dp">
+
+            <!-- 第一行：放电速度百分比数值 + 息屏标签文字（无小图标，对齐唤醒卡片样式） -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <!-- 每小时放电占比百分比数值 (如 0.0%/h) -->
+                <TextView
+                    android:id="@+id/tv_screen_off_speed"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    tools:text="0.0%/h" />
+
+                <TextView
+                    android:id="@+id/tv_screen_off_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="3dp"
+                    android:text="@string/power_header_screen_off"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- 第二行：实际统计放电速度与时长（百分比在前，实际统计时长在后） -->
+            <TextView
+                android:id="@+id/tv_screen_off_7days_speed"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:ellipsize="end"
+                android:letterSpacing="-0.01"
+                android:singleLine="true"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="16sp"
                 android:textStyle="bold"
-                tools:text="0.85%/h" />
-        </LinearLayout>
+                tools:text="0.8%/h 3d12h" />
 
-        <!-- 细垂直分割线 -->
-        <View
-            android:layout_width="1dp"
-            android:layout_height="match_parent"
-            android:layout_marginVertical="3dp"
-            android:background="#15888888" />
-
-        <!-- 模块 3：全局放电速度（图标前置于数值，无多余文字行） -->
-        <LinearLayout
-            android:id="@+id/layout_module_global"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:background="?attr/selectableItemBackground"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:orientation="horizontal"
-            android:paddingHorizontal="2dp"
-            android:paddingVertical="4dp">
-
-            <ImageView
-                android:id="@+id/iv_module_global_icon"
-                android:layout_width="14dp"
-                android:layout_height="14dp"
-                android:layout_marginEnd="4dp"
-                android:contentDescription="@string/power_global_discharge_speed"
-                android:src="@drawable/ic_power_global" />
-
-            <!-- 每小时放电占比百分比数值 (如 4.42%/h) -->
+            <!-- 第三行：充满电使用时间（时长在前，满电标签在后） -->
             <TextView
-                android:id="@+id/tv_module_global_speed"
+                android:id="@+id/tv_screen_off_full_duration"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:letterSpacing="-0.01"
+                android:singleLine="true"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="10.5sp"
+                tools:text="125h00m 满电" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- 卡片 3：全局放电速度 -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/card_global_speed"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="2dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:foreground="?attr/selectableItemBackground"
+        app:cardBackgroundColor="#14888888"
+        app:cardCornerRadius="14dp"
+        app:cardElevation="0dp"
+        app:strokeWidth="0dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="5dp"
+            android:paddingVertical="8dp">
+
+            <!-- 第一行：放电速度百分比数值 + 全局标签文字（无小图标，对齐深度睡眠卡片样式） -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <!-- 每小时放电占比百分比数值 (如 2.2%/h) -->
+                <TextView
+                    android:id="@+id/tv_global_speed"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    tools:text="2.2%/h" />
+
+                <TextView
+                    android:id="@+id/tv_global_title"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="3dp"
+                    android:text="@string/power_header_global"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- 第二行：实际统计放电速度与时长（百分比在前，实际统计时长在后） -->
+            <TextView
+                android:id="@+id/tv_global_7days_speed"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:ellipsize="end"
+                android:letterSpacing="-0.01"
+                android:singleLine="true"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="16sp"
                 android:textStyle="bold"
-                tools:text="4.42%/h" />
+                tools:text="3.1%/h 5d06h" />
+
+            <!-- 第三行：充满电使用时间（时长在前，满电标签在后） -->
+            <TextView
+                android:id="@+id/tv_global_full_duration"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:letterSpacing="-0.01"
+                android:singleLine="true"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="10.5sp"
+                tools:text="32h15m 满电" />
         </LinearLayout>
-    </LinearLayout>
-</com.google.android.material.card.MaterialCardView>
+    </com.google.android.material.card.MaterialCardView>
+</LinearLayout>

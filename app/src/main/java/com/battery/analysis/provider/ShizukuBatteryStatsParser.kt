@@ -372,8 +372,12 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             screenOffDeepSleepDurationMs + screenOffAwakeDurationMs
         }
         if (screenOffDrainMah > 0f && totalOffMs > 0L) {
-            if (rawIdleDrain > 0f) {
-                // 优先采信系统内核根据 PowerProfile 统计的底层纯待机放电量（Idle / Device standby）
+            val deepSleepHours = screenOffDeepSleepDurationMs / 3600000f
+            val impliedIdleWatts = if (deepSleepHours > 0f) (rawIdleDrain * 3.85f / 1000f) / deepSleepHours else 0f
+            val isIdlePlausible = rawIdleDrain > 0f && (screenOffDeepSleepDurationMs < 60_000L || impliedIdleWatts >= 0.015f)
+
+            if (isIdlePlausible) {
+                // 优先采信系统内核根据 PowerProfile 统计且通过物理合理性门禁的底层纯待机放电量（Idle / Device standby）
                 screenOffDeepSleepDrainMah = rawIdleDrain.coerceAtMost(screenOffDrainMah)
                 screenOffAwakeDrainMah = (screenOffDrainMah - screenOffDeepSleepDrainMah).coerceAtLeast(0f)
             } else if (screenOffDeepSleepDurationMs <= 0L && screenOffAwakeDurationMs > 0L) {
@@ -385,7 +389,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 screenOffDeepSleepDrainMah = screenOffDrainMah
                 screenOffAwakeDrainMah = 0f
             } else {
-                // 底层 dumpsys 未上报独立待机电量且同时存在唤醒与休眠时长时，如实保持未获取，绝不私自捏造经验比例
+                // 底层 dumpsys 未上报独立待机电量或数值严重失真（低于静态底噪极限），且同时存在唤醒与休眠时长时，如实保持未获取，绝不私自捏造经验比例
                 screenOffDeepSleepDrainMah = 0f
                 screenOffAwakeDrainMah = 0f
             }

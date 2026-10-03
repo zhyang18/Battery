@@ -83,6 +83,11 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * @property screenOffDeepSleepDrainMah 深度睡眠期间消耗的电量（mAh）
      * @property screenDrainMah 自断开充电以来的真实屏幕硬件放电量（mAh）
      * @property appList 解析得到的应用耗电实体列表
+     * @property screenDrainMah 自断开充电以来的真实屏幕硬件放电量（mAh）
+     * @property cellularDrainMah 蜂窝网络基带（Cellular / Modem）硬件放电量（mAh）
+     * @property wifiDrainMah 无线局域网（Wi-Fi）硬件放电量（mAh）
+     * @property bluetoothDrainMah 蓝牙（Bluetooth）硬件放电量（mAh）
+     * @property idleDrainMah 系统底层统计的设备空闲/待机纯放电量（mAh）
      * @property historyLevelPoints 解析得到的系统权威电量历史时间点与电量百分比序列列表 [List<Pair<Long, Int>>]
      * @property detectedUnplugTs 从底层历史账本中精确探测到的最近一次断开充电器的物理时间戳（毫秒，可选）
      * @property detectedUnplugLevel 从底层历史账本中精确探测到的最近一次断开充电器瞬间的电池电量（百分比，可选）
@@ -100,6 +105,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val screenOffDeepSleepDrainMah: Float = 0f,
         val appList: List<AppPowerUsageItem>,
         val screenDrainMah: Float = 0f,
+        val cellularDrainMah: Float = 0f,
+        val wifiDrainMah: Float = 0f,
+        val bluetoothDrainMah: Float = 0f,
+        val idleDrainMah: Float = 0f,
         val historyLevelPoints: List<Pair<Long, Int>> = emptyList(),
         val historyTempPoints: List<Pair<Long, Float>> = emptyList(),
         val detectedUnplugTs: Long? = null,
@@ -220,6 +229,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         var capacityMah = 4500f
         var computedDrainMah = 0f
         var screenDrainMah = 0f
+        var cellularDrainMah = 0f
+        var wifiDrainMah = 0f
+        var bluetoothDrainMah = 0f
+        var idleDrainMah = 0f
         var dischargeDurationMs = 0L
         var screenOnDurationMs = 0L
 
@@ -335,8 +348,23 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         } else {
             0f
         }
+        if (rawIdleDrain > 0f) {
+            idleDrainMah = rawIdleDrain
+        }
         if (screenOffDrainMah <= 0f && rawIdleDrain > 0f) {
             screenOffDrainMah = rawIdleDrain
+        }
+        val rawCellMatcher = REGEX_CELLULAR_DRAIN.matcher(rawText)
+        if (rawCellMatcher.find()) {
+            cellularDrainMah = rawCellMatcher.group(1)?.toFloatOrNull() ?: 0f
+        }
+        val rawWifiMatcher = REGEX_WIFI_DRAIN.matcher(rawText)
+        if (rawWifiMatcher.find()) {
+            wifiDrainMah = rawWifiMatcher.group(1)?.toFloatOrNull() ?: 0f
+        }
+        val rawBtMatcher = REGEX_BLUETOOTH_DRAIN.matcher(rawText)
+        if (rawBtMatcher.find()) {
+            bluetoothDrainMah = rawBtMatcher.group(1)?.toFloatOrNull() ?: 0f
         }
         val totalOffMs = if (screenOffDurationMs > 0L) {
             screenOffDurationMs
@@ -512,7 +540,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 // 遇到明显的大段落结束标记时才结束
                 if (line.isNotEmpty() && !line.startsWith(" ") && !line.startsWith("\t")) {
                     if (trimmed.startsWith("All ", ignoreCase = true) ||
-                        trimmed.startsWith("Cellular ", ignoreCase = true) ||
+                        trimmed.startsWith("Cellular statistics", ignoreCase = true) ||
                         trimmed.startsWith("Per-app ", ignoreCase = true) ||
                         trimmed.startsWith("Battery History", ignoreCase = true) ||
                         trimmed.startsWith("Statistics since", ignoreCase = true)) {
@@ -527,6 +555,42 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                     val sDrain = screenDrainMatcher.group(1)?.toFloatOrNull() ?: 0f
                     if (sDrain > screenDrainMah) {
                         screenDrainMah = sDrain
+                    }
+                }
+
+                // 提取基带蜂窝网络硬件单独放电量（如 "Cellular standby: 45.2" 或 "Cellular: 45.2"）
+                val cellularDrainMatcher = REGEX_CELLULAR_DRAIN.matcher(trimmed)
+                if (cellularDrainMatcher.find()) {
+                    val cDrain = cellularDrainMatcher.group(1)?.toFloatOrNull() ?: 0f
+                    if (cDrain > cellularDrainMah) {
+                        cellularDrainMah = cDrain
+                    }
+                }
+
+                // 提取 Wi-Fi 硬件单独放电量（如 "Wifi: 12.3" 或 "Wi-Fi: 12.3"）
+                val wifiDrainMatcher = REGEX_WIFI_DRAIN.matcher(trimmed)
+                if (wifiDrainMatcher.find()) {
+                    val wDrain = wifiDrainMatcher.group(1)?.toFloatOrNull() ?: 0f
+                    if (wDrain > wifiDrainMah) {
+                        wifiDrainMah = wDrain
+                    }
+                }
+
+                // 提取蓝牙硬件单独放电量（如 "Bluetooth: 2.1"）
+                val btDrainMatcher = REGEX_BLUETOOTH_DRAIN.matcher(trimmed)
+                if (btDrainMatcher.find()) {
+                    val bDrain = btDrainMatcher.group(1)?.toFloatOrNull() ?: 0f
+                    if (bDrain > bluetoothDrainMah) {
+                        bluetoothDrainMah = bDrain
+                    }
+                }
+
+                // 提取空闲/待机底噪单独放电量（如 "Idle: 15.0" 或 "Device standby: 15.0"）
+                val idleDrainInSecMatcher = REGEX_IDLE_DRAIN.matcher(trimmed)
+                if (idleDrainInSecMatcher.find()) {
+                    val iDrain = idleDrainInSecMatcher.group(1)?.toFloatOrNull() ?: 0f
+                    if (iDrain > idleDrainMah) {
+                        idleDrainMah = iDrain
                     }
                 }
 
@@ -828,6 +892,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             screenOffDeepSleepDrainMah = screenOffDeepSleepDrainMah,
             appList = validatedList,
             screenDrainMah = screenDrainMah,
+            cellularDrainMah = cellularDrainMah,
+            wifiDrainMah = wifiDrainMah,
+            bluetoothDrainMah = bluetoothDrainMah,
+            idleDrainMah = idleDrainMah,
             historyLevelPoints = filteredHistoryPoints,
             historyTempPoints = effectiveTempPoints,
             detectedUnplugTs = finalUnplugTs,
@@ -1866,6 +1934,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         private val REGEX_CAP_DRAIN = Pattern.compile("Capacity:\\s*([\\d.]+).*?Computed drain:\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_COMPUTED_DRAIN_ALONE = Pattern.compile("Computed drain:\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_SCREEN_DRAIN_LINE = Pattern.compile("^\\s*Screen:\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
+        private val REGEX_CELLULAR_DRAIN = Pattern.compile("(?:Cellular|Cellular standby|Mobile radio):\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
+        private val REGEX_WIFI_DRAIN = Pattern.compile("(?:Wifi|Wi-Fi):\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
+        private val REGEX_BLUETOOTH_DRAIN = Pattern.compile("Bluetooth:\\s*([\\d.]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_TIME_ON_BATTERY = Pattern.compile("Time on battery:\\s*([^\\n\\(]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_DISCHARGE_TIME = Pattern.compile("Discharge:\\s*([^\\n\\(]+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_SCREEN_ON = Pattern.compile("Screen on:\\s*([^\\n\\(]+)", Pattern.CASE_INSENSITIVE)

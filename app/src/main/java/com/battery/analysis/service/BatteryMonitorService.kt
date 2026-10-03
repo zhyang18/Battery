@@ -101,6 +101,14 @@ class BatteryMonitorService : Service() {
     @Volatile
     private var lastScreenOffUptime: Long = 0L
 
+    /** 上次屏幕熄灭瞬间硬件芯片库仑计快照（微安时 uAh），用于亮屏时差分计算真实硬件电荷量 */
+    @Volatile
+    private var lastScreenOffChargeCounterUah: Int = 0
+
+    /** 上次屏幕熄灭瞬间测得的电池端电压（伏特 V），用于与亮屏端电压求动态梯形平均电压 */
+    @Volatile
+    private var lastScreenOffVoltageVolts: Float = 0f
+
     /** 当前前台服务是否正挂载在静默渠道 [CHANNEL_ID_SILENT] 上的状态标识 */
     @Volatile
     private var isSilentNotificationActive: Boolean = false
@@ -140,19 +148,58 @@ class BatteryMonitorService : Service() {
                     handlePowerDisconnected(appContext)
                 }
                 Intent.ACTION_SCREEN_ON -> {
-                    // 屏幕点亮瞬间：标记屏幕状态、结算本次息屏的唤醒与深度睡眠时长、恢复轮询协程并强制刷新一次通知
+                    // 屏幕点亮瞬间：标记屏幕状态、结算本次息屏的唤醒与深度睡眠时长、通过硬件库仑计快照差分结算真实物理电荷与能量
                     cachedIsInteractive = true
                     if (lastScreenOffRealtime > 0L) {
                         val screenOffRealtimeMs = (SystemClock.elapsedRealtime() - lastScreenOffRealtime).coerceAtLeast(0L)
                         val screenOffUptimeMs = (SystemClock.uptimeMillis() - lastScreenOffUptime).coerceAtLeast(0L)
                         val deepSleepMs = (screenOffRealtimeMs - screenOffUptimeMs).coerceAtLeast(0L)
+
+                        val bm = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                        val screenOnCounterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: 0
+                        val screenOnVolt = cachedVoltageVolts
+
+                        var offHwMah = 0f
+                        var offHwWh = 0f
+                        if (lastScreenOffChargeCounterUah > 0 && screenOnCounterUah > 0 && lastScreenOffChargeCounterUah >= screenOnCounterUah) {
+                            val rawMah = (lastScreenOffChargeCounterUah - screenOnCounterUah) / 1000f
+                            val avgVolt = if (lastScreenOffVoltageVolts > 0f && screenOnVolt > 0f) {
+                                (lastScreenOffVoltageVolts + screenOnVolt) / 2f
+                            } else if (screenOnVolt > 0f) {
+                                screenOnVolt
+                            } else {
+                                com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
+                            }
+                            val rawWh = (rawMah * avgVolt) / 1000f
+
+                            // 物理合理性门禁（Sanity Gate）：
+                            // 针对荣耀、华为等机型电池计量 IC 寄存器可能存在的离散大步进更新延迟（未触发步进时仅有量化噪声，如 0.1mAh），
+                            // 计算等效待机物理功率并进行门禁校验，杜绝将尚未步进的微小脏数据误当做真实放电量
+                            val offHours = screenOffRealtimeMs / 3600_000f
+                            val impliedWatts = if (offHours > 0f) rawWh / offHours else 0f
+                            val isPhysicallyPlausible = if (screenOffRealtimeMs >= 30_000L) {
+                                rawMah >= 0.2f && impliedWatts in 0.02f..1.5f
+                            } else {
+                                impliedWatts <= 2.5f
+                            }
+
+                            if (isPhysicallyPlausible) {
+                                offHwMah = rawMah
+                                offHwWh = rawWh
+                            }
+                        }
+
                         PowerUsageManager.getInstance(appContext).recordScreenOffSleepInterval(
                             screenOffRealtimeMs = screenOffRealtimeMs,
                             screenOffAwakeMs = screenOffUptimeMs,
-                            deepSleepMs = deepSleepMs
+                            deepSleepMs = deepSleepMs,
+                            hwDrainMah = offHwMah,
+                            hwEnergyWh = offHwWh
                         )
                         lastScreenOffRealtime = 0L
                         lastScreenOffUptime = 0L
+                        lastScreenOffChargeCounterUah = 0
+                        lastScreenOffVoltageVolts = 0f
                     }
                     startMonitorSamplingLoop()
                     updateNotification(force = true)
@@ -185,6 +232,12 @@ class BatteryMonitorService : Service() {
                             }
                             cachedDischargePowerWatts = pWatts
                         }
+
+                        // 记录灭屏瞬间芯片硬件库仑计快照与端电压（进阶方案 1 & 2）
+                        val bm = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                        lastScreenOffChargeCounterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: 0
+                        lastScreenOffVoltageVolts = curVolt
+
                         powerManager.recordDischargeRealtimeSample(
                             timestamp = System.currentTimeMillis(),
                             batteryLevel = cachedLevelPercent,

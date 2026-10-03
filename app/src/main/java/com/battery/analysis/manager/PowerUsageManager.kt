@@ -712,8 +712,47 @@ class PowerUsageManager private constructor(private val context: Context) {
          * @param awakeMs 息屏唤醒时长（毫秒 ms，来自系统硬件时钟差分）
          * @param rawSleepDrainMah 系统底层 dumpsys 上报的独立纯待机电量（毫安时 mAh，若有）
          * @param rawAwakeDrainMah 系统底层 dumpsys 上报的独立唤醒电量（毫安时 mAh，若有）
+          * @param samples 瞬时物理采样点列表（若有）
+         * @param nominalVoltageVolts 电池标称电压（伏特 V）
+         * @param allCycleSamples 放电全周期物理采样点列表（用于最近采样窗口缺乏纯净待机点时提取该硬件周期的物理底噪）
+         * @return 包含分解后的唤醒能耗、深度休眠能耗与各自平均功耗的结果对象 [ScreenOffDecomposedEnergy]
+         */
+        internal fun extractQuiescentStandbyWatts(samples: List<PowerDischargePoint>): Float? {
+            val validOffSamples = samples.filter { !it.isScreenOn && it.powerWatts > 0f }
+            if (validOffSamples.isEmpty()) return null
+            return if (validOffSamples.size >= 3) {
+                val sortedPowers = validOffSamples.map { it.powerWatts }.sorted()
+                val p10Index = (sortedPowers.size * 0.10).toInt().coerceIn(0, sortedPowers.size - 1)
+                val candidateWatts = sortedPowers[p10Index]
+                if (candidateWatts in 0.015f..0.15f) {
+                    candidateWatts
+                } else if (candidateWatts < 0.015f) {
+                    sortedPowers.firstOrNull { it in 0.015f..0.15f } ?: (if (candidateWatts > 0f) candidateWatts else null)
+                } else {
+                    val minPower = sortedPowers.first()
+                    if (minPower <= 0.15f) minPower else null
+                }
+            } else {
+                val validPowers = validOffSamples.map { it.powerWatts }.filter { it <= 0.15f }
+                validPowers.minOrNull()
+            }
+        }
+
+        /**
+         * 真实物理守恒分解息屏唤醒能耗与深度睡眠能耗。
+         * 优先采信底层内核根据硬件芯片寄存器与电源配置模型权威统计的原生待机放电量（Idle / Device standby）；
+         * 若底层未细分，则从放电周期真实物理采样点序列中提取纯净静态待机底噪并按时长比例积分，
+         * 严格杜绝任何保底虚构与非物理比例捏造。
+         *
+         * @param offEnergyWh 息屏总能耗（瓦时 Wh）
+         * @param screenOffMs 息屏总时长（毫秒 ms）
+         * @param deepSleepMs 深度休眠时长（毫秒 ms，来自系统硬件时钟差分）
+         * @param awakeMs 息屏唤醒时长（毫秒 ms，来自系统硬件时钟差分）
+         * @param rawSleepDrainMah 系统底层 dumpsys 上报的独立纯待机电量（毫安时 mAh，若有）
+         * @param rawAwakeDrainMah 系统底层 dumpsys 上报的独立唤醒电量（毫安时 mAh，若有）
          * @param samples 瞬时物理采样点列表（若有）
          * @param nominalVoltageVolts 电池标称电压（伏特 V）
+         * @param allCycleSamples 放电全周期物理采样点列表（用于最近采样窗口缺乏纯净待机点时提取该硬件周期的物理底噪）
          * @return 包含分解后的唤醒能耗、深度休眠能耗与各自平均功耗的结果对象 [ScreenOffDecomposedEnergy]
          */
         fun calculateScreenOffAwakeAndDeepSleepEnergy(
@@ -724,7 +763,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             rawSleepDrainMah: Float = 0f,
             rawAwakeDrainMah: Float = 0f,
             samples: List<PowerDischargePoint> = emptyList(),
-            nominalVoltageVolts: Float = 3.85f
+            nominalVoltageVolts: Float = 3.85f,
+            allCycleSamples: List<PowerDischargePoint> = emptyList()
         ): ScreenOffDecomposedEnergy {
             if (offEnergyWh <= 0f || screenOffMs <= 0L) {
                 return ScreenOffDecomposedEnergy(0f, 0f, 0f, 0f, isDecomposedAvailable = false)
@@ -768,28 +808,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                 isDecomposedAvailable = true
             } else {
                 // 2. 无系统原生有效细分时，从真实物理采样点序列中提取纯净静止待机底噪（杜绝唤醒活跃尖峰污染）
-                val validOffSamples = samples.filter { !it.isScreenOn && it.powerWatts > 0f }
-                val baselineSleepWatts: Float? = if (validOffSamples.size >= 3) {
-                    val sortedPowers = validOffSamples.map { it.powerWatts }.sorted()
-                    val p10Index = (sortedPowers.size * 0.10).toInt().coerceIn(0, sortedPowers.size - 1)
-                    val candidateWatts = sortedPowers[p10Index]
-                    // 待机底噪物理门禁：深度休眠 CPU 处于挂起态，正常待机底噪通常在 0.015W ~ 0.15W；若超过说明均为高功耗唤醒活跃采样
-                    if (candidateWatts in 0.015f..0.15f) {
-                        candidateWatts
-                    } else if (candidateWatts < 0.015f) {
-                        sortedPowers.firstOrNull { it in 0.015f..0.15f } ?: (if (candidateWatts > 0f) candidateWatts else null)
-                    } else {
-                        // 若 P10 超过 0.15W，检查是否存在有效待机区间样本（取最小值判断是否确实采到了待机底噪）
-                        val minPower = sortedPowers.first()
-                        if (minPower <= 0.15f) minPower else null
-                    }
-                } else if (validOffSamples.isNotEmpty()) {
-                    // 若因系统深度休眠挂起导致息屏期间仅有极少采样点（1~2个），检查是否存在符合待机底噪（<= 0.15W）的实测点
-                    val validPowers = validOffSamples.map { it.powerWatts }.filter { it <= 0.15f }
-                    validPowers.minOrNull()
-                } else {
-                    null
-                }
+                // 优先从当前评估窗口采样点提取，若因深度睡眠挂起导致窗口内仅有过渡样本，则检索放电全周期真实样本池
+                val baselineSleepWatts: Float? = extractQuiescentStandbyWatts(samples)
+                    ?: if (allCycleSamples.isNotEmpty()) extractQuiescentStandbyWatts(allCycleSamples) else null
 
                 if (baselineSleepWatts != null && baselineSleepWatts > 0f) {
                     // 策略 2：基于硬件物理采样实测待机底噪真实计算深度休眠能耗
@@ -1150,6 +1171,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             if (hwEnergyWh > 0f) {
                 localScreenOffHwEnergyWh += hwEnergyWh
             }
+            saveDischargeSamplesToPrefsAsync()
         }
     }
 
@@ -1627,6 +1649,12 @@ class PowerUsageManager private constructor(private val context: Context) {
         // 重置应用即时物理能耗映射表
         appRealtimeEnergyMap.clear()
 
+        // 重置息屏唤醒与深度睡眠时钟累加指标
+        localScreenOffAwakeDurationMs = 0L
+        localScreenOffDeepSleepDurationMs = 0L
+        localScreenOffHwDrainMah = 0f
+        localScreenOffHwEnergyWh = 0f
+
         // 异步清除私有文件
         saveDischargeSamplesToPrefsAsync()
     }
@@ -1666,6 +1694,12 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         // 重置应用即时物理能耗映射表
         appRealtimeEnergyMap.clear()
+
+        // 重置息屏唤醒与深度睡眠时钟累加指标
+        localScreenOffAwakeDurationMs = 0L
+        localScreenOffDeepSleepDurationMs = 0L
+        localScreenOffHwDrainMah = 0f
+        localScreenOffHwEnergyWh = 0f
 
         val firstPoint = PowerDischargePoint(
             timestamp = timestamp,
@@ -1735,6 +1769,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                 .append(",\"offJ\":").append(dischargeAccumulator.screenOffJoules)
                 .append(",\"onMs\":").append(dischargeAccumulator.screenOnDurationMs)
                 .append(",\"offMs\":").append(dischargeAccumulator.screenOffDurationMs)
+                .append(",\"offAwakeMs\":").append(localScreenOffAwakeDurationMs)
+                .append(",\"offSleepMs\":").append(localScreenOffDeepSleepDurationMs)
+                .append(",\"offHwMah\":").append(localScreenOffHwDrainMah)
+                .append(",\"offHwWh\":").append(localScreenOffHwEnergyWh)
                 .append(",\"lastTs\":").append(dischargeAccumulator.lastSampleTs)
                 .append(",\"lastW\":").append(dischargeAccumulator.lastSampleWatts)
                 .append(",\"lastOn\":").append(dischargeAccumulator.lastSampleScreenOn)
@@ -1819,6 +1857,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                 dischargeAccumulator.lastSampleWatts = accObj.optDouble("lastW", 0.0).toFloat()
                 dischargeAccumulator.lastSampleScreenOn = accObj.optBoolean("lastOn", false)
                 dischargeAccumulator.lastSampleTemp = accObj.optDouble("lastT", 0.0).toFloat()
+                localScreenOffAwakeDurationMs = accObj.optLong("offAwakeMs", 0L)
+                localScreenOffDeepSleepDurationMs = accObj.optLong("offSleepMs", 0L)
+                localScreenOffHwDrainMah = accObj.optDouble("offHwMah", 0.0).toFloat()
+                localScreenOffHwEnergyWh = accObj.optDouble("offHwWh", 0.0).toFloat()
 
                 appRealtimeEnergyMap.clear()
                 val appsArray = accObj.optJSONArray("apps")
@@ -3295,7 +3337,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                     rawSleepDrainMah = stats.screenOffDeepSleepDrainMah,
                     rawAwakeDrainMah = stats.screenOffAwakeDrainMah,
                     samples = recentSamples,
-                    nominalVoltageVolts = nominalVoltageVolts
+                    nominalVoltageVolts = nominalVoltageVolts,
+                    allCycleSamples = getDischargeRealtimeSamples()
                 )
                 val awakeEnergyWh = decomposedOff.awakeEnergyWh
                 val deepSleepEnergyWh = decomposedOff.deepSleepEnergyWh
@@ -5549,7 +5592,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             deepSleepMs = deepSleepMs,
             awakeMs = awakeMs,
             samples = recentSamples,
-            nominalVoltageVolts = nominalVoltageVolts
+            nominalVoltageVolts = nominalVoltageVolts,
+            allCycleSamples = getDischargeRealtimeSamples()
         )
         val awakeEnergyWh = decomposedOff.awakeEnergyWh
         val deepSleepEnergyWh = decomposedOff.deepSleepEnergyWh

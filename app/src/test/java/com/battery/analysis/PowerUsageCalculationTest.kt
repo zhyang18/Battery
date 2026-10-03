@@ -4378,6 +4378,100 @@ class PowerUsageCalculationTest {
         assertEquals(0f, decomposed.deepSleepEnergyWh, 0.0001f)
         assertEquals(0f, decomposed.awakeEnergyWh, 0.0001f)
     }
+
+    /**
+     * 验证当评估窗口内仅采集到灭屏瞬态过渡尖峰点（如 0.35W > 0.15W）时，
+     * 算法能够自动从放电全周期真实历史样本池中提取纯净芯片待机底噪（如 0.038W），
+     * 从而保持物理守恒能量分解成功，杜绝唤醒统计偶发跌入不可用（--）状态。
+     */
+    @Test
+    fun testScreenOffTransitionSpikeFallbackToAllCycleQuiescentStandby() {
+        val screenOffMs = 1800_000L // 息屏 30 分钟
+        val deepSleepMs = 1500_000L // 深度休眠 25 分钟
+        val awakeMs = 300_000L // 唤醒 5 分钟
+        val totalOffEnergyWh = 0.050f // 息屏总能耗 0.050Wh
+
+        // 当前窗口内仅有刚灭屏时的瞬态过渡点（0.35W，超过待机门禁）
+        val recentWindowSamples = listOf(
+            PowerDischargePoint(
+                timestamp = System.currentTimeMillis() - 1790_000L,
+                elapsedHours = 0.5f,
+                batteryLevel = 80,
+                voltageVolts = 4.0f,
+                temperature = 30.0f,
+                powerWatts = 0.35f,
+                isScreenOn = false
+            )
+        )
+
+        // 放电全周期历史样本池中包含了此前测得的真实待机底噪点（0.035W）
+        val allCycleSamples = listOf(
+            PowerDischargePoint(
+                timestamp = System.currentTimeMillis() - 3600_000L,
+                elapsedHours = 1.0f,
+                batteryLevel = 82,
+                voltageVolts = 4.05f,
+                temperature = 29.5f,
+                powerWatts = 0.035f,
+                isScreenOn = false
+            )
+        )
+
+        val decomposed = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = totalOffEnergyWh,
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            rawSleepDrainMah = 0f,
+            rawAwakeDrainMah = 0f,
+            samples = recentWindowSamples,
+            nominalVoltageVolts = 3.85f,
+            allCycleSamples = allCycleSamples
+        )
+
+        // 验证：成功复用放电全周期测得的真实待机底噪
+        assertTrue("复用全周期实测待机底噪后必须可用", decomposed.isDecomposedAvailable)
+        val expectedSleepWh = 0.035f * (deepSleepMs / 3600000f)
+        assertEquals("深度休眠能耗与芯片实测底噪相符", expectedSleepWh, decomposed.deepSleepEnergyWh, 0.001f)
+        val expectedAwakeWh = totalOffEnergyWh - decomposed.deepSleepEnergyWh
+        assertEquals("唤醒能耗与剩余能耗完全守恒", expectedAwakeWh, decomposed.awakeEnergyWh, 0.001f)
+        assertEquals("总能耗严格物理守恒", totalOffEnergyWh, decomposed.deepSleepEnergyWh + decomposed.awakeEnergyWh, 0.0001f)
+    }
+
+    /**
+     * 验证物理累加器 JSON 字符串包含息屏唤醒/深度睡眠/库仑计快照字段时的解析与持久化完整性。
+     */
+    @Test
+    fun testScreenOffAwakeJsonSerializationAndRestoration() {
+        val jsonStr = """
+            {
+                "onJ": 1250.5,
+                "offJ": 450.2,
+                "onMs": 600000,
+                "offMs": 1800000,
+                "offAwakeMs": 150000,
+                "offSleepMs": 1650000,
+                "offHwMah": 12.5,
+                "offHwWh": 0.048,
+                "lastTs": 1700000000000,
+                "lastW": 0.05,
+                "lastOn": false,
+                "lastT": 28.5,
+                "apps": []
+            }
+        """.trimIndent()
+
+        val obj = org.json.JSONObject(jsonStr)
+        val restoredAwakeMs = obj.optLong("offAwakeMs", 0L)
+        val restoredSleepMs = obj.optLong("offSleepMs", 0L)
+        val restoredHwMah = obj.optDouble("offHwMah", 0.0).toFloat()
+        val restoredHwWh = obj.optDouble("offHwWh", 0.0).toFloat()
+
+        assertEquals("唤醒时长准确恢复", 150000L, restoredAwakeMs)
+        assertEquals("深度休眠时长准确恢复", 1650000L, restoredSleepMs)
+        assertEquals("库仑计电量准确恢复", 12.5f, restoredHwMah, 0.001f)
+        assertEquals("端电压能量准确恢复", 0.048f, restoredHwWh, 0.0001f)
+    }
 }
 
 

@@ -604,9 +604,17 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
             // 2. 唤醒卡片
             if (overview.screenOffAwakeDurationMs <= 0L && overview.screenOffAwakeEnergyWh <= 0f) {
-                tvAwakePercent.text = "--"
-                tvAwakeSubtitle.text = noRecordText
-                tvAwakeMah.text = "--"
+                if (overview.screenOffDurationMs > 0L) {
+                    // 放电周期内经历过息屏，但唤醒时长与能耗均为 0（手机处于 100% 纯深度睡眠挂起状态）
+                    tvAwakePercent.text = "0.0%"
+                    val subtitleHtml = "<font color=\"#FFA4A4\">0s</font> <font color=\"#FFA4A4\">0.000Wh</font>"
+                    tvAwakeSubtitle.text = HtmlCompat.fromHtml(subtitleHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
+                    tvAwakeMah.text = HtmlCompat.fromHtml("<font color=\"#FFA4A4\">0.0 mAh</font>", HtmlCompat.FROM_HTML_MODE_LEGACY)
+                } else {
+                    tvAwakePercent.text = "--"
+                    tvAwakeSubtitle.text = noRecordText
+                    tvAwakeMah.text = "--"
+                }
             } else {
                 val awakePercentStr = if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakePercent > 0f) {
                     String.format(Locale.US, "%.1f%%", overview.screenOffAwakePercent)
@@ -646,9 +654,17 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
             // 3. 深度睡眠卡片
             if (overview.screenOffDeepSleepDurationMs <= 0L && overview.screenOffDeepSleepEnergyWh <= 0f) {
-                tvSleepPercent.text = "--"
-                tvSleepSubtitle.text = noRecordText
-                tvSleepMah.text = "--"
+                if (overview.screenOffDurationMs > 0L) {
+                    // 放电周期内经历过息屏，但深度睡眠时长为 0（息屏期间 CPU 全程被持有唤醒锁活跃工作）
+                    tvSleepPercent.text = "0.0%"
+                    val subtitleHtml = "<font color=\"#B71C1C\">0s</font> <font color=\"#B71C1C\">0.000Wh</font>"
+                    tvSleepSubtitle.text = HtmlCompat.fromHtml(subtitleHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
+                    tvSleepMah.text = HtmlCompat.fromHtml("<font color=\"#B71C1C\">0.0 mAh</font>", HtmlCompat.FROM_HTML_MODE_LEGACY)
+                } else {
+                    tvSleepPercent.text = "--"
+                    tvSleepSubtitle.text = noRecordText
+                    tvSleepMah.text = "--"
+                }
             } else {
                 val sleepPercentStr = if (overview.isScreenOffDecomposedAvailable && overview.screenOffDeepSleepPercent > 0f) {
                     String.format(Locale.US, "%.1f%%", overview.screenOffDeepSleepPercent)

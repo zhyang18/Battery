@@ -126,6 +126,24 @@ class BatteryMonitorService : Service() {
     private var cachedRemoteViews: RemoteViews? = null
 
     /**
+     * 从本地存储中恢复可能因后台被系统杀死重启而中断的灭屏时序与硬件基准。
+     *
+     * @param context 应用程序上下文
+     */
+    private fun restoreScreenOffBaselineIfNeeded(context: Context) {
+        if (lastScreenOffRealtime <= 0L) {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            val savedRealtime = prefs.getLong(KEY_LAST_SCREEN_OFF_REALTIME, 0L)
+            if (savedRealtime > 0L) {
+                lastScreenOffRealtime = savedRealtime
+                lastScreenOffUptime = prefs.getLong(KEY_LAST_SCREEN_OFF_UPTIME, 0L)
+                lastScreenOffChargeCounterUah = prefs.getInt(KEY_LAST_SCREEN_OFF_COUNTER_UAH, 0)
+                lastScreenOffVoltageVolts = prefs.getFloat(KEY_LAST_SCREEN_OFF_VOLTAGE, 0f)
+            }
+        }
+    }
+
+    /**
      * 内部动态广播接收器，用于在前台服务存活期间毫秒级捕获充放电广播、电池状态变动及屏幕亮灭事件。
      */
     private val powerReceiver = object : BroadcastReceiver() {
@@ -141,6 +159,7 @@ class BatteryMonitorService : Service() {
             when (action) {
                 Intent.ACTION_POWER_CONNECTED -> {
                     cachedIsCharging = true
+                    clearPersistedScreenOffBaseline(appContext)
                     handlePowerConnected(appContext)
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> {
@@ -150,6 +169,7 @@ class BatteryMonitorService : Service() {
                 Intent.ACTION_SCREEN_ON -> {
                     // 屏幕点亮瞬间：标记屏幕状态、结算本次息屏的唤醒与深度睡眠时长、通过硬件库仑计快照差分结算真实物理电荷与能量
                     cachedIsInteractive = true
+                    restoreScreenOffBaselineIfNeeded(appContext)
                     if (lastScreenOffRealtime > 0L) {
                         val screenOffRealtimeMs = (SystemClock.elapsedRealtime() - lastScreenOffRealtime).coerceAtLeast(0L)
                         val screenOffUptimeMs = (SystemClock.uptimeMillis() - lastScreenOffUptime).coerceAtLeast(0L)
@@ -200,6 +220,7 @@ class BatteryMonitorService : Service() {
                         lastScreenOffUptime = 0L
                         lastScreenOffChargeCounterUah = 0
                         lastScreenOffVoltageVolts = 0f
+                        clearPersistedScreenOffBaseline(appContext)
                     }
                     startMonitorSamplingLoop()
                     updateNotification(force = true)
@@ -237,6 +258,14 @@ class BatteryMonitorService : Service() {
                         val bm = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
                         lastScreenOffChargeCounterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: 0
                         lastScreenOffVoltageVolts = curVolt
+
+                        persistScreenOffBaseline(
+                            appContext,
+                            lastScreenOffRealtime,
+                            lastScreenOffUptime,
+                            lastScreenOffChargeCounterUah,
+                            lastScreenOffVoltageVolts
+                        )
 
                         powerManager.recordDischargeRealtimeSample(
                             timestamp = System.currentTimeMillis(),
@@ -1089,6 +1118,51 @@ class BatteryMonitorService : Service() {
         const val DEFAULT_SCREEN_ON_INTERVAL_MS = 1000L
         /** 息屏放电采样默认间隔（毫秒）：默认为 1 秒（1000L）高频精准采集 */
         const val DEFAULT_SCREEN_OFF_INTERVAL_MS = 1000L
+
+        private const val KEY_LAST_SCREEN_OFF_REALTIME = "pref_last_screen_off_realtime"
+        private const val KEY_LAST_SCREEN_OFF_UPTIME = "pref_last_screen_off_uptime"
+        private const val KEY_LAST_SCREEN_OFF_COUNTER_UAH = "pref_last_screen_off_counter_uah"
+        private const val KEY_LAST_SCREEN_OFF_VOLTAGE = "pref_last_screen_off_voltage"
+
+        /**
+         * 将屏幕熄灭时刻的时序与硬件基准持久化至本地存储，防止后台服务被系统杀死自愈后丢失息屏时基。
+         *
+         * @param context 应用程序上下文
+         * @param realtimeMs 灭屏时刻的 elapsedRealtime（毫秒）
+         * @param uptimeMs 灭屏时刻的 uptimeMillis（毫秒）
+         * @param counterUah 灭屏时刻硬件库仑计读数（微安时 uAh）
+         * @param voltageVolts 灭屏时刻端电压（伏特 V）
+         */
+        fun persistScreenOffBaseline(
+            context: Context,
+            realtimeMs: Long,
+            uptimeMs: Long,
+            counterUah: Int,
+            voltageVolts: Float
+        ) {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.edit()
+                .putLong(KEY_LAST_SCREEN_OFF_REALTIME, realtimeMs)
+                .putLong(KEY_LAST_SCREEN_OFF_UPTIME, uptimeMs)
+                .putInt(KEY_LAST_SCREEN_OFF_COUNTER_UAH, counterUah)
+                .putFloat(KEY_LAST_SCREEN_OFF_VOLTAGE, voltageVolts)
+                .apply()
+        }
+
+        /**
+         * 清除已完成结算的屏幕熄灭基准持久化数据。
+         *
+         * @param context 应用程序上下文
+         */
+        fun clearPersistedScreenOffBaseline(context: Context) {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.edit()
+                .remove(KEY_LAST_SCREEN_OFF_REALTIME)
+                .remove(KEY_LAST_SCREEN_OFF_UPTIME)
+                .remove(KEY_LAST_SCREEN_OFF_COUNTER_UAH)
+                .remove(KEY_LAST_SCREEN_OFF_VOLTAGE)
+                .apply()
+        }
 
         /** 宿主应用（MainActivity）当前是否处于最前台可见活跃状态的全局内存指示器 */
         @Volatile

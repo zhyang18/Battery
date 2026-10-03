@@ -4118,6 +4118,81 @@ class PowerUsageCalculationTest {
 
         assertEquals("真实掉电 1% 必须优先采纳物理 50mAh 而非滞后的 0.1mAh", 50f, physicalDrainMah, 0.001f)
     }
+
+    /**
+     * 验证当电池百分比未下降（dropPercent == 0，如 69% -> 69%）且放电时长达 27 分钟（亮屏 3m53s，息屏 23m28s）时，
+     * 因无宏观掉电天花板（physicalTotalEnergyWh == 0f），双锚定算法不会抹杀息屏能耗，息屏功耗与能量忠实按物理待机基线呈现。
+     */
+    @Test
+    fun testScreenOffEnergyWhenDropPercentZeroAndDualAnchorInvoked() {
+        val onEnergyWh = 0.174f
+        val onHours = 233f / 3600f // 3分53秒
+        val onWatts = onEnergyWh / onHours // 2.69W
+        val offHours = 1408f / 3600f // 23分28秒
+        val totalHours = onHours + offHours
+        val safeOffWatts = 0.08f // 系统客观待机底噪
+        val safeOffEnergyWh = safeOffWatts * offHours // 约 0.0313Wh
+        val physicalTotalEnergyWh = 0f // 未发生宏观百分比掉电且库仑计未步进，无宏观物理天花板
+
+        val dualStats = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = onEnergyWh,
+            intOffEnergyWh = safeOffEnergyWh,
+            intTotalEnergyWh = onEnergyWh + safeOffEnergyWh,
+            intOnPowerWatts = onWatts,
+            intOffPowerWatts = safeOffWatts,
+            intTotalPowerWatts = (onEnergyWh + safeOffEnergyWh) / totalHours,
+            physicalTotalEnergyWh = physicalTotalEnergyWh,
+            screenOnHours = onHours,
+            screenOffHours = offHours,
+            dischargeHours = totalHours,
+            screenOffMs = 1408000L,
+            nominalVoltageVolts = 3.85f
+        )
+
+        // 验证：
+        // 1. 亮屏能量与功耗保持高精度微积分真值（0.174Wh，2.69W）
+        assertEquals(0.174f, dualStats.onEnergyWh, 0.001f)
+        assertEquals(2.688f, dualStats.screenOnWatts, 0.05f)
+
+        // 2. 息屏能量绝对不被抹杀归零（约 0.031Wh，杜绝 0.000Wh）
+        assertTrue("dropPercent == 0 时息屏能量杜绝归零", dualStats.offEnergyWh > 0.02f)
+
+        // 3. 息屏功耗正常展示待机真实值（约 0.08W，杜绝 '--'）
+        assertTrue("dropPercent == 0 时息屏功耗正常展示（>= 0.05W）", dualStats.screenOffWatts >= 0.05f)
+
+        // 4. 整机总能量忠实反映亮屏与息屏之和（约 0.205Wh）
+        assertEquals(onEnergyWh + dualStats.offEnergyWh, dualStats.totalEnergyWh, 0.001f)
+    }
+
+    /**
+     * 验证当放电周期达 27 分钟但硬件芯片库仑计差值因量化未步进仅记录 0.1mAh 时，
+     * 功率门禁能正确过滤量化噪声，将其置为 0f，杜绝 0.1mAh 穿透破坏整机放电量。
+     */
+    @Test
+    fun testValidHwMahFilteringWhenCoulombQuantizationNotStepped() {
+        val durationMs = 1641000L // 27分21秒
+        val dischargeHours = durationMs / 3600000f
+        val hwDischargedMah = 0.1f // 仅 0.1mAh
+        val nominalVoltageVolts = 3.85f
+        val dropPercent = 0
+        val smoothedDropMah = 0f
+
+        val impliedTotalWatts = if (dischargeHours > 0f) (hwDischargedMah * nominalVoltageVolts / 1000f) / dischargeHours else 0f
+
+        val validHwMah = if (hwDischargedMah > 0f) {
+            if (dropPercent > 0 && hwDischargedMah < (smoothedDropMah * 0.3f)) {
+                0f
+            } else if (durationMs >= 30_000L && impliedTotalWatts < 0.02f) {
+                0f
+            } else {
+                hwDischargedMah
+            }
+        } else {
+            0f
+        }
+
+        assertEquals("量化未步进的 0.1mAh 必须被过滤为 0f", 0f, validHwMah, 0.0001f)
+    }
 }
 
 

@@ -426,25 +426,31 @@ class PowerUsageManager private constructor(private val context: Context) {
             screenOffLongIntervals: List<LongIntervalSample>
         ): Double {
             if (screenOffDurationMs <= 0L) return 0.0
-            if (screenOffConfidentDurationMs <= 0L) return screenOffEnergyWh
+            if (screenOffConfidentDurationMs <= 0L && screenOffLongIntervals.isEmpty()) return screenOffEnergyWh
             if (screenOffLongIntervals.isEmpty()) return screenOffConfidentEnergyWh
 
-            val confidentCoverage = (screenOffConfidentDurationMs.toDouble() / screenOffDurationMs.toDouble()).coerceIn(0.0, 1.0)
+            val confidentCoverage = if (screenOffDurationMs > 0L) {
+                (screenOffConfidentDurationMs.toDouble() / screenOffDurationMs.toDouble()).coerceIn(0.0, 1.0)
+            } else {
+                0.0
+            }
             val durationScore = (screenOffConfidentDurationMs.toDouble() / 7_200_000.0).coerceIn(0.0, 1.0)
             val sampleScore = (screenOffShortIntervalPowers.size.toDouble() / 1_000.0).coerceIn(0.0, 1.0)
             val confidenceScore = kotlin.math.sqrt(durationScore * sampleScore) * kotlin.math.sqrt(confidentCoverage)
 
             // 物理第一性原理：休眠长断层对应 CPU 挂起休眠（Deep Sleep），其真实功率为系统硬件静态待机底噪（0.03W ~ 0.12W）。
             // 息屏短样本主要由系统或应用唤醒活跃期产生，若采用 P30~P50 会严重受唤醒尖峰污染导致长断层虚高放大数倍。
-            // 故待机基线功率应取低位分布（P10 ~ P20），并设 <= 0.15W 待机底噪门禁校验。
+            // 故待机基线功率应取低位分布（P10 ~ P20），并设 <= 0.15W 待机底噪门禁校验；若无短样本，采用系统待机底座基线。
             val baselinePercentile = 0.10 + (0.20 - 0.10) * confidenceScore
             var baselinePowerWatts = computeWeightedPercentilePower(screenOffShortIntervalPowers, baselinePercentile)
-                ?: return screenOffConfidentEnergyWh
+                ?: ShizukuBatteryStatsParser.DEFAULT_STANDBY_BASE_WATTS.toDouble()
 
             if (baselinePowerWatts > 0.15) {
                 val minValidPower = screenOffShortIntervalPowers.filter { it.powerWatts > 0.0 }.minOfOrNull { it.powerWatts }
                 if (minValidPower != null && minValidPower <= 0.15) {
                     baselinePowerWatts = minValidPower
+                } else if (baselinePowerWatts > 0.25) {
+                    baselinePowerWatts = ShizukuBatteryStatsParser.DEFAULT_STANDBY_BASE_WATTS.toDouble()
                 }
             }
 
@@ -620,6 +626,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                         realTotalEnergyWh = onEnergyWh + offEnergyWh
                     }
                 } else {
+                    // 无宏观物理天花板约束（如系统底层未发生百分比掉电）：
+                    // 整机放电能量忠实等于亮屏微积分与息屏待机微积分/外推底噪之和
                     offEnergyWh = baseOffEnergyWh
                     realTotalEnergyWh = onEnergyWh + offEnergyWh
                 }
@@ -2956,9 +2964,13 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
 
                 // 物理守恒基础：硬件芯片库仑计差值与纯应用前台实耗电量，绝不采用 dumpsys computedDrainMah 软件估算
+                val impliedTotalWatts = if (dischargeHours > 0f) (hwDischargedMah * nominalVoltageVolts / 1000f) / dischargeHours else 0f
                 val validHwMah = if (hwDischargedMah > 0f) {
                     if (dropPercent > 0 && hwDischargedMah < (smoothedDropMah * 0.3f)) {
                         // 硬件库仑计处于离散步进滞后状态（例如掉电 1% 约 50mAh，库仑计差值却只有微小的 0.1mAh），采纳真实掉电量
+                        0f
+                    } else if (durationMs >= 30_000L && impliedTotalWatts < 0.02f) {
+                        // 放电时间已超 30 秒但库仑计差值折算功率低于静态待机底噪极限（0.02W），说明处于芯片量化未步进盲区，不可作为全周期基准
                         0f
                     } else {
                         hwDischargedMah
@@ -2968,8 +2980,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
                 val physicalDrainMah = when {
                     validHwMah > 0f -> validHwMah
-                    dropPercent > 0 -> smoothedDropMah
-                    minPhysicalMah > 0f -> minPhysicalMah
+                    dropPercent > 0 -> maxOf(smoothedDropMah, minPhysicalMah)
                     else -> 0f
                 }
                 val physicalTotalEnergyWh = (physicalDrainMah * nominalVoltageVolts) / 1000f
@@ -5261,9 +5272,13 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         // 物理电量基础：优先采用硬件芯片库仑计差值，若无则采用掉电百分比折算
+        val impliedTotalWatts = if (dischargeHours > 0f) (hwDischargedMah * nominalVoltageVolts / 1000f) / dischargeHours else 0f
         val validHwMah = if (hwDischargedMah > 0f) {
             if (dropPercent > 0 && hwDischargedMah < (smoothedDropMah * 0.3f)) {
                 // 硬件库仑计处于离散步进滞后状态（例如掉电 1% 约 50mAh，库仑计差值却只有微小的 0.1mAh），采纳真实掉电量
+                0f
+            } else if (totalMs >= 30_000L && impliedTotalWatts < 0.02f) {
+                // 放电时间已超 30 秒但库仑计差值折算功率低于静态待机底噪极限（0.02W），说明处于芯片量化未步进盲区，不可作为全周期基准
                 0f
             } else {
                 hwDischargedMah

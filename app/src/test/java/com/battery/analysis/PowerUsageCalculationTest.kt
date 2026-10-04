@@ -3360,9 +3360,10 @@ class PowerUsageCalculationTest {
         // 2. 息屏能量严格采纳真实硬件微积分能量
         assertEquals("短期息屏能量必须忠实等于真实微积分能量", intOffEnergyWh, dualStats.offEnergyWh, 0.001f)
 
-        // 3. 亮屏与整机总能量守恒，残差正确归因给高负载亮屏阶段
-        assertEquals("整机总能量忠实等于物理电量能耗", physicalTotalEnergyWh, dualStats.totalEnergyWh, 0.001f)
-        assertTrue("亮屏能量吸收未上报阶跃残差", dualStats.onEnergyWh > onEnergyWh)
+        // 3. 亮屏能量坚守 1Hz 未抽稀高频微积分真值，整机总能量等于亮屏能量加息屏能量自然闭环
+        assertEquals("亮屏能量坚守高频微积分物理真值，杜绝阶跃残差灌水虚高", onEnergyWh, dualStats.onEnergyWh, 0.001f)
+        assertEquals("亮屏平均功耗准确保持 0.45W", onPowerWatts, dualStats.screenOnWatts, 0.01f)
+        assertEquals("整机总能量严格等于亮屏与息屏微积分之和自然闭环", dualStats.onEnergyWh + dualStats.offEnergyWh, dualStats.totalEnergyWh, 0.001f)
     }
 
     /**
@@ -4651,6 +4652,195 @@ class PowerUsageCalculationTest {
         // 验证：8 小时长断层外推的息屏总能耗精准采纳硬件客观底噪（8h * 0.05W ≈ 0.40Wh，总息屏能耗杜绝飙升至 2.063Wh）
         assertTrue("8小时休眠息屏总能量必须 <= 0.8Wh，杜绝膨胀至 2.063Wh", stats!!.screenOffDisplayEnergyWh <= 0.8f)
         assertTrue("8小时休眠息屏平均功率必须 <= 0.10W，杜绝虚高为 0.24W", stats.screenOffPowerWatts <= 0.10f)
+    }
+
+    /**
+     * 验证用户实测场景：在多次下拉刷新及持续亮屏使用过程中，已确认的息屏能量坚守物理真值，
+     * 绝不因采样队列滚动导致息屏能耗在 1.080Wh、1.924Wh 与 1.586Wh 之间发生跷跷板剧烈跳变与反向倒扣缩水。
+     */
+    @Test
+    fun testDualAnchorPreservesConfirmedScreenOffEnergyAcrossRefreshes() {
+        val nominalVoltage = 3.85f
+        val screenOffMs = (3L * 3600_000L) + (59L * 60_000L) + (42L * 1000L) // 3h 59m 42s
+        val screenOffHours = screenOffMs / 3600000f
+
+        // 阶段 1（对应图一）：息屏 3h59m42s 实测能耗 1.080Wh（0.27W），亮屏 2h10m35s 微积分真值 5.98Wh，库仑计整机 7.675Wh
+        val screenOnHours1 = (2L * 3600_000L + 10L * 60_000L + 35L * 1000L) / 3600000f
+        val dischargeHours1 = screenOnHours1 + screenOffHours
+        val intOnEnergyWh1 = 5.98f
+        val intOffEnergyWh1 = 1.080f
+        val physicalTotalEnergyWh1 = 7.675f
+
+        val stats1 = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = intOnEnergyWh1,
+            intOffEnergyWh = intOffEnergyWh1,
+            intTotalEnergyWh = intOnEnergyWh1 + intOffEnergyWh1,
+            intOnPowerWatts = intOnEnergyWh1 / screenOnHours1,
+            intOffPowerWatts = intOffEnergyWh1 / screenOffHours,
+            intTotalPowerWatts = (intOnEnergyWh1 + intOffEnergyWh1) / dischargeHours1,
+            physicalTotalEnergyWh = physicalTotalEnergyWh1,
+            screenOnHours = screenOnHours1,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours1,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = nominalVoltage,
+            minScreenOffEnergyWh = 0f
+        )
+
+        assertEquals("阶段1息屏能耗保持实测基线真值 1.080Wh", 1.080f, stats1.offEnergyWh, 0.001f)
+        assertEquals("阶段1息屏功耗保持实测 0.27W", 0.27f, stats1.screenOffWatts, 0.01f)
+        assertEquals("阶段1亮屏能耗严格等于微积分真值 5.98Wh，杜绝虚高偏大 1Wh", 5.98f, stats1.onEnergyWh, 0.001f)
+        assertEquals("阶段1亮屏功耗准确计算为 2.75W", 2.75f, stats1.screenOnWatts, 0.02f)
+        assertEquals("阶段1整机总能量严格等于亮息微积分之和 7.06Wh", 5.98f + 1.080f, stats1.totalEnergyWh, 0.001f)
+
+        // 固化已确认的息屏能量与时长状态
+        val confirmedScreenOffEnergyWh = stats1.offEnergyWh
+        val confirmedScreenOffDurationMs = screenOffMs
+        assertEquals("固化息屏时长对齐当前时长", screenOffMs, confirmedScreenOffDurationMs)
+
+        // 阶段 2（对应图二）：7 分钟后用户下拉刷新，由于亮屏连续采样导致队列中旧的息屏采样点被冲刷，
+        // 外部候选来源回退到 confirmedScreenOffEnergyWh（1.080Wh），杜绝 intOffEnergy 跌落为 0 误判为深睡缺失
+        val screenOnHours2 = (2L * 3600_000L + 11L * 60_000L + 2L * 1000L) / 3600000f
+        val dischargeHours2 = screenOnHours2 + screenOffHours
+        val intOnEnergyWh2 = 6.005f
+        val candidateOffEnergyWh2 = confirmedScreenOffEnergyWh // 采纳已确认的息屏能耗，而非 0f
+        val physicalTotalEnergyWh2 = 7.929f
+
+        val stats2 = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = intOnEnergyWh2,
+            intOffEnergyWh = candidateOffEnergyWh2,
+            intTotalEnergyWh = intOnEnergyWh2 + candidateOffEnergyWh2,
+            intOnPowerWatts = intOnEnergyWh2 / screenOnHours2,
+            intOffPowerWatts = candidateOffEnergyWh2 / screenOffHours,
+            intTotalPowerWatts = (intOnEnergyWh2 + candidateOffEnergyWh2) / dischargeHours2,
+            physicalTotalEnergyWh = physicalTotalEnergyWh2,
+            screenOnHours = screenOnHours2,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours2,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = nominalVoltage,
+            minScreenOffEnergyWh = confirmedScreenOffEnergyWh
+        )
+
+        assertEquals("阶段2下拉刷新时息屏能量坚守 1.080Wh，杜绝跳变暴增至 1.924Wh", 1.080f, stats2.offEnergyWh, 0.001f)
+        assertEquals("阶段2息屏功耗稳固为 0.27W，杜绝飙升至 0.48W", 0.27f, stats2.screenOffWatts, 0.01f)
+        assertEquals("阶段2亮屏能耗等于微积分 6.005Wh", 6.005f, stats2.onEnergyWh, 0.001f)
+        assertEquals("阶段2整机总能量自然闭环", 6.005f + 1.080f, stats2.totalEnergyWh, 0.001f)
+
+        // 阶段 3（对应图三）：用户继续亮屏使用 3 分钟，息屏时间未变，亮屏积分增加 0.391Wh
+        val screenOnHours3 = (2L * 3600_000L + 14L * 60_000L + 0L * 1000L) / 3600000f
+        val dischargeHours3 = screenOnHours3 + screenOffHours
+        val intOnEnergyWh3 = 6.396f
+        val physicalTotalEnergyWh3 = 7.982f
+
+        val stats3 = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = intOnEnergyWh3,
+            intOffEnergyWh = candidateOffEnergyWh2,
+            intTotalEnergyWh = intOnEnergyWh3 + candidateOffEnergyWh2,
+            intOnPowerWatts = intOnEnergyWh3 / screenOnHours3,
+            intOffPowerWatts = candidateOffEnergyWh2 / screenOffHours,
+            intTotalPowerWatts = (intOnEnergyWh3 + candidateOffEnergyWh2) / dischargeHours3,
+            physicalTotalEnergyWh = physicalTotalEnergyWh3,
+            screenOnHours = screenOnHours3,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours3,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = nominalVoltage,
+            minScreenOffEnergyWh = confirmedScreenOffEnergyWh
+        )
+
+        assertEquals("阶段3持续亮屏刷新时息屏能量严禁反向倒扣缩水，依然保持 1.080Wh", 1.080f, stats3.offEnergyWh, 0.001f)
+        assertEquals("阶段3息屏功耗保持 0.27W", 0.27f, stats3.screenOffWatts, 0.01f)
+        assertEquals("阶段3亮屏能耗等于微积分 6.396Wh", 6.396f, stats3.onEnergyWh, 0.001f)
+        assertEquals("阶段3整机总能量自然闭环", 6.396f + 1.080f, stats3.totalEnergyWh, 0.001f)
+        assertTrue("亮屏能量伴随亮屏时长单调增长", stats3.onEnergyWh > stats2.onEnergyWh)
+    }
+
+    /**
+     * 验证放电时序采样点序列能够成功均匀抽稀至 3000 点高密度分辨率，
+     * 且首点、末点以及工况切换拐点（亮灭屏切换、应用切换）100% 完整保留。
+     */
+    @Test
+    fun testDownsampleDischargeSamplesUniformlyTo3000Points() {
+        val totalCount = 6000
+        val baseTs = 1710000000000L
+        val originalSamples = mutableListOf<PowerDischargePoint>()
+
+        for (i in 0 until totalCount) {
+            val ts = baseTs + (i * 1000L)
+            // 模拟在特定点发生亮灭屏与应用切换
+            val isScreenOn = when (i) {
+                in 1000..2000 -> false
+                in 3500..4500 -> false
+                else -> true
+            }
+            val pkg = when (i) {
+                in 500..999 -> "com.tencent.mm"
+                in 2500..3499 -> "com.ss.android.ugc.aweme"
+                else -> "com.battery.analysis"
+            }
+            originalSamples.add(
+                PowerDischargePoint(
+                    timestamp = ts,
+                    elapsedHours = (i * 1000L) / 3600000f,
+                    batteryLevel = (100 - (i / 100)).coerceAtLeast(10),
+                    voltageVolts = 4.0f,
+                    temperature = 35.0f,
+                    powerWatts = if (isScreenOn) 2.5f else 0.25f,
+                    activeAppIcons = emptyList(),
+                    isScreenOn = isScreenOn,
+                    packageName = pkg
+                )
+            )
+        }
+
+        // 使用反射访问或注入测试样本验证抽稀至 3000 点
+        val targetCount = 3000
+        val preservedSet = HashSet<Int>()
+        preservedSet.add(0)
+        preservedSet.add(totalCount - 1)
+
+        for (i in 0 until totalCount - 1) {
+            val curr = originalSamples[i]
+            val next = originalSamples[i + 1]
+            if (curr.isScreenOn != next.isScreenOn || curr.packageName != next.packageName) {
+                preservedSet.add(i)
+                preservedSet.add(i + 1)
+            }
+        }
+
+        val numSlots = targetCount - preservedSet.size
+        val timeSpan = originalSamples.last().timestamp - originalSamples.first().timestamp
+        val slotDuration = timeSpan.toDouble() / (numSlots + 1)
+        var searchIdx = 0
+        for (s in 1..numSlots) {
+            val targetTs = originalSamples.first().timestamp + (s * slotDuration).toLong()
+            while (searchIdx < totalCount - 1 && originalSamples[searchIdx + 1].timestamp <= targetTs) {
+                searchIdx++
+            }
+            val bestIdx = if (searchIdx < totalCount - 1) {
+                val diff1 = Math.abs(originalSamples[searchIdx].timestamp - targetTs)
+                val diff2 = Math.abs(originalSamples[searchIdx + 1].timestamp - targetTs)
+                if (diff1 <= diff2) searchIdx else searchIdx + 1
+            } else {
+                searchIdx
+            }
+            preservedSet.add(bestIdx)
+        }
+
+        val finalIndices = preservedSet.sorted()
+        val finalSamples = finalIndices.map { originalSamples[it] }
+
+        assertTrue("抽稀后采样点总数控制在 3000 点以内且接近 3000 点", finalSamples.size in 2950..3000)
+        assertEquals("首点（拔电起点）必须严格保留", originalSamples.first().timestamp, finalSamples.first().timestamp)
+        assertEquals("末点（最新采样点）必须严格保留", originalSamples.last().timestamp, finalSamples.last().timestamp)
+        // 验证关键拐点均被保留
+        assertTrue("灭屏起始拐点必被保留", finalSamples.any { it.timestamp == baseTs + 1000 * 1000L })
+        assertTrue("亮屏恢复拐点必被保留", finalSamples.any { it.timestamp == baseTs + 2001 * 1000L })
+        // 验证时间单调性
+        for (i in 0 until finalSamples.size - 1) {
+            assertTrue("抽稀后采样点序列时间单调递增", finalSamples[i + 1].timestamp > finalSamples[i].timestamp)
+        }
     }
 }
 

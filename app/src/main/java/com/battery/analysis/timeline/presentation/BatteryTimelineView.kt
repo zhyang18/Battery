@@ -949,7 +949,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     ) {
         cache.path.reset()
         cache.markers.clear()
-        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 300)
+        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 1500)
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
@@ -1081,7 +1081,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         cache.path.reset()
         cache.markers.clear()
         if (rawSamples.isEmpty()) return
-        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 300)
+        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 1500)
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
@@ -1172,7 +1172,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         cache.path.reset()
         cache.markers.clear()
         if (rawSamples.isEmpty()) return
-        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 300)
+        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 1500)
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
@@ -1265,7 +1265,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         cache.path.reset()
         cache.markers.clear()
         if (rawSamples.isEmpty()) return
-        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 300)
+        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 1500)
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth

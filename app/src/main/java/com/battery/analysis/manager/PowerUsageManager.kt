@@ -30,6 +30,7 @@ import com.battery.analysis.timeline.domain.EnergySource
 import com.battery.analysis.timeline.domain.ScreenEvent
 import com.battery.analysis.timeline.presentation.BatteryTimelineState
 import com.battery.analysis.timeline.presentation.TimelineMetric
+import com.battery.analysis.util.AppIconCacheManager
 import com.battery.analysis.util.BatteryEnergyCalculator
 import com.battery.analysis.util.NetworkStatsHelper
 import com.battery.analysis.util.SysfsBatterySampler
@@ -3298,9 +3299,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                     }
                 }.filter {
                     if (enableBackgroundStats) {
-                        it.foregroundTimeMs > 0L || it.backgroundTimeMs > 0L || it.backgroundEnergyWh > 0.001f || it.energyWh > 0.001f
+                        it.foregroundTimeMs > 0L || it.backgroundTimeMs > 0L || it.backgroundEnergyWh > 0.001f || it.energyWh > 0.001f || it.isUninstalledApp()
                     } else {
-                        it.foregroundTimeMs > 0L || isAssistantScreenApp(it.packageName)
+                        it.foregroundTimeMs > 0L || isAssistantScreenApp(it.packageName) || it.isUninstalledApp() || ((it.directEnergyWh ?: 0f) > 0.001f)
                     }
                 }
 
@@ -3821,7 +3822,14 @@ class PowerUsageManager private constructor(private val context: Context) {
             val isInteractiveSys = isInteractiveSystemApp(packageName)
             !isSystem || isUpdatedSystem || hasLauncher || isHome || isInteractiveSys
         } catch (_: Exception) {
-            isInteractiveSystemApp(packageName)
+            // 若系统已查无此包（已卸载），若在本地磁盘有图标/名称持久化缓存或属于有效第三方包名，如实判定为用户应用
+            if (AppIconCacheManager.getSavedAppName(context, packageName) != null ||
+                AppIconCacheManager.hasAppIcon(context, packageName) ||
+                (packageName.contains(".") && !packageName.startsWith("android") && !packageName.startsWith("com.android."))) {
+                !isInteractiveSystemApp(packageName)
+            } else {
+                isInteractiveSystemApp(packageName)
+            }
         }
     }
 

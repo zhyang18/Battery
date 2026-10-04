@@ -468,6 +468,11 @@ class BatteryMonitorService : Service() {
         try {
             com.battery.analysis.util.ShizukuProcessCleaner.purgeDanglingProcesses()
         } catch (_: Exception) {}
+
+        // 服务启动时异步预热已安装应用的原生小图标与显示名称，确保卸载后 100% 完整保留
+        try {
+            com.battery.analysis.util.AppIconCacheManager.warmUpInstalledAppsAsync(this)
+        } catch (_: Exception) {}
     }
 
     /**

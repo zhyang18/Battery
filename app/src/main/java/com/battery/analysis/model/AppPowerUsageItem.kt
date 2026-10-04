@@ -26,6 +26,7 @@ import android.graphics.drawable.Drawable
  * @property foregroundPowerWatts 前台活跃点亮屏幕综合平均放电功耗（单位：瓦特 W，默认 0f）
  * @property backgroundPowerWatts 后台运行活跃放电平均功耗（单位：瓦特 W，默认 0f）
  * @property fgsDurationMs 前台服务（Foreground Service）常驻挂载时长（单位：毫秒，默认 0L）
+ * @property isUninstalled 显式标记当前应用是否属于已卸载应用（默认 false）
  */
 data class AppPowerUsageItem(
     val packageName: String,
@@ -46,7 +47,8 @@ data class AppPowerUsageItem(
     val gpsTimeMs: Long = 0L,
     val foregroundPowerWatts: Float = 0f,
     val backgroundPowerWatts: Float = 0f,
-    val fgsDurationMs: Long = 0L
+    val fgsDurationMs: Long = 0L,
+    val isUninstalled: Boolean = false
 ) {
     /**
      * 计算该应用消耗的总电量（单位：瓦时 Wh）。
@@ -69,7 +71,7 @@ data class AppPowerUsageItem(
      * @return 若为已卸载应用返回 true，否则返回 false
      */
     fun isUninstalledApp(): Boolean {
-        return isUninstalledPackage(packageName)
+        return isUninstalled || isUninstalledPackage(packageName)
     }
 
     /**
@@ -101,6 +103,8 @@ data class AppPowerUsageItem(
         } else {
             maxOf(this.avgTemperature, other.avgTemperature)
         }
+        val mergedIsUninstalled = this.isUninstalled || other.isUninstalled ||
+                isUninstalledPackage(this.packageName) || isUninstalledPackage(other.packageName)
 
         val fgHours = if (mergedFgMs > 0L) mergedFgMs / 3600000.0 else 0.0
         val bgHours = if (mergedBgMs > 0L) mergedBgMs / 3600000.0 else 0.0
@@ -133,7 +137,8 @@ data class AppPowerUsageItem(
             fgsDurationMs = mergedFgs,
             lastUsedTimeMs = mergedLastUsed,
             avgTemperature = mergedAvgTemp,
-            maxTemperature = mergedMaxTemp
+            maxTemperature = mergedMaxTemp,
+            isUninstalled = mergedIsUninstalled
         )
     }
 

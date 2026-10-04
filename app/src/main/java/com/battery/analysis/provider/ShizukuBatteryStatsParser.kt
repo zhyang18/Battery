@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import com.battery.analysis.model.AppPowerUsageItem
+import com.battery.analysis.util.AppIconCacheManager
 import com.battery.analysis.util.NetworkStatsHelper
 import com.battery.analysis.util.safeDestroy
 import rikka.shizuku.Shizuku
@@ -633,7 +634,18 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             "uninstalled_app_summary"
                         }
 
-                        val isUninstalled = AppPowerUsageItem.isUninstalledPackage(effectivePkg)
+                        // 真实性检测：即使已解析出真实包名，若系统 PackageManager 查无此包，依然判定为已卸载应用
+                        val isPkgNotFound = if (!resolvedPkg.isNullOrEmpty() && !AppPowerUsageItem.isUninstalledPackage(resolvedPkg)) {
+                            try {
+                                pm.getApplicationInfo(resolvedPkg, 0)
+                                false
+                            } catch (_: Exception) {
+                                true
+                            }
+                        } else {
+                            false
+                        }
+                        val isUninstalled = isExplicitlyUninstalled || isPkgNotFound || AppPowerUsageItem.isUninstalledPackage(effectivePkg)
 
                         val (rawFgMs, rawBackgroundMs, cpuMs) = parseAppTimesFromDetails(
                             extraDetails,
@@ -725,7 +737,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             gpsTimeMs = realGpsMs,
                             foregroundPowerWatts = fgWatts,
                             backgroundPowerWatts = bgWatts,
-                            fgsDurationMs = realFgsMs
+                            fgsDurationMs = realFgsMs,
+                            isUninstalled = isUninstalled
                         )
 
                         // 核心：若同一包名已存在于列表（例如卸载重装前后产生了多个不同 UID），执行物理守恒合并
@@ -1000,6 +1013,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             loadUidPackageMapViaShizukuAsync()
             persistUidPackageMapAsync()
 
+            // 4. 异步在后台线程中增量预热全系统应用的原生小图标与显示名称，确保卸载后 100% 完整保留
+            AppIconCacheManager.warmUpInstalledAppsAsync(context)
+
             return cachedUidPkgMap
         }
     }
@@ -1104,7 +1120,14 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 pm.getLaunchIntentForPackage(packageName) != null || isHomeLauncher(packageName)
             }
         } catch (_: Exception) {
-            isInteractiveSystemApp(packageName)
+            // 若系统已无此包（已被卸载），若在本地磁盘有图标/名称持久化缓存或属于有效第三方包名，如实判定为用户应用
+            if (AppIconCacheManager.getSavedAppName(context, packageName) != null ||
+                AppIconCacheManager.hasAppIcon(context, packageName) ||
+                (packageName.contains(".") && !packageName.startsWith("android") && !packageName.startsWith("com.android."))) {
+                !isInteractiveSystemApp(packageName)
+            } else {
+                isInteractiveSystemApp(packageName)
+            }
         }
         userInstalledAppCache[packageName] = result
         return result
@@ -1296,8 +1319,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 effectiveFg = effectiveFg.coerceAtMost(dischargeMs)
             }
 
-            // 若未开启后台统计且前台时长为 0，直接移除纯后台应用
-            if (!enableBackgroundStats && effectiveFg <= 0L) {
+            // 若未开启后台统计且前台时长为 0，且非已卸载应用、无直接电量消耗时，才移除纯后台应用
+            if (!enableBackgroundStats && effectiveFg <= 0L && !old.isUninstalledApp() && ((old.directEnergyWh ?: 0f) <= 0.001f)) {
                 existingMap.remove(pkg)
                 continue
             }
@@ -1821,14 +1844,24 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val cached = appNameCache[pkgName]
         if (cached != null) return cached
 
+        // 1. 若为 UID 虚拟已卸载包名前缀
         if (AppPowerUsageItem.isUninstalledPackage(pkgName)) {
-            val uidStr = if (pkgName.startsWith(AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX)) {
-                pkgName.removePrefix(AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX)
+            val uid = if (pkgName.startsWith(AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX)) {
+                pkgName.removePrefix(AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX).toIntOrNull()
+            } else if (pkgName.startsWith("uninstalled_uid_")) {
+                pkgName.removePrefix("uninstalled_uid_").toIntOrNull()
             } else {
-                ""
+                null
             }
-            val name = if (uidStr.isNotEmpty()) {
-                context.getString(com.battery.analysis.R.string.power_uninstalled_app_with_uid, uidStr)
+            val savedName = if (uid != null && uid > 0) {
+                AppIconCacheManager.getSavedAppNameByUid(context, uid)
+            } else {
+                null
+            }
+            val name = if (!savedName.isNullOrBlank()) {
+                context.getString(com.battery.analysis.R.string.power_uninstalled_app_with_pkg, savedName)
+            } else if (uid != null && uid > 0) {
+                context.getString(com.battery.analysis.R.string.power_uninstalled_app_with_uid, uid.toString())
             } else {
                 context.getString(com.battery.analysis.R.string.power_uninstalled_app)
             }
@@ -1836,11 +1869,18 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             return name
         }
 
+        // 2. 真实包名优先尝试从 PackageManager 获取并自动持久化
         val name = try {
             val appInfo = pm.getApplicationInfo(pkgName, 0)
-            pm.getApplicationLabel(appInfo).toString()
+            val label = pm.getApplicationLabel(appInfo).toString()
+            AppIconCacheManager.saveAppName(context, pkgName, label)
+            label
         } catch (_: Exception) {
-            if (pkgName.contains(".")) {
+            // 3. 查本地持久化存储中的原应用名称，实现已卸载应用的原名毫秒级还原
+            val savedName = AppIconCacheManager.getSavedAppName(context, pkgName)
+            if (!savedName.isNullOrBlank()) {
+                context.getString(com.battery.analysis.R.string.power_uninstalled_app_with_pkg, savedName)
+            } else if (pkgName.contains(".")) {
                 context.getString(com.battery.analysis.R.string.power_uninstalled_app_with_pkg, pkgName.substringAfterLast('.'))
             } else {
                 context.getString(com.battery.analysis.R.string.power_uninstalled_app)

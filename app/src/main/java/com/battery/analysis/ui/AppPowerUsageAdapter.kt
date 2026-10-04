@@ -1048,6 +1048,9 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             )
             if (cachedBitmap != null && !cachedBitmap.isRecycled) {
                 ivAppIcon.setImageBitmap(cachedBitmap)
+            } else if (item.isUninstalledApp()) {
+                // 已卸载应用且磁盘尚未命中原生图标时，展示专属已卸载矢量图标，杜绝误展示为本应用自身图标
+                ivAppIcon.setImageResource(R.drawable.ic_uninstalled_app)
             } else {
                 ivAppIcon.setImageResource(R.mipmap.ic_launcher)
             }
@@ -1405,9 +1408,9 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      * 对应用列表执行过滤与排序。
      */
     private fun applyFilterAndSort() {
-        val fgList = allAppItems.filter { it.foregroundTimeMs > 0L }.toMutableList()
+        val fgList = allAppItems.filter { it.foregroundTimeMs > 0L || it.isUninstalledApp() }.toMutableList()
         val bgList = if (showBackgroundStats) {
-            allAppItems.filter { it.foregroundTimeMs <= 0L }.toMutableList()
+            allAppItems.filter { it.foregroundTimeMs <= 0L && !it.isUninstalledApp() }.toMutableList()
         } else {
             mutableListOf()
         }

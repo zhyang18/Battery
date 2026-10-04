@@ -8,15 +8,13 @@ import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import androidx.collection.LruCache
+import com.battery.analysis.model.AppPowerUsageItem
+import com.battery.analysis.util.AppIconCacheManager
 
 /**
- * 应用图标 Drawable 到 Bitmap 的轻量级内存缓存工具类。
+ * 应用程序图标 Drawable 到 Bitmap 的轻量级两级缓存工具类（L1 内存 LRU 缓存 + L2 本地磁盘持久化缓存）。
  * 避免在 Canvas 绘制循环及列表滚动中频繁进行 Drawable 转换与内存分配，提升整体帧率。
- *
- * 优化：
- * 1. 采用按需加载与直出指定尺寸 Bitmap 机制，防止在数据模型中长期强引用庞大的原始 AdaptiveIconDrawable；
- * 2. 基于 Bitmap 字节大小的 [LruCache]，上限压缩至最大 4MB，显著降低常驻内存；
- * 3. 提供 [trimToLevel] 响应 [android.content.ComponentCallbacks2] 内存修剪，UI 不可见或切后台时彻底清空。
+ * 针对已卸载应用，结合本地磁盘图标仓库实现原生小图标长期持久保留与息屏刷新后的毫秒级还原。
  */
 object DrawableBitmapCache {
 
@@ -78,7 +76,7 @@ object DrawableBitmapCache {
                 drawable.draw(canvas)
                 newBmp
             }
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             null
         }
 
@@ -89,15 +87,15 @@ object DrawableBitmapCache {
     }
 
     /**
-     * 按需获取或直接从 PackageManager 极速解码指定尺寸的应用小图标 Bitmap。
-     * 解决数据模型中强引用原始 Drawable 导致内存暴涨的问题，解码后原始 Drawable 立即释放，
-     * 仅将极小尺寸（如 42dp，单张约 60KB）的 Bitmap 保留在 LRU 缓存中。
+     * 按需获取或直接从 PackageManager/本地磁盘持久化仓库极速解码指定尺寸的应用小图标 Bitmap。
+     * 针对已卸载应用，自动反向检索本地持久化图标仓库与历史 UID 关联包名，
+     * 解决应用卸载或息屏清空内存后原 app 小图标无法显示的缺陷。
      *
      * @param context 运行上下文
      * @param packageName 目标应用包名
      * @param sizePx 目标绘制像素大小
      * @param fallbackDrawable 可选的备选 Drawable
-     * @return 转换或命中缓存的 [Bitmap] 实例，加载失败返回 null
+     * @return 转换或命中两级缓存的 [Bitmap] 实例，加载失败返回 null
      */
     fun getOrLoadBitmap(
         context: Context,
@@ -105,45 +103,88 @@ object DrawableBitmapCache {
         sizePx: Int,
         fallbackDrawable: Drawable? = null
     ): Bitmap? {
-        if (sizePx <= 0) return null
+        if (sizePx <= 0 || packageName.isBlank()) return null
         val cacheKey = "${packageName}_$sizePx"
 
+        // 1. 优先从 L1 内存 LRU 缓存获取
         val cached = cache.get(cacheKey)
         if (cached != null && !cached.isRecycled) {
             return cached
         }
 
-        val bitmap = try {
-            val drawable = fallbackDrawable ?: run {
-                val pm = context.packageManager
-                if (packageName == "com.android.systemui.standby" || packageName.startsWith("systemui.standby")) {
-                    getDefaultHomeLauncherIcon(context) ?: pm.defaultActivityIcon
-                } else {
-                    try {
-                        val ai = pm.getApplicationInfo(packageName, 0)
-                        pm.getApplicationIcon(ai)
-                    } catch (_: Exception) {
-                        pm.defaultActivityIcon
-                    }
-                }
+        // 2. 若传入了备用 Drawable，直接转换并异步备份至磁盘持久化
+        if (fallbackDrawable != null) {
+            val bmp = getOrConvertBitmap(packageName, fallbackDrawable, sizePx)
+            if (bmp != null) {
+                AppIconCacheManager.saveAppIconAsync(context, packageName, bmp)
             }
-            if (drawable is BitmapDrawable && drawable.bitmap != null && !drawable.bitmap.isRecycled) {
-                Bitmap.createScaledBitmap(drawable.bitmap, sizePx, sizePx, true)
-            } else {
-                val newBmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(newBmp)
-                drawable.setBounds(0, 0, sizePx, sizePx)
-                drawable.draw(canvas)
-                newBmp
-            }
-        } catch (_: Throwable) {
-            null
+            return bmp
         }
 
-        if (bitmap != null) {
-            cache.put(cacheKey, bitmap)
+        // 3. 处理系统桌面或待机虚拟包名
+        val pm = context.packageManager
+        if (packageName == "com.android.systemui.standby" || packageName.startsWith("systemui.standby") || packageName == AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY) {
+            val launcherDrawable = getDefaultHomeLauncherIcon(context) ?: try { pm.defaultActivityIcon } catch (_: Throwable) { null }
+            val bmp = getOrConvertBitmap(packageName, launcherDrawable, sizePx)
+            if (bmp != null) {
+                AppIconCacheManager.saveAppIconAsync(context, packageName, bmp)
+            }
+            return bmp
         }
-        return bitmap
+
+        // 4. 尝试从系统已安装的应用信息中解码图标（安装状态）
+        var loadedBitmap: Bitmap? = null
+        var isUninstalled = false
+
+        try {
+            val ai = pm.getApplicationInfo(packageName, 0)
+            val drawable = pm.getApplicationIcon(ai)
+            loadedBitmap = getOrConvertBitmap(packageName, drawable, sizePx)
+            if (loadedBitmap != null) {
+                // 自动将当前安装的原生图标持久化至本地磁盘，为后续卸载提供留痕与追溯
+                AppIconCacheManager.saveAppIconAsync(context, packageName, loadedBitmap)
+            }
+        } catch (_: Exception) {
+            // 系统中查无此包，判定该应用已被卸载
+            isUninstalled = true
+        }
+
+        // 5. 若应用已被卸载或底层查无此包，优先从 L2 本地磁盘持久化仓库恢复原 app 小图标
+        if (loadedBitmap == null && (isUninstalled || AppPowerUsageItem.isUninstalledPackage(packageName))) {
+            // 5.1 优先使用真实包名从本地磁盘读取卸载前已缓存的原生图标
+            var diskBmp = AppIconCacheManager.loadAppIcon(context, packageName)
+
+            // 5.2 若当前为 UID 虚拟包名（如 uninstalled_uid_10234），通过 UID 反查历史真实包名并加载磁盘图标
+            if (diskBmp == null && packageName.startsWith(AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX)) {
+                val uid = packageName.removePrefix(AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX).toIntOrNull()
+                if (uid != null && uid > 0) {
+                    diskBmp = AppIconCacheManager.loadAppIconByUid(context, uid)
+                }
+            } else if (diskBmp == null && packageName.startsWith("uninstalled_uid_")) {
+                val uid = packageName.removePrefix("uninstalled_uid_").toIntOrNull()
+                if (uid != null && uid > 0) {
+                    diskBmp = AppIconCacheManager.loadAppIconByUid(context, uid)
+                }
+            }
+
+            if (diskBmp != null && !diskBmp.isRecycled) {
+                // 将磁盘加载的 Bitmap 缩放为对应 targetSize 规格并存入内存 L1 缓存
+                loadedBitmap = if (diskBmp.width != sizePx || diskBmp.height != sizePx) {
+                    try {
+                        Bitmap.createScaledBitmap(diskBmp, sizePx, sizePx, true)
+                    } catch (_: Throwable) {
+                        diskBmp
+                    }
+                } else {
+                    diskBmp
+                }
+            }
+        }
+
+        if (loadedBitmap != null && !loadedBitmap.isRecycled) {
+            cache.put(cacheKey, loadedBitmap)
+        }
+        return loadedBitmap
     }
 
     /**
@@ -176,18 +217,20 @@ object DrawableBitmapCache {
 
     /**
      * 响应系统低内存信号，按内存压力等级主动收缩缓存。
-     * 当进入后台（level >= 20）时立即释放全部缓存，彻底消除图标内存驻留。
+     * 针对息屏场景（TRIM_MEMORY_UI_HIDDEN），只做局部收缩而不彻底抹除关键图标；仅在严重内存不足时清空。
+     * 即便内存被清空，后续也可直接经由本地磁盘持久化秒级恢复。
      *
      * @param level 系统低内存等级，参见 [android.content.ComponentCallbacks2] 常量
      */
     fun trimToLevel(level: Int) {
         when {
-            level >= 20 -> cache.evictAll() // TRIM_MEMORY_UI_HIDDEN 及以上直接清空全部图标缓存
+            level >= 80 -> cache.evictAll() // TRIM_MEMORY_COMPLETE 严重缺内存时彻底清空
+            level >= 40 -> cache.trimToSize(cache.size() / 2) // TRIM_MEMORY_BACKGROUND 减半
         }
     }
 
     /**
-     * 清理所有图标位图缓存。
+     * 清理所有内存中的图标位图缓存。
      */
     fun clear() {
         cache.evictAll()

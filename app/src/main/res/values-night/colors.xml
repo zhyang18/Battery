@@ -19,4 +19,8 @@
     <!-- 耗电统计卡片状态图标色彩体系（深色模式：对标图二亮白与暗灰） -->
     <color name="power_icon_screen_on">#CBD5E1</color>
     <color name="power_icon_screen_off">#64748B</color>
+
+    <!-- 已卸载应用通用图标颜色体系（深色模式） -->
+    <color name="uninstalled_icon_bg">#28282E</color>
+    <color name="uninstalled_icon_fg">#94A3B8</color>
 </resources>

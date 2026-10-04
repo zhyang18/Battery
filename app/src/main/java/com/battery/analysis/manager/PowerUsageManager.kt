@@ -989,13 +989,13 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         /**
-         * 将毫秒时长格式化为贴合紧凑卡片显示的紧凑时间格式（如 "4m10s"、"1h20m5s"、"50s"）。
+         * 将毫秒时长格式化为贴合紧凑卡片显示的紧凑时间格式（如 "04m10s"、"01h20m05s"、"50s"、"00s"）。
          *
          * @param durationMs 时长（单位：毫秒）
          * @return 紧凑格式化时间字符串
          */
         fun formatCompactDuration(durationMs: Long): String {
-            if (durationMs <= 0L) return "0s"
+            if (durationMs <= 0L) return "00s"
             val totalSecs = durationMs / 1000L
             val hours = totalSecs / 3600L
             val mins = (totalSecs % 3600L) / 60L
@@ -1003,15 +1003,15 @@ class PowerUsageManager private constructor(private val context: Context) {
 
             return when {
                 hours > 0L -> {
-                    if (secs > 0L) "${hours}h${mins}m${secs}s"
-                    else if (mins > 0L) "${hours}h${mins}m"
-                    else "${hours}h"
+                    if (secs > 0L) String.format(Locale.getDefault(), "%02dh%02dm%02ds", hours, mins, secs)
+                    else if (mins > 0L) String.format(Locale.getDefault(), "%02dh%02dm", hours, mins)
+                    else String.format(Locale.getDefault(), "%02dh", hours)
                 }
                 mins > 0L -> {
-                    if (secs > 0L) "${mins}m${secs}s"
-                    else "${mins}m"
+                    if (secs > 0L) String.format(Locale.getDefault(), "%02dm%02ds", mins, secs)
+                    else String.format(Locale.getDefault(), "%02dm", mins)
                 }
-                else -> "${secs}s"
+                else -> String.format(Locale.getDefault(), "%02ds", secs)
             }
         }
 
@@ -5738,7 +5738,7 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 将浮点小时数格式化为 "14h46m" 或 "2d18h" 等友好文本。
+     * 将浮点小时数格式化为 "14h46m" 或 "02d18h" 等友好文本。
      * 若小时数异常过大（大于 720 小时即 30 天）或为无效数值，返回 "--"。
      *
      * @param hours 小时浮点数
@@ -5753,14 +5753,14 @@ class PowerUsageManager private constructor(private val context: Context) {
         val h = (totalMinutes % 1440) / 60
         val m = totalMinutes % 60
         return when {
-            days > 0 -> String.format(Locale.getDefault(), "%dd%02dh", days, h)
-            h > 0 -> String.format(Locale.getDefault(), "%dh%02dm", h, m)
-            else -> "${m}m"
+            days > 0 -> String.format(Locale.getDefault(), "%02dd%02dh", days, h)
+            h > 0 -> String.format(Locale.getDefault(), "%02dh%02dm", h, m)
+            else -> String.format(Locale.getDefault(), "%02dm", m)
         }
     }
 
     /**
-     * 将毫秒时长格式化为 "1d 2h 30m" 或 "58m45s" 友善文本。
+     * 将毫秒时长格式化为 "01d02h"、"02h30m" 或 "58m45s" 友善文本。
      *
      * @param ms 毫秒数
      * @return 格式化文本
@@ -5773,9 +5773,9 @@ class PowerUsageManager private constructor(private val context: Context) {
         val seconds = totalSec % 60
 
         return when {
-            days > 0 -> "${days}d${hours}h"
-            hours > 0 -> "${hours}h${minutes}m"
-            else -> "${minutes}m${seconds}s"
+            days > 0 -> String.format(Locale.getDefault(), "%02dd%02dh", days, hours)
+            hours > 0 -> String.format(Locale.getDefault(), "%02dh%02dm", hours, minutes)
+            else -> String.format(Locale.getDefault(), "%02dm%02ds", minutes, seconds)
         }
     }
 

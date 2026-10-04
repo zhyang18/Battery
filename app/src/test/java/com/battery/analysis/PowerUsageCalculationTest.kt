@@ -713,9 +713,9 @@ class PowerUsageCalculationTest {
             val h = (totalMinutes % 1440) / 60
             val m = totalMinutes % 60
             return when {
-                days > 0 -> "${days}d${h}h"
-                h > 0 -> "${h}h${m}m"
-                else -> "${m}m"
+                days > 0 -> String.format(java.util.Locale.getDefault(), "%02dd%02dh", days, h)
+                h > 0 -> String.format(java.util.Locale.getDefault(), "%02dh%02dm", h, m)
+                else -> String.format(java.util.Locale.getDefault(), "%02dm", m)
             }
         }
 
@@ -728,9 +728,9 @@ class PowerUsageCalculationTest {
         assertEquals("--", formatHours(Float.POSITIVE_INFINITY))
 
         // 2. 验证正常续航数值的精确格式化
-        assertEquals("3h31m", formatHours(3.52f))
+        assertEquals("03h31m", formatHours(3.52f))
         assertEquals("14h30m", formatHours(14.5f))
-        assertEquals("2d12h", formatHours(60f))
+        assertEquals("02d12h", formatHours(60f))
         assertEquals("45m", formatHours(0.75f))
     }
 
@@ -1053,7 +1053,7 @@ class PowerUsageCalculationTest {
             backgroundPowerWatts = 0f
         )
         assertEquals("功耗严格反映前台真实物理功耗 1.89W", "1.89W", zeroBgItem.getFormattedCombinedAvgWatts())
-        assertEquals("前台时长格式化正常", "1s", zeroBgItem.getFormattedDuration())
+        assertEquals("前台时长格式化正常", "01s", zeroBgItem.getFormattedDuration())
 
         // 场景 3：前台运行少于 1 秒（500ms）的应用，功耗精确展示为 2.10W，时长精确展示为 500ms
         val subSecondItem = AppPowerUsageItem(
@@ -1092,7 +1092,7 @@ class PowerUsageCalculationTest {
             backgroundPowerWatts = 0f
         )
         assertEquals("纯后台应用功耗诚实显示为 --", "--", pureBgItem.getFormattedCombinedAvgWatts())
-        assertEquals("纯后台应用前台时长为 0s", "0s", pureBgItem.getFormattedDuration())
+        assertEquals("纯后台应用前台时长为 00s", "00s", pureBgItem.getFormattedDuration())
     }
 
     /**
@@ -1322,15 +1322,15 @@ class PowerUsageCalculationTest {
 
         // 验证常驻时长格式化
         assertEquals("前台服务常驻时长必须正确格式化为 12h30m", "12h30m", fgsApp.getFormattedFgsDuration())
-        assertEquals("无前台服务应用常驻时长格式化为 0s", "0s", nonFgsApp.getFormattedFgsDuration())
+        assertEquals("无前台服务应用常驻时长格式化为 00s", "00s", nonFgsApp.getFormattedFgsDuration())
 
         // 验证两个应用的后台活跃时长口径一致（均为分/秒级别真实工作时间）
-        assertEquals("电池统计后台活跃工时为 1m20s", "1m20s", fgsApp.getFormattedBackgroundDuration())
+        assertEquals("电池统计后台活跃工时为 01m20s", "01m20s", fgsApp.getFormattedBackgroundDuration())
         assertEquals("BatteryRecord 后台活跃工时为 33s", "33s", nonFgsApp.getFormattedBackgroundDuration())
 
         // 验证组合展示中的前后台工时（清晰注明后台工时）
-        assertEquals("5m23s | 后台 1m20s", fgsApp.getFormattedCombinedDuration())
-        assertEquals("1m25s | 后台 33s", nonFgsApp.getFormattedCombinedDuration())
+        assertEquals("05m23s | 后台 01m20s", fgsApp.getFormattedCombinedDuration())
+        assertEquals("01m25s | 后台 33s", nonFgsApp.getFormattedCombinedDuration())
 
         // 验证功耗展示：仅统计前台真实物理功耗
         assertEquals("1.09W", fgsApp.getFormattedCombinedAvgWatts())
@@ -2400,7 +2400,7 @@ class PowerUsageCalculationTest {
             screenOnDurationText = "",
             trendPointsJson = pointsJson
         )
-        assertEquals("40m0s", record2.getDisplayScreenOnDuration())
+        assertEquals("40m00s", record2.getDisplayScreenOnDuration())
 
         // 场景 3：无有效亮屏文本且无点集数据时，如实返回未知占位符 "--"
         val record3 = record1.copy(

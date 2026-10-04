@@ -223,14 +223,14 @@ class ChargingHistoryRecordTest {
             screenOffDurationMs = 0L
         )
         assertEquals(430000L, record1.getScreenOnDurationMs())
-        assertEquals("7m10s", record1.getFormattedScreenOnDuration())
+        assertEquals("07m10s", record1.getFormattedScreenOnDuration())
 
         val record2 = record1.copy(
             durationMs = 5130000L,
             screenOffDurationMs = 1210000L
         )
         assertEquals(3920000L, record2.getScreenOnDurationMs())
-        assertEquals("1h5m20s", record2.getFormattedScreenOnDuration())
+        assertEquals("01h05m20s", record2.getFormattedScreenOnDuration())
     }
 
     /**

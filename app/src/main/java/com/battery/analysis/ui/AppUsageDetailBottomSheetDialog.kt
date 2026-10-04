@@ -320,17 +320,19 @@ class AppUsageDetailBottomSheetDialog(
         if (ms < 1000L) return "${ms}ms"
 
         val totalSeconds = ms / 1000
-        if (totalSeconds < 60) return "${totalSeconds}s"
+        if (totalSeconds < 60) return String.format(Locale.getDefault(), "%02ds", totalSeconds)
 
         val minutes = totalSeconds / 60
         val remainingSeconds = totalSeconds % 60
         if (minutes < 60) {
-            return if (remainingSeconds > 0) "${minutes}m ${remainingSeconds}s" else "${minutes}m"
+            return if (remainingSeconds > 0) String.format(Locale.getDefault(), "%02dm%02ds", minutes, remainingSeconds)
+            else String.format(Locale.getDefault(), "%02dm", minutes)
         }
 
         val hours = minutes / 60
         val remainingMinutes = minutes % 60
-        return if (remainingMinutes > 0) "${hours}h ${remainingMinutes}m" else "${hours}h"
+        return if (remainingMinutes > 0) String.format(Locale.getDefault(), "%02dh%02dm", hours, remainingMinutes)
+        else String.format(Locale.getDefault(), "%02dh", hours)
     }
 
     /**
@@ -358,12 +360,12 @@ class AppUsageDetailBottomSheetDialog(
      *
      * @param wakeMs 唤醒锁持有时长（毫秒）
      * @param gpsMs GPS 定位使用时长（毫秒）
-     * @return 组合展示的文本（如 "锁: 12s | GPS: 0s" 或 "--"）
+     * @return 组合展示的文本（如 "锁: 12s | GPS: 00s" 或 "--"）
      */
     private fun formatWakelockAndGps(wakeMs: Long, gpsMs: Long): String {
         if (wakeMs <= 0L && gpsMs <= 0L) return "--"
-        val wakeStr = if (wakeMs > 0L) formatDurationMs(wakeMs) else "0s"
-        val gpsStr = if (gpsMs > 0L) formatDurationMs(gpsMs) else "0s"
+        val wakeStr = if (wakeMs > 0L) formatDurationMs(wakeMs) else "00s"
+        val gpsStr = if (gpsMs > 0L) formatDurationMs(gpsMs) else "00s"
         return "锁: $wakeStr | GPS: $gpsStr"
     }
 }

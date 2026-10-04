@@ -597,22 +597,22 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
     }
 
     /**
-     * 将时长毫秒数格式化为紧凑卡片展示文本（如 "1h03m" 或 "49m55s"）。
+     * 将时长毫秒数格式化为紧凑卡片展示文本（如 "01h03m" 或 "49m55s"）。
      *
      * @param durationMs 时长毫秒数值
      * @param rawText 原始文本兜底
      * @return 紧凑格式化时长文本
      */
     private fun formatCardDuration(durationMs: Long, rawText: String): String {
-        if (durationMs <= 0L) return if (rawText.isNotBlank()) rawText else "0s"
+        if (durationMs <= 0L) return if (rawText.isNotBlank()) rawText else "00s"
         val totalSec = durationMs / 1000L
         val hours = totalSec / 3600L
         val minutes = (totalSec % 3600L) / 60L
         val seconds = totalSec % 60L
         return when {
-            hours > 0 -> String.format(Locale.getDefault(), "%dh%02dm", hours, minutes)
-            minutes > 0 -> String.format(Locale.getDefault(), "%dm%02ds", minutes, seconds)
-            else -> String.format(Locale.getDefault(), "%ds", seconds)
+            hours > 0 -> String.format(Locale.getDefault(), "%02dh%02dm", hours, minutes)
+            minutes > 0 -> String.format(Locale.getDefault(), "%02dm%02ds", minutes, seconds)
+            else -> String.format(Locale.getDefault(), "%02ds", seconds)
         }
     }
 

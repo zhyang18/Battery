@@ -1857,18 +1857,18 @@ class PowerUsageFragment : Fragment() {
     }
 
     /**
-     * 将毫秒时长按 "0m0s" 规范格式化为紧凑友好文本。
-     * 当小于 1 小时时展示为分秒格式（如 "0m0s"、"13m44s"、"49m55s"）；
-     * 当大于等于 1 小时且小于 1 天时展示为时分格式（如 "1h03m"）；
-     * 当大于等于 1 天时展示为天时格式（如 "1d03h"）。
+     * 将毫秒时长按 "00m00s" 规范格式化为紧凑友好文本。
+     * 当小于 1 小时时展示为分秒格式（如 "00m00s"、"13m44s"、"49m55s"）；
+     * 当大于等于 1 小时且小于 1 天时展示为时分格式（如 "01h03m"）；
+     * 当大于等于 1 天时展示为天时格式（如 "01d03h"）。
      *
      * @param ms 物理持续时长毫秒值
      * @param fallbackText 当毫秒值为 0 或无效时的备用文本
-     * @return 格式化后的紧凑时长字符串（如 "0m0s"、"13m44s"）
+     * @return 格式化后的紧凑时长字符串（如 "00m00s"、"13m44s"）
      */
     private fun formatCardDuration(ms: Long, fallbackText: String): String {
         if (ms <= 0L) {
-            return if (fallbackText.isNotBlank()) fallbackText else "0m0s"
+            return if (fallbackText.isNotBlank()) fallbackText else "00m00s"
         }
         val totalSec = ms / 1000L
         val days = totalSec / 86400L
@@ -1876,9 +1876,9 @@ class PowerUsageFragment : Fragment() {
         val minutes = (totalSec % 3600L) / 60L
         val seconds = totalSec % 60L
         return when {
-            days > 0L -> String.format(Locale.getDefault(), "%dd%02dh", days, hours)
-            hours > 0L -> String.format(Locale.getDefault(), "%dh%02dm", hours, minutes)
-            else -> "${minutes}m${seconds}s"
+            days > 0L -> String.format(Locale.getDefault(), "%02dd%02dh", days, hours)
+            hours > 0L -> String.format(Locale.getDefault(), "%02dh%02dm", hours, minutes)
+            else -> String.format(Locale.getDefault(), "%02dm%02ds", minutes, seconds)
         }
     }
 

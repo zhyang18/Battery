@@ -90,7 +90,7 @@ class AppEnergyDetailBottomSheetDialog(
     }
 
     /**
-     * 格式化毫秒耗时为紧凑可读字符串（如 "12s"、"450ms" 或 "--"）。
+     * 格式化毫秒耗时为紧凑可读字符串（如 "12s"、"05s"、"450ms" 或 "--"）。
      *
      * @param ms 待格式化的时间毫秒数
      * @return 格式化后的时间文本
@@ -98,7 +98,7 @@ class AppEnergyDetailBottomSheetDialog(
     private fun formatDurationMs(ms: Long): String {
         return when {
             ms <= 0L -> "--"
-            ms >= 1000L -> "${ms / 1000}s"
+            ms >= 1000L -> String.format(Locale.getDefault(), "%02ds", ms / 1000L)
             else -> "${ms}ms"
         }
     }
@@ -128,12 +128,12 @@ class AppEnergyDetailBottomSheetDialog(
      *
      * @param wakeMs 唤醒锁持有时长（毫秒）
      * @param gpsMs GPS 定位使用时长（毫秒）
-     * @return 组合展示的文本（如 "锁: 5s | GPS: 2s" 或 "--"）
+     * @return 组合展示的文本（如 "锁: 05s | GPS: 02s" 或 "--"）
      */
     private fun formatWakelockAndGps(wakeMs: Long, gpsMs: Long): String {
         if (wakeMs <= 0L && gpsMs <= 0L) return "--"
-        val wakeStr = if (wakeMs > 0L) formatDurationMs(wakeMs) else "0s"
-        val gpsStr = if (gpsMs > 0L) formatDurationMs(gpsMs) else "0s"
+        val wakeStr = if (wakeMs > 0L) formatDurationMs(wakeMs) else "00s"
+        val gpsStr = if (gpsMs > 0L) formatDurationMs(gpsMs) else "00s"
         return "锁: $wakeStr | GPS: $gpsStr"
     }
 }

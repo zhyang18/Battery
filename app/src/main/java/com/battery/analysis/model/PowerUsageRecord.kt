@@ -363,9 +363,9 @@ data class PowerUsageRecord(
                     val minutes = (totalSec % 3600L) / 60L
                     val seconds = totalSec % 60L
                     return when {
-                        days > 0L -> "${days}d${hours}h"
-                        hours > 0L -> "${hours}h${minutes}m"
-                        else -> "${minutes}m${seconds}s"
+                        days > 0L -> String.format(java.util.Locale.getDefault(), "%02dd%02dh", days, hours)
+                        hours > 0L -> String.format(java.util.Locale.getDefault(), "%02dh%02dm", hours, minutes)
+                        else -> String.format(java.util.Locale.getDefault(), "%02dm%02ds", minutes, seconds)
                     }
                 }
             }

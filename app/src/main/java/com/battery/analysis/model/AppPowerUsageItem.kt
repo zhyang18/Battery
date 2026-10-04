@@ -185,18 +185,18 @@ data class AppPowerUsageItem(
     }
 
     /**
-     * 格式化指定毫秒时长为人类可读字符串（如 "19m38s"、"58s"、"2h15m" 或 "350ms"）。
-     * 对少于 1 秒的毫秒级运行时长精确展示（如 "350ms"），杜绝被粗暴丢弃或显示为 "0s"。
+     * 格式化指定毫秒时长为人类可读字符串（如 "19m38s"、"05s"、"02h15m"、"00s" 或 "350ms"）。
+     * 对少于 1 秒的毫秒级运行时长精确展示（如 "350ms"），杜绝被粗暴丢弃或显示为 "00s"。
      *
      * @param durationMs 待格式化的时间毫秒数
      * @return 格式化后的时间字符串
      */
     private fun formatDurationMs(durationMs: Long): String {
-        if (durationMs <= 0L) return "0s"
+        if (durationMs <= 0L) return "00s"
         if (durationMs < 1000L) return "${durationMs}ms"
         val totalSeconds = durationMs / 1000
         if (totalSeconds < 60) {
-            return "${totalSeconds}s"
+            return String.format(java.util.Locale.getDefault(), "%02ds", totalSeconds)
         }
         val totalMinutes = totalSeconds / 60
         val remainingSeconds = totalSeconds % 60
@@ -204,9 +204,11 @@ data class AppPowerUsageItem(
         val remainingMinutes = totalMinutes % 60
 
         return if (hours > 0) {
-            if (remainingMinutes > 0) "${hours}h${remainingMinutes}m" else "${hours}h"
+            if (remainingMinutes > 0) String.format(java.util.Locale.getDefault(), "%02dh%02dm", hours, remainingMinutes)
+            else String.format(java.util.Locale.getDefault(), "%02dh", hours)
         } else {
-            if (remainingSeconds > 0) "${remainingMinutes}m${remainingSeconds}s" else "${remainingMinutes}m"
+            if (remainingSeconds > 0) String.format(java.util.Locale.getDefault(), "%02dm%02ds", remainingMinutes, remainingSeconds)
+            else String.format(java.util.Locale.getDefault(), "%02dm", remainingMinutes)
         }
     }
 
@@ -250,7 +252,7 @@ data class AppPowerUsageItem(
     }
 
     /**
-     * 获取格式化后的前台使用时长字符串（如 19m38s、58s、2h15m）。
+     * 获取格式化后的前台使用时长字符串（如 19m38s、05s、02h15m、00s）。
      *
      * @return 格式化后的前台使用时长文本
      */
@@ -259,7 +261,7 @@ data class AppPowerUsageItem(
     }
 
     /**
-     * 获取格式化后的后台运行活跃时长字符串（如 1h20m、30s）。
+     * 获取格式化后的后台运行活跃时长字符串（如 01h20m、30s、00s）。
      *
      * @return 格式化后的后台运行活跃时长文本
      */
@@ -268,7 +270,7 @@ data class AppPowerUsageItem(
     }
 
     /**
-     * 获取格式化后的前台服务常驻挂载时长字符串（如 12h30m、15m）。
+     * 获取格式化后的前台服务常驻挂载时长字符串（如 12h30m、15m、00s）。
      *
      * @return 格式化后的前台服务常驻时长文本
      */
@@ -288,7 +290,7 @@ data class AppPowerUsageItem(
             hasFg && hasBg -> "${formatDurationMs(foregroundTimeMs)} | 后台 ${formatDurationMs(backgroundTimeMs)}"
             hasFg -> formatDurationMs(foregroundTimeMs)
             hasBg -> "后台: ${formatDurationMs(backgroundTimeMs)}"
-            else -> "0s"
+            else -> "00s"
         }
     }
 

@@ -731,9 +731,9 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         val hours = (totalSec % 86400L) / 3600L
         val minutes = (totalSec % 3600L) / 60L
         return when {
-            days > 0L -> String.format(Locale.getDefault(), "%dd%02dh", days, hours)
-            hours > 0L -> String.format(Locale.getDefault(), "%dh%02dm", hours, minutes)
-            else -> String.format(Locale.getDefault(), "%dm", minutes)
+            days > 0L -> String.format(Locale.getDefault(), "%02dd%02dh", days, hours)
+            hours > 0L -> String.format(Locale.getDefault(), "%02dh%02dm", hours, minutes)
+            else -> String.format(Locale.getDefault(), "%02dm", minutes)
         }
     }
 
@@ -741,9 +741,9 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      * 将 7 天滑动窗口内实际有效统计时长（毫秒）格式化为紧凑时长文本。
      * 有多少显示多少，最长不超过 7 天。
      * 当持续时间大于等于 7 天时显示为 "7d"；
-     * 当持续时间大于等于 1 天时显示为 "XdXXh" 格式（如 1d08h、3d12h）；
-     * 当持续时间大于等于 1 小时时显示为 "XhXXm" 格式（如 4h30m、18h20m）；
-     * 否则显示为 "Xm" 格式（如 25m）。
+     * 当持续时间大于等于 1 天时显示为 "XdXXh" 格式（如 01d08h、03d12h）；
+     * 当持续时间大于等于 1 小时时显示为 "XhXXm" 格式（如 04h30m、18h20m）；
+     * 否则显示为 "Xm" 格式（如 25m、05m）。
      *
      * @param ms 实际有效统计时长物理毫秒数
      * @return 格式化后的紧凑时长字符串，数据无效时返回空字符串
@@ -756,9 +756,9 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         val minutes = (totalSec % 3600L) / 60L
         return when {
             days >= 7L -> "7d"
-            days > 0L -> String.format(Locale.getDefault(), "%dd%02dh", days, hours)
-            hours > 0L -> String.format(Locale.getDefault(), "%dh%02dm", hours, minutes)
-            else -> String.format(Locale.getDefault(), "%dm", minutes.coerceAtLeast(1L))
+            days > 0L -> String.format(Locale.getDefault(), "%02dd%02dh", days, hours)
+            hours > 0L -> String.format(Locale.getDefault(), "%02dh%02dm", hours, minutes)
+            else -> String.format(Locale.getDefault(), "%02dm", minutes.coerceAtLeast(1L))
         }
     }
 
@@ -930,9 +930,9 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         val minutes = (totalSec % 3600L) / 60L
         val seconds = totalSec % 60L
         return when {
-            days > 0L -> String.format(Locale.getDefault(), "%dd%02dh", days, hours)
-            hours > 0L -> String.format(Locale.getDefault(), "%dh%02dm", hours, minutes)
-            else -> "${minutes}m${seconds}s"
+            days > 0L -> String.format(Locale.getDefault(), "%02dd%02dh", days, hours)
+            hours > 0L -> String.format(Locale.getDefault(), "%02dh%02dm", hours, minutes)
+            else -> String.format(Locale.getDefault(), "%02dm%02ds", minutes, seconds)
         }
     }
 
@@ -1094,7 +1094,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 tvFgDuration.text = item.getFormattedDuration()
             } else if (!hasBg) {
                 layoutFgDuration.visibility = View.VISIBLE
-                tvFgDuration.text = "0s"
+                tvFgDuration.text = "00s"
             } else {
                 layoutFgDuration.visibility = View.GONE
             }

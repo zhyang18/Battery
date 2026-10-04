@@ -45,23 +45,25 @@ data class AppTimelineEvent(
     val source: EnergySource = EnergySource.ESTIMATED
 ) {
     /**
-     * 获取格式化后的持续使用时长字符串（如 1m 22s、45s、2h 10m）。
+     * 获取格式化后的持续使用时长字符串（如 01m22s、45s、02h10m、00s）。
      *
      * @return 格式化后的使用时长文本
      */
     fun getFormattedDuration(): String {
         val totalSeconds = durationMs / 1000
         if (totalSeconds < 60) {
-            return "${totalSeconds}s"
+            return String.format(Locale.getDefault(), "%02ds", totalSeconds)
         }
         val minutes = totalSeconds / 60
         val remainingSeconds = totalSeconds % 60
         if (minutes < 60) {
-            return if (remainingSeconds > 0) "${minutes}m ${remainingSeconds}s" else "${minutes}m"
+            return if (remainingSeconds > 0) String.format(Locale.getDefault(), "%02dm%02ds", minutes, remainingSeconds)
+            else String.format(Locale.getDefault(), "%02dm", minutes)
         }
         val hours = minutes / 60
         val remainingMinutes = minutes % 60
-        return if (remainingMinutes > 0) "${hours}h ${remainingMinutes}m" else "${hours}h"
+        return if (remainingMinutes > 0) String.format(Locale.getDefault(), "%02dh%02dm", hours, remainingMinutes)
+        else String.format(Locale.getDefault(), "%02dh", hours)
     }
 
     /**

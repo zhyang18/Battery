@@ -32,16 +32,16 @@ data class PowerDischargePoint(
     /**
      * 获取用于 X 轴或浮窗气泡展示的格式化时间描述。
      *
-     * @return 格式化后的时间字符串（如 "12h" 或 "1d6h"）
+     * @return 格式化后的时间字符串（如 "12h" 或 "01d06h"）
      */
     fun getFormattedTimeLabel(): String {
         val totalHours = elapsedHours.toInt()
         val days = totalHours / 24
         val remHours = totalHours % 24
         return when {
-            days > 0 && remHours > 0 -> "${days}d${remHours}h"
-            days > 0 -> "${days}d"
-            else -> "${remHours}h"
+            days > 0 && remHours > 0 -> String.format(java.util.Locale.getDefault(), "%02dd%02dh", days, remHours)
+            days > 0 -> String.format(java.util.Locale.getDefault(), "%02dd", days)
+            else -> String.format(java.util.Locale.getDefault(), "%02dh", remHours)
         }
     }
 }

@@ -55,9 +55,9 @@ data class ChargingHistoryRecord(
         val minutes = (totalSec % 3600L) / 60L
         val seconds = totalSec % 60L
         return if (hours > 0L) {
-            "${hours}h${minutes}m${seconds}s"
+            String.format(java.util.Locale.getDefault(), "%02dh%02dm%02ds", hours, minutes, seconds)
         } else {
-            "${minutes}m${seconds}s"
+            String.format(java.util.Locale.getDefault(), "%02dm%02ds", minutes, seconds)
         }
     }
 
@@ -72,7 +72,7 @@ data class ChargingHistoryRecord(
     }
 
     /**
-     * 格式化输出亮屏充电时长的友好文本（如 "10m15s" 或 "1h20m15s"）。
+     * 格式化输出亮屏充电时长的友好文本（如 "10m15s" 或 "01h20m15s"）。
      *
      * @return 格式化后的亮屏持续时长字符串
      */
@@ -82,9 +82,9 @@ data class ChargingHistoryRecord(
         val minutes = (totalSec % 3600L) / 60L
         val seconds = totalSec % 60L
         return if (hours > 0L) {
-            "${hours}h${minutes}m${seconds}s"
+            String.format(java.util.Locale.getDefault(), "%02dh%02dm%02ds", hours, minutes, seconds)
         } else {
-            "${minutes}m${seconds}s"
+            String.format(java.util.Locale.getDefault(), "%02dm%02ds", minutes, seconds)
         }
     }
 
@@ -99,7 +99,7 @@ data class ChargingHistoryRecord(
     }
 
     /**
-     * 格式化输出息屏充电时长的友好文本（如 "10m15s"）。
+     * 格式化输出息屏充电时长的友好文本（如 "10m15s" 或 "01h20m15s"）。
      *
      * @return 格式化后的息屏持续时长字符串
      */
@@ -109,9 +109,9 @@ data class ChargingHistoryRecord(
         val minutes = (totalSec % 3600L) / 60L
         val seconds = totalSec % 60L
         return if (hours > 0L) {
-            "${hours}h${minutes}m${seconds}s"
+            String.format(java.util.Locale.getDefault(), "%02dh%02dm%02ds", hours, minutes, seconds)
         } else {
-            "${minutes}m${seconds}s"
+            String.format(java.util.Locale.getDefault(), "%02dm%02ds", minutes, seconds)
         }
     }
 
@@ -146,7 +146,7 @@ data class ChargingHistoryRecord(
     }
 
     /**
-     * 获取按设计图样式的时长及电量增量摘要文本（如 "25m · 20%~85%(+65%)"）。
+     * 获取按设计图样式的时长及电量增量摘要文本（如 "25m · 20%~85%(+65%)" 或 "01h20m · 20%~85%(+65%)"）。
      *
      * @return 格式化后的时长与电量变化字符串
      */
@@ -155,9 +155,9 @@ data class ChargingHistoryRecord(
         val hours = totalSec / 3600L
         val minutes = (totalSec % 3600L) / 60L
         val shortDur = if (hours > 0L) {
-            "${hours}h${minutes}m"
+            String.format(java.util.Locale.getDefault(), "%02dh%02dm", hours, minutes)
         } else {
-            "${minutes}m"
+            String.format(java.util.Locale.getDefault(), "%02dm", minutes)
         }
         val gainSign = if (levelGain >= 0) "+$levelGain%" else "$levelGain%"
         return "$shortDur · $startLevel%~$endLevel%($gainSign)"

@@ -75,6 +75,17 @@ data class AppPowerUsageItem(
     }
 
     /**
+     * 检查当前应用条目是否具备真实有效的物理放电能量（大于等于 0.0005Wh，在界面上至少呈现为 0.001Wh）。
+     * 用于杜绝底层量化噪声与 0 耗电无效条目在主列表中产生脏数据刷屏。
+     *
+     * @return 若具备有效物理能耗返回 true，否则返回 false
+     */
+    fun hasEffectiveEnergy(): Boolean {
+        val direct = directEnergyWh ?: 0f
+        return direct >= 0.0005f || energyWh >= 0.0005f || foregroundEnergyWh >= 0.0005f || backgroundEnergyWh >= 0.0005f
+    }
+
+    /**
      * 将另一项同应用实体（如卸载前与重装后的分段统计实体）的数据进行物理守恒合并。
      * 累加前后台工时、放电能量、CPU 运算时间与硬件网络/锁/GPS 开销，并重新计算综合平均功耗。
      *

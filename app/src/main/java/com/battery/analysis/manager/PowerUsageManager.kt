@@ -3299,9 +3299,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                     }
                 }.filter {
                     if (enableBackgroundStats) {
-                        it.foregroundTimeMs > 0L || it.backgroundTimeMs > 0L || it.backgroundEnergyWh > 0.001f || it.energyWh > 0.001f || it.isUninstalledApp()
+                        it.foregroundTimeMs > 0L || it.backgroundTimeMs > 0L || it.backgroundEnergyWh > 0.001f || it.energyWh > 0.001f || (it.isUninstalledApp() && it.hasEffectiveEnergy())
                     } else {
-                        it.foregroundTimeMs > 0L || isAssistantScreenApp(it.packageName) || it.isUninstalledApp() || ((it.directEnergyWh ?: 0f) > 0.001f)
+                        it.foregroundTimeMs > 0L || isAssistantScreenApp(it.packageName) || (it.isUninstalledApp() && it.hasEffectiveEnergy()) || ((it.directEnergyWh ?: 0f) > 0.001f)
                     }
                 }
 
@@ -3493,7 +3493,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             val safeBg = item.backgroundTimeMs.coerceIn(0L, maxBgForApp)
             item.copy(foregroundTimeMs = safeFg, backgroundTimeMs = safeBg)
         }.filter {
-            it.foregroundTimeMs > 0L || isAssistantScreenApp(it.packageName) || it.isUninstalledApp() || ((it.directEnergyWh ?: 0f) > 0.001f) || (enableBackgroundStats && (it.backgroundTimeMs > 0L || it.energyWh > 0.001f))
+            it.foregroundTimeMs > 0L || isAssistantScreenApp(it.packageName) || (it.isUninstalledApp() && it.hasEffectiveEnergy()) || ((it.directEnergyWh ?: 0f) > 0.001f) || (enableBackgroundStats && (it.backgroundTimeMs > 0L || it.energyWh > 0.001f))
         }
 
         // 普通模式物理完善：

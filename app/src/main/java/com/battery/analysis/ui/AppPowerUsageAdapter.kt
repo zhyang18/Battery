@@ -1408,7 +1408,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      * 对应用列表执行过滤与排序。
      */
     private fun applyFilterAndSort() {
-        val fgList = allAppItems.filter { it.foregroundTimeMs > 0L || it.isUninstalledApp() }.toMutableList()
+        val fgList = allAppItems.filter { it.foregroundTimeMs > 0L || (it.isUninstalledApp() && it.hasEffectiveEnergy()) }.toMutableList()
         val bgList = if (showBackgroundStats) {
             allAppItems.filter { it.foregroundTimeMs <= 0L && !it.isUninstalledApp() }.toMutableList()
         } else {

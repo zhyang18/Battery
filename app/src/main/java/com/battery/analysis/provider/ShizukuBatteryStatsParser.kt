@@ -608,44 +608,53 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                     val extraDetails = uidMatcher.group(4) ?: ""
 
                     val uid = convertUidStringToNumeric(uidRaw)
+                    val appId = if (uid > 0) uid % 100000 else -1
+                    val isUserAppSpace = appId >= android.os.Process.FIRST_APPLICATION_UID // 10000
                     val isExplicitlyUninstalled = uidRaw.equals("uninstalled", ignoreCase = true) ||
                             directPkg.equals("uninstalled", ignoreCase = true) ||
                             (extraDetails.contains("uninstalled", ignoreCase = true) && !extraDetails.contains("="))
 
                     // 只要产生了有效放电记录（> 0.001 mAh），即纳入统计
                     if ((uid > 0 || isExplicitlyUninstalled) && drainMah > 0.001f) {
-                        // 优先提取 dumpsys 直接携带的包名，次查当前 UID 映射表，次查持久化历史 UID 缓存（跨卸载重装溯源），次选系统 pm 及 Shizuku 特权兜底
+                        // 优先提取 dumpsys 直接携带的包名，次查当前 UID 映射表，次查持久化历史 UID 缓存（跨卸载重装溯源），次查本地持久化仓库，次选系统 pm 及 Shizuku 特权兜底
                         val resolvedPkg = if (!directPkg.isNullOrEmpty() && directPkg.contains(".") && !isExplicitlyUninstalled) {
                             directPkg
                         } else {
                             uidPkgMap[uid]
                                 ?: (if (uid > 0) cachedUidPkgMap[uid] else null)
+                                ?: (if (uid > 0) AppIconCacheManager.getPackageNameByUid(context, uid) else null)
                                 ?: (if (uid > 0) pm.getPackagesForUid(uid)?.firstOrNull() else null)
                                 ?: (if (uid > 0) pm.getNameForUid(uid)?.let { if (it.contains(":")) it.substringAfter(":") else it } else null)
                                 ?: (if (uid > 0) resolvePackageNameForUid(uid) else null)
                         }
 
-                        // 若成功解析出包名则使用真实包名；若已彻底卸载且无历史包名记录，则生成专用的已卸载虚拟包名标识
-                        val effectivePkg = if (!resolvedPkg.isNullOrEmpty()) {
-                            resolvedPkg
-                        } else if (uid > 0) {
-                            "${AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX}$uid"
-                        } else {
-                            "uninstalled_app_summary"
-                        }
+                        // 核心规则：区分用户应用空间（appId >= 10000）与系统底层守护进程（appId < 10000）
+                        val effectivePkg: String
+                        val isUninstalled: Boolean
 
-                        // 真实性检测：即使已解析出真实包名，若系统 PackageManager 查无此包，依然判定为已卸载应用
-                        val isPkgNotFound = if (!resolvedPkg.isNullOrEmpty() && !AppPowerUsageItem.isUninstalledPackage(resolvedPkg)) {
-                            try {
-                                pm.getApplicationInfo(resolvedPkg, 0)
+                        if (!resolvedPkg.isNullOrEmpty()) {
+                            effectivePkg = resolvedPkg
+                            val isPkgNotFound = if (!AppPowerUsageItem.isUninstalledPackage(resolvedPkg)) {
+                                try {
+                                    pm.getApplicationInfo(resolvedPkg, 0)
+                                    false
+                                } catch (_: Exception) {
+                                    true
+                                }
+                            } else {
                                 false
-                            } catch (_: Exception) {
-                                true
                             }
+                            isUninstalled = isExplicitlyUninstalled || isPkgNotFound || AppPowerUsageItem.isUninstalledPackage(effectivePkg)
+                        } else if (isUserAppSpace || isExplicitlyUninstalled) {
+                            // 真正用户应用空间的已卸载应用，但无具体包名可追溯：统一归纳为单一清晰的汇总条目，杜绝 10234 等零碎数字代号刷屏
+                            effectivePkg = "uninstalled_app_summary"
+                            isUninstalled = true
                         } else {
-                            false
+                            // 系统底层硬件守护进程或系统原生服务（UID < 10000，如 1066、1069、1092、1072、2903 等）
+                            // 严禁赋予已卸载标记，严禁作为已卸载应用向用户展示
+                            effectivePkg = "system:daemon_$uid"
+                            isUninstalled = false
                         }
-                        val isUninstalled = isExplicitlyUninstalled || isPkgNotFound || AppPowerUsageItem.isUninstalledPackage(effectivePkg)
 
                         val (rawFgMs, rawBackgroundMs, cpuMs) = parseAppTimesFromDetails(
                             extraDetails,
@@ -672,9 +681,16 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                             0L
                         }
 
-                        // 若未开启后台统计，纯后台系统应用（foregroundMs <= 0L）跳过；但已卸载产生真实耗电的应用予以保留展示
-                        if (!enableBackgroundStats && foregroundMs <= 0L && !isUninstalled) {
-                            continue
+                        // 真实有效性能耗门禁：
+                        // 1. 若未开启后台统计，纯后台系统应用（foregroundMs <= 0L 且非已卸载应用）跳过；
+                        // 2. 对于已卸载应用条目，若既无前台工时（foregroundMs <= 0L）且能耗低于物理有效门限（< 0.0005Wh，在界面上显示为 -- 或 <0.001Wh），
+                        //    属于系统底层微小量化底噪，直接跳过，杜绝 0 耗电无效条目在主列表刷屏！
+                        if (!enableBackgroundStats) {
+                            if (foregroundMs <= 0L) {
+                                if (!isUninstalled || totalDirectEnergyWh < 0.0005f) {
+                                    continue
+                                }
+                            }
                         }
 
                         val backgroundMs = if (enableBackgroundStats) rawBackgroundMs else 0L
@@ -823,7 +839,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             if (enableBackgroundStats) {
                 it.foregroundTimeMs > 0L || it.backgroundTimeMs > 0L || it.energyWh > 0.001f || ((it.directEnergyWh ?: 0f) > 0.001f)
             } else {
-                it.foregroundTimeMs > 0L || it.isUninstalledApp() || ((it.directEnergyWh ?: 0f) > 0.001f)
+                it.foregroundTimeMs > 0L || (it.isUninstalledApp() && it.hasEffectiveEnergy()) || ((it.directEnergyWh ?: 0f) > 0.001f)
             }
         }.toMutableList()
 
@@ -1319,8 +1335,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 effectiveFg = effectiveFg.coerceAtMost(dischargeMs)
             }
 
-            // 若未开启后台统计且前台时长为 0，且非已卸载应用、无直接电量消耗时，才移除纯后台应用
-            if (!enableBackgroundStats && effectiveFg <= 0L && !old.isUninstalledApp() && ((old.directEnergyWh ?: 0f) <= 0.001f)) {
+            // 若未开启后台统计且前台时长为 0，且非有效已卸载应用（无工时且无有效放电能量）、无直接电量消耗时，才移除纯后台应用
+            if (!enableBackgroundStats && effectiveFg <= 0L && (!old.isUninstalledApp() || !old.hasEffectiveEnergy()) && ((old.directEnergyWh ?: 0f) <= 0.001f)) {
                 existingMap.remove(pkg)
                 continue
             }
@@ -1483,7 +1499,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             existingMap.values.toMutableList()
         } else {
             existingMap.values.filter {
-                it.foregroundTimeMs > 0L || isAssistantScreenApp(it.packageName) || it.isUninstalledApp() || ((it.directEnergyWh ?: 0f) > 0.001f)
+                it.foregroundTimeMs > 0L || isAssistantScreenApp(it.packageName) || (it.isUninstalledApp() && it.hasEffectiveEnergy()) || ((it.directEnergyWh ?: 0f) > 0.001f)
             }.toMutableList()
         }
     }
@@ -1844,7 +1860,21 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val cached = appNameCache[pkgName]
         if (cached != null) return cached
 
-        // 1. 若为 UID 虚拟已卸载包名前缀
+        // 0. 若为系统底层守护进程虚拟包名
+        if (pkgName.startsWith("system:daemon_")) {
+            val uidStr = pkgName.removePrefix("system:daemon_")
+            val name = "系统服务 ($uidStr)"
+            appNameCache[pkgName] = name
+            return name
+        }
+
+        // 1. 若为已卸载汇总或 UID 虚拟已卸载包名
+        if (pkgName == "uninstalled_app_summary") {
+            val name = context.getString(com.battery.analysis.R.string.power_uninstalled_app)
+            appNameCache[pkgName] = name
+            return name
+        }
+
         if (AppPowerUsageItem.isUninstalledPackage(pkgName)) {
             val uid = if (pkgName.startsWith(AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX)) {
                 pkgName.removePrefix(AppPowerUsageItem.PACKAGE_UNINSTALLED_PREFIX).toIntOrNull()

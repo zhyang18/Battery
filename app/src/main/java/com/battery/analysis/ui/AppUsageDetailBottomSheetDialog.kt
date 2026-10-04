@@ -117,6 +117,8 @@ class AppUsageDetailBottomSheetDialog(
         val bmp = DrawableBitmapCache.getOrLoadBitmap(context, item.packageName, targetIconPx, item.icon)
         if (bmp != null && !bmp.isRecycled) {
             ivIcon.setImageBitmap(bmp)
+        } else if (item.isUninstalledApp()) {
+            ivIcon.setImageResource(R.drawable.ic_uninstalled_app)
         } else {
             ivIcon.setImageResource(R.mipmap.ic_launcher)
         }

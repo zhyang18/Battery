@@ -153,6 +153,23 @@ object AppIconCacheManager {
     }
 
     /**
+     * 将 UID 与应用程序包名的映射关系持久化保存至本地配置中。
+     * 用于在应用被卸载后依然能够通过系统底层 BatteryStats 的 UID 反查出原应用的真实包名。
+     *
+     * @param context 运行上下文
+     * @param uid 目标用户标识 UID
+     * @param packageName 目标应用程序包名
+     */
+    fun saveUidMapping(context: Context, uid: Int, packageName: String) {
+        if (uid <= 0 || packageName.isBlank()) return
+        try {
+            val prefs = context.getSharedPreferences(PREFS_UID_PKG, Context.MODE_PRIVATE)
+            prefs.edit().putString(uid.toString(), packageName).apply()
+        } catch (_: Throwable) {
+        }
+    }
+
+    /**
      * 根据 UID 从本地历史映射字典中反查关联的应用程序包名。
      *
      * @param context 运行上下文
@@ -248,10 +265,17 @@ object AppIconCacheManager {
                 val targetSizePx = (appCtx.resources.displayMetrics.density * 42f).toInt().coerceAtLeast(1)
                 val namePrefs = appCtx.getSharedPreferences(PREFS_APP_NAMES, Context.MODE_PRIVATE)
                 val nameEditor = namePrefs.edit()
+                val uidPrefs = appCtx.getSharedPreferences(PREFS_UID_PKG, Context.MODE_PRIVATE)
+                val uidEditor = uidPrefs.edit()
 
                 for (app in apps) {
                     val pkg = app.packageName
                     if (pkg.isBlank()) continue
+
+                    // 0. 持久化应用 UID 与包名映射
+                    if (app.uid > 0) {
+                        uidEditor.putString(app.uid.toString(), pkg)
+                    }
 
                     // 1. 持久化应用显示名称
                     if (!namePrefs.contains(pkg)) {
@@ -278,6 +302,7 @@ object AppIconCacheManager {
                     }
                 }
                 nameEditor.apply()
+                uidEditor.apply()
             } catch (_: Throwable) {
             }
         }

@@ -198,7 +198,7 @@ class BatteryMonitorService : Service() {
                             val offHours = screenOffRealtimeMs / 3600_000f
                             val impliedWatts = if (offHours > 0f) rawWh / offHours else 0f
                             val isPhysicallyPlausible = if (screenOffRealtimeMs >= 30_000L) {
-                                rawMah >= 0.2f && impliedWatts in 0.02f..1.5f
+                                rawMah >= 0.2f && impliedWatts <= 1.5f
                             } else {
                                 impliedWatts <= 2.5f
                             }

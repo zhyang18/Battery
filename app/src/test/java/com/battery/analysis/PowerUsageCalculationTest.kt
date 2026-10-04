@@ -3838,14 +3838,13 @@ class PowerUsageCalculationTest {
     }
 
     /**
-     * 验证用户实测场景：亮屏 1h06m（2.457Wh），息屏 9h10m，电池掉电 13%（约 3.45Wh）。
-     * 当微积分与断层外推息屏能量偏大时，双锚定物理天花板严格将息屏能量约束在约 1.0Wh，
-     * 杜绝总耗能虚增至 4.576Wh（17.5%），使各项指标与 AccuBattery Pro 及 batteryrecorder 完美一致。
+     * 验证当亮屏微积分能量与息屏实测能量之和超过离散掉电百分比折算值时，
+     * 双锚定算法严格遵循严禁人为虚拟钳位原则，息屏能量坚守实测真值（2.119Wh），
+     * 亮屏能量坚守高频微积分真值（2.457Wh），整机能量由二者自然守恒累加（4.576Wh），
+     * 彻底杜绝通过 (physicalTotalEnergyWh - intOnEnergyWh) 反向倒扣息屏能量而引发的刷新递减与跳变异常。
      */
     @Test
     fun testScreenOffEnergyCeilingConstraintUnderActualDischargeDrop() {
-        // 场景参数对应用户实测：
-        // 电池实际掉电 13%（88% -> 75%），折算真实物理放电量约为 3.45Wh (约 896 mAh @ 3.85V)
         val physicalTotalEnergyWh = 3.45f
         val screenOnMs = 66L * 60_000L // 1h06m
         val screenOffMs = 550L * 60_000L // 9h10m
@@ -3858,17 +3857,16 @@ class PowerUsageCalculationTest {
         val intOnEnergyWh = 2.457f // 亮屏 1Hz 采样真实积分
         val intOnPowerWatts = intOnEnergyWh / screenOnHours // ~2.23W
 
-        // 模拟未受约束前虚高外推的息屏能量（2.119Wh，导致总能耗虚高至 4.576Wh）
-        val inflatedOffEnergyWh = 2.119f
-        val inflatedOffPowerWatts = inflatedOffEnergyWh / screenOffHours
+        val realOffEnergyWh = 2.119f
+        val realOffPowerWatts = realOffEnergyWh / screenOffHours
 
         val stats = PowerUsageManager.calculateDualAnchorEnergyAndPower(
             intOnEnergyWh = intOnEnergyWh,
-            intOffEnergyWh = inflatedOffEnergyWh,
-            intTotalEnergyWh = intOnEnergyWh + inflatedOffEnergyWh,
+            intOffEnergyWh = realOffEnergyWh,
+            intTotalEnergyWh = intOnEnergyWh + realOffEnergyWh,
             intOnPowerWatts = intOnPowerWatts,
-            intOffPowerWatts = inflatedOffPowerWatts,
-            intTotalPowerWatts = (intOnEnergyWh + inflatedOffEnergyWh) / totalHours,
+            intOffPowerWatts = realOffPowerWatts,
+            intTotalPowerWatts = (intOnEnergyWh + realOffEnergyWh) / totalHours,
             physicalTotalEnergyWh = physicalTotalEnergyWh,
             screenOnHours = screenOnHours,
             screenOffHours = screenOffHours,
@@ -3877,17 +3875,14 @@ class PowerUsageCalculationTest {
             nominalVoltageVolts = 3.85f
         )
 
-        // 1. 整机总放电能耗必须严格受控于实际掉电 13% 的物理真实放电量（3.45Wh），绝不允许膨胀至 4.576Wh (17.5%)
-        assertEquals("整机总能耗必须严格等于物理实际放电能量", physicalTotalEnergyWh, stats.totalEnergyWh, 0.001f)
-
-        // 2. 亮屏能量保持 1Hz 高频微积分最高物理置信度不变（2.457Wh）
+        // 1. 亮屏能量保持 1Hz 高频微积分最高物理置信度不变（2.457Wh）
         assertEquals("亮屏能耗保持高频微积分物理真值", intOnEnergyWh, stats.onEnergyWh, 0.001f)
 
-        // 3. 息屏能量严格受限于物理剩余放电残差（3.45Wh - 2.457Wh = 0.993Wh），落入 0.95Wh ~ 1.15Wh 合理区间（与 batteryrecorder 的 1.125Wh 及 AccuBattery 的 251mAh / 1.05Wh 吻合）
-        val expectedOffEnergyWh = physicalTotalEnergyWh - intOnEnergyWh
-        assertEquals("息屏能耗必须对齐物理剩余放电量上限", expectedOffEnergyWh, stats.offEnergyWh, 0.001f)
-        assertTrue("息屏能耗杜绝虚高两倍至 2.119Wh", stats.offEnergyWh < 1.15f)
-        assertTrue("息屏平均功率必须落在合理待机区间（< 0.15W）", stats.screenOffWatts < 0.15f)
+        // 2. 息屏能量坚守实测真值（2.119Wh），严禁被 (physicalTotalEnergyWh - intOnEnergyWh) 反向倒扣
+        assertEquals("息屏能耗保持实测物理真值，杜绝虚拟钳位倒扣", realOffEnergyWh, stats.offEnergyWh, 0.001f)
+
+        // 3. 整机总放电能耗忠实等于亮屏微积分与息屏能耗之和（4.576Wh），能量物理守恒
+        assertEquals("整机总能耗等于亮屏与息屏实测能耗自然累加", intOnEnergyWh + realOffEnergyWh, stats.totalEnergyWh, 0.001f)
     }
 
     /**
@@ -4471,6 +4466,191 @@ class PowerUsageCalculationTest {
         assertEquals("深度休眠时长准确恢复", 1650000L, restoredSleepMs)
         assertEquals("库仑计电量准确恢复", 12.5f, restoredHwMah, 0.001f)
         assertEquals("端电压能量准确恢复", 0.048f, restoredHwWh, 0.0001f)
+    }
+
+    /**
+     * 验证亮屏使用期间多次连续手动刷新时，息屏能耗绝对坚守其不可逆的物理历史真值，
+     * 杜绝因宏观电量百分比尚未步进导致息屏能量被 (physicalTotalEnergyWh - onEnergyWh) 虚拟钳位反向倒扣慢慢变小、
+     * 以及在亮屏能耗突破门禁或息屏后再刷新时突然跳变的物理异常。
+     */
+    @Test
+    fun testScreenOffEnergyMonotonicallyNonDecreasingDuringScreenOnUsage() {
+        val nominalVoltage = 3.85f
+        val screenOffMs = 3600_000L // 息屏 1 小时
+        val screenOffHours = 1.0f
+        val realScreenOffEnergyWh = 0.496f // 硬件实测息屏真实能耗 0.496Wh
+        val intOffPowerWatts = 0.496f // 息屏等效功率 0.496W (> 0.15W)
+        val physicalTotalEnergyWh = 1.000f // 电池掉电 1% 对应的宏观电量 1.000Wh
+
+        // 模拟亮屏使用期间的连续 4 次刷新，亮屏能耗由 0.634Wh 逐渐增加
+        val screenOnWatts = 2.0f
+        val testOnEnergies = listOf(0.634f, 0.640f, 0.680f, 0.750f)
+
+        for (onEnergyWh in testOnEnergies) {
+            val screenOnHours = onEnergyWh / screenOnWatts
+            val dischargeHours = screenOffHours + screenOnHours
+            val stats = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+                intOnEnergyWh = onEnergyWh,
+                intOffEnergyWh = realScreenOffEnergyWh,
+                intTotalEnergyWh = onEnergyWh + realScreenOffEnergyWh,
+                intOnPowerWatts = screenOnWatts,
+                intOffPowerWatts = intOffPowerWatts,
+                intTotalPowerWatts = (onEnergyWh + realScreenOffEnergyWh) / dischargeHours,
+                physicalTotalEnergyWh = physicalTotalEnergyWh,
+                screenOnHours = screenOnHours,
+                screenOffHours = screenOffHours,
+                dischargeHours = dischargeHours,
+                screenOffMs = screenOffMs,
+                nominalVoltageVolts = nominalVoltage
+            )
+
+            // 核心物理验证：息屏能量必须坚定等于 0.496Wh，严禁被倒扣为 0.366Wh、0.360Wh 等残差，更严禁缩水归零
+            assertEquals(
+                "亮屏能耗在 ${onEnergyWh}Wh 刷新时，息屏能量必须稳定等于 0.496Wh 实测值",
+                realScreenOffEnergyWh,
+                stats.offEnergyWh,
+                0.001f
+            )
+
+            // 亮屏能量保持真实递增
+            assertEquals(onEnergyWh, stats.onEnergyWh, 0.001f)
+
+            // 整机总能量等于亮屏微积分与息屏能耗之和，忠实反映真实能耗
+            assertEquals(
+                stats.onEnergyWh + stats.offEnergyWh,
+                stats.totalEnergyWh,
+                0.001f
+            )
+        }
+    }
+
+    /**
+     * 验证极低待机功耗设备（如深度睡眠功耗低于 0.02W）在长待机下的硬件快照能耗能够被完整采信，
+     * 杜绝因全周期平均功率低于 0.02W 导致硬件实测数据被丢弃并在外推值与实测值之间反复横跳，
+     * 同时验证系统绝不使用 0.15W 等人为合成的假数据进行保底覆盖。
+     */
+    @Test
+    fun testUltraLowStandbyWattsScreenOffHardwareSnapshotPreserved() {
+        val nominalVoltage = 3.85f
+        val screenOffMs = 10L * 3600_000L // 10 小时长待机
+        val screenOffHours = 10.0f
+        val screenOnHours = 1.0f
+        val dischargeHours = 11.0f
+        val onEnergyWh = 2.0f
+
+        // 极低功耗待机：10 小时仅消耗 0.100Wh，等效待机功率为 0.010W (< 0.02W)
+        val ultraLowOffEnergyWh = 0.100f
+        val ultraLowOffWatts = 0.010f
+
+        val stats = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = onEnergyWh,
+            intOffEnergyWh = ultraLowOffEnergyWh,
+            intTotalEnergyWh = onEnergyWh + ultraLowOffEnergyWh,
+            intOnPowerWatts = 2.0f,
+            intOffPowerWatts = ultraLowOffWatts,
+            intTotalPowerWatts = (onEnergyWh + ultraLowOffEnergyWh) / dischargeHours,
+            physicalTotalEnergyWh = 0f,
+            screenOnHours = screenOnHours,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = nominalVoltage
+        )
+
+        // 验证：极低功耗息屏能耗 0.100Wh 严格忠实保留，绝不被人为保底为 0.15W * 10h = 1.50Wh
+        assertEquals(
+            "极低待机功耗息屏能量忠实保留实测值 0.100Wh",
+            ultraLowOffEnergyWh,
+            stats.offEnergyWh,
+            0.001f
+        )
+        assertEquals(
+            "极低待机功耗准确计算为 0.010W",
+            ultraLowOffWatts,
+            stats.screenOffWatts,
+            0.001f
+        )
+    }
+
+    /**
+     * 验证图一场景：息屏存在有效唤醒时长（13m10s）与深度休眠时长（3h59m22s）时，
+     * 深度休眠能耗受到物理功耗梯度上限约束，唤醒能耗稳定大于 0（严格杜绝深睡独占 100% 息屏能耗导致唤醒能耗为 0 显示为 --），
+     * 且唤醒能耗与深睡能耗之和严格物理守恒等于息屏总能耗。
+     */
+    @Test
+    fun testScreenOffDecompositionWithAwakeAndDeepSleepGuaranteesAwakeEnergyPositive() {
+        val offEnergyWh = 0.540f // 息屏总能耗 0.540Wh
+        val awakeMs = 13L * 60_000L + 10_000L // 13分10秒唤醒
+        val deepSleepMs = 3L * 3600_000L + 59L * 60_000L + 22_000L // 3小时59分22秒深睡
+        val screenOffMs = awakeMs + deepSleepMs // 4小时12分32秒
+
+        // 构造几个略微偏高的唤醒样本（0.14W 左右）
+        val baseTs = 1700000000000L
+        val testSamples = listOf(
+            PowerDischargePoint(timestamp = baseTs, elapsedHours = 0f, batteryLevel = 80, voltageVolts = 4.0f, temperature = 30f, powerWatts = 0.14f, isScreenOn = false),
+            PowerDischargePoint(timestamp = baseTs + 60_000L, elapsedHours = 0.01f, batteryLevel = 80, voltageVolts = 4.0f, temperature = 30f, powerWatts = 0.15f, isScreenOn = false),
+            PowerDischargePoint(timestamp = baseTs + 120_000L, elapsedHours = 0.02f, batteryLevel = 80, voltageVolts = 4.0f, temperature = 30f, powerWatts = 0.13f, isScreenOn = false)
+        )
+
+        val decomposed = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = offEnergyWh,
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            rawSleepDrainMah = 0f,
+            rawAwakeDrainMah = 0f,
+            samples = testSamples,
+            nominalVoltageVolts = 3.85f
+        )
+
+        // 1. 细分状态必须标记为可用
+        assertTrue("细分可用性标记必须为 true", decomposed.isDecomposedAvailable)
+
+        // 2. 唤醒能耗必须稳定大于 0，绝对不允许为 0f
+        assertTrue("唤醒能量必须大于 0，杜绝显示为 --", decomposed.awakeEnergyWh > 0.001f)
+        assertTrue("唤醒等效功率必须大于 0", decomposed.awakeWatts > 0.05f)
+
+        // 3. 深度睡眠能耗必须为正数且合理
+        assertTrue("深睡能量必须大于 0", decomposed.deepSleepEnergyWh > 0f)
+        assertTrue("深睡功率必须低于息屏总平均功率", decomposed.deepSleepWatts < (offEnergyWh / (screenOffMs / 3600000f)))
+
+        // 4. 物理能量守恒：深睡能量 + 唤醒能量 == 息屏总能量
+        assertEquals(
+            "能量守恒：深睡能量与唤醒能量之和严格等于息屏总能量",
+            offEnergyWh,
+            decomposed.deepSleepEnergyWh + decomposed.awakeEnergyWh,
+            0.001f
+        )
+    }
+
+    /**
+     * 验证图二场景：8 小时长时间待机（深度睡眠 8h01m，唤醒 23m），
+     * 休眠长断层外推基线功率受到静态休眠底噪上限约束（<= 0.06W），
+     * 息屏总能耗保持在合理物理区间（约 0.4Wh ~ 0.7Wh），杜绝虚高膨胀至 2.063Wh，
+     * 同时唤醒功率保持在合理活跃区间（<= 1.0W），杜绝出现 3.79W 的异常尖峰。
+     */
+    @Test
+    fun testLongDeepSleepGapExtrapolatedPowerBoundedByQuiescentStandbyWatts() {
+        // 模拟放电采样点序列：包含一段亮屏使用、一次熄灭进入 8 小时深度休眠大断层，随后唤醒点亮
+        val startTs = 1700000000000L
+        val sleepGapMs = 8L * 3600_000L // 8 小时深度休眠断层
+        val wakeSamples = listOf(
+            // 亮屏阶段
+            PowerDischargePoint(timestamp = startTs, elapsedHours = 0f, batteryLevel = 80, voltageVolts = 4.0f, temperature = 30f, powerWatts = 2.0f, isScreenOn = true),
+            PowerDischargePoint(timestamp = startTs + 60_000L, elapsedHours = 0.016f, batteryLevel = 80, voltageVolts = 4.0f, temperature = 30f, powerWatts = 2.0f, isScreenOn = true),
+            // 灭屏瞬间捕获到硬件静止待机底噪（0.05W），随后伴随偶发唤醒短样本（0.28W）
+            PowerDischargePoint(timestamp = startTs + 61_000L, elapsedHours = 0.017f, batteryLevel = 80, voltageVolts = 4.0f, temperature = 30f, powerWatts = 0.05f, isScreenOn = false),
+            PowerDischargePoint(timestamp = startTs + 120_000L, elapsedHours = 0.033f, batteryLevel = 80, voltageVolts = 4.0f, temperature = 30f, powerWatts = 0.28f, isScreenOn = false),
+            // 经过 8 小时深度休眠断层后醒来
+            PowerDischargePoint(timestamp = startTs + 120_000L + sleepGapMs, elapsedHours = 8.033f, batteryLevel = 78, voltageVolts = 3.9f, temperature = 28f, powerWatts = 0.25f, isScreenOn = false)
+        )
+
+        val stats = PowerUsageManager.computeDischargePowerStats(wakeSamples)
+        org.junit.Assert.assertNotNull("放电统计结果不应为空", stats)
+
+        // 验证：8 小时长断层外推的息屏总能耗精准采纳硬件客观底噪（8h * 0.05W ≈ 0.40Wh，总息屏能耗杜绝飙升至 2.063Wh）
+        assertTrue("8小时休眠息屏总能量必须 <= 0.8Wh，杜绝膨胀至 2.063Wh", stats!!.screenOffDisplayEnergyWh <= 0.8f)
+        assertTrue("8小时休眠息屏平均功率必须 <= 0.10W，杜绝虚高为 0.24W", stats.screenOffPowerWatts <= 0.10f)
     }
 }
 

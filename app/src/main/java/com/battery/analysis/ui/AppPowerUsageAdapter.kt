@@ -618,6 +618,10 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             } else {
                 val awakePercentStr = if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakePercent > 0f) {
                     String.format(Locale.US, "%.1f%%", overview.screenOffAwakePercent)
+                } else if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakeEnergyWh > 0f) {
+                    "<0.1%"
+                } else if (overview.screenOffAwakeDurationMs > 0L) {
+                    "0.0%"
                 } else {
                     "--"
                 }
@@ -628,8 +632,12 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 } else {
                     overview.screenOffAwakeDurationText.ifBlank { "0s" }
                 }
-                val energyText = if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakeEnergyWh > 0f) {
+                val energyText = if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakeEnergyWh >= 0.001f) {
                     String.format(Locale.US, "%.3fWh", overview.screenOffAwakeEnergyWh)
+                } else if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakeEnergyWh > 0f) {
+                    "<0.001Wh"
+                } else if (overview.screenOffAwakeDurationMs > 0L) {
+                    "0.000Wh"
                 } else {
                     "--"
                 }
@@ -643,9 +651,12 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 } else {
                     0f
                 }
-                if (awakeDrainMah > 0f) {
+                if (awakeDrainMah >= 0.1f) {
                     val mahText = String.format(Locale.US, "%.1f mAh", awakeDrainMah)
                     val mahHtml = "<font color=\"#FFA4A4\">$mahText</font>"
+                    tvAwakeMah.text = HtmlCompat.fromHtml(mahHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
+                } else if (overview.screenOffAwakeDurationMs > 0L) {
+                    val mahHtml = "<font color=\"#FFA4A4\">0.0 mAh</font>"
                     tvAwakeMah.text = HtmlCompat.fromHtml(mahHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
                 } else {
                     tvAwakeMah.text = "--"

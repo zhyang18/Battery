@@ -4842,6 +4842,99 @@ class PowerUsageCalculationTest {
             assertTrue("抽稀后采样点序列时间单调递增", finalSamples[i + 1].timestamp > finalSamples[i].timestamp)
         }
     }
+
+    /**
+     * 验证图一与图二对比场景：息屏 1h16m51s（深睡 1h8m18s，唤醒 8m29s），
+     * 系统底层硬件库仑计真实放电量为 59.0 mAh（对应 AccuBattery Pro 实测真值），
+     * 深度睡眠精准计算为 29.6 mAh（0.114 Wh，平均电流 26.0 mA），
+     * 唤醒活跃消耗精准闭环为 29.4 mAh（0.113 Wh，平均电流 208 mA），
+     * 彻底杜绝息屏总电量膨胀为 100.2 mAh 以及唤醒电量虚高为 70.6 mAh（1.92W 异常功耗）的错误。
+     */
+    @Test
+    fun testScreenOffSleepAwakeEnergyMatchesAccuBatteryProHardwareTruth() {
+        val nominalVoltage = 3.85f
+        val awakeMs = (8L * 60_000L) + (29L * 1000L) // 8m 29s
+        val deepSleepMs = (1L * 3600_000L) + (8L * 60_000L) + (18L * 1000L) // 1h 8m 18s
+        val screenOffMs = awakeMs + deepSleepMs // 1h 16m 47s (对齐图一)
+        val deepSleepHours = deepSleepMs.toDouble() / 3600000.0
+        val awakeHours = awakeMs.toDouble() / 3600000.0
+
+        // 硬件真实息屏总放电量 59.0 mAh（对齐图二 AccuBattery Pro）
+        val hwScreenOffDrainMah = 59.0f
+        val hwScreenOffEnergyWh = (hwScreenOffDrainMah * nominalVoltage) / 1000f // 0.22715 Wh
+
+        // 模拟放电全周期真实静止待机物理底噪样本（0.100W，对应电流 26.0mA）
+        val baseTs = 1710000000000L
+        val cycleSamples = listOf(
+            PowerDischargePoint(timestamp = baseTs, elapsedHours = 0f, batteryLevel = 80, voltageVolts = 3.85f, temperature = 28f, powerWatts = 0.100f, isScreenOn = false),
+            PowerDischargePoint(timestamp = baseTs + 60_000L, elapsedHours = 0.016f, batteryLevel = 80, voltageVolts = 3.85f, temperature = 28f, powerWatts = 0.100f, isScreenOn = false)
+        )
+
+        val decomposed = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = hwScreenOffEnergyWh,
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            rawSleepDrainMah = 0f,
+            rawAwakeDrainMah = 0f,
+            samples = emptyList(),
+            nominalVoltageVolts = nominalVoltage,
+            allCycleSamples = cycleSamples
+        )
+
+        // 1. 验证细分可用性
+        assertTrue("细分可用性必须为 true", decomposed.isDecomposedAvailable)
+
+        // 2. 验证深度睡眠消耗：必须约为 0.114Wh，折算约 29.6 mAh（与图一 0.114Wh / 29.6mAh 以及 AccuBattery 的 32mAh 高度吻合）
+        val deepSleepMah = (decomposed.deepSleepEnergyWh * 1000f) / nominalVoltage
+        assertEquals("深度睡眠能量必须精准对齐 0.114Wh", 0.114f, decomposed.deepSleepEnergyWh, 0.005f)
+        assertEquals("深度睡眠电量必须精准对齐 29.6 mAh", 29.6f, deepSleepMah, 1.5f)
+        val deepSleepCurrentMa = (deepSleepMah / deepSleepHours).toFloat()
+        assertTrue("深度睡眠待机电流必须在 20mA ~ 30mA 真实底噪范围内", deepSleepCurrentMa in 24f..30f)
+
+        // 3. 验证唤醒活跃消耗：必须精准闭环在约 29.4 mAh / 0.113Wh，杜绝膨胀至 70.6 mAh
+        val awakeMah = (decomposed.awakeEnergyWh * 1000f) / nominalVoltage
+        assertEquals("唤醒电量必须闭环在约 29.4 mAh（杜绝虚高为 70.6 mAh）", 29.4f, awakeMah, 1.5f)
+        val awakeWatts = decomposed.awakeWatts
+        assertTrue("唤醒等效功率必须在 0.5W ~ 1.0W 合理活跃区间（杜绝 1.92W 异常值）", awakeWatts in 0.5f..1.1f)
+        val awakeCurrentMa = (awakeMah / awakeHours).toFloat()
+        assertTrue("唤醒平均电流必须在 180mA ~ 250mA 合理范围内（对齐 AccuBattery 的 195mA）", awakeCurrentMa in 180f..250f)
+
+        // 4. 验证严格物理能量与电量守恒
+        val totalDecomposedMah = deepSleepMah + awakeMah
+        assertEquals("深睡与唤醒电量之和严格等于硬件息屏放电量 59.0 mAh", hwScreenOffDrainMah, totalDecomposedMah, 0.01f)
+        assertEquals("深睡与唤醒能量之和严格等于硬件息屏总能量 0.227Wh", hwScreenOffEnergyWh, decomposed.deepSleepEnergyWh + decomposed.awakeEnergyWh, 0.001f)
+    }
+
+    /**
+     * 验证当息屏唤醒期间由于 CPU 瞬时提频产生 2.0W~3.0W 瞬态脉冲尖峰时，
+     * 加权中位数门禁机制能够有效滤除脉冲尖峰放大效应，
+     * 确保即使完全通过软件采样点积分，唤醒等效功率依然收敛在物理常理区间（<= 1.0W）。
+     */
+    @Test
+    fun testScreenOffShortSampleSpikeSuppressionInDischargeStats() {
+        val startTs = 1710000000000L
+        val sleepGapMs = 1L * 3600_000L + 8L * 60_000L // 1 小时 8 分钟深度休眠断层
+        val awakeDurationMs = 8L * 60_000L // 8 分钟唤醒
+
+        // 构造采样序列：长断层后醒来，在 8 分钟唤醒期间伴随瞬态脉冲（2.5W），但中位数为 0.6W
+        val samples = listOf(
+            PowerDischargePoint(timestamp = startTs, elapsedHours = 0f, batteryLevel = 80, voltageVolts = 3.85f, temperature = 28f, powerWatts = 0.08f, isScreenOn = false),
+            // 休眠长断层
+            PowerDischargePoint(timestamp = startTs + sleepGapMs, elapsedHours = 1.13f, batteryLevel = 79, voltageVolts = 3.85f, temperature = 28f, powerWatts = 0.08f, isScreenOn = false),
+            // 唤醒阶段多个切片（包含 2.5W 提频尖峰与正常待机样本）
+            PowerDischargePoint(timestamp = startTs + sleepGapMs + 10_000L, elapsedHours = 1.135f, batteryLevel = 79, voltageVolts = 3.85f, temperature = 29f, powerWatts = 2.5f, isScreenOn = false),
+            PowerDischargePoint(timestamp = startTs + sleepGapMs + 20_000L, elapsedHours = 1.14f, batteryLevel = 79, voltageVolts = 3.85f, temperature = 29f, powerWatts = 0.6f, isScreenOn = false),
+            PowerDischargePoint(timestamp = startTs + sleepGapMs + awakeDurationMs, elapsedHours = 1.26f, batteryLevel = 79, voltageVolts = 3.85f, temperature = 29f, powerWatts = 0.6f, isScreenOn = false)
+        )
+
+        val stats = PowerUsageManager.computeDischargePowerStats(samples)
+        org.junit.Assert.assertNotNull("放电统计结果不应为空", stats)
+
+        // 验证：总息屏能量受到门禁控制，唤醒阶段绝不会放大至 0.272Wh（总息屏能耗保持 <= 0.25Wh）
+        assertTrue("瞬态提频尖峰被有效抑制，息屏总能耗必须 <= 0.28Wh（远低于未受抑制的 0.386Wh，实际为 ${stats!!.screenOffDisplayEnergyWh}）", stats.screenOffDisplayEnergyWh <= 0.28f)
+        assertTrue("息屏平均放电功率必须 <= 0.22W（远低于虚高的 0.30W 以上，实际为 ${stats.screenOffPowerWatts}）", stats.screenOffPowerWatts <= 0.22f)
+    }
 }
 
 

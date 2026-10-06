@@ -111,6 +111,17 @@ data class PowerUsageRecord(
             totalEnergyWh = batteryTotalEnergyWh
         )
 
+        val awakeWatts = if (screenOffAwakeDurationMs > 0L && screenOffAwakeEnergyWh > 0f) {
+            (screenOffAwakeEnergyWh / (screenOffAwakeDurationMs.toDouble() / 3600000.0)).toFloat()
+        } else {
+            0f
+        }
+        val deepSleepWatts = if (screenOffDeepSleepDurationMs > 0L && screenOffDeepSleepEnergyWh > 0f) {
+            (screenOffDeepSleepEnergyWh / (screenOffDeepSleepDurationMs.toDouble() / 3600000.0)).toFloat()
+        } else {
+            0f
+        }
+
         val overview = PowerOverviewStats(
             avgPowerWatts = avgPowerWatts,
             screenOnPowerWatts = screenOnPowerWatts,
@@ -134,6 +145,8 @@ data class PowerUsageRecord(
             screenOffDeepSleepEnergyWh = screenOffDeepSleepEnergyWh,
             screenOffAwakeDurationMs = screenOffAwakeDurationMs,
             screenOffDeepSleepDurationMs = screenOffDeepSleepDurationMs,
+            screenOffAwakePowerWatts = awakeWatts,
+            screenOffDeepSleepPowerWatts = deepSleepWatts,
             screenOffAwakeDrainMah = screenOffAwakeDrainMah,
             screenOffDeepSleepDrainMah = screenOffDeepSleepDrainMah,
             isScreenOffDecomposedAvailable = isScreenOffDecomposedAvailable,

@@ -1040,6 +1040,11 @@ class PowerUsageFragment : Fragment() {
         binding.layoutMetricScreenOffRow.setOnClickListener { showMetricRowDetailBubble(binding.layoutMetricScreenOffRow, ROW_SCREEN_OFF) }
         binding.layoutMetricGlobalRow.setOnClickListener { showMetricRowDetailBubble(binding.layoutMetricGlobalRow, ROW_GLOBAL) }
 
+        // 核心功耗指标卡片能量数值点击弹出等效电量（mAh）详细说明气泡弹框
+        binding.tvMetricScreenOnEnergy.setOnClickListener { showMetricEnergyDetailBubble(binding.tvMetricScreenOnEnergy, ROW_SCREEN_ON) }
+        binding.tvMetricScreenOffEnergy.setOnClickListener { showMetricEnergyDetailBubble(binding.tvMetricScreenOffEnergy, ROW_SCREEN_OFF) }
+        binding.tvMetricGlobalEnergy.setOnClickListener { showMetricEnergyDetailBubble(binding.tvMetricGlobalEnergy, ROW_GLOBAL) }
+
         // 列表内放电速度概览卡片（作为 RecyclerView 子项可滚动）点击弹出分三行对应的模块说明气泡弹框
         adapter.onMetricModuleClickedListener = { anchorView, rowType ->
             val message = when (rowType) {
@@ -1091,13 +1096,63 @@ class PowerUsageFragment : Fragment() {
      */
     private fun showMetricRowDetailBubble(anchorView: View, rowType: Int) {
         val message = when (rowType) {
-            ROW_SCREEN_ON -> "亮屏：时间、平均功耗、能量、续航时间"
-            ROW_SCREEN_OFF -> "息屏：时间、平均功耗、能量、续航时间"
-            ROW_GLOBAL -> "全局：时间、平均功耗、能量、续航时间"
+            ROW_SCREEN_ON -> "亮屏：时间、平均功耗、能量、剩余续航时间"
+            ROW_SCREEN_OFF -> "息屏：时间、平均功耗、能量、剩余续航时间"
+            ROW_GLOBAL -> "全局：时间、平均功耗、能量、剩余续航时间"
             else -> return
         }
         showBubbleTooltip(anchorView, message)
     }
+
+    /**
+     * 弹出核心功耗指标卡片各行（亮屏、息屏、全局）能量数值换算为毫安时（mAh）的详细气泡弹框。
+     * 按照锂电池标准标称电压 3.85V 进行等效折算，展示换算公式与物理说明。
+     *
+     * @param anchorView 触发气泡弹窗的目标锚点视图
+     * @param rowType 行分类标识（[ROW_SCREEN_ON] 为亮屏行，[ROW_SCREEN_OFF] 为息屏行，[ROW_GLOBAL] 为全局行）
+     */
+    private fun showMetricEnergyDetailBubble(anchorView: View, rowType: Int) {
+        val pkg = lastRenderedPackage
+        val overview = pkg?.overviewStats
+        if (overview == null) {
+            showBubbleTooltip(anchorView, getString(R.string.power_metric_no_record))
+            return
+        }
+
+        val lastUnplugWh = powerManager.getLastUnplugEnergyWh()?.takeIf { it > 0f }
+        val (title, energyWh, ratioStr) = when (rowType) {
+            ROW_SCREEN_ON -> {
+                val ratio = if (lastUnplugWh != null) {
+                    val r = (overview.screenOnEnergyWh / lastUnplugWh * 100f)
+                    String.format(Locale.getDefault(), "%.1f%%", r)
+                } else null
+                Triple("亮屏", overview.screenOnEnergyWh, ratio)
+            }
+            ROW_SCREEN_OFF -> {
+                val ratio = if (lastUnplugWh != null) {
+                    val r = (overview.screenOffEnergyWh / lastUnplugWh * 100f)
+                    String.format(Locale.getDefault(), "%.1f%%", r)
+                } else null
+                Triple("息屏", overview.screenOffEnergyWh, ratio)
+            }
+            ROW_GLOBAL -> {
+                val ratio = if (lastUnplugWh != null) {
+                    val r = (overview.totalEnergyWh / lastUnplugWh * 100f)
+                    String.format(Locale.getDefault(), "%.1f%%", r)
+                } else null
+                Triple("全局", overview.totalEnergyWh, ratio)
+            }
+            else -> return
+        }
+
+        val message = BatteryEnergyCalculator.formatEnergyConversionMessage(
+            title = title,
+            energyWh = energyWh,
+            ratioStr = ratioStr
+        )
+        showBubbleTooltip(anchorView, message, autoDismissMs = 0L)
+    }
+
 
     /**
      * 根据设备当前充放电状态智能应用界面模式：

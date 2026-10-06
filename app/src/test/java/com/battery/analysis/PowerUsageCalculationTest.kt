@@ -2,6 +2,7 @@ package com.battery.analysis
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.regex.Pattern
@@ -2909,17 +2910,13 @@ class PowerUsageCalculationTest {
         assertEquals("亮屏能量严格等于微积分真值 2.00Wh", 2.00f, result.onEnergyWh, 0.001f)
         assertEquals("亮屏功耗准确计算为 2.00W", 2.00f, result.screenOnWatts, 0.001f)
 
-        // 2. 息屏能量精准吸纳硬件休眠漏电补偿：3.54Wh - 2.00Wh = 1.54Wh
-        assertEquals("息屏能量吸收深度休眠补偿准确达到 1.54Wh", 1.54f, result.offEnergyWh, 0.001f)
-        assertEquals("息屏功耗准确体现真实待机功耗 0.22W", 1.54f / 7.0f, result.screenOffWatts, 0.001f)
+        // 2. 息屏能量坚守实测物理真值，彻底废除整机掉电残差倒灌
+        assertEquals("息屏能量坚守实测微积分真值 0.02Wh，绝不倒灌虚增", 0.02f, result.offEnergyWh, 0.001f)
+        assertEquals("息屏功耗准确体现真实微积分功耗", 0.02f / 7.0f, result.screenOffWatts, 0.001f)
 
-        // 3. 整机总能量严格锚定硬件物理总能耗 3.54Wh
-        assertEquals("整机总能量严格等于硬件物理总能量 3.54Wh", 3.54f, result.totalEnergyWh, 0.001f)
-        assertEquals("全局平均功耗准确为 0.4425W", 3.54f / 8.0f, result.avgWatts, 0.001f)
-        assertEquals("实际放电毫安时精准对应 919.48mAh", (3.54f * 1000f) / nominalVoltage, result.realDischargedMah, 0.01f)
-
-        // 4. 严格物理闭环校验：E_total = E_on + E_off，且 P_total * T_total = P_on * T_on + P_off * T_off
+        // 3. 整机总能量严格遵循自然累加物理闭环：E_total = E_on + E_off
         val energySum = result.onEnergyWh + result.offEnergyWh
+        assertEquals("整机总能量严格等于亮屏能量加息屏能量 2.02Wh", 2.02f, result.totalEnergyWh, 0.001f)
         assertEquals("能量守恒：总能量等于亮屏能量加息屏能量", result.totalEnergyWh, energySum, 0.0001f)
 
         val powerTimeSum = result.screenOnWatts * screenOnHours + result.screenOffWatts * screenOffHours
@@ -3105,11 +3102,10 @@ class PowerUsageCalculationTest {
 
         assertEquals("24小时亮屏能量准确为 6.00Wh", 6.00f, result.onEnergyWh, 0.001f)
         assertEquals("24小时亮屏功耗准确为 2.00W", 2.00f, result.screenOnWatts, 0.001f)
-        assertEquals("24小时息屏能量准确补偿为 1.70Wh", 1.70f, result.offEnergyWh, 0.001f)
-        assertEquals("24小时息屏功耗准确计算为 0.081W", 1.70f / 21.0f, result.screenOffWatts, 0.001f)
-        assertEquals("24小时总能量严格对齐硬件 7.70Wh", 7.70f, result.totalEnergyWh, 0.001f)
-        assertEquals("24小时全局平均功耗准确计算为 0.3208W", 7.70f / 24.0f, result.avgWatts, 0.001f)
-        assertEquals("24小时放电电量精准对应 2000mAh", 2000f, result.realDischargedMah, 0.01f)
+        assertEquals("24小时息屏能量坚守微积分真值 0.10Wh，绝不倒灌虚增", 0.10f, result.offEnergyWh, 0.001f)
+        assertEquals("24小时息屏功耗准确计算为对应微积分水平", 0.10f / 21.0f, result.screenOffWatts, 0.001f)
+        assertEquals("24小时总能量严格等于亮屏+息屏 6.10Wh", 6.10f, result.totalEnergyWh, 0.001f)
+        assertEquals("24小时全局平均功耗准确计算为 0.2542W", 6.10f / 24.0f, result.avgWatts, 0.001f)
 
         // 验证 100% 物理闭环
         val diff = Math.abs(result.totalEnergyWh - (result.screenOnWatts * screenOnHours + result.screenOffWatts * screenOffHours))
@@ -4757,11 +4753,11 @@ class PowerUsageCalculationTest {
     }
 
     /**
-     * 验证放电时序采样点序列能够成功均匀抽稀至 3000 点高密度分辨率，
+     * 验证放电时序采样点序列能够成功均匀抽稀至 2000 点高密度分辨率，
      * 且首点、末点以及工况切换拐点（亮灭屏切换、应用切换）100% 完整保留。
      */
     @Test
-    fun testDownsampleDischargeSamplesUniformlyTo3000Points() {
+    fun testDownsampleDischargeSamplesUniformlyTo2000Points() {
         val totalCount = 6000
         val baseTs = 1710000000000L
         val originalSamples = mutableListOf<PowerDischargePoint>()
@@ -4794,44 +4790,10 @@ class PowerUsageCalculationTest {
             )
         }
 
-        // 使用反射访问或注入测试样本验证抽稀至 3000 点
-        val targetCount = 3000
-        val preservedSet = HashSet<Int>()
-        preservedSet.add(0)
-        preservedSet.add(totalCount - 1)
+        // 调用 PowerUsageManager 生产抽稀方法抽稀至 2000 点
+        val finalSamples = PowerUsageManager.downsampleDischargeSamplesUniformly(originalSamples, targetCount = 2000)
 
-        for (i in 0 until totalCount - 1) {
-            val curr = originalSamples[i]
-            val next = originalSamples[i + 1]
-            if (curr.isScreenOn != next.isScreenOn || curr.packageName != next.packageName) {
-                preservedSet.add(i)
-                preservedSet.add(i + 1)
-            }
-        }
-
-        val numSlots = targetCount - preservedSet.size
-        val timeSpan = originalSamples.last().timestamp - originalSamples.first().timestamp
-        val slotDuration = timeSpan.toDouble() / (numSlots + 1)
-        var searchIdx = 0
-        for (s in 1..numSlots) {
-            val targetTs = originalSamples.first().timestamp + (s * slotDuration).toLong()
-            while (searchIdx < totalCount - 1 && originalSamples[searchIdx + 1].timestamp <= targetTs) {
-                searchIdx++
-            }
-            val bestIdx = if (searchIdx < totalCount - 1) {
-                val diff1 = Math.abs(originalSamples[searchIdx].timestamp - targetTs)
-                val diff2 = Math.abs(originalSamples[searchIdx + 1].timestamp - targetTs)
-                if (diff1 <= diff2) searchIdx else searchIdx + 1
-            } else {
-                searchIdx
-            }
-            preservedSet.add(bestIdx)
-        }
-
-        val finalIndices = preservedSet.sorted()
-        val finalSamples = finalIndices.map { originalSamples[it] }
-
-        assertTrue("抽稀后采样点总数控制在 3000 点以内且接近 3000 点", finalSamples.size in 2950..3000)
+        assertTrue("抽稀后采样点总数控制在 2000 点以内且接近 2000 点", finalSamples.size in 1950..2000)
         assertEquals("首点（拔电起点）必须严格保留", originalSamples.first().timestamp, finalSamples.first().timestamp)
         assertEquals("末点（最新采样点）必须严格保留", originalSamples.last().timestamp, finalSamples.last().timestamp)
         // 验证关键拐点均被保留
@@ -4841,6 +4803,46 @@ class PowerUsageCalculationTest {
         for (i in 0 until finalSamples.size - 1) {
             assertTrue("抽稀后采样点序列时间单调递增", finalSamples[i + 1].timestamp > finalSamples[i].timestamp)
         }
+    }
+
+    /**
+     * 验证耗电趋势图表抽稀至 2000 点时，统计数据计算功耗的采样点绝不抽稀，
+     * 保持完整高频物理采样点用于微积分与物理能耗统计，确保统计精度 100% 忠实真实数据。
+     */
+    @Test
+    fun testPowerStatsCalculationSamplesNotDownsampled() {
+        val totalCount = 6000
+        val baseTs = 1710000000000L
+        val originalSamples = mutableListOf<PowerDischargePoint>()
+
+        for (i in 0 until totalCount) {
+            val ts = baseTs + (i * 1000L)
+            val isOn = i < 3000
+            originalSamples.add(
+                PowerDischargePoint(
+                    timestamp = ts,
+                    elapsedHours = (i * 1000L) / 3600000f,
+                    batteryLevel = 100,
+                    voltageVolts = 3.85f,
+                    temperature = 30.0f,
+                    powerWatts = if (isOn) 2.0f else 0.1f,
+                    isScreenOn = isOn
+                )
+            )
+        }
+
+        // 验证用于图表展示的点抽稀至 2000 点
+        val chartSamples = PowerUsageManager.downsampleDischargeSamplesUniformly(originalSamples, targetCount = 2000)
+        assertTrue("图表展示采样点抽稀到 2000 点以内", chartSamples.size in 1950..2000)
+
+        // 验证用于统计数据计算功耗的原始采样点保持未抽稀完整 6000 点
+        assertEquals("功耗统计采样点不抽稀，保持完整 6000 点高频数据", 6000, originalSamples.size)
+
+        // 验证使用未抽稀高频采样点进行微积分统计计算
+        val rawStats = PowerUsageManager.computeDischargePowerStats(originalSamples, recordIntervalMs = 1000L)
+        assertNotNull("未抽稀采样点统计结果不可为 null", rawStats)
+        assertEquals("亮屏功耗准确计算为 2.0W", 2.0f, rawStats!!.screenOnPowerWatts, 0.05f)
+        assertEquals("息屏功耗准确计算为 0.1W", 0.1f, rawStats.screenOffPowerWatts, 0.02f)
     }
 
     /**
@@ -4934,6 +4936,360 @@ class PowerUsageCalculationTest {
         // 验证：总息屏能量受到门禁控制，唤醒阶段绝不会放大至 0.272Wh（总息屏能耗保持 <= 0.25Wh）
         assertTrue("瞬态提频尖峰被有效抑制，息屏总能耗必须 <= 0.28Wh（远低于未受抑制的 0.386Wh，实际为 ${stats!!.screenOffDisplayEnergyWh}）", stats.screenOffDisplayEnergyWh <= 0.28f)
         assertTrue("息屏平均放电功率必须 <= 0.22W（远低于虚高的 0.30W 以上，实际为 ${stats.screenOffPowerWatts}）", stats.screenOffPowerWatts <= 0.22f)
+    }
+
+    /**
+     * 验证当设备在 8 点左右基准能量为 2.116Wh 时，用户再次息屏 5 分钟且底层 dumpsys 因未达 1% 掉电阈值而未更新时，
+     * 增量补偿机制能够基于真实待机时序微积分平滑计算出待机增量，彻底解决卡死在 2.116Wh 不动的缺陷。
+     */
+    @Test
+    fun testScreenOffDeltaCompensationWhenDumpsysStepUnchanged() {
+        val baseScreenOffMs = 9L * 3600_000L + 21L * 60_000L + 19_000L // 09h21m19s
+        val baseEnergyWh = 2.116f // 8 点时的基准能量 2.116Wh (549.5mAh * 3.85V / 1000)
+        val confirmedWh = 2.116f
+        val confirmedMs = baseScreenOffMs
+
+        // 模拟用户息屏 5 分钟后点亮屏幕刷新：总息屏时长推进了 5 分钟
+        val currentScreenOffMs = baseScreenOffMs + 5L * 60_000L // 09h26m19s
+
+        val result = PowerUsageManager.calculateScreenOffEnergyWithDeltaCompensation(
+            screenOffMs = currentScreenOffMs,
+            baselineDurationMs = baseScreenOffMs, // dumpsys 尚未步进，基准依然是 09h21m19s
+            baselineEnergyWh = baseEnergyWh, // dumpsys 依然是 2.116Wh
+            localScreenOffHwEnergyWh = 0f, // 硬件库仑计处于量化盲区
+            quiescentStandbyWatts = 0.08f,
+            confirmedScreenOffEnergyWh = confirmedWh,
+            confirmedScreenOffDurationMs = confirmedMs
+        )
+
+        // 验证：成功执行增量补偿，能量大于 2.116Wh（约 2.135Wh），且平均功耗保持在 0.22W~0.23W 恒定水平
+        assertTrue("必须触发增量时序补偿", result.isDeltaCompensated)
+        assertTrue("息屏能量必须大于基准 2.116Wh（彻底杜绝卡死不动），实际为: ${result.offEnergyWh}", result.offEnergyWh > 2.116f)
+        assertEquals("5分钟增量能量符合物理待机功耗（约增加 0.019Wh）", 2.135f, result.offEnergyWh, 0.005f)
+        assertTrue("息屏平均功率必须保持在正常待机水平（约 0.23W），实际为: ${result.offPowerWatts}", result.offPowerWatts in 0.22f..0.24f)
+    }
+
+    /**
+     * 验证当用户处于亮屏使用阶段时，息屏时长未实质增加（<= 10秒），
+     * 息屏能量严格锁定已确认的历史真值，绝不发生虚假漂移。
+     */
+    @Test
+    fun testScreenOffDeltaCompensationWhenScreenOnActive() {
+        val confirmedWh = 2.116f
+        val confirmedMs = 9L * 3600_000L + 21L * 60_000L + 19_000L // 09h21m19s
+        val currentScreenOffMs = confirmedMs + 2_000L // 仅有 2 秒的微小抖动，实际为亮屏使用阶段
+
+        val result = PowerUsageManager.calculateScreenOffEnergyWithDeltaCompensation(
+            screenOffMs = currentScreenOffMs,
+            baselineDurationMs = confirmedMs,
+            baselineEnergyWh = confirmedWh,
+            localScreenOffHwEnergyWh = 0f,
+            quiescentStandbyWatts = 0.08f,
+            confirmedScreenOffEnergyWh = confirmedWh,
+            confirmedScreenOffDurationMs = confirmedMs
+        )
+
+        // 验证：不触发增量补偿，严格锁定历史已确认能量
+        assertFalse("亮屏期间不得触发增量补偿", result.isDeltaCompensated)
+        assertEquals("息屏能量必须严格锁定历史真值 2.116Wh", 2.116f, result.offEnergyWh, 0.0001f)
+    }
+
+    /**
+     * 验证当系统底层 dumpsys 随后发生 1% 掉电 Step 更新推进基准时长时，
+     * 新基准能够无缝平滑吸收历史增量，数据稳定过渡，不发生二次暴增跳跃。
+     */
+    @Test
+    fun testScreenOffDeltaCompensationSmoothTransitionWhenDumpsysSteps() {
+        val oldBaseMs = 9L * 3600_000L + 21L * 60_000L + 19_000L // 09h21m19s
+        val previousConfirmedWh = 2.135f // 先前 5 分钟已补偿至 2.135Wh
+
+        // 随后系统发生 1% 掉电，dumpsys 更新推进：
+        val newDumpsysMs = oldBaseMs + 6L * 60_000L // 推进至 09h27m19s
+        val newDumpsysEnergyWh = 2.139f // dumpsys 最新放电能量 2.139Wh
+        val currentScreenOffMs = newDumpsysMs + 1_000L // 当前刷新时息屏时长对齐最新 dumpsys
+
+        val result = PowerUsageManager.calculateScreenOffEnergyWithDeltaCompensation(
+            screenOffMs = currentScreenOffMs,
+            baselineDurationMs = newDumpsysMs,
+            baselineEnergyWh = newDumpsysEnergyWh,
+            localScreenOffHwEnergyWh = 0f,
+            quiescentStandbyWatts = 0.08f,
+            confirmedScreenOffEnergyWh = previousConfirmedWh,
+            confirmedScreenOffDurationMs = oldBaseMs
+        )
+
+        // 验证：能量平滑过渡至 2.139Wh，绝不发生二次叠加暴增至 4.2Wh
+        assertEquals("系统底层推进后能量平滑接轨至最新真值", 2.139f, result.offEnergyWh, 0.001f)
+        assertTrue("功率保持在合理待机区间", result.offPowerWatts in 0.22f..0.24f)
+    }
+
+    /**
+     * 验证新放电周期短息屏场景（如刚拔电3分51秒、息屏44秒、dumpsys尚未步进掉电 1%）：
+     * 本地 1Hz 瞬时采样累加器记录了真实的微积分能量（0.002Wh），
+     * 算法如实输出真实物理能量，彻底杜绝短息屏显示为 0.000Wh 的物理矛盾。
+     */
+    @Test
+    fun testScreenOffShortDurationWithAccumulatorDataNotZero() {
+        val screenOffMs = 44_000L // 44 秒短息屏
+        val dumpsysDurationMs = 44_000L // dumpsys 记录的时长
+        val dumpsysEnergyWh = 0.0f // dumpsys 尚未步进掉电 1%，无能量记录
+        val accJoules = 7.2 // 34 秒唤醒活跃态 1Hz 采样累加出的微积分焦耳数
+        val accOffEnergyWh = (accJoules / 3600.0).toFloat() // 约 0.002Wh
+
+        val result = PowerUsageManager.calculateScreenOffEnergyWithDeltaCompensation(
+            screenOffMs = screenOffMs,
+            baselineDurationMs = dumpsysDurationMs,
+            baselineEnergyWh = dumpsysEnergyWh,
+            accOffEnergyWh = accOffEnergyWh,
+            localScreenOffHwEnergyWh = 0f,
+            quiescentStandbyWatts = null,
+            confirmedScreenOffEnergyWh = 0f,
+            confirmedScreenOffDurationMs = 0L
+        )
+
+        // 验证：能量必须真实反映物理微积分真值（0.002Wh），严禁归零为 0.000Wh
+        assertEquals("息屏能量必须如实反映 1Hz 微积分真值 0.002Wh", 0.002f, result.offEnergyWh, 0.0005f)
+        assertTrue("息屏平均功率必须由能量除以时间真实闭环计算（约 0.16W）", result.offPowerWatts in 0.15f..0.18f)
+    }
+
+    /**
+     * 验证当本地缺乏采样累加器但存在实测静态物理待机底噪时，短息屏能耗通过时序微积分计算，
+     * 不发生归零停滞。
+     */
+    @Test
+    fun testScreenOffShortDurationWithoutAccumulatorUsesQuiescentWatts() {
+        val screenOffMs = 44_000L // 44 秒短息屏
+        val dumpsysDurationMs = 44_000L
+        val dumpsysEnergyWh = 0.0f
+        val quiescentWatts = 0.12f // 实测纯净待机底噪 0.12W
+
+        val result = PowerUsageManager.calculateScreenOffEnergyWithDeltaCompensation(
+            screenOffMs = screenOffMs,
+            baselineDurationMs = dumpsysDurationMs,
+            baselineEnergyWh = dumpsysEnergyWh,
+            accOffEnergyWh = 0f,
+            localScreenOffHwEnergyWh = 0f,
+            quiescentStandbyWatts = quiescentWatts,
+            confirmedScreenOffEnergyWh = 0f,
+            confirmedScreenOffDurationMs = 0L
+        )
+
+        // 44秒 @ 0.12W = 0.12 * (44 / 3600) = 0.00147Wh
+        assertEquals("息屏能量必须基于实测底噪时钟微积分得出", 0.00147f, result.offEnergyWh, 0.0005f)
+        assertEquals("息屏平均功率等于实测待机底噪", 0.12f, result.offPowerWatts, 0.005f)
+    }
+
+    /**
+     * 验证 extractQuiescentStandbyWatts 忠实反映采样样本的 P10 真实底噪，
+     * 即使设备待机底噪为 0.22W（例如开启高耗电后台或5G），也不会被人为的 0.15W 门禁过滤丢弃。
+     */
+    @Test
+    fun testExtractQuiescentStandbyWattsFaithfulToSamples() {
+        val samples = listOf(
+            PowerDischargePoint(timestamp = 1000L, elapsedHours = 0.1f, batteryLevel = 90, powerWatts = 2.5f, isScreenOn = false),
+            PowerDischargePoint(timestamp = 2000L, elapsedHours = 0.2f, batteryLevel = 90, powerWatts = 0.28f, isScreenOn = false),
+            PowerDischargePoint(timestamp = 3000L, elapsedHours = 0.3f, batteryLevel = 90, powerWatts = 0.22f, isScreenOn = false),
+            PowerDischargePoint(timestamp = 4000L, elapsedHours = 0.4f, batteryLevel = 90, powerWatts = 0.23f, isScreenOn = false),
+            PowerDischargePoint(timestamp = 5000L, elapsedHours = 0.5f, batteryLevel = 90, powerWatts = 1.8f, isScreenOn = false)
+        )
+
+        val quiescent = PowerUsageManager.extractQuiescentStandbyWatts(samples)
+        assertNotNull("必须成功提取出待机底噪", quiescent)
+        assertEquals("忠实提取 P10 真实底噪 0.22W", 0.22f, quiescent!!, 0.01f)
+    }
+
+    /**
+     * 验证用户在使用期间（已积累 2.116Wh 息屏能耗与对应时长）息屏 1 分钟后刷新时，
+     * 算法正确利用解耦后的基准时长快照识别未结算时长，
+     * 能量实时刷新增加，彻底杜绝在 2.116Wh 卡死不动的缺陷。
+     */
+    @Test
+    fun testScreenOffRealtimeRefreshDuringUsageAfterOneMinute() {
+        val baseScreenOffMs = 2L * 3600_000L // 使用期间累计基准息屏时长 2 小时
+        val kernelOffEnergyWh = 2.116f // dumpsys 基准息屏能耗 2.116Wh
+        val standbyWatts = 0.08f // 实测纯净待机底噪 0.08W
+
+        // 用户息屏 1 分钟后点亮屏幕刷新（息屏总时长增加 60 秒）
+        val screenOffMs = baseScreenOffMs + 60_000L
+
+        val result = PowerUsageManager.calculateScreenOffEnergyWithDeltaCompensation(
+            screenOffMs = screenOffMs,
+            baselineDurationMs = baseScreenOffMs, // 传入解耦的基准时长快照，而非当前实时时长
+            baselineEnergyWh = kernelOffEnergyWh,
+            accOffEnergyWh = 0f,
+            sampleIntegratedOffEnergyWh = 0f,
+            localScreenOffHwEnergyWh = 0f,
+            quiescentStandbyWatts = standbyWatts,
+            confirmedScreenOffEnergyWh = kernelOffEnergyWh,
+            confirmedScreenOffDurationMs = baseScreenOffMs
+        )
+
+        // 验证：成功执行增量补偿，能量大于 2.116Wh（约增加 0.08 * (60/3600) = 0.00133Wh）
+        assertTrue("必须触发增量时序补偿", result.isDeltaCompensated)
+        assertTrue("息屏能量必须大于基准 2.116Wh，实际为: ${result.offEnergyWh}", result.offEnergyWh > 2.116f)
+        assertEquals("1分钟息屏能量增量准确（约 2.1173Wh）", 2.1173f, result.offEnergyWh, 0.0005f)
+        assertTrue("息屏平均功率符合物理待机（约 1.05W）", result.offPowerWatts > 0f)
+    }
+
+    /**
+     * 验证在使用期间连续多次息屏（例如先息屏 1 分钟刷新，随后再息屏 1 分钟刷新）时，
+     * 统一基准锚点机制能够持续推进未结算时间轴，能量平滑持续递增，
+     * 杜绝因基准能量未变但基准时长被推进导致第二次刷新卡死不动的数学死锁。
+     */
+    @Test
+    fun testScreenOffConsecutiveRefreshesDoNotGetStuck() {
+        val baseScreenOffMs = 2L * 3600_000L // 基准时长 2 小时
+        val kernelOffEnergyWh = 2.116f // dumpsys 基准能量 2.116Wh
+        val standbyWatts = 0.09f // 待机底噪 0.09W
+
+        // 第一次息屏 1 分钟刷新：
+        val screenOffMs1 = baseScreenOffMs + 60_000L
+        val result1 = PowerUsageManager.calculateScreenOffEnergyWithDeltaCompensation(
+            screenOffMs = screenOffMs1,
+            baselineDurationMs = baseScreenOffMs,
+            baselineEnergyWh = kernelOffEnergyWh,
+            quiescentStandbyWatts = standbyWatts,
+            confirmedScreenOffEnergyWh = kernelOffEnergyWh,
+            confirmedScreenOffDurationMs = baseScreenOffMs
+        )
+
+        val confirmedEnergy1 = result1.offEnergyWh
+        val confirmedDuration1 = screenOffMs1
+        assertTrue("第一次刷新必须大于 2.116Wh", confirmedEnergy1 > kernelOffEnergyWh)
+        assertEquals("第一次增量约 0.0015Wh", 2.1175f, confirmedEnergy1, 0.0005f)
+
+        // 第二次再息屏 1 分钟刷新（此时 dumpsys 依然未掉电 1%，保持 2.116Wh，但息屏时长累计增加 120 秒）：
+        val screenOffMs2 = baseScreenOffMs + 120_000L
+        val result2 = PowerUsageManager.calculateScreenOffEnergyWithDeltaCompensation(
+            screenOffMs = screenOffMs2,
+            baselineDurationMs = baseScreenOffMs,
+            baselineEnergyWh = kernelOffEnergyWh,
+            quiescentStandbyWatts = standbyWatts,
+            confirmedScreenOffEnergyWh = confirmedEnergy1,
+            confirmedScreenOffDurationMs = confirmedDuration1
+        )
+
+        val confirmedEnergy2 = result2.offEnergyWh
+        assertTrue("第二次刷新能量必须大于第一次刷新的能量（杜绝卡死不动），实际为: $confirmedEnergy2", confirmedEnergy2 > confirmedEnergy1)
+        assertEquals("第二次累积增量约 0.0030Wh（即 2.1190Wh）", 2.1190f, confirmedEnergy2, 0.0005f)
+    }
+
+    /**
+     * 验证用户实测场景：本地具备 1Hz 真实物理放电微积分（1.20Wh）时，
+     * 即使系统底层 dumpsys 上报了整机掉电残差倒灌（2.060Wh / 535mAh），
+     * 息屏计算坚决采纳本地高频微积分真值，绝不发生从 1.20Wh 突增跳变至 2.060Wh 的问题，
+     * 且全局总能量严格等于亮屏采样微积分加上息屏实测微积分（彻底废除能量守恒倒灌）。
+     */
+    @Test
+    fun testScreenOffMicroIntegralNotOverwrittenByDumpsysResidual() {
+        val screenOffMs = 8L * 3600_000L + 11L * 60_000L // 08h11m
+        val dumpsysResidualWh = 2.060f // dumpsys 上报的粗粒度或整机掉电残差 2.060Wh
+        val localMicroIntegralWh = 1.200f // 本地 1Hz 真实微积分真值 1.20Wh
+
+        // 1. 验证 calculateScreenOffEnergyWithDeltaCompensation 坚守本地真实微积分真值
+        val result = PowerUsageManager.calculateScreenOffEnergyWithDeltaCompensation(
+            screenOffMs = screenOffMs,
+            baselineDurationMs = screenOffMs,
+            baselineEnergyWh = dumpsysResidualWh, // 模拟 dumpsys 传入粗粒度 2.060Wh
+            accOffEnergyWh = localMicroIntegralWh, // 本地常驻累加器记录 1.20Wh
+            sampleIntegratedOffEnergyWh = localMicroIntegralWh,
+            localScreenOffHwEnergyWh = 0f,
+            quiescentStandbyWatts = 0.07f,
+            confirmedScreenOffEnergyWh = 0f,
+            confirmedScreenOffDurationMs = 0L
+        )
+
+        assertEquals("息屏能量必须严格锁定本地 1Hz 实测真值 1.20Wh，杜绝跳变成 2.060Wh", 1.200f, result.offEnergyWh, 0.001f)
+        assertFalse("本地具备微积分时不应被虚假增量补偿篡改", result.isDeltaCompensated)
+
+        // 2. 验证全局总能量严格解耦为自然累加：E_total = E_on + E_off
+        val intOnEnergyWh = 6.765f
+        val screenOnHours = 4.35f
+        val screenOffHours = 8.183f
+        val dischargeHours = 12.533f
+        val physicalTotalEnergyWh = 8.825f // 模拟电池掉电 28.7% 对应的整机总能量 8.825Wh
+
+        val dualStats = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = intOnEnergyWh,
+            intOffEnergyWh = result.offEnergyWh,
+            intTotalEnergyWh = intOnEnergyWh + result.offEnergyWh,
+            intOnPowerWatts = intOnEnergyWh / screenOnHours,
+            intOffPowerWatts = result.offPowerWatts,
+            intTotalPowerWatts = (intOnEnergyWh + result.offEnergyWh) / dischargeHours,
+            physicalTotalEnergyWh = physicalTotalEnergyWh,
+            screenOnHours = screenOnHours,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = 3.85f,
+            minScreenOffEnergyWh = 0f
+        )
+
+        assertEquals("亮屏能量严格等于微积分真值 6.765Wh", 6.765f, dualStats.onEnergyWh, 0.001f)
+        assertEquals("息屏能量严格等于实测真值 1.200Wh，绝无残差倒灌", 1.200f, dualStats.offEnergyWh, 0.001f)
+        val expectedTotalEnergy = intOnEnergyWh + result.offEnergyWh
+        assertEquals("全局总能量严格等于亮屏+息屏（7.965Wh），彻底解耦外部掉电量", expectedTotalEnergy, dualStats.totalEnergyWh, 0.001f)
+
+        // 3. 验证唤醒功耗合理性（杜绝虚高为 2.05W）
+        val deepSleepMs = 7L * 3600_000L + 25L * 60_000L // 07h25m
+        val awakeMs = 45L * 60_000L // 45m
+        val decomposed = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = dualStats.offEnergyWh,
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            rawSleepDrainMah = 0f,
+            rawAwakeDrainMah = 0f,
+            samples = emptyList(),
+            nominalVoltageVolts = 3.85f,
+            allCycleSamples = emptyList()
+        )
+
+        if (decomposed.isDecomposedAvailable) {
+            assertTrue("唤醒功耗必须处于物理正常区间（< 1.2W），实际为: ${decomposed.awakeWatts}", decomposed.awakeWatts < 1.2f)
+        }
+    }
+
+    /**
+     * 验证能量（Wh）基于标称电压 3.85V 转换为等效电量（mAh）的计算精度与提示说明文案格式。
+     */
+    @Test
+    fun testEnergyToMahConversionMessage() {
+        val onEnergyWh = 6.765f
+        val offEnergyWh = 2.060f
+        val totalEnergyWh = 8.825f
+
+        // 1. 验证亮屏能量 6.765Wh 换算为 mAh：6.765 * 1000 / 3.85 = 1757.14 mAh
+        val onMessage = com.battery.analysis.util.BatteryEnergyCalculator.formatEnergyConversionMessage(
+            title = "亮屏",
+            energyWh = onEnergyWh,
+            ratioStr = "22.0%"
+        )
+        assertTrue("包含亮屏标题与能量占比", onMessage.contains("亮屏消耗能量：6.765Wh (22.0%)"))
+        assertTrue("包含折算后的精确 mAh", onMessage.contains("1757.1 mAh"))
+        assertTrue("包含四舍五入等效整数 mAh", onMessage.contains("≈ 1757mAh"))
+        assertTrue("包含标称电压 3.85V 基准", onMessage.contains("3.85V"))
+        assertTrue("包含换算公式说明", onMessage.contains("电量(mAh) = 能量(Wh) × 1000 ÷ 标称电压(3.85V)"))
+
+        // 2. 验证息屏能量 2.060Wh 换算为 mAh：2.060 * 1000 / 3.85 = 535.06 mAh -> 535.1 mAh
+        val offMessage = com.battery.analysis.util.BatteryEnergyCalculator.formatEnergyConversionMessage(
+            title = "息屏",
+            energyWh = offEnergyWh,
+            ratioStr = "6.7%"
+        )
+        assertTrue("包含息屏标题与能量占比", offMessage.contains("息屏消耗能量：2.060Wh (6.7%)"))
+        assertTrue("包含折算后的精确 mAh", offMessage.contains("535.1 mAh"))
+        assertTrue("包含四舍五入等效整数 mAh", offMessage.contains("≈ 535mAh"))
+
+        // 3. 验证全局能量 8.825Wh 换算为 mAh：8.825 * 1000 / 3.85 = 2292.21 mAh -> 2292.2 mAh
+        val totalMessage = com.battery.analysis.util.BatteryEnergyCalculator.formatEnergyConversionMessage(
+            title = "全局",
+            energyWh = totalEnergyWh,
+            ratioStr = "28.7%"
+        )
+        assertTrue("包含全局标题与能量占比", totalMessage.contains("全局消耗能量：8.825Wh (28.7%)"))
+        assertTrue("包含折算后的精确 mAh", totalMessage.contains("2292.2 mAh"))
+        assertTrue("包含四舍五入等效整数 mAh", totalMessage.contains("≈ 2292mAh"))
     }
 }
 

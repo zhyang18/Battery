@@ -333,16 +333,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         if (offDrainMatcher.find()) {
             screenOffDrainMah = offDrainMatcher.group(1)?.toFloatOrNull() ?: 0f
         }
-        if (screenOffDrainMah <= 0f) {
-            val amountMatcher = REGEX_SCREEN_OFF_DISCHARGE_AMOUNT.matcher(rawText)
-            if (amountMatcher.find()) {
-                val percent = amountMatcher.group(1)?.toFloatOrNull() ?: 0f
-                if (percent > 0f) {
-                    val rawOffMah = (percent / 100f) * capacityMah
-                    screenOffDrainMah = rawOffMah.coerceAtLeast(0f)
-                }
-            }
-        }
+        // 遵循物理真实性原则：严禁使用粗粒度整数掉电百分比（Amount discharged while screen off: \d+）反推息屏放电量，
+        // 杜绝将系统粗粒度整数阶跃伪造为精确毫安时而导致息屏能量与功耗严重失真。
         val idleMatcher = REGEX_IDLE_DRAIN.matcher(rawText)
         val rawIdleDrain = if (idleMatcher.find()) {
             idleMatcher.group(1)?.toFloatOrNull() ?: 0f
@@ -887,25 +879,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             computedDrainMah = sumAppScreenMah
         }
 
-        // 9. 若底层未直接给出息屏放电量，但已有明确的息屏时长（>=30秒）以及整机总放电量，
-        // 则整机总放电量扣除前台亮屏应用与屏幕显示所消耗电量后的结余放电量按时间占比分摊作为息屏待机放电量
-        if (screenOffDrainMah <= 0f && screenOffDurationMs >= 30000L && computedDrainMah > 0f) {
-            val totalFgDrain = if (voltageVolts > 0f) {
-                validatedList.sumOf { (it.energyWh * 1000f / voltageVolts).toDouble() }.toFloat()
-            } else {
-                0f
-            }
-            val remainingDrain = (computedDrainMah - totalFgDrain - screenDrainMah).coerceAtLeast(0f)
-            val offRatio = if (dischargeDurationMs > 0L) {
-                (screenOffDurationMs.toFloat() / dischargeDurationMs).coerceIn(0f, 1f)
-            } else {
-                0f
-            }
-            val allocatedOffDrain = remainingDrain * offRatio
-            if (allocatedOffDrain > 0.05f) {
-                screenOffDrainMah = allocatedOffDrain
-            }
-        }
+        // 9. 息屏待机放电量严格反映系统真实测量，严禁将整机总放电扣除前台应用后的结余残差按时间分摊给息屏，
+        // 彻底杜绝全局总能量向息屏倒灌导致息屏能耗与唤醒功耗严重失真；若底层未记录则保持真实 0f，由高精度 1Hz 微积分客观结算。
 
         // 10. 排序策略：用户安装的常用三方应用（带启动图标或非系统应用）排在最前，系统底层进程排在后方
         validatedList.sortWith(compareByDescending<AppPowerUsageItem> { isUserInstalledApp(it.packageName) }

@@ -550,6 +550,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     /**
      * 绑定息屏、唤醒与深度睡眠三状态指标卡片数据。
      * 包含息屏总耗电、息屏唤醒活跃耗电与深度睡眠挂起耗电三个等宽紧凑卡片，
+     * 展示放电占比、时长与能量、以及消耗电荷量（mAh）与对应平均放电功耗（W）。
      * 严格遵循物理能量守恒定律，采用 4m10s 紧凑时间格式与 16sp 粗体百分比对齐。
      *
      * @param holder 息屏、唤醒与深度睡眠卡片 ViewHolder
@@ -599,7 +600,27 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 } else {
                     0f
                 }
-                tvScreenOffMah.text = if (offDrainMah > 0f) String.format(Locale.US, "%.1f mAh", offDrainMah) else "--"
+                val offPowerWatts = if (overview.screenOffPowerWatts > 0f) {
+                    overview.screenOffPowerWatts
+                } else if (overview.screenOffDurationMs > 0L && overview.screenOffEnergyWh > 0f) {
+                    (overview.screenOffEnergyWh / (overview.screenOffDurationMs.toDouble() / 3600000.0)).toFloat()
+                } else {
+                    0f
+                }
+                val offPowerText = if (overview.screenOffDurationMs > 0L || overview.screenOffEnergyWh > 0f) {
+                    formatCardPowerWatts(offPowerWatts)
+                } else {
+                    null
+                }
+                if (offDrainMah > 0f) {
+                    val mahStr = String.format(Locale.US, "%.1f mAh", offDrainMah)
+                    tvScreenOffMah.text = if (offPowerText != null) "$mahStr $offPowerText" else mahStr
+                } else if (overview.screenOffDurationMs > 0L) {
+                    val mahStr = "0.0 mAh"
+                    tvScreenOffMah.text = if (offPowerText != null) "$mahStr $offPowerText" else mahStr
+                } else {
+                    tvScreenOffMah.text = "--"
+                }
             }
 
             // 2. 唤醒卡片
@@ -609,7 +630,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                     tvAwakePercent.text = "0.0%"
                     val subtitleHtml = "<font color=\"#FFA4A4\">0s</font> <font color=\"#FFA4A4\">0.000Wh</font>"
                     tvAwakeSubtitle.text = HtmlCompat.fromHtml(subtitleHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
-                    tvAwakeMah.text = HtmlCompat.fromHtml("<font color=\"#FFA4A4\">0.0 mAh</font>", HtmlCompat.FROM_HTML_MODE_LEGACY)
+                    tvAwakeMah.text = HtmlCompat.fromHtml("<font color=\"#FFA4A4\">0.0 mAh 0.00W</font>", HtmlCompat.FROM_HTML_MODE_LEGACY)
                 } else {
                     tvAwakePercent.text = "--"
                     tvAwakeSubtitle.text = noRecordText
@@ -651,12 +672,26 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 } else {
                     0f
                 }
+                val awakePowerWatts = if (overview.screenOffAwakePowerWatts > 0f) {
+                    overview.screenOffAwakePowerWatts
+                } else if (overview.screenOffAwakeDurationMs > 0L && overview.screenOffAwakeEnergyWh > 0f) {
+                    (overview.screenOffAwakeEnergyWh / (overview.screenOffAwakeDurationMs.toDouble() / 3600000.0)).toFloat()
+                } else {
+                    0f
+                }
+                val awakePowerText = if (overview.screenOffAwakeDurationMs > 0L || overview.screenOffAwakeEnergyWh > 0f) {
+                    formatCardPowerWatts(awakePowerWatts)
+                } else {
+                    null
+                }
                 if (awakeDrainMah >= 0.1f) {
                     val mahText = String.format(Locale.US, "%.1f mAh", awakeDrainMah)
-                    val mahHtml = "<font color=\"#FFA4A4\">$mahText</font>"
+                    val fullText = if (awakePowerText != null) "$mahText $awakePowerText" else mahText
+                    val mahHtml = "<font color=\"#FFA4A4\">$fullText</font>"
                     tvAwakeMah.text = HtmlCompat.fromHtml(mahHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
                 } else if (overview.screenOffAwakeDurationMs > 0L) {
-                    val mahHtml = "<font color=\"#FFA4A4\">0.0 mAh</font>"
+                    val fullText = if (awakePowerText != null) "0.0 mAh $awakePowerText" else "0.0 mAh"
+                    val mahHtml = "<font color=\"#FFA4A4\">$fullText</font>"
                     tvAwakeMah.text = HtmlCompat.fromHtml(mahHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
                 } else {
                     tvAwakeMah.text = "--"
@@ -670,7 +705,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                     tvSleepPercent.text = "0.0%"
                     val subtitleHtml = "<font color=\"#B71C1C\">0s</font> <font color=\"#B71C1C\">0.000Wh</font>"
                     tvSleepSubtitle.text = HtmlCompat.fromHtml(subtitleHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
-                    tvSleepMah.text = HtmlCompat.fromHtml("<font color=\"#B71C1C\">0.0 mAh</font>", HtmlCompat.FROM_HTML_MODE_LEGACY)
+                    tvSleepMah.text = HtmlCompat.fromHtml("<font color=\"#B71C1C\">0.0 mAh 0.00W</font>", HtmlCompat.FROM_HTML_MODE_LEGACY)
                 } else {
                     tvSleepPercent.text = "--"
                     tvSleepSubtitle.text = noRecordText
@@ -704,14 +739,51 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 } else {
                     0f
                 }
+                val deepSleepPowerWatts = if (overview.screenOffDeepSleepPowerWatts > 0f) {
+                    overview.screenOffDeepSleepPowerWatts
+                } else if (overview.screenOffDeepSleepDurationMs > 0L && overview.screenOffDeepSleepEnergyWh > 0f) {
+                    (overview.screenOffDeepSleepEnergyWh / (overview.screenOffDeepSleepDurationMs.toDouble() / 3600000.0)).toFloat()
+                } else {
+                    0f
+                }
+                val sleepPowerText = if (overview.screenOffDeepSleepDurationMs > 0L || overview.screenOffDeepSleepEnergyWh > 0f) {
+                    formatCardPowerWatts(deepSleepPowerWatts)
+                } else {
+                    null
+                }
                 if (sleepDrainMah > 0f) {
                     val mahText = String.format(Locale.US, "%.1f mAh", sleepDrainMah)
-                    val mahHtml = "<font color=\"#B71C1C\">$mahText</font>"
+                    val fullText = if (sleepPowerText != null) "$mahText $sleepPowerText" else mahText
+                    val mahHtml = "<font color=\"#B71C1C\">$fullText</font>"
+                    tvSleepMah.text = HtmlCompat.fromHtml(mahHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
+                } else if (overview.screenOffDeepSleepDurationMs > 0L) {
+                    val fullText = if (sleepPowerText != null) "0.0 mAh $sleepPowerText" else "0.0 mAh"
+                    val mahHtml = "<font color=\"#B71C1C\">$fullText</font>"
                     tvSleepMah.text = HtmlCompat.fromHtml(mahHtml, HtmlCompat.FROM_HTML_MODE_LEGACY)
                 } else {
                     tvSleepMah.text = "--"
                 }
             }
+        }
+    }
+
+    /**
+     * 格式化卡片平均放电功耗数值为紧凑单位文本。
+     * 遵循物理客观真值，当平均功耗大于等于 0.01W 时保留两位小数（如 "0.25W"、"2.05W"）；
+     * 当平均功耗在 (0W, 0.01W) 微弱区间时保留三位小数（如 "0.008W"），杜绝四舍五入为 0.00W；
+     * 当功耗等于 0W 时展示为 "0.00W"；数据缺失时返回 null。
+     *
+     * @param watts 物理实测或能量积分推导的平均放电功率（单位：W）
+     * @return 格式化后的紧凑功耗字符串（如 "0.25W"），数值无效时返回 null
+     */
+    private fun formatCardPowerWatts(watts: Float?): String? {
+        if (watts == null || watts < 0f || watts.isNaN()) return null
+        return if (watts >= 0.01f) {
+            String.format(Locale.US, "%.2fW", watts)
+        } else if (watts > 0f) {
+            String.format(Locale.US, "%.3fW", watts)
+        } else {
+            "0.00W"
         }
     }
 

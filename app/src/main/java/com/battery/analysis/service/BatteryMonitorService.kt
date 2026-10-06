@@ -222,6 +222,36 @@ class BatteryMonitorService : Service() {
                         lastScreenOffVoltageVolts = 0f
                         clearPersistedScreenOffBaseline(appContext)
                     }
+
+                    // 屏幕点亮瞬间：立即采集一次当前硬件瞬态放电状态并上报，结清息屏期间的过渡微积分切片
+                    if (!cachedIsCharging) {
+                        val powerManager = PowerUsageManager.getInstance(appContext)
+                        val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
+                            context = this@BatteryMonitorService,
+                            fallbackVoltageVolts = cachedVoltageVolts,
+                            fallbackTempCelsius = cachedTemperature,
+                            allowProcessFork = false
+                        )
+                        val pWatts = hwSample?.powerWatts ?: 0f
+                        val curVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
+                        val curTemp = hwSample?.temperatureCelsius ?: cachedTemperature
+                        if (hwSample?.voltageVolts != null) cachedVoltageVolts = curVolt
+                        if (hwSample?.temperatureCelsius != null) cachedTemperature = curTemp
+                        if (hwSample?.powerWatts != null) {
+                            cachedScreenOnDischargePowerWatts = pWatts
+                            cachedDischargePowerWatts = pWatts
+                        }
+
+                        powerManager.recordDischargeRealtimeSample(
+                            timestamp = System.currentTimeMillis(),
+                            batteryLevel = cachedLevelPercent,
+                            voltageVolts = curVolt,
+                            temperature = curTemp,
+                            powerWatts = pWatts,
+                            isScreenOn = true
+                        )
+                    }
+
                     startMonitorSamplingLoop()
                     updateNotification(force = true)
                 }

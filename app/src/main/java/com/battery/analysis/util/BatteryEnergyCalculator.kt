@@ -1,5 +1,7 @@
 package com.battery.analysis.util
 
+import java.util.Locale
+
 /**
  * 电池剩余能量（瓦时 Wh）高精度计算器。
  * 封装并统一多级能量计算策略，优先采用硬件原生能量/电荷计数器，并支持历史满充容量与设计容量多级降级推算。
@@ -89,5 +91,43 @@ object BatteryEnergyCalculator {
         val totalWh = (effectiveCapacityMah * safeNominalVoltage) / 1000f
         return if (totalWh > 0f) totalWh else null
     }
+
+    /**
+     * 将消耗或统计的能量数值（单位：Wh）基于电池标称电压转换为等效电量（单位：mAh），并构建详细的提示说明文案。
+     * 换算公式遵循物理定律：电量(mAh) = 能量(Wh) * 1000 / 标称电压(V)。
+     *
+     * @param title 指标分类标题（如“亮屏”、“息屏”、“全局”）
+     * @param energyWh 实际消耗的能量数值（单位：Wh）
+     * @param ratioStr 能量占比文本（可选，如 "22.0%"）
+     * @param nominalVoltageVolts 折算采用的标称电压（单位：V，默认采用 3.85V）
+     * @return 格式化后的详细提示文案
+     */
+    fun formatEnergyConversionMessage(
+        title: String,
+        energyWh: Float,
+        ratioStr: String? = null,
+        nominalVoltageVolts: Float = DEFAULT_NOMINAL_VOLTAGE_VOLTS
+    ): String {
+        val safeNominalVoltage = if (nominalVoltageVolts > 0f) nominalVoltageVolts else DEFAULT_NOMINAL_VOLTAGE_VOLTS
+        val mah = (energyWh * 1000f) / safeNominalVoltage
+        val energyStr = String.format(java.util.Locale.getDefault(), "%.3fWh", energyWh)
+        val energyWithRatio = if (!ratioStr.isNullOrBlank() && ratioStr != "--%") {
+            "$energyStr ($ratioStr)"
+        } else {
+            energyStr
+        }
+        val mahStr = String.format(java.util.Locale.getDefault(), "%.1f mAh", mah)
+        val roundedMah = Math.round(mah)
+
+        return buildString {
+            append("${title}消耗能量：$energyWithRatio\n")
+            append("折算等效电量：约 $mahStr (≈ ${roundedMah}mAh)\n")
+            append("换算基准：标称电压 ${safeNominalVoltage}V\n\n")
+            append("💡 换算说明：\n")
+            append("电量(mAh) = 能量(Wh) × 1000 ÷ 标称电压(${safeNominalVoltage}V)。\n")
+            append("锂电池物理放电能量由端电压与电荷量积分所得。行业通常基于标准标称电压(${safeNominalVoltage}V)将实际物理能量折算为等效电量；实际放电过程中电池端电压通常随负载与剩余电量在 3.6V~4.4V 之间动态变化。")
+        }
+    }
 }
+
 

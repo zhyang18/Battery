@@ -516,13 +516,39 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
 
         // 指标卡片三行点击气泡提示（亮屏 / 息屏 / 全局）
         hBinding.layoutMetricScreenOnRow.setOnClickListener {
-            showBubbleTooltip(hBinding.layoutMetricScreenOnRow, "亮屏：时间、平均功耗、能量、续航时间")
+            showBubbleTooltip(hBinding.layoutMetricScreenOnRow, "亮屏：时间、平均功耗、能量、剩余续航时间")
         }
         hBinding.layoutMetricScreenOffRow.setOnClickListener {
-            showBubbleTooltip(hBinding.layoutMetricScreenOffRow, "息屏：时间、平均功耗、能量、续航时间")
+            showBubbleTooltip(hBinding.layoutMetricScreenOffRow, "息屏：时间、平均功耗、能量、剩余续航时间")
         }
         hBinding.layoutMetricGlobalRow.setOnClickListener {
-            showBubbleTooltip(hBinding.layoutMetricGlobalRow, "全局：时间、平均功耗、能量、续航时间")
+            showBubbleTooltip(hBinding.layoutMetricGlobalRow, "全局：时间、平均功耗、能量、剩余续航时间")
+        }
+
+        // 核心功耗指标卡片能量数值点击弹出等效电量（mAh）详细说明气泡弹框
+        hBinding.tvMetricScreenOnEnergy.setOnClickListener {
+            val message = BatteryEnergyCalculator.formatEnergyConversionMessage(
+                title = "亮屏",
+                energyWh = onEnergy,
+                ratioStr = onEnergyRatioStr.takeIf { it != "--%" }
+            )
+            showBubbleTooltip(hBinding.tvMetricScreenOnEnergy, message, autoDismissMs = 0L)
+        }
+        hBinding.tvMetricScreenOffEnergy.setOnClickListener {
+            val message = BatteryEnergyCalculator.formatEnergyConversionMessage(
+                title = "息屏",
+                energyWh = offEnergy,
+                ratioStr = offEnergyRatioStr.takeIf { it != "--%" }
+            )
+            showBubbleTooltip(hBinding.tvMetricScreenOffEnergy, message, autoDismissMs = 0L)
+        }
+        hBinding.tvMetricGlobalEnergy.setOnClickListener {
+            val message = BatteryEnergyCalculator.formatEnergyConversionMessage(
+                title = "全局",
+                energyWh = totalEnergy,
+                ratioStr = "100%"
+            )
+            showBubbleTooltip(hBinding.tvMetricGlobalEnergy, message, autoDismissMs = 0L)
         }
     }
 

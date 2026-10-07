@@ -4753,11 +4753,11 @@ class PowerUsageCalculationTest {
     }
 
     /**
-     * 验证放电时序采样点序列能够成功均匀抽稀至 2000 点高密度分辨率，
+     * 验证放电时序采样点序列能够成功均匀抽稀至 3000 点高密度分辨率，
      * 且首点、末点以及工况切换拐点（亮灭屏切换、应用切换）100% 完整保留。
      */
     @Test
-    fun testDownsampleDischargeSamplesUniformlyTo2000Points() {
+    fun testDownsampleDischargeSamplesUniformlyTo3000Points() {
         val totalCount = 6000
         val baseTs = 1710000000000L
         val originalSamples = mutableListOf<PowerDischargePoint>()
@@ -4790,10 +4790,10 @@ class PowerUsageCalculationTest {
             )
         }
 
-        // 调用 PowerUsageManager 生产抽稀方法抽稀至 2000 点
-        val finalSamples = PowerUsageManager.downsampleDischargeSamplesUniformly(originalSamples, targetCount = 2000)
+        // 调用 PowerUsageManager 生产抽稀方法抽稀至 3000 点
+        val finalSamples = PowerUsageManager.downsampleDischargeSamplesUniformly(originalSamples, targetCount = 3000)
 
-        assertTrue("抽稀后采样点总数控制在 2000 点以内且接近 2000 点", finalSamples.size in 1950..2000)
+        assertTrue("抽稀后采样点总数控制在 3000 点以内且接近 3000 点", finalSamples.size in 2950..3000)
         assertEquals("首点（拔电起点）必须严格保留", originalSamples.first().timestamp, finalSamples.first().timestamp)
         assertEquals("末点（最新采样点）必须严格保留", originalSamples.last().timestamp, finalSamples.last().timestamp)
         // 验证关键拐点均被保留
@@ -4806,7 +4806,7 @@ class PowerUsageCalculationTest {
     }
 
     /**
-     * 验证耗电趋势图表抽稀至 2000 点时，统计数据计算功耗的采样点绝不抽稀，
+     * 验证耗电趋势图表抽稀至 3000 点时，统计数据计算功耗的采样点绝不抽稀，
      * 保持完整高频物理采样点用于微积分与物理能耗统计，确保统计精度 100% 忠实真实数据。
      */
     @Test
@@ -4831,9 +4831,9 @@ class PowerUsageCalculationTest {
             )
         }
 
-        // 验证用于图表展示的点抽稀至 2000 点
-        val chartSamples = PowerUsageManager.downsampleDischargeSamplesUniformly(originalSamples, targetCount = 2000)
-        assertTrue("图表展示采样点抽稀到 2000 点以内", chartSamples.size in 1950..2000)
+        // 验证用于图表展示的点抽稀至 3000 点
+        val chartSamples = PowerUsageManager.downsampleDischargeSamplesUniformly(originalSamples, targetCount = 3000)
+        assertTrue("图表展示采样点抽稀到 3000 点以内", chartSamples.size in 2950..3000)
 
         // 验证用于统计数据计算功耗的原始采样点保持未抽稀完整 6000 点
         assertEquals("功耗统计采样点不抽稀，保持完整 6000 点高频数据", 6000, originalSamples.size)

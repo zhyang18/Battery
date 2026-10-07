@@ -1195,7 +1195,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         /**
-         * 对放电时序采样点序列执行全时间轴均匀时间网格抽稀，将总点数控制在目标数量（默认 2000 点）。
+         * 对放电时序采样点序列执行全时间轴均匀时间网格抽稀，将总点数控制在目标数量（默认 3000 点）。
          * 专供耗电趋势图表显示使用，统计数据计算功耗的采样点绝不抽稀。
          *
          * 核心算法：
@@ -1205,12 +1205,12 @@ class PowerUsageManager private constructor(private val context: Context) {
          * 4. 纯用于耗电趋势图表 UI 渲染，底层统计数据计算功耗的原始采样点保持完全未抽稀。
          *
          * @param samples 原始放电瞬时采样点列表
-         * @param targetCount 抽稀后保留的目标采样点数量（默认 2000）
+         * @param targetCount 抽稀后保留的目标采样点数量（默认 3000）
          * @return 抽稀后的放电采样点列表 [List<PowerDischargePoint>]
          */
         fun downsampleDischargeSamplesUniformly(
             samples: List<PowerDischargePoint>,
-            targetCount: Int = 2000
+            targetCount: Int = 3000
         ): List<PowerDischargePoint> {
             if (samples.size <= targetCount) return samples
             val totalPoints = samples.size
@@ -1699,7 +1699,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         // 核心规范：统计数据计算功耗的物理采样点保持高精度，严禁在后台采样收集时就地抽稀，
         // 确保梯形微积分、应用切片能耗分析、静息功耗提取等统计指标 100% 忠实反映真实硬件数据。
-        // 抽稀仅在生成供耗电趋势图表显示的序列时按需执行（目标 2000 点）。
+        // 抽稀仅在生成供耗电趋势图表显示的序列时按需执行（目标 3000 点）。
 
         // 同步记录时序温度点
         recordDischargeTempSample(timestamp, temperature)
@@ -1715,7 +1715,7 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 对放电时序采样点序列执行全时间轴均匀时间网格抽稀，将总点数控制在目标数量（默认 2000 点）。
+     * 对放电时序采样点序列执行全时间轴均匀时间网格抽稀，将总点数控制在目标数量（默认 3000 点）。
      * 专供耗电趋势图表显示使用，统计数据计算功耗的采样点绝不抽稀。
      *
      * 核心算法：
@@ -1725,22 +1725,22 @@ class PowerUsageManager private constructor(private val context: Context) {
      * 4. 纯用于耗电趋势图表 UI 渲染，底层统计数据计算功耗的原始采样点保持完全未抽稀。
      *
      * @param samples 原始放电瞬时采样点列表
-     * @param targetCount 抽稀后保留的目标采样点数量（默认 2000）
+     * @param targetCount 抽稀后保留的目标采样点数量（默认 3000）
      * @return 抽稀后的放电采样点列表 [List<PowerDischargePoint>]
      */
     fun downsampleDischargeSamplesUniformly(
         samples: List<PowerDischargePoint>,
-        targetCount: Int = 2000
+        targetCount: Int = 3000
     ): List<PowerDischargePoint> = Companion.downsampleDischargeSamplesUniformly(samples, targetCount)
 
     /**
      * 兼容性重载：对当前内存中的 [dischargeRealtimeSamples] 执行全时间轴均匀时间网格抽稀。
      * 注意：日常采样与功耗统计计算严禁调用此方法以防统计精度丢失，仅限特殊内存压缩调试场景使用。
      *
-     * @param targetCount 抽稀后保留的目标采样点数量（默认 2000）
+     * @param targetCount 抽稀后保留的目标采样点数量（默认 3000）
      */
     @Synchronized
-    fun downsampleDischargeSamplesUniformly(targetCount: Int = 2000) {
+    fun downsampleDischargeSamplesUniformly(targetCount: Int = 3000) {
         if (dischargeRealtimeSamples.size <= targetCount) return
         val downsampled = downsampleDischargeSamplesUniformly(dischargeRealtimeSamples, targetCount)
         dischargeRealtimeSamples.clear()
@@ -5265,30 +5265,37 @@ class PowerUsageManager private constructor(private val context: Context) {
         val realtimeSamples = getDischargeRealtimeSamples().filter { it.timestamp in (startTs - 15000L)..now }
         if (realtimeSamples.size >= 2) {
             val sortedSamples = realtimeSamples.sortedBy { it.timestamp }
-            // 耗电趋势图表采样点均匀抽稀至 2000 点（保留工况突变点与首尾边界），而用于统计数据计算功耗的底层采样点保持完整不抽稀
-            val chartSamples = if (sortedSamples.size > 2000) {
-                downsampleDischargeSamplesUniformly(sortedSamples, targetCount = 2000)
+            // 耗电趋势图表采样点均匀抽稀至 3000 点（保留工况突变点与首尾边界），而用于统计数据计算功耗的底层采样点保持完整不抽稀
+            val chartSamples = if (sortedSamples.size > 3000) {
+                downsampleDischargeSamplesUniformly(sortedSamples, targetCount = 3000)
             } else {
                 sortedSamples
             }
+            val sortedScreenIntervals = screenIntervals.sortedBy { it.startTs }
+            val sortedAppIntervals = appIntervals.sortedBy { it.startTs }
+            var screenPtr = 0
+            var appPtr = 0
+
             for (s in chartSamples) {
                 val pointTs = s.timestamp
                 val elapsedHours = (pointTs - startTs).coerceAtLeast(0L) / 3600000f
 
+                // 线性扫描匹配亮屏区间（pointTs 单调递增）
+                while (screenPtr < sortedScreenIntervals.size && sortedScreenIntervals[screenPtr].endTs < pointTs) {
+                    screenPtr++
+                }
                 var isScreenOn = s.isScreenOn
-                for (screenInt in screenIntervals) {
-                    if (pointTs in screenInt.startTs..screenInt.endTs) {
-                        isScreenOn = true
-                        break
-                    }
+                if (screenPtr < sortedScreenIntervals.size && pointTs in sortedScreenIntervals[screenPtr].startTs..sortedScreenIntervals[screenPtr].endTs) {
+                    isScreenOn = true
                 }
 
+                // 线性扫描匹配应用前台区间（pointTs 单调递增）
+                while (appPtr < sortedAppIntervals.size && sortedAppIntervals[appPtr].endTs < pointTs) {
+                    appPtr++
+                }
                 var matchedPkg: String? = null
-                for (interval in appIntervals) {
-                    if (pointTs in interval.startTs..interval.endTs) {
-                        matchedPkg = interval.packageName
-                        break
-                    }
+                if (appPtr < sortedAppIntervals.size && pointTs in sortedAppIntervals[appPtr].startTs..sortedAppIntervals[appPtr].endTs) {
+                    matchedPkg = sortedAppIntervals[appPtr].packageName
                 }
                 // 若区间未覆盖但物理采样点自带真实记录包名，且非忽略系统组件
                 if (matchedPkg == null && !s.packageName.isNullOrEmpty() && !com.battery.analysis.service.KeepAliveAccessibilityService.isIgnoredSystemComponent(s.packageName)) {
@@ -5299,17 +5306,18 @@ class PowerUsageManager private constructor(private val context: Context) {
                     matchedPkg = com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY
                 }
 
-                val icons = mutableListOf<android.graphics.drawable.Drawable>()
-                val names = mutableListOf<String>()
+                val icons: List<android.graphics.drawable.Drawable>
+                val names: List<String>
                 if (matchedPkg != null) {
                     val info = appInfoMap.getOrPut(matchedPkg) {
                         val (icon, name, _) = getAppInfo(matchedPkg)
                         Pair(icon, name)
                     }
-                    if (info.first != null) {
-                        icons.add(info.first!!)
-                        names.add(info.second)
-                    }
+                    icons = if (info.first != null) listOf(info.first!!) else emptyList()
+                    names = if (info.second.isNotEmpty()) listOf(info.second) else emptyList()
+                } else {
+                    icons = emptyList()
+                    names = emptyList()
                 }
 
                 points.add(

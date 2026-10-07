@@ -20,6 +20,7 @@ import android.view.View
 import androidx.core.view.GestureDetectorCompat
 import com.battery.analysis.timeline.domain.AppTimelineEvent
 import com.battery.analysis.timeline.domain.BatterySample
+import com.battery.analysis.timeline.domain.ScreenEvent
 import com.battery.analysis.timeline.domain.TimelineEventMerger
 import com.battery.analysis.timeline.util.ChartDownsampler
 import com.battery.analysis.timeline.util.DrawableBitmapCache
@@ -342,15 +343,51 @@ class BatteryTimelineView @JvmOverloads constructor(
     private val cachedSlotItems = mutableListOf<TimelineLayoutCalculator.LaidOutAppSlotItem>()
 
     /**
+     * 预计算排布完成的标注绘制单元，零 onDraw 测量与堆内存分配开销。
+     *
+     * @property marker 原始标注数据
+     * @property textX 文本左边缘 X 坐标
+     * @property textY 文本绘制基线 Y 坐标
+     */
+    private class LaidOutMarker(
+        val marker: CurveMarker,
+        val textX: Float,
+        val textY: Float
+    )
+
+    /**
      * 曲线与标注点的预计算绘制缓存数据实体。
      *
      * @property path 预先构建完成的三次贝塞尔平滑路径
-     * @property markers 预先排布且完成碰撞避让的节点标注集合
+     * @property markers 原始节点标注集合
+     * @property laidOutMarkers 预先排布且完成碰撞避让的像素级绘制标注单元列表
      */
     private class CachedCurveData {
         val path = Path()
         val markers = mutableListOf<CurveMarker>()
+        val laidOutMarkers = mutableListOf<LaidOutMarker>()
     }
+
+    /**
+     * 图表顶部看板预格式化静态数据缓存，避免滚动时每帧触发日期格式化与字符串拼接。
+     *
+     * @property timeStr 时间文本
+     * @property levelStr 电量百分比文本
+     * @property energyStr 能量文本
+     * @property powerStr 功耗文本
+     * @property tempStr 温度文本
+     * @property voltStr 电压文本
+     * @property curApp 前台应用实体
+     */
+    private class CachedHeaderData(
+        val timeStr: String,
+        val levelStr: String?,
+        val energyStr: String?,
+        val powerStr: String?,
+        val tempStr: String?,
+        val voltStr: String?,
+        val curApp: AppTimelineEvent?
+    )
 
     private val cachedPowerCurve = CachedCurveData()
     private val cachedBatteryCurve = CachedCurveData()
@@ -366,11 +403,21 @@ class BatteryTimelineView @JvmOverloads constructor(
     private var cachedMinVoltV = 3.4f
     private var cachedMaxVoltV = 4.4f
 
+    /** 缓存的合并后屏幕状态事件序列，避免 onDraw 循环重复执行 mergeScreenEvents */
+    private var cachedMergedScreenEvents = emptyList<ScreenEvent>()
+
+    /** 缓存的时间刻度信息，避免 onDraw 循环中重复计算与分配对象 */
+    private var cachedTicks = emptyList<TimelineScaleCalculator.TimeTick>()
+
+    /** 缓存的默认看板数据 */
+    private var cachedDefaultHeader: CachedHeaderData? = null
+
     /**
      * 将曲线与图表绘制缓存标记为失效，触发下一次绘制前的按需重新预计算。
      */
     private fun invalidateCurveCache() {
         isCurveCacheValid = false
+        cachedDefaultHeader = null
     }
 
     // 手势与交互状态
@@ -412,6 +459,7 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     /**
      * 设置时间轴最新状态并触发重绘。
+     * 具备相同数据状态防抖与缓存保护，彻底消除列表上下滑动时重复调用导致的掉帧与重排卡顿。
      *
      * @param state 最新的时间轴状态 [BatteryTimelineState]
      */
@@ -423,12 +471,30 @@ class BatteryTimelineView @JvmOverloads constructor(
         val vStart = if (state.visibleStartTimestamp in 1 until end) state.visibleStartTimestamp else start
         val vEnd = if (state.visibleEndTimestamp > vStart) state.visibleEndTimestamp else end
 
+        // 核心性能保护：在 RecyclerView 垂直滚动中，若数据引用与时间视窗完全未改变，直接复用既有预计算缓存
+        val isIdentical = (this.timelineState === state || (
+            this.timelineState.startTimestamp == start &&
+            this.timelineState.endTimestamp == end &&
+            this.timelineState.visibleStartTimestamp == vStart &&
+            this.timelineState.visibleEndTimestamp == vEnd &&
+            this.timelineState.selectedMetrics == state.selectedMetrics &&
+            this.timelineState.selectedApp == state.selectedApp &&
+            this.timelineState.batterySamples === state.batterySamples &&
+            this.timelineState.appEvents === state.appEvents &&
+            this.timelineState.screenEvents === state.screenEvents
+        ))
+
         this.timelineState = state.copy(
             startTimestamp = start,
             endTimestamp = end,
             visibleStartTimestamp = vStart,
             visibleEndTimestamp = vEnd
         )
+
+        if (isIdentical && isCurveCacheValid && cachedSlotItems.isNotEmpty()) {
+            return
+        }
+
         invalidateCurveCache()
         recalculateLayout()
         invalidate()
@@ -589,33 +655,22 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 视图从窗口脱附时的回调（如页签切走、Fragment 销毁等）。
-     * 主动调用 [DrawableBitmapCache.trimToLevel] 清空图标 Bitmap 缓存，
-     * 同时清理 [cachedSlotItems]、各曲线缓存 markers 及使曲线缓存失效，
-     * 彻底释放时间轴页面不可见期间的后台绘制内存。
+     * 视图从窗口脱附时的回调。
+     * 在 RecyclerView 垂直滚动时 ViewHolder 脱附视野属于高频正常生命周期，
+     * 严禁在此处清空图标 Bitmap、时间槽排布及曲线 Path 预计算缓存，确保滑回视野时直接 0 耗时复用既有绘制缓存。
      */
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        // 进入后台时清空全部 Bitmap 图标缓存（BACKGROUND 级别）
-        DrawableBitmapCache.trimToLevel(40)
-        // 清理 App 时间槽布局缓存列表
-        cachedSlotItems.clear()
-        // 清理各曲线 Marker 标注点列表（Path 本身置为失效即可，下次重建）
-        cachedPowerCurve.markers.clear()
-        cachedBatteryCurve.markers.clear()
-        cachedTempCurve.markers.clear()
-        cachedVoltCurve.markers.clear()
-        // 标记曲线缓存失效，下次 attach 时重新计算
-        isCurveCacheValid = false
+        isCursorActive = false
+        isDragging = false
     }
 
     /**
-     * 视图重新附着至窗口时的回调（如页签切回）。
-     * 使曲线缓存失效，确保下次 onDraw 时重新计算绘制路径。
+     * 视图重新附着至窗口时的回调。
      */
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        invalidateCurveCache()
+        // 保持并复用已有缓存，绝不主动清空
     }
 
     /**
@@ -671,7 +726,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         drawYAxisAndGrid(canvas, contentLeft, contentRight, topPadding, availableH)
 
         // 2. 绘制垂直时间网格虚线与底部时间刻度文字（以时间点为中心严格居中对齐）
-        drawTimeGridAndTicks(canvas, contentLeft, contentWidth, mainChartHeight, screenBarBottom, timeTextY, visibleStart, visibleEnd)
+        drawTimeGridAndTicks(canvas, contentLeft, contentWidth, mainChartHeight, screenBarBottom, timeTextY)
 
         // 3. 绘制 App 活动分槽平铺徽章（置于底层，使后续所有曲线覆盖在应用小图标之上）
         val metrics = timelineState.selectedMetrics
@@ -681,16 +736,16 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         // 4. 多选/反选模式：以平滑三次贝塞尔曲线绘制各指标曲线（直接复用预计算 Path 与 Markers）
         if (metrics.contains(TimelineMetric.POWER)) {
-            drawPowerCurve(canvas, cachedPowerCurve, topPadding, availableH, contentLeft, contentRight)
+            drawPowerCurve(canvas, cachedPowerCurve)
         }
         if (metrics.contains(TimelineMetric.BATTERY)) {
-            drawBatteryCurve(canvas, cachedBatteryCurve, topPadding, availableH, contentLeft, contentRight)
+            drawBatteryCurve(canvas, cachedBatteryCurve)
         }
         if (metrics.contains(TimelineMetric.TEMPERATURE)) {
-            drawTemperatureCurve(canvas, cachedTempCurve, topPadding, availableH, contentLeft, contentRight)
+            drawTemperatureCurve(canvas, cachedTempCurve)
         }
         if (metrics.contains(TimelineMetric.VOLTAGE)) {
-            drawVoltageCurve(canvas, cachedVoltCurve, topPadding, availableH, contentLeft, contentRight)
+            drawVoltageCurve(canvas, cachedVoltCurve)
         }
 
         // 5. 绘制横贯全宽的固定底图时间轴屏幕状态实线条（亮屏绿 / 息屏红）
@@ -732,8 +787,6 @@ class BatteryTimelineView @JvmOverloads constructor(
      * @param mainHeight 曲线主体高度
      * @param tickTop 刻度短线上边缘 Y 坐标
      * @param textY 时间文字基线 Y 坐标
-     * @param visibleStart 视窗起始时间戳
-     * @param visibleEnd 视窗结束时间戳
      */
     private fun drawTimeGridAndTicks(
         canvas: Canvas,
@@ -741,11 +794,9 @@ class BatteryTimelineView @JvmOverloads constructor(
         contentWidth: Float,
         mainHeight: Float,
         tickTop: Float,
-        textY: Float,
-        visibleStart: Long,
-        visibleEnd: Long
+        textY: Float
     ) {
-        val ticks = TimelineScaleCalculator.calculateTicks(visibleStart, visibleEnd)
+        val ticks = cachedTicks
         val w = width.toFloat()
         for (tick in ticks) {
             val x = contentLeft + tick.xRatio * contentWidth
@@ -908,19 +959,55 @@ class BatteryTimelineView @JvmOverloads constructor(
             cachedMaxVoltV = 4.4f
         }
 
+        val bottomBound = topPadding + availableH
+        val contentRight = contentLeft + contentWidth
+
         val metrics = timelineState.selectedMetrics
         if (metrics.contains(TimelineMetric.POWER)) {
             buildPowerCurveCache(cachedPowerCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, cachedMaxScaleW, rawSamples)
+            layoutSmartMarkers(cachedPowerCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound)
         }
         if (metrics.contains(TimelineMetric.BATTERY)) {
             buildBatteryCurveCache(cachedBatteryCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, rawSamples)
+            layoutSmartMarkers(cachedBatteryCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound)
         }
         if (metrics.contains(TimelineMetric.TEMPERATURE)) {
             buildTemperatureCurveCache(cachedTempCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, rawSamples)
+            layoutSmartMarkers(cachedTempCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound)
         }
         if (metrics.contains(TimelineMetric.VOLTAGE)) {
             buildVoltageCurveCache(cachedVoltCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, rawSamples)
+            layoutSmartMarkers(cachedVoltCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound)
         }
+
+        cachedMergedScreenEvents = TimelineEventMerger.mergeScreenEvents(timelineState.screenEvents)
+        cachedTicks = TimelineScaleCalculator.calculateTicks(visibleStart, visibleEnd)
+        updateDefaultHeaderCache()
+    }
+
+    /**
+     * 预先计算并缓存非游标状态下的顶部常驻看板展示文本与应用图标，彻底杜绝列表滚动时每帧触发日期格式化与对象检索。
+     */
+    private fun updateDefaultHeaderCache() {
+        val lastSample = timelineState.batterySamples.lastOrNull()
+        val latestTs = lastSample?.timestamp ?: timelineState.endTimestamp.takeIf { it > 0L } ?: System.currentTimeMillis()
+        val timeStr = timeFormatterTooltip.format(Date(latestTs))
+        val levelStr = lastSample?.let { "${it.batteryLevel}%" }
+        val energyStr = lastSample?.let { s ->
+            s.energyWh?.let { String.format(Locale.getDefault(), "%.1fWh", it) }
+                ?: timelineState.totalEnergyWh?.takeIf { it > 0f }?.let {
+                    String.format(Locale.getDefault(), "%.1fWh", s.batteryLevel / 100f * it)
+                }
+        }
+        val powerStr = lastSample?.let {
+            val pWatts = it.getPowerWatts()
+            val signedPower = if (pWatts > 0) -pWatts else pWatts
+            String.format(Locale.getDefault(), "%.2fW", signedPower)
+        }
+        val tempStr = lastSample?.let { String.format(Locale.getDefault(), "%.1f℃", it.temperatureC) }
+        val voltStr = lastSample?.let { String.format(Locale.getDefault(), "%.3fV", it.getVoltageVolts()) }
+        val curApp = timelineState.appEvents.find { it.startTime <= latestTs && it.endTime >= latestTs } ?: timelineState.appEvents.lastOrNull()
+        cachedDefaultHeader = CachedHeaderData(timeStr, levelStr, energyStr, powerStr, tempStr, voltStr, curApp)
     }
 
     /**
@@ -949,7 +1036,9 @@ class BatteryTimelineView @JvmOverloads constructor(
     ) {
         cache.path.reset()
         cache.markers.clear()
-        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 1500)
+        if (rawSamples.isEmpty()) return
+        val targetPoints = (contentWidth * 0.75f).toInt().coerceIn(300, 800)
+        val downsampled = ChartDownsampler.downsampleByMetric(rawSamples, targetPoints) { abs(it.powerMw) }
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
@@ -973,7 +1062,8 @@ class BatteryTimelineView @JvmOverloads constructor(
             val pW = (abs(s.powerMw) / 1000.0).toFloat().coerceIn(0f, maxScaleW.toFloat())
             val y = calcPowerY(pW)
 
-            if (x > lastX) {
+            // 像素级防抖：横向位移必须大于 0.5px 或到达末点，杜绝同像素重复绘制
+            if (x > lastX + 0.5f || s === downsampled.last()) {
                 cache.path.lineTo(x, y)
                 lastX = x
                 lastY = y
@@ -1029,22 +1119,14 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制功耗波动平滑曲线与标注节点（直接复用预计算 Path 与 Markers）。
+     * 绘制功耗波动平滑曲线与标注节点（直接复用预计算 Path 与预排布 Markers）。
      *
      * @param canvas 绘制画布 [Canvas]
      * @param cache 功耗曲线缓存对象 [CachedCurveData]
-     * @param topPadding 顶部安全边距
-     * @param availableH 曲线有效绘制高度
-     * @param contentLeft 内容区左边缘 X 坐标
-     * @param contentRight 内容区右边缘 X 坐标
      */
     private fun drawPowerCurve(
         canvas: Canvas,
-        cache: CachedCurveData,
-        topPadding: Float,
-        availableH: Float,
-        contentLeft: Float,
-        contentRight: Float
+        cache: CachedCurveData
     ) {
         val strokeColor = Color.parseColor("#B390CAF9")
         linePaint.color = strokeColor
@@ -1052,8 +1134,7 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         metricDotPaint.color = strokeColor
         metricLabelPaint.color = strokeColor
-        val bottomBound = topPadding + availableH
-        drawSmartMarkers(canvas, cache.markers, metricLabelPaint, metricLabelHaloPaint, metricDotPaint, contentLeft, contentRight, topPadding, bottomBound)
+        drawSmartMarkers(canvas, cache, metricLabelPaint, metricLabelHaloPaint, metricDotPaint)
     }
 
     /**
@@ -1081,7 +1162,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         cache.path.reset()
         cache.markers.clear()
         if (rawSamples.isEmpty()) return
-        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 1500)
+        val targetPoints = (contentWidth * 0.6f).toInt().coerceIn(200, 600)
+        val downsampled = ChartDownsampler.downsampleByMetric(rawSamples, targetPoints) { it.batteryLevel.toDouble() }
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
@@ -1090,7 +1172,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         val firstY = topPadding + (1f - firstNorm) * availableH
 
         cache.path.moveTo(contentLeft, firstY)
-        cache.markers.add(CurveMarker(contentLeft, firstY, "${firstSample.batteryLevel}%", isPriority = false))
+        cache.markers.add(CurveMarker(contentLeft, firstY, "${firstSample.batteryLevel}%", isPriority = true))
 
         var lastX = contentLeft
         var lastY = firstY
@@ -1101,10 +1183,12 @@ class BatteryTimelineView @JvmOverloads constructor(
             val norm = (s.batteryLevel / 100f).coerceIn(0f, 1f) * 0.45f + 0.50f
             val y = topPadding + (1f - norm) * availableH
 
-            if (x > lastX) {
+            // 像素级防抖：横向位移大于 1.0px 或电量阶跃或到达末点才追加贝塞尔段
+            if (x > lastX + 1.0f || s === downsampled.last() || s.batteryLevel != lastLevel) {
                 val cX = (lastX + x) / 2f
                 cache.path.cubicTo(cX, lastY, cX, y, x, y)
-                if (s.batteryLevel != lastLevel) {
+                // 仅对每隔 10% 的大整数点或关键拐点添加 Marker，控制总数避免碰撞检测卡顿
+                if (s.batteryLevel != lastLevel && (s.batteryLevel % 10 == 0 || cache.markers.size < 5)) {
                     cache.markers.add(CurveMarker(x, y, "${s.batteryLevel}%", isPriority = false))
                 }
                 lastX = x
@@ -1117,25 +1201,25 @@ class BatteryTimelineView @JvmOverloads constructor(
             val cX = (lastX + contentRight) / 2f
             cache.path.cubicTo(cX, lastY, cX, lastY, contentRight, lastY)
         }
+
+        // 末点高优先级 Marker
+        val lastSample = downsampled.last()
+        if (cache.markers.none { abs(it.x - contentRight) < dp10 }) {
+            val lastNorm = (lastSample.batteryLevel / 100f).coerceIn(0f, 1f) * 0.45f + 0.50f
+            val endY = topPadding + (1f - lastNorm) * availableH
+            cache.markers.add(CurveMarker(contentRight, endY, "${lastSample.batteryLevel}%", isPriority = true))
+        }
     }
 
     /**
-     * 绘制电量平滑衰减曲线与数值标签（直接复用预计算 Path 与 Markers）。
+     * 绘制电量平滑衰减曲线与数值标签（直接复用预计算 Path 与预排布 Markers）。
      *
      * @param canvas 绘制画布 [Canvas]
      * @param cache 电量曲线缓存对象 [CachedCurveData]
-     * @param topPadding 顶部安全间距
-     * @param availableH 曲线有效可用高度
-     * @param contentLeft 内容区左边界 X 坐标
-     * @param contentRight 内容区右边界 X 坐标
      */
     private fun drawBatteryCurve(
         canvas: Canvas,
-        cache: CachedCurveData,
-        topPadding: Float,
-        availableH: Float,
-        contentLeft: Float,
-        contentRight: Float
+        cache: CachedCurveData
     ) {
         val color = Color.parseColor("#B33A7FF0")
         linePaint.color = color
@@ -1143,8 +1227,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         metricLabelPaint.color = color
 
         canvas.drawPath(cache.path, linePaint)
-        val batteryBottomBound = topPadding + availableH
-        drawSmartMarkers(canvas, cache.markers, metricLabelPaint, metricLabelHaloPaint, metricDotPaint, contentLeft, contentRight, topPadding, batteryBottomBound)
+        drawSmartMarkers(canvas, cache, metricLabelPaint, metricLabelHaloPaint, metricDotPaint)
     }
 
     /**
@@ -1172,7 +1255,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         cache.path.reset()
         cache.markers.clear()
         if (rawSamples.isEmpty()) return
-        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 1500)
+        val targetPoints = (contentWidth * 0.75f).toInt().coerceIn(300, 800)
+        val downsampled = ChartDownsampler.downsampleByMetric(rawSamples, targetPoints) { it.temperatureC }
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
@@ -1193,7 +1277,8 @@ class BatteryTimelineView @JvmOverloads constructor(
             val norm = (((s.temperatureC - cachedMinTemp) / tempRange) * 0.40 + 0.45).toFloat()
             val y = topPadding + (1f - norm) * availableH
 
-            if (x > lastX) {
+            // 像素级防抖：横向位移大于 1.0px 或到达末点才追加贝塞尔段
+            if (x > lastX + 1.0f || s === downsampled.last()) {
                 val cX = (lastX + x) / 2f
                 cache.path.cubicTo(cX, lastY, cX, y, x, y)
                 val tempInt = (s.temperatureC * 2).toInt()
@@ -1213,22 +1298,14 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制温度平滑温升/降温曲线与数值标签（直接复用预计算 Path 与 Markers）。
+     * 绘制温度平滑温升/降温曲线与数值标签（直接复用预计算 Path 与预排布 Markers）。
      *
      * @param canvas 绘制画布 [Canvas]
      * @param cache 温度曲线缓存对象 [CachedCurveData]
-     * @param topPadding 顶部安全间距
-     * @param availableH 曲线有效可用高度
-     * @param contentLeft 内容区左边界 X 坐标
-     * @param contentRight 内容区右边界 X 坐标
      */
     private fun drawTemperatureCurve(
         canvas: Canvas,
-        cache: CachedCurveData,
-        topPadding: Float,
-        availableH: Float,
-        contentLeft: Float,
-        contentRight: Float
+        cache: CachedCurveData
     ) {
         val color = Color.parseColor("#B3FF5252")
         linePaint.color = color
@@ -1236,8 +1313,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         metricLabelPaint.color = color
 
         canvas.drawPath(cache.path, linePaint)
-        val tempBottomBound = topPadding + availableH
-        drawSmartMarkers(canvas, cache.markers, metricLabelPaint, metricLabelHaloPaint, metricDotPaint, contentLeft, contentRight, topPadding, tempBottomBound)
+        drawSmartMarkers(canvas, cache, metricLabelPaint, metricLabelHaloPaint, metricDotPaint)
     }
 
     /**
@@ -1265,7 +1341,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         cache.path.reset()
         cache.markers.clear()
         if (rawSamples.isEmpty()) return
-        val downsampled = ChartDownsampler.downsample(rawSamples, targetMaxPoints = 1500)
+        val targetPoints = (contentWidth * 0.75f).toInt().coerceIn(300, 800)
+        val downsampled = ChartDownsampler.downsampleByMetric(rawSamples, targetPoints) { it.voltageMv.toDouble() }
         if (downsampled.isEmpty()) return
 
         val contentRight = contentLeft + contentWidth
@@ -1288,7 +1365,8 @@ class BatteryTimelineView @JvmOverloads constructor(
             val norm = (((voltV - cachedMinVoltV) / voltRange) * 0.35f + 0.35f)
             val y = topPadding + (1f - norm) * availableH
 
-            if (x > lastX) {
+            // 像素级防抖：横向位移大于 1.0px 或到达末点才追加贝塞尔段
+            if (x > lastX + 1.0f || s === downsampled.last()) {
                 val cX = (lastX + x) / 2f
                 cache.path.cubicTo(cX, lastY, cX, y, x, y)
                 if (abs(voltV - lastVolt) >= 0.05f && cache.markers.size < 6) {
@@ -1307,22 +1385,14 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制电压平滑变化曲线与数值标签（直接复用预计算 Path 与 Markers）。
+     * 绘制电压平滑变化曲线与数值标签（直接复用预计算 Path 与预排布 Markers）。
      *
      * @param canvas 绘制画布 [Canvas]
      * @param cache 电压曲线缓存对象 [CachedCurveData]
-     * @param topPadding 顶部安全间距
-     * @param availableH 曲线有效可用高度
-     * @param contentLeft 内容区左边界 X 坐标
-     * @param contentRight 内容区右边界 X 坐标
      */
     private fun drawVoltageCurve(
         canvas: Canvas,
-        cache: CachedCurveData,
-        topPadding: Float,
-        availableH: Float,
-        contentLeft: Float,
-        contentRight: Float
+        cache: CachedCurveData
     ) {
         val color = Color.parseColor("#B3FFCA28")
         linePaint.color = color
@@ -1330,8 +1400,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         metricLabelPaint.color = color
 
         canvas.drawPath(cache.path, linePaint)
-        val voltBottomBound = topPadding + availableH
-        drawSmartMarkers(canvas, cache.markers, metricLabelPaint, metricLabelHaloPaint, metricDotPaint, contentLeft, contentRight, topPadding, voltBottomBound)
+        drawSmartMarkers(canvas, cache, metricLabelPaint, metricLabelHaloPaint, metricDotPaint)
     }
 
     /**
@@ -1433,43 +1502,35 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 智能计算并绘制曲线关键节点圆点与小数字标签。
-     * 针对曲线最峰（最高点）、最谷（最低点）赋予绝对优先权确保 100% 呈现，
-     * 并针对每个节点智能判断放置方位：优先居左，若左侧空间不足则智能切换至上方或右侧，彻底杜绝边界截断与标签重叠。
+     * 预计算曲线关键节点的排布坐标与文字基线，并进行智能避让与碰撞检测。
+     * 针对最峰（最高点）与最谷（最低点）赋予绝对高优先级呈现，
+     * 针对每个节点智能探测左/上/右方位，杜绝截断与重叠，并将结果固化到缓存中。
      *
-     * @param canvas 绘制目标画布 [Canvas]
-     * @param markers 候选标注节点列表 [CurveMarker]
-     * @param paint 文本主色填充画笔 [Paint]
-     * @param haloPaint 文本微暗描边光晕画笔 [Paint]
-     * @param dotPaint 节点小圆点画笔 [Paint]
+     * @param cache 目标曲线缓存对象 [CachedCurveData]
+     * @param paint 标注文本测量画笔 [Paint]
      * @param contentLeft 内容区左边缘 X 坐标
      * @param contentRight 内容区右边缘 X 坐标
      * @param topBound 内容区上边缘 Y 坐标
      * @param bottomBound 内容区下边缘 Y 坐标
      */
-    private fun drawSmartMarkers(
-        canvas: Canvas,
-        markers: List<CurveMarker>,
+    private fun layoutSmartMarkers(
+        cache: CachedCurveData,
         paint: Paint,
-        haloPaint: Paint,
-        dotPaint: Paint,
         contentLeft: Float,
         contentRight: Float,
         topBound: Float,
         bottomBound: Float
     ) {
-        if (markers.isEmpty()) return
+        cache.laidOutMarkers.clear()
+        if (cache.markers.isEmpty()) return
 
         paint.textAlign = Paint.Align.LEFT
-        haloPaint.textAlign = Paint.Align.LEFT
-
         val fontMetrics = paint.fontMetrics
         val textHeight = fontMetrics.descent - fontMetrics.ascent
-        val dotRadius = dp2_5
         val occupiedRects = mutableListOf<RectF>()
 
-        // 1. 第一阶段：最峰（Max）与最谷（Min）绝对高优先级绘制（绝不被过滤丢弃）
-        val priorityMarkers = markers.filter { it.isPriority }
+        // 1. 第一阶段：最峰（Max）与最谷（Min）绝对高优先级排布（绝不被过滤丢弃）
+        val priorityMarkers = cache.markers.filter { it.isPriority }
         for (m in priorityMarkers) {
             val textWidth = paint.measureText(m.text)
             var bestRect = determineBestMarkerRect(m, textWidth, textHeight, contentLeft, contentRight, topBound, bottomBound, occupiedRects, checkCollision = true)
@@ -1478,32 +1539,57 @@ class BatteryTimelineView @JvmOverloads constructor(
                     ?: calculateMarkerTextRect(m, textWidth, textHeight, 1, contentLeft, contentRight, topBound, bottomBound)
             }
 
-            // 绘制圆点
-            canvas.drawCircle(m.x, m.y, dotRadius, dotPaint)
-
-            // 双层清晰绘制：微暗描边光晕 + 主题前景色
             val baseline = bestRect.top - fontMetrics.ascent
-            canvas.drawText(m.text, bestRect.left, baseline, haloPaint)
-            canvas.drawText(m.text, bestRect.left, baseline, paint)
+            cache.laidOutMarkers.add(LaidOutMarker(m, bestRect.left, baseline))
 
             // 占位矩形附加安全缓冲呼吸空间（左右 4dp，上下 2dp）
             occupiedRects.add(RectF(bestRect.left - dp4, bestRect.top - dp2, bestRect.right + dp4, bestRect.bottom + dp2))
         }
 
-        // 2. 第二阶段：次要参考节点在无碰撞冲突的前提下补充绘制
-        val secondaryMarkers = markers.filter { !it.isPriority }
+        // 2. 第二阶段：次要参考节点在无碰撞冲突的前提下补充排布
+        val secondaryMarkers = cache.markers.filter { !it.isPriority }
         for (m in secondaryMarkers) {
             val textWidth = paint.measureText(m.text)
             val bestRect = determineBestMarkerRect(m, textWidth, textHeight, contentLeft, contentRight, topBound, bottomBound, occupiedRects, checkCollision = true)
             if (bestRect != null) {
-                canvas.drawCircle(m.x, m.y, dotRadius, dotPaint)
-
                 val baseline = bestRect.top - fontMetrics.ascent
-                canvas.drawText(m.text, bestRect.left, baseline, haloPaint)
-                canvas.drawText(m.text, bestRect.left, baseline, paint)
+                cache.laidOutMarkers.add(LaidOutMarker(m, bestRect.left, baseline))
 
                 occupiedRects.add(RectF(bestRect.left - dp4, bestRect.top - dp2, bestRect.right + dp4, bestRect.bottom + dp2))
             }
+        }
+    }
+
+    /**
+     * 绘制曲线预排布的关键节点圆点与小数字标签。
+     * 直接遍历已完成避让排布的 [CachedCurveData.laidOutMarkers]，零 onDraw 测量与堆内存分配开销。
+     *
+     * @param canvas 绘制目标画布 [Canvas]
+     * @param cache 包含预排布标注节点的曲线缓存 [CachedCurveData]
+     * @param paint 文本主色填充画笔 [Paint]
+     * @param haloPaint 文本微暗描边光晕画笔 [Paint]
+     * @param dotPaint 节点小圆点画笔 [Paint]
+     */
+    private fun drawSmartMarkers(
+        canvas: Canvas,
+        cache: CachedCurveData,
+        paint: Paint,
+        haloPaint: Paint,
+        dotPaint: Paint
+    ) {
+        if (cache.laidOutMarkers.isEmpty()) return
+
+        paint.textAlign = Paint.Align.LEFT
+        haloPaint.textAlign = Paint.Align.LEFT
+
+        val dotRadius = dp2_5
+        for (item in cache.laidOutMarkers) {
+            // 绘制圆点
+            canvas.drawCircle(item.marker.x, item.marker.y, dotRadius, dotPaint)
+
+            // 双层清晰绘制：微暗描边光晕 + 主题前景色
+            canvas.drawText(item.marker.text, item.textX, item.textY, haloPaint)
+            canvas.drawText(item.marker.text, item.textX, item.textY, paint)
         }
     }
 
@@ -1530,7 +1616,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         val contentWidth = contentRight - contentLeft
         if (contentWidth <= 0f) return
 
-        val mergedScreens = TimelineEventMerger.mergeScreenEvents(timelineState.screenEvents)
+        val mergedScreens = cachedMergedScreenEvents
         if (mergedScreens.isEmpty()) {
             tempRectF.set(contentLeft, top, contentRight, bottom)
             canvas.drawRoundRect(tempRectF, dp1_5, dp1_5, screenOnBarPaint)
@@ -1541,28 +1627,6 @@ class BatteryTimelineView @JvmOverloads constructor(
         tempRectF.set(contentLeft, top, contentRight, bottom)
         canvas.drawRoundRect(tempRectF, dp1_5, dp1_5, screenOffDeepSleepBarPaint)
 
-        // 绘制指定分段的辅助函数
-        val drawSegment = { left: Float, right: Float, paint: Paint ->
-            if (right > left) {
-                tempRectF.set(left, top, right, bottom)
-                val isAtLeft = left <= contentLeft + dp0_5
-                val isAtRight = right >= contentRight - dp0_5
-                if (isAtLeft && isAtRight) {
-                    canvas.drawRoundRect(tempRectF, dp1_5, dp1_5, paint)
-                } else if (isAtLeft) {
-                    tempPath.reset()
-                    tempPath.addRoundRect(tempRectF, floatArrayOf(dp1_5, dp1_5, 0f, 0f, 0f, 0f, dp1_5, dp1_5), Path.Direction.CW)
-                    canvas.drawPath(tempPath, paint)
-                } else if (isAtRight) {
-                    tempPath.reset()
-                    tempPath.addRoundRect(tempRectF, floatArrayOf(0f, 0f, dp1_5, dp1_5, dp1_5, dp1_5, 0f, 0f), Path.Direction.CW)
-                    canvas.drawPath(tempPath, paint)
-                } else {
-                    canvas.drawRect(tempRectF, paint)
-                }
-            }
-        }
-
         // 2. 依次精确绘制亮屏（亮绿）、息屏深度睡眠（深红）与息屏唤醒（浅红）三色段
         for (event in mergedScreens) {
             if (event.endTime < visibleStart || event.startTime > visibleEnd) continue
@@ -1571,11 +1635,53 @@ class BatteryTimelineView @JvmOverloads constructor(
             val right = (contentLeft + TimelineScaleCalculator.timeToX(event.endTime, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
 
             if (event.isScreenOn) {
-                drawSegment(left, right, screenOnBarPaint)
+                drawScreenSegment(canvas, left, right, top, bottom, contentLeft, contentRight, screenOnBarPaint)
             } else if (event.isDeepSleep) {
-                drawSegment(left, right, screenOffDeepSleepBarPaint)
+                drawScreenSegment(canvas, left, right, top, bottom, contentLeft, contentRight, screenOffDeepSleepBarPaint)
             } else {
-                drawSegment(left, right, screenOffAwakeBarPaint)
+                drawScreenSegment(canvas, left, right, top, bottom, contentLeft, contentRight, screenOffAwakeBarPaint)
+            }
+        }
+    }
+
+    /**
+     * 绘制屏幕状态单条分段（支持首尾圆角与中间矩形）。
+     *
+     * @param canvas 绘图画布 [Canvas]
+     * @param left 分段左边缘 X 坐标
+     * @param right 分段右边缘 X 坐标
+     * @param top 分段上边缘 Y 坐标
+     * @param bottom 分段下边缘 Y 坐标
+     * @param contentLeft 状态条总左边界 X 坐标
+     * @param contentRight 状态条总右边界 X 坐标
+     * @param paint 绘制画笔 [Paint]
+     */
+    private fun drawScreenSegment(
+        canvas: Canvas,
+        left: Float,
+        right: Float,
+        top: Float,
+        bottom: Float,
+        contentLeft: Float,
+        contentRight: Float,
+        paint: Paint
+    ) {
+        if (right > left) {
+            tempRectF.set(left, top, right, bottom)
+            val isAtLeft = left <= contentLeft + dp0_5
+            val isAtRight = right >= contentRight - dp0_5
+            if (isAtLeft && isAtRight) {
+                canvas.drawRoundRect(tempRectF, dp1_5, dp1_5, paint)
+            } else if (isAtLeft) {
+                tempPath.reset()
+                tempPath.addRoundRect(tempRectF, floatArrayOf(dp1_5, dp1_5, 0f, 0f, 0f, 0f, dp1_5, dp1_5), Path.Direction.CW)
+                canvas.drawPath(tempPath, paint)
+            } else if (isAtRight) {
+                tempPath.reset()
+                tempPath.addRoundRect(tempRectF, floatArrayOf(0f, 0f, dp1_5, dp1_5, dp1_5, dp1_5, 0f, 0f), Path.Direction.CW)
+                canvas.drawPath(tempPath, paint)
+            } else {
+                canvas.drawRect(tempRectF, paint)
             }
         }
     }
@@ -1614,38 +1720,49 @@ class BatteryTimelineView @JvmOverloads constructor(
             contentRight
         }
 
-        // 1. 查询目标时刻对应的数据实体（触摸时取游标时刻临近点，非触摸时取最新采样点或当前刷新时间）
-        val curTs: Long
-        val curSample: BatterySample?
+        // 1. 查询目标时刻对应的数据实体（触摸时取游标时刻临近点，非触摸时直接复用预计算静态看板缓存）
+        val timeStr: String
+        val levelStr: String?
+        val energyStr: String?
+        val powerStr: String?
+        val tempStr: String?
+        val voltStr: String?
         val curApp: AppTimelineEvent?
+        val curSample: BatterySample?
 
         if (isCursorActive) {
-            curTs = TimelineScaleCalculator.xToTime(clampedX, visibleStart, visibleEnd, contentWidth, contentLeft)
+            val curTs = TimelineScaleCalculator.xToTime(clampedX, visibleStart, visibleEnd, contentWidth, contentLeft)
             curSample = timelineState.batterySamples.minByOrNull { abs(it.timestamp - curTs) }
             curApp = timelineState.appEvents.find { it.startTime <= curTs && it.endTime >= curTs }
+            timeStr = timeFormatterTooltip.format(Date(curTs))
+            levelStr = curSample?.let { "${it.batteryLevel}%" }
+            energyStr = curSample?.let { s ->
+                s.energyWh?.let { String.format(Locale.getDefault(), "%.1fWh", it) }
+                    ?: timelineState.totalEnergyWh?.takeIf { it > 0f }?.let {
+                        String.format(Locale.getDefault(), "%.1fWh", s.batteryLevel / 100f * it)
+                    }
+            }
+            powerStr = curSample?.let {
+                val pWatts = it.getPowerWatts()
+                val signedPower = if (pWatts > 0) -pWatts else pWatts
+                String.format(Locale.getDefault(), "%.2fW", signedPower)
+            }
+            tempStr = curSample?.let { String.format(Locale.getDefault(), "%.1f℃", it.temperatureC) }
+            voltStr = curSample?.let { String.format(Locale.getDefault(), "%.3fV", it.getVoltageVolts()) }
         } else {
-            val lastSample = timelineState.batterySamples.lastOrNull()
-            curSample = lastSample
-            val latestTs = lastSample?.timestamp ?: timelineState.endTimestamp.takeIf { it > 0L } ?: System.currentTimeMillis()
-            curTs = latestTs
-            curApp = timelineState.appEvents.find { it.startTime <= latestTs && it.endTime >= latestTs } ?: timelineState.appEvents.lastOrNull()
+            val headerData = cachedDefaultHeader ?: run {
+                updateDefaultHeaderCache()
+                cachedDefaultHeader!!
+            }
+            timeStr = headerData.timeStr
+            levelStr = headerData.levelStr
+            energyStr = headerData.energyStr
+            powerStr = headerData.powerStr
+            tempStr = headerData.tempStr
+            voltStr = headerData.voltStr
+            curApp = headerData.curApp
+            curSample = timelineState.batterySamples.lastOrNull()
         }
-
-        val timeStr = timeFormatterTooltip.format(Date(curTs))
-        val levelStr = curSample?.let { "${it.batteryLevel}%" }
-        val energyStr = curSample?.let { s ->
-            s.energyWh?.let { String.format(Locale.getDefault(), "%.1fWh", it) }
-                ?: timelineState.totalEnergyWh?.takeIf { it > 0f }?.let {
-                    String.format(Locale.getDefault(), "%.1fWh", s.batteryLevel / 100f * it)
-                }
-        }
-        val powerStr = curSample?.let {
-            val pWatts = it.getPowerWatts()
-            val signedPower = if (pWatts > 0) -pWatts else pWatts
-            String.format(Locale.getDefault(), "%.2fW", signedPower)
-        }
-        val tempStr = curSample?.let { String.format(Locale.getDefault(), "%.1f℃", it.temperatureC) }
-        val voltStr = curSample?.let { String.format(Locale.getDefault(), "%.3fV", it.getVoltageVolts()) }
 
         // 2. 顶部单行轻微圆角背景与描边卡片
         val headerTop = dp2

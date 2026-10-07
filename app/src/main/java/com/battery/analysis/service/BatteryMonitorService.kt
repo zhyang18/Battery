@@ -192,18 +192,8 @@ class BatteryMonitorService : Service() {
                             }
                             val rawWh = (rawMah * avgVolt) / 1000f
 
-                            // 物理合理性门禁（Sanity Gate）：
-                            // 针对荣耀、华为等机型电池计量 IC 寄存器可能存在的离散大步进更新延迟（未触发步进时仅有量化噪声，如 0.1mAh），
-                            // 计算等效待机物理功率并进行门禁校验，杜绝将尚未步进的微小脏数据误当做真实放电量
-                            val offHours = screenOffRealtimeMs / 3600_000f
-                            val impliedWatts = if (offHours > 0f) rawWh / offHours else 0f
-                            val isPhysicallyPlausible = if (screenOffRealtimeMs >= 30_000L) {
-                                rawMah >= 0.2f && impliedWatts <= 1.5f
-                            } else {
-                                impliedWatts <= 2.5f
-                            }
-
-                            if (isPhysicallyPlausible) {
+                            // 忠实记录硬件芯片库仑计差分放电量（有效正数即采纳，严禁人为虚构上限丢弃真实放电数据）
+                            if (rawMah > 0f && rawWh > 0f) {
                                 offHwMah = rawMah
                                 offHwWh = rawWh
                             }

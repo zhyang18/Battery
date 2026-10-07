@@ -962,22 +962,23 @@ class BatteryTimelineView @JvmOverloads constructor(
         val bottomBound = topPadding + availableH
         val contentRight = contentLeft + contentWidth
 
+        val sharedOccupiedRects = mutableListOf<RectF>()
         val metrics = timelineState.selectedMetrics
-        if (metrics.contains(TimelineMetric.POWER)) {
-            buildPowerCurveCache(cachedPowerCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, cachedMaxScaleW, rawSamples)
-            layoutSmartMarkers(cachedPowerCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound)
-        }
         if (metrics.contains(TimelineMetric.BATTERY)) {
             buildBatteryCurveCache(cachedBatteryCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, rawSamples)
-            layoutSmartMarkers(cachedBatteryCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound)
+            layoutSmartMarkers(cachedBatteryCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
+        }
+        if (metrics.contains(TimelineMetric.POWER)) {
+            buildPowerCurveCache(cachedPowerCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, cachedMaxScaleW, rawSamples)
+            layoutSmartMarkers(cachedPowerCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
         }
         if (metrics.contains(TimelineMetric.TEMPERATURE)) {
             buildTemperatureCurveCache(cachedTempCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, rawSamples)
-            layoutSmartMarkers(cachedTempCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound)
+            layoutSmartMarkers(cachedTempCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
         }
         if (metrics.contains(TimelineMetric.VOLTAGE)) {
             buildVoltageCurveCache(cachedVoltCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, rawSamples)
-            layoutSmartMarkers(cachedVoltCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound)
+            layoutSmartMarkers(cachedVoltCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
         }
 
         cachedMergedScreenEvents = TimelineEventMerger.mergeScreenEvents(timelineState.screenEvents)
@@ -1043,10 +1044,65 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         val contentRight = contentLeft + contentWidth
 
-        // 功耗纵向区间严格限制不超过整图表高度的 0.95（按 0.95f 比例映射，顶部留出 0.05 空间）
+        // 功耗纵向区间在顶部预留 20dp 专用安全呼吸空间，专门供波峰数值标签居中悬浮排布呈现
+        val powerTopReserved = dp20
+        val effectivePowerH = max(1f, availableH - powerTopReserved)
+
         fun calcPowerY(powerW: Float): Float {
             val ratio = (powerW / maxScaleW.toFloat()).coerceIn(0f, 1f)
-            return topPadding + (1f - ratio * 0.95f) * availableH
+            return topPadding + powerTopReserved + (1f - ratio) * effectivePowerH
+        }
+
+        val maxSample = downsampled.maxByOrNull { abs(it.powerMw) }
+        val minSample = downsampled.minByOrNull { abs(it.powerMw) }
+
+        fun toMarker(s: BatterySample, isPriority: Boolean): CurveMarker {
+            val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
+            val pW = (abs(s.powerMw) / 1000.0).toFloat().coerceIn(0f, maxScaleW.toFloat())
+            val y = calcPowerY(pW)
+            val label = formatPowerWatts(pW)
+            return CurveMarker(x, y, label, isPriority)
+        }
+
+        // 收集所有关键 Marker 节点的时间戳集合，构建 Path 时实施 100% 绝对强制连线保护
+        val keyMarkerTimestamps = HashSet<Long>()
+        if (maxSample != null) {
+            cache.markers.add(toMarker(maxSample, isPriority = true))
+            keyMarkerTimestamps.add(maxSample.timestamp)
+        }
+        if (minSample != null && minSample != maxSample) {
+            cache.markers.add(toMarker(minSample, isPriority = true))
+            keyMarkerTimestamps.add(minSample.timestamp)
+        }
+
+        // 仅在存在显著独立大尖峰时，智能保留至多 1~2 个关键次级峰值（过滤平缓日常小起伏，避免杂乱数值干扰图表）
+        if (maxSample != null) {
+            val maxPW = (abs(maxSample.powerMw) / 1000.0).toFloat()
+            val minSignificantW = maxOf(4.0f, maxPW * 0.4f)
+            val timeSpan = (visibleEnd - visibleStart).coerceAtLeast(1L)
+            val minTimeGap = (timeSpan * 0.12).toLong()
+
+            val candidates = downsampled.filter { s ->
+                val pW = (abs(s.powerMw) / 1000.0).toFloat()
+                s !== maxSample && s !== minSample &&
+                    pW >= minSignificantW &&
+                    abs(s.timestamp - maxSample.timestamp) >= minTimeGap &&
+                    (minSample == null || abs(s.timestamp - minSample.timestamp) >= minTimeGap)
+            }.sortedByDescending { abs(it.powerMw) }
+
+            val chosenSecondary = mutableListOf<BatterySample>()
+            for (c in candidates) {
+                if (chosenSecondary.size >= 2) break
+                val tooClose = chosenSecondary.any { abs(it.timestamp - c.timestamp) < minTimeGap }
+                if (!tooClose) {
+                    chosenSecondary.add(c)
+                }
+            }
+
+            for (s in chosenSecondary) {
+                cache.markers.add(toMarker(s, isPriority = false))
+                keyMarkerTimestamps.add(s.timestamp)
+            }
         }
 
         val firstSample = downsampled.first()
@@ -1062,8 +1118,13 @@ class BatteryTimelineView @JvmOverloads constructor(
             val pW = (abs(s.powerMw) / 1000.0).toFloat().coerceIn(0f, maxScaleW.toFloat())
             val y = calcPowerY(pW)
 
-            // 像素级防抖：横向位移必须大于 0.5px 或到达末点，杜绝同像素重复绘制
-            if (x > lastX + 0.5f || s === downsampled.last()) {
+            val isKeyMarker = s.timestamp in keyMarkerTimestamps
+            val isMovedX = x > lastX + 0.5f
+            val isSignificantY = abs(y - lastY) >= 1.0f
+            val isLast = (s === downsampled.last())
+
+            // 只要是关键 Marker 节点、横向位移显著、垂直落差显著或到达末点，必须绘制折线段（杜绝尖峰被跳过导致圆点悬空）
+            if (isKeyMarker || isMovedX || isSignificantY || isLast) {
                 cache.path.lineTo(x, y)
                 lastX = x
                 lastY = y
@@ -1072,49 +1133,6 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         if (lastX < contentRight) {
             cache.path.lineTo(contentRight, lastY)
-        }
-
-        val maxSample = downsampled.maxByOrNull { abs(it.powerMw) }
-        val minSample = downsampled.minByOrNull { abs(it.powerMw) }
-
-        fun toMarker(s: BatterySample, isPriority: Boolean): CurveMarker {
-            val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
-            val pW = (abs(s.powerMw) / 1000.0).toFloat().coerceIn(0f, maxScaleW.toFloat())
-            val y = calcPowerY(pW)
-            val label = formatPowerWatts(pW)
-            return CurveMarker(x, y, label, isPriority)
-        }
-
-        if (maxSample != null) {
-            cache.markers.add(toMarker(maxSample, isPriority = true))
-        }
-        if (minSample != null && minSample != maxSample) {
-            cache.markers.add(toMarker(minSample, isPriority = true))
-        }
-
-        val secondarySamples = mutableListOf<BatterySample>()
-        if (firstSample != maxSample && firstSample != minSample) {
-            secondarySamples.add(firstSample)
-        }
-
-        val bucketCount = 5
-        val timeSpan = (visibleEnd - visibleStart).coerceAtLeast(1L)
-        val bucketDuration = timeSpan / bucketCount
-        for (b in 0 until bucketCount) {
-            val bStart = visibleStart + b * bucketDuration
-            val bEnd = bStart + bucketDuration
-            val bucketSamples = downsampled.filter { it.timestamp in bStart..bEnd }
-            if (bucketSamples.isNotEmpty()) {
-                val peakInBucket = bucketSamples.maxByOrNull { abs(it.powerMw) }
-                if (peakInBucket != null && peakInBucket != maxSample && peakInBucket != minSample && !secondarySamples.contains(peakInBucket)) {
-                    secondarySamples.add(peakInBucket)
-                }
-            }
-        }
-
-        secondarySamples.sortBy { it.timestamp }
-        for (s in secondarySamples) {
-            cache.markers.add(toMarker(s, isPriority = false))
         }
     }
 
@@ -1405,16 +1423,18 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     /**
      * 计算指定排版方位下的文本外接矩形区域。
+     * 支持左侧、上方、右侧、下方、右下方与左下方 6 种排布方位，
+     * 无论何种方位均实施严格的全视窗防溢出边界保护，确保文字绝不被图表边缘截断。
      *
      * @param marker 待绘制的数值标注节点 [CurveMarker]
      * @param textWidth 文本测量物理宽度（像素）
      * @param textHeight 文本测量物理高度（像素）
-     * @param orientation 排版目标方位：0 表示左侧（Left），1 表示上方（Top），2 表示右侧（Right）
+     * @param orientation 排版目标方位：0 表示左侧，1 表示上方，2 表示右侧，3 表示下方，4 表示右下方，5 表示左下方
      * @param contentLeft 图表内容区域左边界 X 坐标（像素）
      * @param contentRight 图表内容区域右边界 X 坐标（像素）
      * @param topBound 图表内容区域上边界 Y 坐标（像素）
      * @param bottomBound 图表内容区域下边界 Y 坐标（像素）
-     * @return 对应排版方位下的文本外接矩形 [RectF]
+     * @return 对应排版方位下严格防溢出的文本外接矩形 [RectF]
      */
     private fun calculateMarkerTextRect(
         marker: CurveMarker,
@@ -1428,32 +1448,56 @@ class BatteryTimelineView @JvmOverloads constructor(
     ): RectF {
         val dotRadius = dp2_5
         val spacing = dp3
-        return when (orientation) {
+        val rawRect = when (orientation) {
             0 -> { // 左侧 (Left)：优先显示在点左侧偏上
                 val right = marker.x - dotRadius - spacing
                 val left = right - textWidth
-                val top = (marker.y - textHeight / 2f - dp1).coerceIn(topBound, bottomBound - textHeight)
+                val top = marker.y - textHeight / 2f - dp1
                 RectF(left, top, right, top + textHeight)
             }
             1 -> { // 上方 (Top)：居中显示在点上方
                 val bottom = marker.y - dotRadius - spacing
                 val top = bottom - textHeight
-                val left = (marker.x - textWidth / 2f).coerceIn(contentLeft, contentRight - textWidth)
+                val left = marker.x - textWidth / 2f
                 RectF(left, top, left + textWidth, bottom)
             }
-            else -> { // 右侧 (Right)：显示在点右侧偏上
+            2 -> { // 右侧 (Right)：显示在点右侧偏上
                 val left = marker.x + dotRadius + spacing
-                val right = (left + textWidth).coerceAtMost(contentRight)
-                val correctedLeft = (right - textWidth).coerceAtLeast(contentLeft)
-                val top = (marker.y - textHeight / 2f - dp1).coerceIn(topBound, bottomBound - textHeight)
-                RectF(correctedLeft, top, correctedLeft + textWidth, top + textHeight)
+                val top = marker.y - textHeight / 2f - dp1
+                RectF(left, top, left + textWidth, top + textHeight)
+            }
+            3 -> { // 下方 (Bottom)：居中显示在点下方
+                val top = marker.y + dotRadius + spacing
+                val left = marker.x - textWidth / 2f
+                RectF(left, top, left + textWidth, top + textHeight)
+            }
+            4 -> { // 右下方 (Right-Bottom)：显示在点右侧偏下（波峰高点最佳排布）
+                val left = marker.x + dotRadius + spacing
+                val top = marker.y + dotRadius + dp1
+                RectF(left, top, left + textWidth, top + textHeight)
+            }
+            else -> { // 左下方 (Left-Bottom)：显示在点左侧偏下
+                val right = marker.x - dotRadius - spacing
+                val left = right - textWidth
+                val top = marker.y + dotRadius + dp1
+                RectF(left, top, right, top + textHeight)
             }
         }
+
+        // 全局严格防溢出钳位：确保文字绝不超出图表有效安全区域
+        val safeLeft = rawRect.left.coerceIn(contentLeft, contentRight - textWidth)
+        val safeTop = rawRect.top.coerceIn(topBound, bottomBound - textHeight)
+        return RectF(safeLeft, safeTop, safeLeft + textWidth, safeTop + textHeight)
     }
 
     /**
      * 智能探测候选节点的最佳排版方位。
-     * 按照“左侧 -> 上方 -> 右侧”优先级进行智能试探：若左侧显示不下则探测上方，若上方显示不下（如峰值顶格）则探测右侧。
+     * 根据节点所处的物理几何空间（是否靠近顶部边界、底部边界、左侧或右侧边界），
+     * 动态自适应调整方位试探序列：
+     * 1. 上方物理空间充足（含波峰高点）：优先在正上方居中悬浮排布（开阔清晰，杜绝压入下方折线丛）；
+     * 2. 贴顶极限受阻节点：在上方确实无法容纳文本时智能避让至右下方、左下方或下方；
+     * 3. 底部波谷低点（如最小待机功耗 0.03W）：优先探测上方与右侧/左侧，杜绝下溢出界；
+     * 4. 边缘节点：自适应向图表内部收敛。
      *
      * @param marker 待绘制的数值标注节点 [CurveMarker]
      * @param textWidth 文本物理宽度（像素）
@@ -1477,18 +1521,37 @@ class BatteryTimelineView @JvmOverloads constructor(
         occupiedRects: List<RectF>,
         checkCollision: Boolean
     ): RectF? {
-        val orientations = listOf(0, 1, 2)
+        val canFitTop = (marker.y - textHeight - dp4 >= topBound)
+        val canFitBottom = (marker.y + textHeight + dp4 <= bottomBound)
+        val isNearLeft = (marker.x - contentLeft) < textWidth
+        val isNearRight = (contentRight - marker.x) < textWidth
+
+        val orientations = when {
+            // 上方物理空间充足（含波峰高点）：上方永远是最佳第一首选，绝不压入下方折线丛
+            canFitTop -> when {
+                !canFitBottom -> when {
+                    isNearLeft -> listOf(1, 2, 0) // 底部波谷偏左：上方 -> 右侧 -> 左侧
+                    isNearRight -> listOf(1, 0, 2) // 底部波谷偏右：上方 -> 左侧 -> 右侧
+                    else -> listOf(1, 2, 0) // 底部波谷居中：上方 -> 右侧 -> 左侧
+                }
+                isNearLeft -> listOf(1, 2, 4, 3) // 偏左：上方 -> 右侧 -> 右下 -> 下方
+                isNearRight -> listOf(1, 0, 5, 3) // 偏右：上方 -> 左侧 -> 左下 -> 下方
+                else -> listOf(1, 2, 0, 4, 5, 3) // 居中波峰：上方 -> 右侧 -> 左侧 -> 右下 -> 左下 -> 下方
+            }
+            // 上方极端贴顶空间不足（如 100% 满充贴顶）：避让上方，探测右下/左下/下方
+            else -> when {
+                isNearLeft -> listOf(4, 2, 3) // 贴顶偏左：右下 -> 右侧 -> 下方
+                isNearRight -> listOf(5, 0, 3) // 贴顶偏右：左下 -> 左侧 -> 下方
+                else -> listOf(4, 5, 3, 2, 0) // 贴顶居中：右下 -> 左下 -> 下方 -> 右侧 -> 左侧
+            }
+        }
+
         for (ori in orientations) {
             val rect = calculateMarkerTextRect(marker, textWidth, textHeight, ori, contentLeft, contentRight, topBound, bottomBound)
-            // 1. 视窗边界检查：确保文字完整落在可视区域内，绝不发生边缘截断
-            val inBounds = when (ori) {
-                0 -> rect.left >= contentLeft && rect.top >= topBound && rect.bottom <= bottomBound
-                1 -> rect.top >= topBound && rect.bottom <= bottomBound && rect.left >= contentLeft && rect.right <= contentRight
-                else -> rect.right <= contentRight && rect.top >= topBound && rect.bottom <= bottomBound
-            }
-            if (!inBounds) continue
+            // 视窗真实避让检查：如果选上方但点本就在顶部且空间不足，则不推荐强制贴顶
+            if (ori == 1 && marker.y - textHeight - dp4 < topBound) continue
+            if (ori == 3 && marker.y + textHeight + dp4 > bottomBound) continue
 
-            // 2. 防视觉叠压碰撞检查
             if (checkCollision) {
                 val collision = occupiedRects.any { occupied ->
                     RectF.intersects(rect, occupied)
@@ -1502,9 +1565,9 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 预计算曲线关键节点的排布坐标与文字基线，并进行智能避让与碰撞检测。
-     * 针对最峰（最高点）与最谷（最低点）赋予绝对高优先级呈现，
-     * 针对每个节点智能探测左/上/右方位，杜绝截断与重叠，并将结果固化到缓存中。
+     * 预计算曲线关键节点的排布坐标与文字基线，并进行多曲线全局避让与防碰撞检测。
+     * 针对最高峰值与最低谷值赋予绝对高优先级排布呈现，
+     * 智能避让已绘制曲线及同曲线的已排布标签，并将排布坐标固化于缓存中。
      *
      * @param cache 目标曲线缓存对象 [CachedCurveData]
      * @param paint 标注文本测量画笔 [Paint]
@@ -1512,6 +1575,7 @@ class BatteryTimelineView @JvmOverloads constructor(
      * @param contentRight 内容区右边缘 X 坐标
      * @param topBound 内容区上边缘 Y 坐标
      * @param bottomBound 内容区下边缘 Y 坐标
+     * @param occupiedRects 跨曲线全局共享的已占用屏幕矩形集合 [MutableList<RectF>]
      */
     private fun layoutSmartMarkers(
         cache: CachedCurveData,
@@ -1519,7 +1583,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         contentLeft: Float,
         contentRight: Float,
         topBound: Float,
-        bottomBound: Float
+        bottomBound: Float,
+        occupiedRects: MutableList<RectF> = mutableListOf()
     ) {
         cache.laidOutMarkers.clear()
         if (cache.markers.isEmpty()) return
@@ -1527,7 +1592,6 @@ class BatteryTimelineView @JvmOverloads constructor(
         paint.textAlign = Paint.Align.LEFT
         val fontMetrics = paint.fontMetrics
         val textHeight = fontMetrics.descent - fontMetrics.ascent
-        val occupiedRects = mutableListOf<RectF>()
 
         // 1. 第一阶段：最峰（Max）与最谷（Min）绝对高优先级排布（绝不被过滤丢弃）
         val priorityMarkers = cache.markers.filter { it.isPriority }
@@ -1536,7 +1600,10 @@ class BatteryTimelineView @JvmOverloads constructor(
             var bestRect = determineBestMarkerRect(m, textWidth, textHeight, contentLeft, contentRight, topBound, bottomBound, occupiedRects, checkCollision = true)
             if (bestRect == null) {
                 bestRect = determineBestMarkerRect(m, textWidth, textHeight, contentLeft, contentRight, topBound, bottomBound, occupiedRects, checkCollision = false)
-                    ?: calculateMarkerTextRect(m, textWidth, textHeight, 1, contentLeft, contentRight, topBound, bottomBound)
+                    ?: run {
+                        val fallbackOri = if (m.y - topBound >= textHeight + dp6) 1 else 3
+                        calculateMarkerTextRect(m, textWidth, textHeight, fallbackOri, contentLeft, contentRight, topBound, bottomBound)
+                    }
             }
 
             val baseline = bestRect.top - fontMetrics.ascent

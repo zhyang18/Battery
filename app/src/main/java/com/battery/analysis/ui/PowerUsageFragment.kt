@@ -783,6 +783,7 @@ class PowerUsageFragment : Fragment() {
             }
         }
         adapter.onMetricsChangedListener = { selectedMetrics ->
+            adapter.updateCachedMetrics(selectedMetrics)
             adapter.overviewHolder?.binding?.batteryTimelineView?.setSelectedMetrics(selectedMetrics)
         }
         adapter.onEnergyClickListener = { anchorView, touchX, touchY ->
@@ -1751,8 +1752,7 @@ class PowerUsageFragment : Fragment() {
         val overview = fullPackage.overviewStats
 
         // 构建并绑定功耗时间轴最新状态（多选模式，优先复用后台异步预构建的 timelineState 避免主线程卡顿）
-        val selectedMetrics = adapter.overviewHolder?.binding?.metricSelectorView?.getSelectedMetrics()
-            ?: com.battery.analysis.timeline.presentation.TimelineMetric.entries.toSet()
+        val selectedMetrics = adapter.getSelectedMetrics(requireContext())
         val baseState = prebuiltTimelineState ?: powerManager.buildTimelineState(fullPackage, isHistoryRecord = isViewingSnapshot)
         val timelineState = baseState.copy(selectedMetrics = selectedMetrics)
         val lastUnplugWh = powerManager.getLastUnplugEnergyWh()

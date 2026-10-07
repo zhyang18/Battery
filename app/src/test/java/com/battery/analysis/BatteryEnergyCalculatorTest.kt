@@ -185,4 +185,36 @@ class BatteryEnergyCalculatorTest {
         val negativeResult = BatteryEnergyCalculator.calculateTotalEnergyWh(-100f)
         org.junit.Assert.assertNull(negativeResult)
     }
+
+    /**
+     * 测试 formatCapacityWithNominalWh 在输入有效容量时，正确格式化输出 mAh 与按标压折算的 Wh 数据。
+     */
+    @Test
+    fun testFormatCapacityWithNominalWhValid() {
+        val result5000 = BatteryEnergyCalculator.formatCapacityWithNominalWh(5000f)
+        assertEquals("5000.0 mAh (19.25 Wh)", result5000)
+
+        val result4920 = BatteryEnergyCalculator.formatCapacityWithNominalWh(4920f)
+        assertEquals("4920.0 mAh (18.94 Wh)", result4920)
+
+        val result4250 = BatteryEnergyCalculator.formatCapacityWithNominalWh(4250f)
+        assertEquals("4250.0 mAh (16.36 Wh)", result4250)
+    }
+
+    /**
+     * 测试 formatCapacityWithNominalWh 在容量为 null 或非正数时的异常边界保护，严格杜绝虚假能量数据。
+     */
+    @Test
+    fun testFormatCapacityWithNominalWhEdgeCases() {
+        // null 输入应如实返回 null
+        val nullResult = BatteryEnergyCalculator.formatCapacityWithNominalWh(null)
+        org.junit.Assert.assertNull(nullResult)
+
+        // 0 输入或负数输入不应捏造正数 Wh
+        val zeroResult = BatteryEnergyCalculator.formatCapacityWithNominalWh(0f)
+        assertEquals("0.0 mAh", zeroResult)
+
+        val negativeResult = BatteryEnergyCalculator.formatCapacityWithNominalWh(-500f)
+        assertEquals("-500.0 mAh", negativeResult)
+    }
 }

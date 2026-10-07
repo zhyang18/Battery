@@ -4,6 +4,7 @@ import android.content.Context
 import com.battery.analysis.R
 import com.battery.analysis.databinding.LayoutBatteryParamItemsBinding
 import com.battery.analysis.model.BatteryInfo
+import com.battery.analysis.util.BatteryEnergyCalculator
 
 /**
  * 电池详细参数视图绑定辅助工具类。
@@ -56,9 +57,9 @@ object BatteryParamViewBinder {
         binding.tvValPower.text = info.powerWatts?.let {
             if (it > 0f) String.format("+%.2f W", it) else String.format("%.2f W", it)
         } ?: unknownText
-        binding.tvValDesignCapacity.text = info.designCapacity?.let { String.format("%.1f mAh", it) } ?: unknownText
-        binding.tvValFullCapacity.text = info.fullChargeCapacity?.let { String.format("%.1f mAh", it) } ?: unknownText
-        binding.tvValCurrentCapacity.text = info.currentCapacity?.let { String.format("%.1f mAh", it) } ?: unknownText
+        binding.tvValDesignCapacity.text = BatteryEnergyCalculator.formatCapacityWithNominalWh(info.designCapacity) ?: unknownText
+        binding.tvValFullCapacity.text = BatteryEnergyCalculator.formatCapacityWithNominalWh(info.fullChargeCapacity) ?: unknownText
+        binding.tvValCurrentCapacity.text = BatteryEnergyCalculator.formatCapacityWithNominalWh(info.currentCapacity) ?: unknownText
         binding.tvValDualCell.text = info.isDualCell?.let {
             if (it) context.getString(R.string.yes) else context.getString(R.string.no)
         } ?: unknownText

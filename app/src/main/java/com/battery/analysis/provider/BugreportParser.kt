@@ -6,6 +6,7 @@ import android.util.Log
 import com.battery.analysis.model.BatteryInfo
 import com.battery.analysis.model.BugreportResult
 import com.battery.analysis.model.HealthInfoItem
+import com.battery.analysis.util.BatteryEnergyCalculator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -516,28 +517,28 @@ class BugreportParser {
 
         val designVal = batteryFullChargeDesign
         val designDisplay = if (designVal != null) {
-            val mah = if (designVal < 100000L) designVal else designVal / 1000L
-            "$mah mAh"
+            val mah = if (designVal < 100000L) designVal.toFloat() else designVal / 1000f
+            BatteryEnergyCalculator.formatCapacityWithNominalWh(mah) ?: "未知"
         } else "未知"
         tableItems.add(HealthInfoItem("🔋 设计容量", designDisplay, "出厂设计容量"))
 
         val fccVal = batteryFullCharge
         val fccDisplay = if (fccVal != null) {
-            val mah = if (fccVal < 100000L) fccVal else fccVal / 1000L
-            "$mah mAh"
+            val mah = if (fccVal < 100000L) fccVal.toFloat() else fccVal / 1000f
+            BatteryEnergyCalculator.formatCapacityWithNominalWh(mah) ?: "未知"
         } else "未知"
         tableItems.add(HealthInfoItem("🔋 充满容量", fccDisplay, "电量计估算 FCC"))
 
         val chargeVal = batteryChargeCounter
         val chargeDisplay = when {
             chargeVal != null -> {
-                val mah = if (chargeVal >= 100000L) chargeVal / 1000L else chargeVal
-                "$mah mAh"
+                val mah = if (chargeVal >= 100000L) chargeVal / 1000f else chargeVal.toFloat()
+                BatteryEnergyCalculator.formatCapacityWithNominalWh(mah) ?: "未知"
             }
             fccVal != null && levelVal != null -> {
-                val fMah = if (fccVal < 100000L) fccVal else fccVal / 1000L
-                val mah = (fMah * levelVal) / 100L
-                "$mah mAh"
+                val fMah = if (fccVal < 100000L) fccVal.toFloat() else fccVal / 1000f
+                val mah = (fMah * levelVal) / 100f
+                BatteryEnergyCalculator.formatCapacityWithNominalWh(mah) ?: "未知"
             }
             else -> "未知"
         }

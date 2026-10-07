@@ -241,7 +241,7 @@
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="13sp"
                 android:textStyle="bold"
-                tools:text="5000.0 mAh" />
+                tools:text="5000.0 mAh (19.25 Wh)" />
         </LinearLayout>
         <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#14888888" />
 
@@ -264,7 +264,7 @@
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="13sp"
                 android:textStyle="bold"
-                tools:text="4920.0 mAh" />
+                tools:text="4920.0 mAh (18.94 Wh)" />
         </LinearLayout>
         <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#14888888" />
 
@@ -287,7 +287,7 @@
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="13sp"
                 android:textStyle="bold"
-                tools:text="4250.0 mAh" />
+                tools:text="4250.0 mAh (16.36 Wh)" />
         </LinearLayout>
         <View android:layout_width="match_parent" android:layout_height="1dp" android:background="#14888888" />
 

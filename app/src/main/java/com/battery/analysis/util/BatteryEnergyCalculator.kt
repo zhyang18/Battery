@@ -128,6 +128,32 @@ object BatteryEnergyCalculator {
             append("锂电池物理放电能量由端电压与电荷量积分所得。行业通常基于标准标称电压(${safeNominalVoltage}V)将实际物理能量折算为等效电量；实际放电过程中电池端电压通常随负载与剩余电量在 3.6V~4.4V 之间动态变化。")
         }
     }
+
+    /**
+     * 格式化电池容量（单位：mAh），并在其后附加按标准标称工作电压折算得到的能量数据（单位：Wh）。
+     * 折算公式：能量(Wh) = (容量(mAh) * V_nominal) / 1000。
+     * 若容量有效（大于 0），格式化为 "%.1f mAh (%.2f Wh)"；
+     * 若容量存在但非正数，仅格式化为 "%.1f mAh"；
+     * 若容量缺失（为 null），返回 null（忠实反映系统真实数据，严禁伪造假数据）。
+     *
+     * @param capacityMah 电池容量数值（单位：mAh），若缺失传入 null
+     * @param nominalVoltageVolts 电池标称工作电压（单位：V，默认采用 [DEFAULT_NOMINAL_VOLTAGE_VOLTS] 即 3.85V）
+     * @return 格式化后的容量与能量字符串（如 "5000.0 mAh (19.25 Wh)"），或在数据缺失时返回 null
+     */
+    fun formatCapacityWithNominalWh(
+        capacityMah: Float?,
+        nominalVoltageVolts: Float = DEFAULT_NOMINAL_VOLTAGE_VOLTS
+    ): String? {
+        if (capacityMah == null) {
+            return null
+        }
+        val totalWh = calculateTotalEnergyWh(capacityMah, nominalVoltageVolts)
+        return if (totalWh != null) {
+            String.format(Locale.getDefault(), "%.1f mAh (%.2f Wh)", capacityMah, totalWh)
+        } else {
+            String.format(Locale.getDefault(), "%.1f mAh", capacityMah)
+        }
+    }
 }
 
 

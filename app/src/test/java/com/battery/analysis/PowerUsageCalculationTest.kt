@@ -5291,6 +5291,80 @@ class PowerUsageCalculationTest {
         assertTrue("包含折算后的精确 mAh", totalMessage.contains("2292.2 mAh"))
         assertTrue("包含四舍五入等效整数 mAh", totalMessage.contains("≈ 2292mAh"))
     }
+
+    /**
+     * 验证在长周期息屏放电场景下，当 dumpsys 局部估算模型漏算（如 649.8mAh）但系统记录了真实息屏掉电百分比（如 14%）时，
+     * 解析器能够自动采纳系统底层真实掉电量，消除长周期累积漏算导致的息屏能量统计偏低问题。
+     */
+    @Test
+    fun testShizukuScreenOffDrainCalibratedByDischargedAmountLongTerm() {
+        val rawDumpsysText = """
+            Battery History (0% used, 192KB used of 1024KB, 0 strings using 0):
+            RESET:TIME: 2026-10-06-12-00-00
+            TIME: 2026-10-06-12-00-00
+            0 (1) 100 -plugged
+            16h40m00s000ms (1) 051
+            
+            Statistics since last charge:
+              System starts: 0, currently on battery: true
+              Time on battery: 16h 40m 0s 0ms (100.0%) realtime, 16h 40m 0s 0ms (100.0%) uptime
+              Total run time: 16h 40m 0s 0ms realtime, 16h 40m 0s 0ms uptime
+              Screen on: 5h 33m 0s 0ms (33.3%) 1x, Screen off: 11h 7m 0s 0ms (66.7%)
+              Screen off discharge: 649.8 mAh
+              Amount discharged while screen on: 35
+              Amount discharged while screen off: 14
+              
+            Estimated power use (mAh):
+              Capacity: 8000, Computed drain: 3920, actual drain: 3920
+              Screen: 1500.0
+              Idle: 200.0
+        """.trimIndent()
+
+        val parsed = com.battery.analysis.provider.ShizukuBatteryStatsParser.parseDischargeSummaryFromText(
+            rawText = rawDumpsysText,
+            unplugTime = 0L
+        )
+
+        // 验证：
+        // 1. 息屏时长准确解析为 11h 07m
+        assertEquals("息屏时长准确解析为 11h07m", 11L * 3600_000L + 7L * 60_000L, parsed.screenOffDurationMs)
+        // 2. 息屏放电量成功结合 Amount discharged while screen off (14%) 与 8000mAh 容量校准为 1120mAh
+        // 彻底解决只取 649.8mAh 导致的 470.2mAh (约 1.8Wh) 严重偏低与断层丢失
+        assertEquals("息屏放电量成功校准为系统真实放电量 1120mAh", 1120f, parsed.screenOffDrainMah, 0.1f)
+    }
+
+    /**
+     * 验证在短时间息屏（如 15 秒）场景下，若系统恰好发生 1% 掉电阶跃，
+     * 物理防尖峰合理性门禁生效，绝不采纳该 1% 阶跃作为息屏放电量，杜绝待机功耗虚高爆表。
+     */
+    @Test
+    fun testShizukuScreenOffDrainPreservesShortPeriodAntiQuantizationSpikeProtection() {
+        val rawDumpsysText = """
+            Battery History:
+            RESET:TIME: 2026-10-06-12-00-00
+            0 (1) 100 -plugged
+            15s000ms (1) 099
+            
+            Statistics since last charge:
+              Time on battery: 15s 0ms (100.0%) realtime, 15s 0ms (100.0%) uptime
+              Screen on: 0s 0ms (0.0%), Screen off: 15s 0ms (100.0%)
+              Screen off discharge: 2.5 mAh
+              Amount discharged while screen off: 1
+              
+            Estimated power use (mAh):
+              Capacity: 5000, Computed drain: 50, actual drain: 50
+        """.trimIndent()
+
+        val parsed = com.battery.analysis.provider.ShizukuBatteryStatsParser.parseDischargeSummaryFromText(
+            rawText = rawDumpsysText,
+            unplugTime = 0L
+        )
+
+        // 验证：
+        // 短期 15 秒息屏触发防尖峰保护（1% * 5000mAh = 50mAh，若采纳等效功率高达 48W），
+        // 坚守 2.5mAh 真实模型值，杜绝量化尖峰
+        assertEquals("短期 15 秒息屏坚守模型放电量 2.5mAh，绝不上涨至 50mAh 尖峰", 2.5f, parsed.screenOffDrainMah, 0.1f)
+    }
 }
 
 

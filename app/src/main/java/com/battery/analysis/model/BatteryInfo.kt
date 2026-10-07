@@ -1,5 +1,7 @@
 package com.battery.analysis.model
 
+import com.battery.analysis.util.BatteryEnergyCalculator
+
 /**
  * 电池信息数据实体类。
  * 用于存储从不同渠道获取或融合后的电池状态数据，涵盖电量、健康度、电压、电流等各项运行与设计参数。
@@ -103,9 +105,9 @@ data class BatteryInfo(
             电流: ${currentNow?.let { if (it > 0f) String.format("+%.0f mA", it) else String.format("%.0f mA", it) } ?: "未知"}
             双电芯: ${isDualCell?.let { if (it) "是" else "否" } ?: "否"}
             电池功率: ${powerWatts?.let { if (it > 0f) String.format("+%.2f W", it) else String.format("%.2f W", it) } ?: "未知"}
-            设计容量: ${designCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
-            充满容量: ${fullChargeCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
-            当前容量: ${currentCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
+            设计容量: ${BatteryEnergyCalculator.formatCapacityWithNominalWh(designCapacity) ?: "未知"}
+            充满容量: ${BatteryEnergyCalculator.formatCapacityWithNominalWh(fullChargeCapacity) ?: "未知"}
+            当前容量: ${BatteryEnergyCalculator.formatCapacityWithNominalWh(currentCapacity) ?: "未知"}
             电池技术: ${technology ?: "未知"}
         """.trimIndent()
     }
@@ -128,9 +130,9 @@ data class BatteryInfo(
             ${currentNow?.let { if (it > 0f) String.format("+%.0f mA", it) else String.format("%.0f mA", it) } ?: "未知"}
             ${isDualCell?.let { if (it) "是" else "否" } ?: "否"}
             ${powerWatts?.let { if (it > 0f) String.format("+%.2f W", it) else String.format("%.2f W", it) } ?: "未知"}
-            ${designCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
-            ${fullChargeCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
-            ${currentCapacity?.let { String.format("%.1f mAh", it) } ?: "未知"}
+            ${BatteryEnergyCalculator.formatCapacityWithNominalWh(designCapacity) ?: "未知"}
+            ${BatteryEnergyCalculator.formatCapacityWithNominalWh(fullChargeCapacity) ?: "未知"}
+            ${BatteryEnergyCalculator.formatCapacityWithNominalWh(currentCapacity) ?: "未知"}
             ${technology ?: "未知"}
         """.trimIndent()
     }

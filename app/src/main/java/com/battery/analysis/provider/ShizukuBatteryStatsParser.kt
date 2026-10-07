@@ -227,168 +227,26 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         enableBackgroundStats: Boolean = false
     ): BatteryStatsResult {
         val pm = context.packageManager
-        var capacityMah = 4500f
-        var computedDrainMah = 0f
-        var screenDrainMah = 0f
-        var cellularDrainMah = 0f
-        var wifiDrainMah = 0f
-        var bluetoothDrainMah = 0f
-        var idleDrainMah = 0f
-        var dischargeDurationMs = 0L
-        var screenOnDurationMs = 0L
-
-        // 1. 匹配整机容量与放电量
-        val capMatcher = REGEX_CAP_DRAIN.matcher(rawText)
-        if (capMatcher.find()) {
-            capacityMah = capMatcher.group(1)?.toFloatOrNull() ?: capacityMah
-            computedDrainMah = capMatcher.group(2)?.toFloatOrNull() ?: 0f
-        } else {
-            val compAloneMatcher = REGEX_COMPUTED_DRAIN_ALONE.matcher(rawText)
-            if (compAloneMatcher.find()) {
-                computedDrainMah = compAloneMatcher.group(1)?.toFloatOrNull() ?: 0f
-            }
-        }
-
-        // 2. 匹配自断电以来的总放电耗时
-        val timeMatcher = REGEX_TIME_ON_BATTERY.matcher(rawText)
-        if (timeMatcher.find()) {
-            val timeStr = timeMatcher.group(1) ?: ""
-            dischargeDurationMs = parseDurationStringToMs(timeStr)
-        }
-        if (dischargeDurationMs <= 0L) {
-            val disMatcher = REGEX_DISCHARGE_TIME.matcher(rawText)
-            if (disMatcher.find()) {
-                val timeStr = disMatcher.group(1) ?: ""
-                dischargeDurationMs = parseDurationStringToMs(timeStr)
-            }
-        }
-        if (dischargeDurationMs <= 0L) {
-            dischargeDurationMs = android.os.SystemClock.elapsedRealtime()
-        }
+        val summary = parseDischargeSummaryFromText(rawText, unplugTime)
+        var capacityMah = summary.capacityMah
+        var computedDrainMah = summary.computedDrainMah
+        var screenDrainMah = summary.screenDrainMah
+        var cellularDrainMah = summary.cellularDrainMah
+        var wifiDrainMah = summary.wifiDrainMah
+        var bluetoothDrainMah = summary.bluetoothDrainMah
+        var idleDrainMah = summary.idleDrainMah
+        var dischargeDurationMs = summary.dischargeDurationMs
+        var screenOnDurationMs = summary.screenOnDurationMs
+        val screenOffDurationMs = summary.screenOffDurationMs
+        val screenOffAwakeDurationMs = summary.screenOffAwakeDurationMs
+        val screenOffDeepSleepDurationMs = summary.screenOffDeepSleepDurationMs
+        val screenOffDrainMah = summary.screenOffDrainMah
+        val screenOffAwakeDrainMah = summary.screenOffAwakeDrainMah
+        val screenOffDeepSleepDrainMah = summary.screenOffDeepSleepDrainMah
 
         val now = System.currentTimeMillis()
         val elapsedSinceUnplug = if (unplugTime > 0L) (now - unplugTime).coerceAtLeast(1000L) else 0L
         val isHistoricalDumpsys = unplugTime > 0L && dischargeDurationMs > (elapsedSinceUnplug + 10000L)
-        if (unplugTime > 0L && dischargeDurationMs > elapsedSinceUnplug) {
-            dischargeDurationMs = elapsedSinceUnplug
-        }
-
-        // 3. 匹配自断电以来的真实亮屏时长与真实息屏时长
-        val screenMatcher = REGEX_SCREEN_ON.matcher(rawText)
-        if (screenMatcher.find()) {
-            val screenStr = screenMatcher.group(1) ?: ""
-            screenOnDurationMs = parseDurationStringToMs(screenStr)
-        }
-
-        var screenOffDurationMs = 0L
-        var screenOffAwakeDurationMs = 0L
-        var screenOffDeepSleepDurationMs = 0L
-        var screenOffDrainMah = 0f
-        var screenOffAwakeDrainMah = 0f
-        var screenOffDeepSleepDrainMah = 0f
-
-        val realtimeUptimeMatcher = REGEX_SCREEN_OFF_REALTIME_UPTIME.matcher(rawText)
-        if (realtimeUptimeMatcher.find()) {
-            val realtimeStr = realtimeUptimeMatcher.group(1)?.trim() ?: ""
-            val uptimeStr = realtimeUptimeMatcher.group(2)?.trim() ?: ""
-            screenOffDurationMs = parseDurationStringToMs(realtimeStr)
-            screenOffAwakeDurationMs = parseDurationStringToMs(uptimeStr)
-            screenOffDeepSleepDurationMs = (screenOffDurationMs - screenOffAwakeDurationMs).coerceAtLeast(0L)
-        } else {
-            val screenOffMatcher = REGEX_SCREEN_OFF_TIME.matcher(rawText)
-            if (screenOffMatcher.find()) {
-                val screenOffStr = screenOffMatcher.group(1) ?: ""
-                screenOffDurationMs = parseDurationStringToMs(screenOffStr)
-            }
-        }
-
-        if (screenOffAwakeDurationMs <= 0L) {
-            val awakeMatcher = REGEX_SCREEN_OFF_AWAKE_ALONE.matcher(rawText)
-            if (awakeMatcher.find()) {
-                screenOffAwakeDurationMs = parseDurationStringToMs(awakeMatcher.group(1) ?: "")
-            }
-        }
-        if (screenOffDeepSleepDurationMs <= 0L) {
-            val sleepMatcher = REGEX_SCREEN_OFF_SLEEPING_ALONE.matcher(rawText)
-            if (sleepMatcher.find()) {
-                screenOffDeepSleepDurationMs = parseDurationStringToMs(sleepMatcher.group(1) ?: "")
-            }
-        }
-        if (screenOffDurationMs <= 0L) {
-            val simpleOffMatcher = REGEX_SCREEN_OFF_SIMPLE.matcher(rawText)
-            if (simpleOffMatcher.find()) {
-                val screenOffStr = simpleOffMatcher.group(1) ?: ""
-                screenOffDurationMs = parseDurationStringToMs(screenOffStr)
-            }
-        }
-        if (screenOffDurationMs <= 0L && dischargeDurationMs > screenOnDurationMs) {
-            screenOffDurationMs = (dischargeDurationMs - screenOnDurationMs).coerceAtLeast(0L)
-        }
-        if (screenOffDurationMs > 0L && screenOffDeepSleepDurationMs <= 0L && screenOffAwakeDurationMs > 0L) {
-            screenOffDeepSleepDurationMs = (screenOffDurationMs - screenOffAwakeDurationMs).coerceAtLeast(0L)
-        }
-
-        // 匹配系统底层真实息屏放电量 (mAh)
-        val offDrainMatcher = REGEX_SCREEN_OFF_DISCHARGE_MAH.matcher(rawText)
-        if (offDrainMatcher.find()) {
-            screenOffDrainMah = offDrainMatcher.group(1)?.toFloatOrNull() ?: 0f
-        }
-        // 遵循物理真实性原则：严禁使用粗粒度整数掉电百分比（Amount discharged while screen off: \d+）反推息屏放电量，
-        // 杜绝将系统粗粒度整数阶跃伪造为精确毫安时而导致息屏能量与功耗严重失真。
-        val idleMatcher = REGEX_IDLE_DRAIN.matcher(rawText)
-        val rawIdleDrain = if (idleMatcher.find()) {
-            idleMatcher.group(1)?.toFloatOrNull() ?: 0f
-        } else {
-            0f
-        }
-        if (rawIdleDrain > 0f) {
-            idleDrainMah = rawIdleDrain
-        }
-        if (screenOffDrainMah <= 0f && rawIdleDrain > 0f) {
-            screenOffDrainMah = rawIdleDrain
-        }
-        val rawCellMatcher = REGEX_CELLULAR_DRAIN.matcher(rawText)
-        if (rawCellMatcher.find()) {
-            cellularDrainMah = rawCellMatcher.group(1)?.toFloatOrNull() ?: 0f
-        }
-        val rawWifiMatcher = REGEX_WIFI_DRAIN.matcher(rawText)
-        if (rawWifiMatcher.find()) {
-            wifiDrainMah = rawWifiMatcher.group(1)?.toFloatOrNull() ?: 0f
-        }
-        val rawBtMatcher = REGEX_BLUETOOTH_DRAIN.matcher(rawText)
-        if (rawBtMatcher.find()) {
-            bluetoothDrainMah = rawBtMatcher.group(1)?.toFloatOrNull() ?: 0f
-        }
-        val totalOffMs = if (screenOffDurationMs > 0L) {
-            screenOffDurationMs
-        } else {
-            screenOffDeepSleepDurationMs + screenOffAwakeDurationMs
-        }
-        if (screenOffDrainMah > 0f && totalOffMs > 0L) {
-            val deepSleepHours = screenOffDeepSleepDurationMs / 3600000f
-            val impliedIdleWatts = if (deepSleepHours > 0f) (rawIdleDrain * 3.85f / 1000f) / deepSleepHours else 0f
-            val isIdlePlausible = rawIdleDrain > 0f && (screenOffDeepSleepDurationMs < 60_000L || impliedIdleWatts >= 0.015f)
-
-            if (isIdlePlausible) {
-                // 优先采信系统内核根据 PowerProfile 统计且通过物理合理性门禁的底层纯待机放电量（Idle / Device standby）
-                screenOffDeepSleepDrainMah = rawIdleDrain.coerceAtMost(screenOffDrainMah)
-                screenOffAwakeDrainMah = (screenOffDrainMah - screenOffDeepSleepDrainMah).coerceAtLeast(0f)
-            } else if (screenOffDeepSleepDurationMs <= 0L && screenOffAwakeDurationMs > 0L) {
-                // 全程无深度休眠，全部息屏放电量归属唤醒
-                screenOffAwakeDrainMah = screenOffDrainMah
-                screenOffDeepSleepDrainMah = 0f
-            } else if (screenOffAwakeDurationMs <= 0L && screenOffDeepSleepDurationMs > 0L) {
-                // 全程无息屏唤醒，全部息屏放电量归属休眠
-                screenOffDeepSleepDrainMah = screenOffDrainMah
-                screenOffAwakeDrainMah = 0f
-            } else {
-                // 底层 dumpsys 未上报独立待机电量或数值严重失真（低于静态底噪极限），且同时存在唤醒与休眠时长时，如实保持未获取，绝不私自捏造经验比例
-                screenOffDeepSleepDrainMah = 0f
-                screenOffAwakeDrainMah = 0f
-            }
-        } else if (rawIdleDrain > 0f) {
-            screenOffDeepSleepDrainMah = rawIdleDrain
-        }
 
         // 4. 逐行提取 Estimated power use 中的各 Uid 耗电及 Battery History 真实电量轨迹点序列
         val parsedAppMap = mutableMapOf<String, AppPowerUsageItem>()
@@ -2016,6 +1874,243 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
         /** 手机息屏待机状态下的典型底座基础功率（单位：W），客观反映基带待机与系统基础唤醒保活底噪 */
         const val DEFAULT_STANDBY_BASE_WATTS = 0.15f
+
+        /**
+         * dumpsys batterystats 原始文本中放电时序与能量消耗宏观概要的数据实体类。
+         *
+         * @property capacityMah 电池满电/设计容量（毫安时 mAh）
+         * @property computedDrainMah 系统计算得到的总放电量（毫安时 mAh）
+         * @property dischargeDurationMs 自断开充电以来的真实放电总时长（毫秒 ms）
+         * @property screenOnDurationMs 自断开充电以来的真实亮屏时长（毫秒 ms）
+         * @property screenOffDurationMs 自断开充电以来的真实息屏时长（毫秒 ms）
+         * @property screenOffAwakeDurationMs 息屏期间处于唤醒状态的时长（毫秒 ms）
+         * @property screenOffDeepSleepDurationMs 息屏期间处于深度睡眠状态的时长（毫秒 ms）
+         * @property screenOffDrainMah 自断开充电以来的真实息屏放电量（毫安时 mAh）
+         * @property screenOffAwakeDrainMah 息屏唤醒期间放电量（毫安时 mAh）
+         * @property screenOffDeepSleepDrainMah 息屏深度睡眠期间放电量（毫安时 mAh）
+         * @property idleDrainMah 纯待机/空闲底噪放电量（毫安时 mAh）
+         * @property cellularDrainMah 蜂窝网络放电量（毫安时 mAh）
+         * @property wifiDrainMah Wi-Fi 放电量（毫安时 mAh）
+         * @property bluetoothDrainMah 蓝牙放电量（毫安时 mAh）
+         * @property screenDrainMah 屏幕硬件放电量（毫安时 mAh）
+         */
+        data class DischargeSummary(
+            val capacityMah: Float,
+            val computedDrainMah: Float,
+            val dischargeDurationMs: Long,
+            val screenOnDurationMs: Long,
+            val screenOffDurationMs: Long,
+            val screenOffAwakeDurationMs: Long,
+            val screenOffDeepSleepDurationMs: Long,
+            val screenOffDrainMah: Float,
+            val screenOffAwakeDrainMah: Float,
+            val screenOffDeepSleepDrainMah: Float,
+            val idleDrainMah: Float,
+            val cellularDrainMah: Float,
+            val wifiDrainMah: Float,
+            val bluetoothDrainMah: Float,
+            val screenDrainMah: Float
+        )
+
+        /**
+         * 从 dumpsys batterystats 原始文本中提取放电宏观时序与能量消耗概要信息（纯文本解析，不依赖 Android Context）。
+         *
+         * @param rawText dumpsys batterystats 原始文本
+         * @param unplugTime 断开外部电源时间戳（毫秒 ms，默认 0L）
+         * @return 宏观时序与能量消耗概要解析结果 [DischargeSummary]
+         */
+        fun parseDischargeSummaryFromText(
+            rawText: String,
+            unplugTime: Long = 0L
+        ): DischargeSummary {
+            var capacityMah = 4500f
+            var computedDrainMah = 0f
+            var screenDrainMah = 0f
+            var cellularDrainMah = 0f
+            var wifiDrainMah = 0f
+            var bluetoothDrainMah = 0f
+            var idleDrainMah = 0f
+            var dischargeDurationMs = 0L
+            var screenOnDurationMs = 0L
+
+            // 1. 匹配整机容量与放电量
+            val capMatcher = REGEX_CAP_DRAIN.matcher(rawText)
+            if (capMatcher.find()) {
+                capacityMah = capMatcher.group(1)?.toFloatOrNull() ?: capacityMah
+                computedDrainMah = capMatcher.group(2)?.toFloatOrNull() ?: 0f
+            } else {
+                val compAloneMatcher = REGEX_COMPUTED_DRAIN_ALONE.matcher(rawText)
+                if (compAloneMatcher.find()) {
+                    computedDrainMah = compAloneMatcher.group(1)?.toFloatOrNull() ?: 0f
+                }
+            }
+
+            // 2. 匹配自断电以来的总放电耗时
+            val timeMatcher = REGEX_TIME_ON_BATTERY.matcher(rawText)
+            if (timeMatcher.find()) {
+                val timeStr = timeMatcher.group(1) ?: ""
+                dischargeDurationMs = parseDurationStringToMs(timeStr)
+            }
+            if (dischargeDurationMs <= 0L) {
+                val disMatcher = REGEX_DISCHARGE_TIME.matcher(rawText)
+                if (disMatcher.find()) {
+                    val timeStr = disMatcher.group(1) ?: ""
+                    dischargeDurationMs = parseDurationStringToMs(timeStr)
+                }
+            }
+
+            val now = System.currentTimeMillis()
+            val elapsedSinceUnplug = if (unplugTime > 0L) (now - unplugTime).coerceAtLeast(1000L) else 0L
+            if (unplugTime > 0L && dischargeDurationMs > elapsedSinceUnplug) {
+                dischargeDurationMs = elapsedSinceUnplug
+            }
+
+            // 3. 匹配自断电以来的真实亮屏时长与真实息屏时长
+            val screenMatcher = REGEX_SCREEN_ON.matcher(rawText)
+            if (screenMatcher.find()) {
+                val screenStr = screenMatcher.group(1) ?: ""
+                screenOnDurationMs = parseDurationStringToMs(screenStr)
+            }
+
+            var screenOffDurationMs = 0L
+            var screenOffAwakeDurationMs = 0L
+            var screenOffDeepSleepDurationMs = 0L
+            var screenOffDrainMah = 0f
+            var screenOffAwakeDrainMah = 0f
+            var screenOffDeepSleepDrainMah = 0f
+
+            val realtimeUptimeMatcher = REGEX_SCREEN_OFF_REALTIME_UPTIME.matcher(rawText)
+            if (realtimeUptimeMatcher.find()) {
+                val realtimeStr = realtimeUptimeMatcher.group(1)?.trim() ?: ""
+                val uptimeStr = realtimeUptimeMatcher.group(2)?.trim() ?: ""
+                screenOffDurationMs = parseDurationStringToMs(realtimeStr)
+                screenOffAwakeDurationMs = parseDurationStringToMs(uptimeStr)
+                screenOffDeepSleepDurationMs = (screenOffDurationMs - screenOffAwakeDurationMs).coerceAtLeast(0L)
+            } else {
+                val screenOffMatcher = REGEX_SCREEN_OFF_TIME.matcher(rawText)
+                if (screenOffMatcher.find()) {
+                    val screenOffStr = screenOffMatcher.group(1) ?: ""
+                    screenOffDurationMs = parseDurationStringToMs(screenOffStr)
+                }
+            }
+
+            if (screenOffAwakeDurationMs <= 0L) {
+                val awakeMatcher = REGEX_SCREEN_OFF_AWAKE_ALONE.matcher(rawText)
+                if (awakeMatcher.find()) {
+                    screenOffAwakeDurationMs = parseDurationStringToMs(awakeMatcher.group(1) ?: "")
+                }
+            }
+            if (screenOffDeepSleepDurationMs <= 0L) {
+                val sleepMatcher = REGEX_SCREEN_OFF_SLEEPING_ALONE.matcher(rawText)
+                if (sleepMatcher.find()) {
+                    screenOffDeepSleepDurationMs = parseDurationStringToMs(sleepMatcher.group(1) ?: "")
+                }
+            }
+            if (screenOffDurationMs <= 0L) {
+                val simpleOffMatcher = REGEX_SCREEN_OFF_SIMPLE.matcher(rawText)
+                if (simpleOffMatcher.find()) {
+                    val screenOffStr = simpleOffMatcher.group(1) ?: ""
+                    screenOffDurationMs = parseDurationStringToMs(screenOffStr)
+                }
+            }
+            if (screenOffDurationMs <= 0L && dischargeDurationMs > screenOnDurationMs) {
+                screenOffDurationMs = (dischargeDurationMs - screenOnDurationMs).coerceAtLeast(0L)
+            }
+            if (screenOffDurationMs > 0L && screenOffDeepSleepDurationMs <= 0L && screenOffAwakeDurationMs > 0L) {
+                screenOffDeepSleepDurationMs = (screenOffDurationMs - screenOffAwakeDurationMs).coerceAtLeast(0L)
+            }
+
+            // 匹配系统底层真实息屏放电量 (mAh)
+            val offDrainMatcher = REGEX_SCREEN_OFF_DISCHARGE_MAH.matcher(rawText)
+            if (offDrainMatcher.find()) {
+                screenOffDrainMah = offDrainMatcher.group(1)?.toFloatOrNull() ?: 0f
+            }
+
+            val totalOffMs = if (screenOffDurationMs > 0L) {
+                screenOffDurationMs
+            } else {
+                screenOffDeepSleepDurationMs + screenOffAwakeDurationMs
+            }
+
+            // 结合系统底层真实掉电百分比进行多源物理校准（Amount discharged while screen off: \d+）：
+            val offAmountMatcher = REGEX_SCREEN_OFF_DISCHARGE_AMOUNT.matcher(rawText)
+            if (offAmountMatcher.find()) {
+                val offPercent = offAmountMatcher.group(1)?.toIntOrNull() ?: 0
+                if (offPercent > 0 && capacityMah > 0f) {
+                    val percentDrainMah = (offPercent / 100f) * capacityMah
+                    val offHours = totalOffMs / 3600_000f
+                    val impliedWatts = if (offHours > 0f) (percentDrainMah * 3.85f / 1000f) / offHours else 0f
+                    val isPlausibleDischarge = (impliedWatts in 0.015f..2.5f) || (offHours >= 0.25f && impliedWatts <= 3.0f)
+                    if (isPlausibleDischarge && percentDrainMah > screenOffDrainMah) {
+                        screenOffDrainMah = percentDrainMah
+                    }
+                }
+            }
+
+            val idleMatcher = REGEX_IDLE_DRAIN.matcher(rawText)
+            val rawIdleDrain = if (idleMatcher.find()) {
+                idleMatcher.group(1)?.toFloatOrNull() ?: 0f
+            } else {
+                0f
+            }
+            if (rawIdleDrain > 0f) {
+                idleDrainMah = rawIdleDrain
+            }
+            if (screenOffDrainMah <= 0f && rawIdleDrain > 0f) {
+                screenOffDrainMah = rawIdleDrain
+            }
+            val rawCellMatcher = REGEX_CELLULAR_DRAIN.matcher(rawText)
+            if (rawCellMatcher.find()) {
+                cellularDrainMah = rawCellMatcher.group(1)?.toFloatOrNull() ?: 0f
+            }
+            val rawWifiMatcher = REGEX_WIFI_DRAIN.matcher(rawText)
+            if (rawWifiMatcher.find()) {
+                wifiDrainMah = rawWifiMatcher.group(1)?.toFloatOrNull() ?: 0f
+            }
+            val rawBtMatcher = REGEX_BLUETOOTH_DRAIN.matcher(rawText)
+            if (rawBtMatcher.find()) {
+                bluetoothDrainMah = rawBtMatcher.group(1)?.toFloatOrNull() ?: 0f
+            }
+            if (screenOffDrainMah > 0f && totalOffMs > 0L) {
+                val deepSleepHours = screenOffDeepSleepDurationMs / 3600000f
+                val impliedIdleWatts = if (deepSleepHours > 0f) (rawIdleDrain * 3.85f / 1000f) / deepSleepHours else 0f
+                val isIdlePlausible = rawIdleDrain > 0f && (screenOffDeepSleepDurationMs < 60_000L || impliedIdleWatts >= 0.015f)
+
+                if (isIdlePlausible) {
+                    screenOffDeepSleepDrainMah = rawIdleDrain.coerceAtMost(screenOffDrainMah)
+                    screenOffAwakeDrainMah = (screenOffDrainMah - screenOffDeepSleepDrainMah).coerceAtLeast(0f)
+                } else if (screenOffDeepSleepDurationMs <= 0L && screenOffAwakeDurationMs > 0L) {
+                    screenOffAwakeDrainMah = screenOffDrainMah
+                    screenOffDeepSleepDrainMah = 0f
+                } else if (screenOffAwakeDurationMs <= 0L && screenOffDeepSleepDurationMs > 0L) {
+                    screenOffDeepSleepDrainMah = screenOffDrainMah
+                    screenOffAwakeDrainMah = 0f
+                } else {
+                    screenOffDeepSleepDrainMah = 0f
+                    screenOffAwakeDrainMah = 0f
+                }
+            } else if (rawIdleDrain > 0f) {
+                screenOffDeepSleepDrainMah = rawIdleDrain
+            }
+
+            return DischargeSummary(
+                capacityMah = capacityMah,
+                computedDrainMah = computedDrainMah,
+                dischargeDurationMs = dischargeDurationMs,
+                screenOnDurationMs = screenOnDurationMs,
+                screenOffDurationMs = screenOffDurationMs,
+                screenOffAwakeDurationMs = screenOffAwakeDurationMs,
+                screenOffDeepSleepDurationMs = screenOffDeepSleepDurationMs,
+                screenOffDrainMah = screenOffDrainMah,
+                screenOffAwakeDrainMah = screenOffAwakeDrainMah,
+                screenOffDeepSleepDrainMah = screenOffDeepSleepDrainMah,
+                idleDrainMah = idleDrainMah,
+                cellularDrainMah = cellularDrainMah,
+                wifiDrainMah = wifiDrainMah,
+                bluetoothDrainMah = bluetoothDrainMah,
+                screenDrainMah = screenDrainMah
+            )
+        }
 
         /**
          * 科学解耦应用的真实前台能量、后台能量与有效后台活跃时长。

@@ -297,6 +297,8 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 UsageOverviewViewHolder(binding).also {
                     overviewHolder = it
                     it.binding.metricSelectorView.setOnMetricsChangedListener { metrics ->
+                        cachedTimelineState = cachedTimelineState?.copy(selectedMetrics = metrics)
+                        it.binding.batteryTimelineView.setSelectedMetrics(metrics)
                         onMetricsChangedListener?.invoke(metrics)
                     }
                     it.binding.batteryTimelineView.setOnEnergyClickListener { view, x, y ->
@@ -1047,13 +1049,18 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     /**
      * 绑定使用过程概览卡片（四维时间轴与底部指标选择器）。
+     * 同步恢复指标选择器当前的实际选中状态，杜绝列表上下滑动复用时指标状态被旧缓存重置。
      *
      * @param holder 概览卡片 ViewHolder
      */
     private fun bindUsageOverview(holder: UsageOverviewViewHolder) {
+        overviewHolder = holder
         with(holder.binding) {
+            val currentSelected = metricSelectorView.getSelectedMetrics()
             cachedTimelineState?.let { state ->
-                batteryTimelineView.setState(state)
+                val syncState = state.copy(selectedMetrics = currentSelected)
+                cachedTimelineState = syncState
+                batteryTimelineView.setState(syncState)
             }
         }
     }
@@ -1410,9 +1417,57 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         cachedVoltageVolts = volt
         cachedIsCharging = isCharging
         if (timelineState != null) {
-            cachedTimelineState = timelineState
+            val currentSelected = overviewHolder?.binding?.metricSelectorView?.getSelectedMetrics()
+                ?: cachedTimelineState?.selectedMetrics
+                ?: timelineState.selectedMetrics
+            cachedTimelineState = timelineState.copy(selectedMetrics = currentSelected)
         }
         overviewHolder?.let { bindUsageOverview(it) }
+    }
+
+    /**
+     * 更新适配器缓存的指标集合，防止列表滑动重建时指标状态被旧缓存重置。
+     *
+     * @param metrics 最新选中的指标集合 [Set<com.battery.analysis.timeline.presentation.TimelineMetric>]
+     */
+    fun updateCachedMetrics(metrics: Set<com.battery.analysis.timeline.presentation.TimelineMetric>) {
+        cachedTimelineState = cachedTimelineState?.copy(selectedMetrics = metrics)
+    }
+
+    /**
+     * 获取当前选中的指标集合。
+     * 优先从当前挂载的 Overview 视图中获取，其次从缓存的时间轴状态中获取，若均无则从本地持久化中加载。
+     * 严禁无脑 fallback 到全选指标，确保用户反选状态绝对忠实保留。
+     *
+     * @param context Android 上下文环境
+     * @return 当前选中的指标集合 [Set<com.battery.analysis.timeline.presentation.TimelineMetric>]
+     */
+    fun getSelectedMetrics(context: Context): Set<com.battery.analysis.timeline.presentation.TimelineMetric> {
+        val current = overviewHolder?.binding?.metricSelectorView?.getSelectedMetrics()
+        if (current != null && current.isNotEmpty()) {
+            return current
+        }
+        val cached = cachedTimelineState?.selectedMetrics
+        if (cached != null && cached.isNotEmpty()) {
+            return cached
+        }
+        val sp = context.getSharedPreferences("timeline_metrics_prefs", Context.MODE_PRIVATE)
+        val saved = sp.getStringSet("saved_timeline_metrics", null)
+        if (saved != null && saved.isNotEmpty()) {
+            val result = mutableSetOf<com.battery.analysis.timeline.presentation.TimelineMetric>()
+            for (name in saved) {
+                try {
+                    result.add(com.battery.analysis.timeline.presentation.TimelineMetric.valueOf(name))
+                } catch (_: Exception) {}
+            }
+            if (result.isNotEmpty()) {
+                return result
+            }
+        }
+        return setOf(
+            com.battery.analysis.timeline.presentation.TimelineMetric.POWER,
+            com.battery.analysis.timeline.presentation.TimelineMetric.APP
+        )
     }
 
     /**
@@ -1421,8 +1476,12 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      * @param timelineState 时间轴状态
      */
     fun updateTimelineState(timelineState: BatteryTimelineState) {
-        cachedTimelineState = timelineState
-        overviewHolder?.binding?.batteryTimelineView?.setState(timelineState)
+        val currentSelected = overviewHolder?.binding?.metricSelectorView?.getSelectedMetrics()
+            ?: cachedTimelineState?.selectedMetrics
+            ?: timelineState.selectedMetrics
+        val syncState = timelineState.copy(selectedMetrics = currentSelected)
+        cachedTimelineState = syncState
+        overviewHolder?.binding?.batteryTimelineView?.setState(syncState)
     }
 
     /**

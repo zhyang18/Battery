@@ -1626,9 +1626,13 @@ class PowerUsageManager private constructor(private val context: Context) {
                     }
                 }
             } else if (!lastOn && !isScreenOn) {
-                // 纯息屏切片：正常采样间隔内进行梯形微积分；超长深度休眠断层或非正功耗按真实静态待机底噪微积分，杜绝唤醒尖峰膨胀或能量断档
-                val safeStandbyWatts = if (avgWatts in 0.015..0.25) avgWatts else ShizukuBatteryStatsParser.DEFAULT_STANDBY_BASE_WATTS.toDouble()
-                val offJoules = safeStandbyWatts * (dt / 1000.0)
+                // 纯息屏切片：正常采样间隔内如实采用梯形微积分；超长深度休眠断层或无正向功率采样时按待机底噪微积分，杜绝人为钳位篡改真实放电数据
+                val effectiveStandbyWatts = if (dt <= MAX_INTEGRATION_INTERVAL_MS && avgWatts > 0.0) {
+                    avgWatts
+                } else {
+                    ShizukuBatteryStatsParser.DEFAULT_STANDBY_BASE_WATTS.toDouble()
+                }
+                val offJoules = effectiveStandbyWatts * (dt / 1000.0)
                 dischargeAccumulator.screenOffJoules += offJoules
                 dischargeAccumulator.screenOffDurationMs += dt
             } else if (lastOn && !isScreenOn) {
@@ -1639,8 +1643,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                 dischargeAccumulator.screenOnJoules += onJoules
                 dischargeAccumulator.screenOnDurationMs += onMs
                 if (offMs > 0L) {
-                    val safeStandbyWatts = if (roundedWatts in 0.015f..0.25f) roundedWatts.toDouble() else ShizukuBatteryStatsParser.DEFAULT_STANDBY_BASE_WATTS.toDouble()
-                    val offJoules = safeStandbyWatts * (offMs / 1000.0)
+                    val effectiveStandbyWatts = if (roundedWatts > 0f) roundedWatts.toDouble() else ShizukuBatteryStatsParser.DEFAULT_STANDBY_BASE_WATTS.toDouble()
+                    val offJoules = effectiveStandbyWatts * (offMs / 1000.0)
                     dischargeAccumulator.screenOffJoules += offJoules
                     dischargeAccumulator.screenOffDurationMs += offMs
                 }
@@ -1658,8 +1662,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val onMs = minOf(1000L, dt)
                 val offMs = dt - onMs
                 if (offMs > 0L) {
-                    val safeStandbyWatts = if (lastWatts in 0.015f..0.25f) lastWatts.toDouble() else ShizukuBatteryStatsParser.DEFAULT_STANDBY_BASE_WATTS.toDouble()
-                    val offJoules = safeStandbyWatts * (offMs / 1000.0)
+                    val effectiveStandbyWatts = if (lastWatts > 0f) lastWatts.toDouble() else ShizukuBatteryStatsParser.DEFAULT_STANDBY_BASE_WATTS.toDouble()
+                    val offJoules = effectiveStandbyWatts * (offMs / 1000.0)
                     dischargeAccumulator.screenOffJoules += offJoules
                     dischargeAccumulator.screenOffDurationMs += offMs
                 }

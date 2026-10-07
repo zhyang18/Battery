@@ -2,6 +2,7 @@ package com.battery.analysis.model
 
 import android.content.Context
 import com.battery.analysis.R
+import com.battery.analysis.util.BatteryEnergyCalculator
 import java.io.Serializable
 import java.util.Locale
 
@@ -171,9 +172,9 @@ data class HistoryRecord(
         $labelVoltage: ${voltage?.let { String.format(Locale.getDefault(), "%.0f mV", it) } ?: unknownText}
         $labelCurrent: ${currentNow?.let { if (it > 0f) String.format(Locale.getDefault(), "+%.0f mA", it) else String.format(Locale.getDefault(), "%.0f mA", it) } ?: unknownText}
         $labelPower: ${powerWatts?.let { if (it > 0f) String.format(Locale.getDefault(), "+%.2f W", it) else String.format(Locale.getDefault(), "%.2f W", it) } ?: unknownText}
-        $labelDesignCap: ${designCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText}
-        $labelFullCap: ${fullChargeCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText}
-        $labelCurrentCap: ${currentCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText}
+        $labelDesignCap: ${BatteryEnergyCalculator.formatCapacityWithNominalWh(designCapacity) ?: unknownText}
+        $labelFullCap: ${BatteryEnergyCalculator.formatCapacityWithNominalWh(fullChargeCapacity) ?: unknownText}
+        $labelCurrentCap: ${BatteryEnergyCalculator.formatCapacityWithNominalWh(currentCapacity) ?: unknownText}
         $labelDualCell: $dualCellText
         $labelTech: ${technology ?: unknownText}
         """.trimIndent()
@@ -240,9 +241,9 @@ data class HistoryRecord(
         list.add(Triple(labelVoltage, voltage?.let { String.format(Locale.getDefault(), "%.0f mV", it) } ?: unknownText, null))
         list.add(Triple(labelCurrent, currentNow?.let { if (it > 0f) String.format(Locale.getDefault(), "+%.0f mA", it) else String.format(Locale.getDefault(), "%.0f mA", it) } ?: unknownText, null))
         list.add(Triple(labelPower, powerWatts?.let { if (it > 0f) String.format(Locale.getDefault(), "+%.2f W", it) else String.format(Locale.getDefault(), "%.2f W", it) } ?: unknownText, null))
-        list.add(Triple(labelDesignCap, designCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText, null))
-        list.add(Triple(labelFullCap, fullChargeCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText, "#2196F3"))
-        list.add(Triple(labelCurrentCap, currentCapacity?.let { String.format(Locale.getDefault(), "%.1f mAh", it) } ?: unknownText, null))
+        list.add(Triple(labelDesignCap, BatteryEnergyCalculator.formatCapacityWithNominalWh(designCapacity) ?: unknownText, null))
+        list.add(Triple(labelFullCap, BatteryEnergyCalculator.formatCapacityWithNominalWh(fullChargeCapacity) ?: unknownText, "#2196F3"))
+        list.add(Triple(labelCurrentCap, BatteryEnergyCalculator.formatCapacityWithNominalWh(currentCapacity) ?: unknownText, null))
         list.add(Triple(labelDualCell, isDualCell?.let { if (it) yesText else noText } ?: noText, null))
         list.add(Triple(labelTech, technology ?: unknownText, null))
         return list

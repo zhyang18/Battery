@@ -2040,7 +2040,15 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                     val percentDrainMah = (offPercent / 100f) * capacityMah
                     val offHours = totalOffMs / 3600_000f
                     val impliedWatts = if (offHours > 0f) (percentDrainMah * 3.85f / 1000f) / offHours else 0f
-                    val isPlausibleDischarge = (impliedWatts in 0.015f..2.5f) || (offHours >= 0.25f && impliedWatts <= 3.0f)
+                    // 物理合理性门禁：
+                    // 1. 若息屏掉电 >= 2%，说明具备完整跨度的息屏放电，只要折算平均功耗处于真实待机/活跃区间（<= 2.5W）即可采纳；
+                    // 2. 若息屏掉电为 1%，为防止熄屏初期（< 15分钟）前序亮屏阶段消耗步进导致量化虚高假象，要求息屏时长必须 >= 15分钟且功耗 <= 2.5W；
+                    // 3. 杜绝熄屏瞬间（如 15 秒或数十秒）将离散步进除以微小时长导致待机功耗虚高爆表。
+                    val isPlausibleDischarge = if (offPercent >= 2) {
+                        impliedWatts in 0.015f..2.5f
+                    } else {
+                        offHours >= 0.25f && impliedWatts in 0.015f..2.5f
+                    }
                     if (isPlausibleDischarge && percentDrainMah > screenOffDrainMah) {
                         screenOffDrainMah = percentDrainMah
                     }

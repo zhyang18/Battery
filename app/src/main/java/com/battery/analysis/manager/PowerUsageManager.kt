@@ -3429,7 +3429,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                             // 物理第一性原理：息屏为待机工况（整机待机功耗远低于亮屏），
                             // 绝不可使用时间占比（screenOnHours / dischargeHours）粗暴平分，否则息屏将吞噬超半数放电量。
                             val standbyWatts = ShizukuBatteryStatsParser.DEFAULT_STANDBY_BASE_WATTS
-                            (standbyWatts * screenOffHours).coerceAtMost(physicalTotalEnergyWh * 0.4f)
+                            (standbyWatts * screenOffHours).coerceAtMost(physicalTotalEnergyWh)
                         }
                         offEnergyWh = maxOf(rawOffWh, minScreenOffEnergy)
                         onEnergyWh = if (intOnEnergyWh > 0f) intOnEnergyWh else (physicalTotalEnergyWh - offEnergyWh).coerceAtLeast(0f)
@@ -5797,7 +5797,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                     // 物理第一性原理：息屏为待机工况（整机待机功耗远低于亮屏），
                     // 绝不可使用时间占比（screenOnHours / dischargeHours）粗暴平分，否则息屏将吞噬超半数放电量。
                     val standbyWatts = ShizukuBatteryStatsParser.DEFAULT_STANDBY_BASE_WATTS
-                    (standbyWatts * screenOffHours).coerceAtMost(physicalTotalEnergyWh * 0.4f)
+                    (standbyWatts * screenOffHours).coerceAtMost(physicalTotalEnergyWh)
                 }
                 offEnergyWh = maxOf(rawOffWh, minScreenOffEnergy)
                 onEnergyWh = if (intOnEnergyWh > 0f) intOnEnergyWh else (physicalTotalEnergyWh - offEnergyWh).coerceAtLeast(0f)

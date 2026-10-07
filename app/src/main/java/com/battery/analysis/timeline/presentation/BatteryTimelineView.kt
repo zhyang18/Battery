@@ -1024,6 +1024,23 @@ class BatteryTimelineView @JvmOverloads constructor(
      * @param maxScaleW 当前可视区间最大功耗刻度值
      * @param rawSamples 原始物理采样点集合
      */
+    /**
+     * 预计算并构建功耗波动时间轴高保真峰谷线段 Path 与关键极值标注点集合。
+     * 彻底摒弃由于采样数据动态追加分桶导致的曲线漂移抖动缺陷；
+     * 采用工业级按屏幕物理像素列（Pixel Column）分桶 Min-Max 峰谷线段聚合算法，
+     * 保持每个像素点内物理真实的瞬时波峰与波谷极值用垂直线段展示，同时维持相邻像素点基线的连续平滑，
+     * 彻底消除每次手动刷新时功耗线段随机变动的现象。
+     *
+     * @param cache 目标功耗曲线缓存对象 [CachedCurveData]
+     * @param contentLeft 内容区左边缘 X 坐标
+     * @param contentWidth 内容区宽度
+     * @param topPadding 顶部安全边距
+     * @param availableH 曲线有效绘制高度
+     * @param visibleStart 可视起始时间戳
+     * @param visibleEnd 可视结束时间戳
+     * @param maxScaleW 当前可视区间最大功耗刻度值
+     * @param rawSamples 原始物理采样点集合
+     */
     private fun buildPowerCurveCache(
         cache: CachedCurveData,
         contentLeft: Float,
@@ -1037,10 +1054,7 @@ class BatteryTimelineView @JvmOverloads constructor(
     ) {
         cache.path.reset()
         cache.markers.clear()
-        if (rawSamples.isEmpty()) return
-        val targetPoints = (contentWidth * 0.75f).toInt().coerceIn(300, 800)
-        val downsampled = ChartDownsampler.downsampleByMetric(rawSamples, targetPoints) { abs(it.powerMw) }
-        if (downsampled.isEmpty()) return
+        if (rawSamples.isEmpty() || contentWidth <= 0f) return
 
         val contentRight = contentLeft + contentWidth
 
@@ -1053,8 +1067,13 @@ class BatteryTimelineView @JvmOverloads constructor(
             return topPadding + powerTopReserved + (1f - ratio) * effectivePowerH
         }
 
-        val maxSample = downsampled.maxByOrNull { abs(it.powerMw) }
-        val minSample = downsampled.minByOrNull { abs(it.powerMw) }
+        // 1. 过滤当前视窗时间范围内的有效样本（前后适度延伸 5 秒以确保边缘闭合）
+        val visibleSamples = rawSamples.filter { it.timestamp in (visibleStart - 5000L)..(visibleEnd + 5000L) }
+        if (visibleSamples.isEmpty()) return
+
+        // 2. 收集全局关键极值 Marker 节点（全周期绝对最大峰值、绝对最小谷值与显著独立大峰值）
+        val maxSample = visibleSamples.maxByOrNull { abs(it.powerMw) }
+        val minSample = visibleSamples.minByOrNull { abs(it.powerMw) }
 
         fun toMarker(s: BatterySample, isPriority: Boolean): CurveMarker {
             val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
@@ -1064,15 +1083,11 @@ class BatteryTimelineView @JvmOverloads constructor(
             return CurveMarker(x, y, label, isPriority)
         }
 
-        // 收集所有关键 Marker 节点的时间戳集合，构建 Path 时实施 100% 绝对强制连线保护
-        val keyMarkerTimestamps = HashSet<Long>()
         if (maxSample != null) {
             cache.markers.add(toMarker(maxSample, isPriority = true))
-            keyMarkerTimestamps.add(maxSample.timestamp)
         }
         if (minSample != null && minSample != maxSample) {
             cache.markers.add(toMarker(minSample, isPriority = true))
-            keyMarkerTimestamps.add(minSample.timestamp)
         }
 
         // 仅在存在显著独立大尖峰时，智能保留至多 1~2 个关键次级峰值（过滤平缓日常小起伏，避免杂乱数值干扰图表）
@@ -1082,7 +1097,7 @@ class BatteryTimelineView @JvmOverloads constructor(
             val timeSpan = (visibleEnd - visibleStart).coerceAtLeast(1L)
             val minTimeGap = (timeSpan * 0.12).toLong()
 
-            val candidates = downsampled.filter { s ->
+            val candidates = visibleSamples.filter { s ->
                 val pW = (abs(s.powerMw) / 1000.0).toFloat()
                 s !== maxSample && s !== minSample &&
                     pW >= minSignificantW &&
@@ -1101,38 +1116,62 @@ class BatteryTimelineView @JvmOverloads constructor(
 
             for (s in chosenSecondary) {
                 cache.markers.add(toMarker(s, isPriority = false))
-                keyMarkerTimestamps.add(s.timestamp)
             }
         }
 
-        val firstSample = downsampled.first()
-        val firstPW = (abs(firstSample.powerMw) / 1000.0).toFloat().coerceIn(0f, maxScaleW.toFloat())
-        val firstY = calcPowerY(firstPW)
+        // 3. 屏幕横向物理像素列（Pixel Column）分桶极值聚合：
+        // 每个像素点 x 固定对应屏幕的一个物理像素，完全锁定历史采样数据，彻底根除动态抽稀算法在刷新时造成的全局抖动
+        val numPixels = contentWidth.toInt().coerceAtLeast(1)
+        val minWattsArray = FloatArray(numPixels) { Float.MAX_VALUE }
+        val maxWattsArray = FloatArray(numPixels) { -Float.MAX_VALUE }
+        val hasSampleArray = BooleanArray(numPixels)
 
-        cache.path.moveTo(contentLeft, firstY)
-        var lastX = contentLeft
-        var lastY = firstY
-
-        for (s in downsampled) {
-            val x = (contentLeft + TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)).coerceIn(contentLeft, contentRight)
+        for (s in visibleSamples) {
+            val relX = TimelineScaleCalculator.timeToX(s.timestamp, visibleStart, visibleEnd, contentWidth)
+            val px = relX.toInt().coerceIn(0, numPixels - 1)
             val pW = (abs(s.powerMw) / 1000.0).toFloat().coerceIn(0f, maxScaleW.toFloat())
-            val y = calcPowerY(pW)
 
-            val isKeyMarker = s.timestamp in keyMarkerTimestamps
-            val isMovedX = x > lastX + 0.5f
-            val isSignificantY = abs(y - lastY) >= 1.0f
-            val isLast = (s === downsampled.last())
-
-            // 只要是关键 Marker 节点、横向位移显著、垂直落差显著或到达末点，必须绘制折线段（杜绝尖峰被跳过导致圆点悬空）
-            if (isKeyMarker || isMovedX || isSignificantY || isLast) {
-                cache.path.lineTo(x, y)
-                lastX = x
-                lastY = y
-            }
+            if (pW < minWattsArray[px]) minWattsArray[px] = pW
+            if (pW > maxWattsArray[px]) maxWattsArray[px] = pW
+            hasSampleArray[px] = true
         }
 
-        if (lastX < contentRight) {
-            cache.path.lineTo(contentRight, lastY)
+        // 4. 构建高保真像素峰谷线段与基线 Path：
+        // 在每个具有物理采样的像素点内，如实展示峰谷落差垂直线段；
+        // 同时在相邻像素之间连贯连接基线，确保无论刷新多少次，历史像素点的峰谷线段绝对固定不变
+        var lastPx = -1
+        var lastValleyY = Float.NaN
+
+        for (px in 0 until numPixels) {
+            if (!hasSampleArray[px]) continue
+
+            val x = contentLeft + px.toFloat()
+            val minW = minWattsArray[px]
+            val maxW = maxWattsArray[px]
+
+            val yPeak = calcPowerY(maxW)
+            val yValley = calcPowerY(minW)
+
+            // 如果与上一有效采样像素列相邻，连接波谷基线，确保视觉连续性
+            if (lastPx != -1 && !lastValleyY.isNaN()) {
+                val prevX = contentLeft + lastPx.toFloat()
+                cache.path.moveTo(prevX, lastValleyY)
+                cache.path.lineTo(x, yValley)
+            }
+
+            // 在该像素点内垂直绘制从波谷到波峰的线段
+            val segmentHeight = yValley - yPeak
+            if (segmentHeight >= dp0_5) {
+                cache.path.moveTo(x, yValley)
+                cache.path.lineTo(x, yPeak)
+            } else {
+                // 峰谷落差微小时至少展示 1px 细线段，确保该像素点具备清晰的物理存在感
+                cache.path.moveTo(x, yValley)
+                cache.path.lineTo(x, yValley - dp1)
+            }
+
+            lastPx = px
+            lastValleyY = yValley
         }
     }
 

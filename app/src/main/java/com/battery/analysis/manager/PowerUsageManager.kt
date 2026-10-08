@@ -1195,14 +1195,16 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         /**
-         * 对放电时序采样点序列执行全时间轴均匀时间网格抽稀，将总点数控制在目标数量（默认 3000 点）。
+         * 对放电时序采样点序列执行高保真极值锁定与全时间轴均匀抽稀，将总点数控制在目标数量范围内。
          * 专供耗电趋势图表显示使用，统计数据计算功耗的采样点绝不抽稀。
          *
          * 核心算法：
          * 1. 首点（拔电起始点）与尾点（最新点）绝对保留，维持完整放电时间跨度；
          * 2. 优先保留亮灭屏状态切换拐点与前台 App 切换拐点，保留工况突变细节；
-         * 3. 在其余区间按全局均匀时间网格采样，保证整条时间线各时间段的分辨率完全均等；
-         * 4. 纯用于耗电趋势图表 UI 渲染，底层统计数据计算功耗的原始采样点保持完全未抽稀。
+         * 3. 核心强化：100% 绝对锁定全周期最高功率波峰、最低功率波谷与显著局部波峰，
+         *    彻底杜绝连续刷新时动态时间分桶移动导致的瞬时高功耗峰值（如 25W）被漏采或突变降低；
+         * 4. 在其余区间按时间均匀分网格采样，网格内优先选取局部峰值代表点，保证整条时间线各时间段的分辨率完全均等；
+         * 5. 纯用于耗电趋势图表 UI 渲染，底层统计数据计算功耗的原始采样点保持完全未抽稀。
          *
          * @param samples 原始放电瞬时采样点列表
          * @param targetCount 抽稀后保留的目标采样点数量（默认 3000）
@@ -1212,7 +1214,9 @@ class PowerUsageManager private constructor(private val context: Context) {
             samples: List<PowerDischargePoint>,
             targetCount: Int = 3000
         ): List<PowerDischargePoint> {
-            if (samples.size <= targetCount) return samples
+            if (samples.size <= targetCount || targetCount <= 2) {
+                return samples
+            }
             val totalPoints = samples.size
             val startPoint = samples.first()
             val endPoint = samples.last()
@@ -1235,7 +1239,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             preservedSet.add(0)
             preservedSet.add(totalPoints - 1)
 
-            // 标记所有状态跳变点（屏幕亮灭切换、前台 App 切换）
+            // 1. 标记所有工况状态跳变点（屏幕亮灭切换、前台 App 切换）
             for (i in 0 until totalPoints - 1) {
                 val curr = samples[i]
                 val next = samples[i + 1]
@@ -1245,11 +1249,52 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
             }
 
+            // 2. 核心保障：锁定全局最高功率波峰与最低功率波谷，杜绝任何峰值丢失
+            val globalMaxIdx = samples.indices.maxByOrNull { samples[it].powerWatts }
+            if (globalMaxIdx != null) preservedSet.add(globalMaxIdx)
+            val globalMinIdx = samples.indices.minByOrNull { samples[it].powerWatts }
+            if (globalMinIdx != null) preservedSet.add(globalMinIdx)
+
+            // 收集所有局部波峰与波谷
+            val localPeaks = mutableListOf<Int>()
+            val localValleys = mutableListOf<Int>()
+            for (i in 1 until totalPoints - 1) {
+                val pPrev = samples[i - 1].powerWatts
+                val pCurr = samples[i].powerWatts
+                val pNext = samples[i + 1].powerWatts
+                if (pCurr > pPrev && pCurr >= pNext) {
+                    localPeaks.add(i)
+                } else if (pCurr < pPrev && pCurr <= pNext) {
+                    localValleys.add(i)
+                }
+            }
+            localPeaks.sortByDescending { samples[it].powerWatts }
+            localValleys.sortBy { samples[it].powerWatts }
+
+            // 优先收录前 25% 目标配额的显著大波峰与极低波谷，保证瞬时大负荷尖峰绝对稳定存在
+            val maxPeaksToAdd = minOf(targetCount / 4, (targetCount - preservedSet.size).coerceAtLeast(0) / 2)
+            var peaksAdded = 0
+            for (idx in localPeaks) {
+                if (preservedSet.size >= targetCount || peaksAdded >= maxPeaksToAdd) break
+                if (preservedSet.add(idx)) {
+                    peaksAdded++
+                }
+            }
+            val maxValleysToAdd = minOf(targetCount / 8, (targetCount - preservedSet.size).coerceAtLeast(0) / 4)
+            var valleysAdded = 0
+            for (idx in localValleys) {
+                if (preservedSet.size >= targetCount || valleysAdded >= maxValleysToAdd) break
+                if (preservedSet.add(idx)) {
+                    valleysAdded++
+                }
+            }
+
             if (preservedSet.size >= targetCount) {
                 val sortedIndices = preservedSet.sorted()
                 return sortedIndices.map { samples[it] }
             }
 
+            // 3. 在剩余区间按时间均匀分网格填充，优先选择网格内功率最大的代表点（波峰优先）
             val numSlots = targetCount - preservedSet.size
             val slotDuration = timeSpan.toDouble() / (numSlots + 1)
             var searchIdx = 0
@@ -1258,14 +1303,39 @@ class PowerUsageManager private constructor(private val context: Context) {
                 while (searchIdx < totalPoints - 1 && samples[searchIdx + 1].timestamp <= targetTs) {
                     searchIdx++
                 }
-                val bestIdx = if (searchIdx < totalPoints - 1) {
-                    val diff1 = Math.abs(samples[searchIdx].timestamp - targetTs)
-                    val diff2 = Math.abs(samples[searchIdx + 1].timestamp - targetTs)
-                    if (diff1 <= diff2) searchIdx else searchIdx + 1
-                } else {
-                    searchIdx
+                // 在 targetTs 邻域窗口内探测局部功率最大值点
+                val windowStartIdx = (searchIdx - 2).coerceAtLeast(0)
+                val windowEndIdx = (searchIdx + 2).coerceAtMost(totalPoints - 1)
+                var bestIdx = searchIdx
+                var bestWatts = -Float.MAX_VALUE
+                for (cand in windowStartIdx..windowEndIdx) {
+                    if (samples[cand].powerWatts > bestWatts) {
+                        bestWatts = samples[cand].powerWatts
+                        bestIdx = cand
+                    }
                 }
-                preservedSet.add(bestIdx)
+                if (!preservedSet.contains(bestIdx)) {
+                    preservedSet.add(bestIdx)
+                } else {
+                    val fallback = if (searchIdx < totalPoints - 1) {
+                        val diff1 = Math.abs(samples[searchIdx].timestamp - targetTs)
+                        val diff2 = Math.abs(samples[searchIdx + 1].timestamp - targetTs)
+                        if (diff1 <= diff2) searchIdx else searchIdx + 1
+                    } else {
+                        searchIdx
+                    }
+                    if (!preservedSet.contains(fallback)) {
+                        preservedSet.add(fallback)
+                    } else {
+                        // 寻找邻近可用采样点补充配额
+                        for (offset in 1..5) {
+                            val candL = (fallback - offset).takeIf { it in 0 until totalPoints && !preservedSet.contains(it) }
+                            val candR = (fallback + offset).takeIf { it in 0 until totalPoints && !preservedSet.contains(it) }
+                            if (candL != null) { preservedSet.add(candL); break }
+                            if (candR != null) { preservedSet.add(candR); break }
+                        }
+                    }
+                }
             }
 
             val finalIndices = preservedSet.sorted()
@@ -5340,9 +5410,12 @@ class PowerUsageManager private constructor(private val context: Context) {
         val realtimeSamples = getDischargeRealtimeSamples().filter { it.timestamp in (startTs - 15000L)..now }
         if (realtimeSamples.size >= 2) {
             val sortedSamples = realtimeSamples.sortedBy { it.timestamp }
-            // 耗电趋势图表采样点均匀抽稀至 3000 点（保留工况突变点与首尾边界），而用于统计数据计算功耗的底层采样点保持完整不抽稀
-            val chartSamples = if (sortedSamples.size > 3000) {
-                downsampleDischargeSamplesUniformly(sortedSamples, targetCount = 3000)
+            // 耗电趋势图表采样点：若点数在 12000 点以内（足以覆盖全天日常或 3~4 小时持续亮屏高频采样），
+            // 100% 完整保留底层物理真实硬件采样点，绝不抽稀，由 BatteryTimelineView 的像素列分桶极值渲染引擎以 120fps 高性能呈现，
+            // 彻底杜绝连续刷新时波峰丢失或曲线抖动问题；
+            // 仅在超长放电周期数据量极大时，调用高保真波峰波谷锁定算法进行平稳抽稀。
+            val chartSamples = if (sortedSamples.size > 12000) {
+                downsampleDischargeSamplesUniformly(sortedSamples, targetCount = 6000)
             } else {
                 sortedSamples
             }

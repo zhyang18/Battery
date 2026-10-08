@@ -459,7 +459,8 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     /**
      * 设置时间轴最新状态并触发重绘。
-     * 具备相同数据状态防抖与缓存保护，彻底消除列表上下滑动时重复调用导致的掉帧与重排卡顿。
+     * 具备严格的状态一致性校验与曲线预计算缓存保护：当数据实体、时间视窗与选中指标未改变且既有曲线缓存有效时，
+     * 直接复用已就绪的 Path 与标注，绝不销毁缓存或重复重绘，彻底根除列表上下滑动经过图表时的掉帧卡顿与重新加载现象。
      *
      * @param state 最新的时间轴状态 [BatteryTimelineState]
      */
@@ -471,7 +472,25 @@ class BatteryTimelineView @JvmOverloads constructor(
         val vStart = if (state.visibleStartTimestamp in 1 until end) state.visibleStartTimestamp else start
         val vEnd = if (state.visibleEndTimestamp > vStart) state.visibleEndTimestamp else end
 
-        // 核心性能保护：在 RecyclerView 垂直滚动中，若数据引用与时间视窗完全未改变，直接复用既有预计算缓存
+        // 精准判断时序采样点数据是否实质一致（避免因外部集合浅拷贝引用不同而误判为数据变化）
+        val samplesIdentical = this.timelineState.batterySamples === state.batterySamples || (
+            this.timelineState.batterySamples.size == state.batterySamples.size &&
+            (this.timelineState.batterySamples.isEmpty() || (
+                this.timelineState.batterySamples.first().timestamp == state.batterySamples.first().timestamp &&
+                this.timelineState.batterySamples.last().timestamp == state.batterySamples.last().timestamp &&
+                this.timelineState.batterySamples.last().powerMw == state.batterySamples.last().powerMw
+            ))
+        )
+
+        val appEventsIdentical = this.timelineState.appEvents === state.appEvents || (
+            this.timelineState.appEvents.size == state.appEvents.size
+        )
+
+        val screenEventsIdentical = this.timelineState.screenEvents === state.screenEvents || (
+            this.timelineState.screenEvents.size == state.screenEvents.size
+        )
+
+        // 核心性能保护：在 RecyclerView 垂直滚动中，若数据内容、时间视窗与选中指标完全未改变，直接复用既有预计算缓存
         val isIdentical = (this.timelineState === state || (
             this.timelineState.startTimestamp == start &&
             this.timelineState.endTimestamp == end &&
@@ -479,9 +498,9 @@ class BatteryTimelineView @JvmOverloads constructor(
             this.timelineState.visibleEndTimestamp == vEnd &&
             this.timelineState.selectedMetrics == state.selectedMetrics &&
             this.timelineState.selectedApp == state.selectedApp &&
-            this.timelineState.batterySamples === state.batterySamples &&
-            this.timelineState.appEvents === state.appEvents &&
-            this.timelineState.screenEvents === state.screenEvents
+            samplesIdentical &&
+            appEventsIdentical &&
+            screenEventsIdentical
         ))
 
         this.timelineState = state.copy(
@@ -491,7 +510,15 @@ class BatteryTimelineView @JvmOverloads constructor(
             visibleEndTimestamp = vEnd
         )
 
-        if (isIdentical && isCurveCacheValid && cachedSlotItems.isNotEmpty()) {
+        // 关键修复：当数据与视窗未变且既有曲线缓存有效时，直接复用既有渲染缓存，绝对不重复加载！
+        if (isIdentical && isCurveCacheValid) {
+            val needLayoutApps = state.selectedMetrics.contains(TimelineMetric.APP) &&
+                state.appEvents.isNotEmpty() &&
+                cachedSlotItems.isEmpty()
+            if (needLayoutApps) {
+                recalculateLayout(canRequestLayout = false)
+                invalidate()
+            }
             return
         }
 
@@ -650,6 +677,7 @@ class BatteryTimelineView @JvmOverloads constructor(
      */
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        if ((w == oldw && h == oldh) || w <= 0 || h <= 0) return
         invalidateCurveCache()
         recalculateLayout()
     }
@@ -883,6 +911,52 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
+     * 在按时间戳升序排列的采样点列表中，通过二分查找定位时间戳大于等于指定时间的首个元素下标。
+     *
+     * @param list 采样点列表 [List<BatterySample>]
+     * @param targetTs 目标起始时间戳（毫秒）
+     * @return 符合条件的首个元素下标（若均小于 targetTs 则返回 list.size）
+     */
+    private fun findFirstIndexAfter(list: List<BatterySample>, targetTs: Long): Int {
+        var low = 0
+        var high = list.size - 1
+        var ans = list.size
+        while (low <= high) {
+            val mid = (low + high) ushr 1
+            if (list[mid].timestamp >= targetTs) {
+                ans = mid
+                high = mid - 1
+            } else {
+                low = mid + 1
+            }
+        }
+        return ans
+    }
+
+    /**
+     * 在按时间戳升序排列的采样点列表中，通过二分查找定位时间戳小于等于指定时间的末个元素下标。
+     *
+     * @param list 采样点列表 [List<BatterySample>]
+     * @param targetTs 目标结束时间戳（毫秒）
+     * @return 符合条件的末个元素下标（若均大于 targetTs 则返回 -1）
+     */
+    private fun findLastIndexBefore(list: List<BatterySample>, targetTs: Long): Int {
+        var low = 0
+        var high = list.size - 1
+        var ans = -1
+        while (low <= high) {
+            val mid = (low + high) ushr 1
+            if (list[mid].timestamp <= targetTs) {
+                ans = mid
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return ans
+    }
+
+    /**
      * 根据当前视窗与数据预计算并构建各选中曲线的平滑 Path 与关键标注点集合。
      * 仅在视窗平移缩放、指标切换或数据重载时执行一次，杜绝列表上下滑动时每帧重复计算。
      *
@@ -901,10 +975,50 @@ class BatteryTimelineView @JvmOverloads constructor(
         visibleStart: Long,
         visibleEnd: Long
     ) {
-        val rawSamples = timelineState.batterySamples.filter { it.timestamp in visibleStart..visibleEnd }
+        val allSamples = timelineState.batterySamples
+        val rangeStartTs = visibleStart - 5000L
+        val rangeEndTs = visibleEnd + 5000L
+
+        // 利用时序单调性通过二分查找快速截取视窗切片，零全量过滤与内存分配开销
+        val startIndex = findFirstIndexAfter(allSamples, rangeStartTs)
+        val endIndex = findLastIndexBefore(allSamples, rangeEndTs)
+
+        val rawSamples = if (startIndex in allSamples.indices && endIndex >= startIndex && endIndex < allSamples.size) {
+            allSamples.subList(startIndex, endIndex + 1)
+        } else {
+            emptyList()
+        }
         cachedRawSamples = rawSamples
 
-        val maxRawPowerW = rawSamples.maxOfOrNull { abs(it.powerMw) / 1000.0 } ?: 15.0
+        // 单次轻量循环同时提取功耗、温度、电压各维度的物理极值，杜绝多次遍历与临时对象产生
+        val sampleSource = if (rawSamples.isNotEmpty()) rawSamples else allSamples
+        var maxRawPowerW = 0.0
+        var minT = Double.MAX_VALUE
+        var maxT = -Double.MAX_VALUE
+        var minV = Float.MAX_VALUE
+        var maxV = -Float.MAX_VALUE
+        var hasValidTemp = false
+        var hasValidVolt = false
+
+        for (s in sampleSource) {
+            val pW = abs(s.powerMw) / 1000.0
+            if (pW > maxRawPowerW) maxRawPowerW = pW
+
+            if (s.temperatureC > 0.0) {
+                if (s.temperatureC < minT) minT = s.temperatureC
+                if (s.temperatureC > maxT) maxT = s.temperatureC
+                hasValidTemp = true
+            }
+
+            if (s.voltageMv > 500) {
+                val v = s.voltageMv / 1000f
+                if (v < minV) minV = v
+                if (v > maxV) maxV = v
+                hasValidVolt = true
+            }
+        }
+        if (maxRawPowerW <= 0.0) maxRawPowerW = 15.0
+
         cachedMaxScaleW = when {
             maxRawPowerW <= 5.0 -> 6.0
             maxRawPowerW <= 10.0 -> 10.0
@@ -916,11 +1030,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         }
 
         // 动态自适应温度量程计算（基于底层真实硬件物理数据，杜绝硬编码与虚拟钳位截断）
-        val validTempSamples = (if (rawSamples.isNotEmpty()) rawSamples else timelineState.batterySamples)
-            .filter { it.temperatureC > 0.0 }
-        if (validTempSamples.isNotEmpty()) {
-            val minT = validTempSamples.minOf { it.temperatureC }
-            val maxT = validTempSamples.maxOf { it.temperatureC }
+        if (hasValidTemp) {
             val rangeT = maxT - minT
             if (rangeT < 1.0) {
                 // 极差过小时居中平滑展开，上下预留 1.5℃ 视野，避免除以 0 导致曲线畸变
@@ -938,11 +1048,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         }
 
         // 动态自适应电压量程计算（基于底层真实硬件物理数据，兼容高压单电芯与多电芯串联）
-        val validVoltSamples = (if (rawSamples.isNotEmpty()) rawSamples else timelineState.batterySamples)
-            .filter { it.voltageMv > 500 }
-        if (validVoltSamples.isNotEmpty()) {
-            val minV = validVoltSamples.minOf { it.voltageMv } / 1000f
-            val maxV = validVoltSamples.maxOf { it.voltageMv } / 1000f
+        if (hasValidVolt) {
             val rangeV = maxV - minV
             if (rangeV < 0.05f) {
                 // 极差过小时居中平滑展开，上下预留 0.05V 视野，避免除以 0
@@ -1152,8 +1258,8 @@ class BatteryTimelineView @JvmOverloads constructor(
             val yPeak = calcPowerY(maxW)
             val yValley = calcPowerY(minW)
 
-            // 如果与上一有效采样像素列相邻，连接波谷基线，确保视觉连续性
-            if (lastPx != -1 && !lastValleyY.isNaN()) {
+            // 如果与上一有效采样像素列相邻或临近，连接波谷基线，确保视觉连续性
+            if (lastPx != -1 && (px - lastPx) <= 5 && !lastValleyY.isNaN()) {
                 val prevX = contentLeft + lastPx.toFloat()
                 cache.path.moveTo(prevX, lastValleyY)
                 cache.path.lineTo(x, yValley)

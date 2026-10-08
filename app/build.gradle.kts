@@ -13,8 +13,8 @@ android {
         applicationId = "com.battery.analysis"
         minSdk = 24
         targetSdk = 36
-        versionCode = 85
-        versionName = "1.9.10"
+        versionCode = 87
+        versionName = "1.9.11.1"
 
         externalNativeBuild {
             cmake {

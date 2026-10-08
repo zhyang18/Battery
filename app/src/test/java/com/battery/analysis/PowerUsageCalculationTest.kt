@@ -4846,6 +4846,76 @@ class PowerUsageCalculationTest {
     }
 
     /**
+     * 验证连续刷新场景下功耗曲线峰值（波峰与波谷）100% 稳定锁定且历史采样点绝不跳变变动。
+     * 模拟用户在 11:03:26 与 8 秒后的 11:03:34 连续刷新：
+     * 1. 25.0W 瞬时最高大尖峰、20.6W 次级尖峰、19.3W 关键尖峰在两次刷新抽稀中均被 100% 锁定保留，绝不发生峰值骤降或丢失；
+     * 2. 两次刷新得到的历史采样点中极值点保持绝对一致，彻底消除每次刷新功耗线段随机变动的异常现象。
+     */
+    @Test
+    fun testConsecutiveRefreshPowerCurveExtremaPreservedAndStable() {
+        val baseTs = 1710000000000L
+        val count1 = 6000 // 模拟第一次刷新（如 11:03:26 时有 6000 个采样点）
+        val samples1 = mutableListOf<PowerDischargePoint>()
+
+        for (i in 0 until count1) {
+            val ts = baseTs + (i * 1000L)
+            val pwr = when (i) {
+                1500 -> 25.0f // 08:30 附近的 25.0W 超大瞬时尖峰
+                3500 -> 20.6f // 09:30 附近的 20.6W 显著尖峰
+                5200 -> 19.3f // 10:45 附近的 19.3W 显著尖峰
+                else -> 1.5f + (i % 5) * 0.2f // 常规起伏波浪
+            }
+            samples1.add(
+                PowerDischargePoint(
+                    timestamp = ts,
+                    elapsedHours = (i * 1000L) / 3600000f,
+                    batteryLevel = 100 - (i / 100),
+                    voltageVolts = 3.90f,
+                    temperature = 35.0f,
+                    powerWatts = pwr,
+                    isScreenOn = true
+                )
+            )
+        }
+
+        // 模拟 8 秒后第二次刷新（11:03:34，新增 8 个采样点）
+        val samples2 = ArrayList(samples1)
+        for (i in count1 until (count1 + 8)) {
+            val ts = baseTs + (i * 1000L)
+            samples2.add(
+                PowerDischargePoint(
+                    timestamp = ts,
+                    elapsedHours = (i * 1000L) / 3600000f,
+                    batteryLevel = 40,
+                    voltageVolts = 3.90f,
+                    temperature = 36.0f,
+                    powerWatts = 2.1f,
+                    isScreenOn = true
+                )
+            )
+        }
+
+        // 两次连续刷新分别执行抽稀
+        val result1 = PowerUsageManager.downsampleDischargeSamplesUniformly(samples1, targetCount = 3000)
+        val result2 = PowerUsageManager.downsampleDischargeSamplesUniformly(samples2, targetCount = 3000)
+
+        // 验证 25.0W 最高大峰值在两次刷新中均被 100% 锁定保留
+        val maxPeak1 = result1.maxByOrNull { it.powerWatts }
+        val maxPeak2 = result2.maxByOrNull { it.powerWatts }
+        assertNotNull("第一次刷新必须包含最大峰值", maxPeak1)
+        assertNotNull("第二次刷新必须包含最大峰值", maxPeak2)
+        assertEquals("第一次刷新最大峰值必须是 25.0W", 25.0f, maxPeak1!!.powerWatts, 0.001f)
+        assertEquals("第二次刷新最大峰值绝对不可降为 21.0W，必须依然是 25.0W", 25.0f, maxPeak2!!.powerWatts, 0.001f)
+        assertEquals("两次刷新最大峰值的时间戳必须完全一致", maxPeak1.timestamp, maxPeak2.timestamp)
+
+        // 验证 20.6W 与 19.3W 显著次级尖峰在两次刷新中均被 100% 完整保留
+        assertTrue("第一次刷新必须保留 20.6W 峰值", result1.any { it.powerWatts == 20.6f })
+        assertTrue("第二次刷新必须保留 20.6W 峰值", result2.any { it.powerWatts == 20.6f })
+        assertTrue("第一次刷新必须保留 19.3W 峰值", result1.any { it.powerWatts == 19.3f })
+        assertTrue("第二次刷新必须保留 19.3W 峰值，绝不跳变为 18.8W", result2.any { it.powerWatts == 19.3f })
+    }
+
+    /**
      * 验证图一与图二对比场景：息屏 1h16m51s（深睡 1h8m18s，唤醒 8m29s），
      * 系统底层硬件库仑计真实放电量为 59.0 mAh（对应 AccuBattery Pro 实测真值），
      * 深度睡眠精准计算为 29.6 mAh（0.114 Wh，平均电流 26.0 mA），

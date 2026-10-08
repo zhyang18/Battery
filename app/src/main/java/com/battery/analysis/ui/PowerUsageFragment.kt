@@ -431,8 +431,15 @@ class PowerUsageFragment : Fragment() {
             }
         }
 
-        // 2. 列表滚动监听：主 RecyclerView 原生滑动联动控制底部页签栏显隐
+        // 2. 列表滚动监听：主 RecyclerView 原生滑动联动控制底部页签栏显隐与滑动期图表冻结
         binding.recyclerAppUsage.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+            override fun onScrollStateChanged(recyclerView: androidx.recyclerview.widget.RecyclerView, newState: Int) {
+                super.onScrollStateChanged(recyclerView, newState)
+                // 滑动过程中彻底冻结图表重绘、重载与数据刷新
+                val isScrolling = (newState != androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE)
+                adapter.setScrolling(isScrolling)
+            }
+
             override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
                 super.onScrolled(recyclerView, dx, dy)
                 if (currentDisplayTab == 1) {

@@ -13,11 +13,12 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.util.AttributeSet
-import android.view.GestureDetector
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
-import androidx.core.view.GestureDetectorCompat
+import android.view.ViewConfiguration
+
 import com.battery.analysis.timeline.domain.AppTimelineEvent
 import com.battery.analysis.timeline.domain.BatterySample
 import com.battery.analysis.timeline.domain.ScreenEvent
@@ -420,13 +421,65 @@ class BatteryTimelineView @JvmOverloads constructor(
         cachedDefaultHeader = null
     }
 
-    // 手势与交互状态
+    // 滑动与滚动静默状态
+    private var isParentScrolling = false
+    private var pendingTimelineState: BatteryTimelineState? = null
+
+    // 手势与交互状态（严格遵循“图表中的触摸事件只有在长按时触发”的交互规范）
     private var isCursorActive = false
     private var cursorX = 0f
-    private var isDragging = false
-    private var lastTouchX = 0f
+    private var touchDownX = 0f
+    private var touchDownY = 0f
+    private var isTouchMoved = false
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    private val longPressTimeout = ViewConfiguration.getLongPressTimeout().toLong().coerceAtLeast(400L)
+
+    /**
+     * 长按触发任务：用户在图表区域内按住不动达到长按门限后，激活垂直游标并触发轻微震动反馈。
+     */
+    private val longPressRunnable = Runnable {
+        if (!isAttachedToWindow || isParentScrolling || isTouchMoved) return@Runnable
+        isCursorActive = true
+        parent?.requestDisallowInterceptTouchEvent(true)
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        cursorX = touchDownX.coerceIn(0f, width.toFloat())
+        notifyCursorMove(cursorX)
+        invalidate()
+    }
+
+    /**
+     * 取消尚未触发的长按检测定时器。
+     */
+    private fun cancelLongPressTimer() {
+        removeCallbacks(longPressRunnable)
+    }
 
     private val timeFormatterTooltip = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+
+    /**
+     * 设置父级列表当前是否处于上、下滑动过程中。
+     * 在上、下滑动期间彻底冻结图表的所有重绘、重载与计算，彻底消除滑动卡顿掉帧。
+     *
+     * @param scrolling 是否正在上下滑动
+     */
+    fun setScrolling(scrolling: Boolean) {
+        if (isParentScrolling == scrolling) return
+        isParentScrolling = scrolling
+        if (scrolling) {
+            cancelLongPressTimer()
+            if (isCursorActive) {
+                isCursorActive = false
+                onCursorInspectListener?.onCursorDismiss()
+                invalidate()
+            }
+        } else {
+            // 滑动完全停止后，若在滑动期间积累了新的待更新状态，则在静止时恢复并执行必要更新
+            pendingTimelineState?.let { pending ->
+                pendingTimelineState = null
+                setState(pending)
+            }
+        }
+    }
 
     // 双指缩放手势检测器
     private val scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -435,21 +488,6 @@ class BatteryTimelineView @JvmOverloads constructor(
             val focusX = detector.focusX
             applyZoom(scaleFactor, focusX)
             return true
-        }
-    })
-
-    // 单指手势检测器（点击与长按）
-    private val gestureDetector = GestureDetectorCompat(context, object : GestureDetector.SimpleOnGestureListener() {
-        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-            return handleSingleTap(e.x, e.y)
-        }
-
-        override fun onLongPress(e: MotionEvent) {
-            isCursorActive = true
-            cursorX = e.x.coerceIn(0f, width.toFloat())
-            parent?.requestDisallowInterceptTouchEvent(true)
-            invalidate()
-            notifyCursorMove(cursorX)
         }
     })
 
@@ -686,11 +724,15 @@ class BatteryTimelineView @JvmOverloads constructor(
      * 视图从窗口脱附时的回调。
      * 在 RecyclerView 垂直滚动时 ViewHolder 脱附视野属于高频正常生命周期，
      * 严禁在此处清空图标 Bitmap、时间槽排布及曲线 Path 预计算缓存，确保滑回视野时直接 0 耗时复用既有绘制缓存。
+     * 脱附时立即移除未执行的长按任务并重置游标状态。
      */
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        isCursorActive = false
-        isDragging = false
+        cancelLongPressTimer()
+        if (isCursorActive) {
+            isCursorActive = false
+            onCursorInspectListener?.onCursorDismiss()
+        }
     }
 
     /**
@@ -2216,51 +2258,104 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     /**
      * 触摸与手势事件分发处理。
+     * 严格遵循“图表中的触摸事件只有在长按时触发”的交互规范：
+     * 1. 父级列表正在滚动时，图表直接忽略所有触摸事件；
+     * 2. 多指缩放手势优先识别，并在多指按下时立即取消长按检测；
+     * 3. 单指触摸按下时启动长按倒计时，此时不拦截父容器，保障列表垂直滚动的最高优先级；
+     * 4. 在未长按状态下，手指发生任何移动（dx > touchSlop || dy > touchSlop）立即取消长按定时器并完全放行给列表滚动，绝对不触发图表触摸事件；
+     * 5. 只有在手指保持按住静止达到长按门限后，才激活垂直游标并锁定父容器，跟随手指横向拖动探查数据；
+     * 6. 手指抬起或手势取消时重置长按状态并释放父容器拦截。
      *
      * @param event 触摸事件 [MotionEvent]
      * @return 是否消费触摸事件
      */
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        val scaleHandled = scaleGestureDetector.onTouchEvent(event)
-        val gestureHandled = gestureDetector.onTouchEvent(event)
+        // 父级列表正在上下滑动过程中，图表严禁响应手势，杜绝抢夺事件与重绘
+        if (isParentScrolling) {
+            cancelLongPressTimer()
+            return false
+        }
+
+        // 双指缩放手势优先处理：检测到多指时立即取消长按检测
+        if (event.pointerCount > 1) {
+            cancelLongPressTimer()
+            if (isCursorActive) {
+                isCursorActive = false
+                onCursorInspectListener?.onCursorDismiss()
+                invalidate()
+            }
+            return scaleGestureDetector.onTouchEvent(event)
+        }
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                lastTouchX = event.x
-                isDragging = false
+                touchDownX = event.x
+                touchDownY = event.y
+                isTouchMoved = false
+                cancelLongPressTimer()
+                postDelayed(longPressRunnable, longPressTimeout)
+                return true
             }
+
             MotionEvent.ACTION_MOVE -> {
+                // 若游标已长按激活，跟随手指横向移动更新游标与读数看板
                 if (isCursorActive) {
+                    parent?.requestDisallowInterceptTouchEvent(true)
                     cursorX = event.x.coerceIn(0f, width.toFloat())
                     notifyCursorMove(cursorX)
                     invalidate()
                     return true
                 }
 
-                if (!scaleGestureDetector.isInProgress && event.pointerCount == 1) {
-                    val dx = event.x - lastTouchX
-                    if (abs(dx) > dp4 || isDragging) {
-                        isDragging = true
-                        parent?.requestDisallowInterceptTouchEvent(true)
-                        applyScroll(dx)
-                        lastTouchX = event.x
-                        invalidate()
-                    }
+                // 未长按状态下：若已被判定为已移动，直接放行
+                if (isTouchMoved) {
+                    return false
                 }
+
+                // 检测位移：只要手指发生任何有效移动，立即彻底取消长按判定并完全放行给列表滚动
+                val totalDx = abs(event.x - touchDownX)
+                val totalDy = abs(event.y - touchDownY)
+                if (totalDx > touchSlop || totalDy > touchSlop) {
+                    isTouchMoved = true
+                    cancelLongPressTimer()
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    return false
+                }
+
+                // 位移仍在 touchSlop 以内，维持等待长按状态，继续接收后续事件
+                return true
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+
+            MotionEvent.ACTION_UP -> {
+                cancelLongPressTimer()
                 if (isCursorActive) {
                     isCursorActive = false
                     onCursorInspectListener?.onCursorDismiss()
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    invalidate()
+                    return true
+                }
+                parent?.requestDisallowInterceptTouchEvent(false)
+                // 原地轻微点击且未长按、未移动时，判定为单指单击（如点击能量指标或应用徽章）
+                if (!isTouchMoved && abs(event.x - touchDownX) <= touchSlop && abs(event.y - touchDownY) <= touchSlop) {
+                    return handleSingleTap(event.x, event.y)
+                }
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                cancelLongPressTimer()
+                if (isCursorActive) {
+                    isCursorActive = false
+                    onCursorInspectListener?.onCursorDismiss()
+                    parent?.requestDisallowInterceptTouchEvent(false)
                     invalidate()
                 }
                 parent?.requestDisallowInterceptTouchEvent(false)
-                isDragging = false
             }
         }
 
-        return scaleHandled || gestureHandled || isDragging || isCursorActive || super.onTouchEvent(event)
+        return isCursorActive || super.onTouchEvent(event)
     }
 
     /**

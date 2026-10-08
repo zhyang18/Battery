@@ -293,16 +293,22 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 SleepAwakeViewHolder(binding).also { sleepAwakeHolder = it }
             }
             TYPE_USAGE_OVERVIEW -> {
-                val binding = ItemPowerUsageOverviewBinding.inflate(inflater, parent, false)
-                UsageOverviewViewHolder(binding).also {
-                    overviewHolder = it
-                    it.binding.metricSelectorView.setOnMetricsChangedListener { metrics ->
-                        cachedTimelineState = cachedTimelineState?.copy(selectedMetrics = metrics)
-                        it.binding.batteryTimelineView.setSelectedMetrics(metrics)
-                        onMetricsChangedListener?.invoke(metrics)
-                    }
-                    it.binding.batteryTimelineView.setOnEnergyClickListener { view, x, y ->
-                        onEnergyClickListener?.invoke(view, x, y)
+                val existing = overviewHolder
+                if (existing != null) {
+                    (existing.itemView.parent as? ViewGroup)?.removeView(existing.itemView)
+                    existing
+                } else {
+                    val binding = ItemPowerUsageOverviewBinding.inflate(inflater, parent, false)
+                    UsageOverviewViewHolder(binding).also {
+                        overviewHolder = it
+                        it.binding.metricSelectorView.setOnMetricsChangedListener { metrics ->
+                            cachedTimelineState = cachedTimelineState?.copy(selectedMetrics = metrics)
+                            it.binding.batteryTimelineView.setSelectedMetrics(metrics)
+                            onMetricsChangedListener?.invoke(metrics)
+                        }
+                        it.binding.batteryTimelineView.setOnEnergyClickListener { view, x, y ->
+                            onEnergyClickListener?.invoke(view, x, y)
+                        }
                     }
                 }
             }
@@ -1050,6 +1056,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     /**
      * 绑定使用过程概览卡片（四维时间轴与底部指标选择器）。
      * 同步恢复指标选择器当前的实际选中状态，杜绝列表上下滑动复用时指标状态被旧缓存重置。
+     * 在主列表上下滑动的过程中，绝对不重载、重绘或刷新图表数据，直接复用既有视图。
      *
      * @param holder 概览卡片 ViewHolder
      */
@@ -1468,6 +1475,21 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             com.battery.analysis.timeline.presentation.TimelineMetric.POWER,
             com.battery.analysis.timeline.presentation.TimelineMetric.APP
         )
+    }
+
+    /** 列表是否处于上下滑动中 */
+    private var isListScrolling: Boolean = false
+
+    /**
+     * 设置当前主列表是否正处于上下滑动的过程中。
+     * 滑动期间完全冻结图表视图的任何重绘、重载与数据刷新，消除滑动经过图表时的掉帧卡顿。
+     *
+     * @param scrolling 是否正在上下滑动
+     */
+    fun setScrolling(scrolling: Boolean) {
+        if (isListScrolling == scrolling) return
+        isListScrolling = scrolling
+        overviewHolder?.binding?.batteryTimelineView?.setScrolling(scrolling)
     }
 
     /**

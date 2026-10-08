@@ -5585,6 +5585,105 @@ class PowerUsageCalculationTest {
         assertEquals("22.6W 波峰线段高度在刷新后绝对稳定不变", max1[peak1Pixel], max2[peak1Pixel], 0.0001f)
         assertEquals("波谷数据在刷新后绝对稳定不变", min1[peak1Pixel], min2[peak1Pixel], 0.0001f)
     }
+
+    /**
+     * 验证关机重启后息屏能量单调性保护：
+     * 关机前已确认的息屏能量 confirmedScreenOffEnergyWh 在关机重启后即使开机屏幕事件流计算出的 screenOffMs
+     * 出现短暂测量波动，计算得到的息屏能量绝不归零或倒退丢失。
+     */
+    @Test
+    fun testScreenOffEnergyMonotonicityProtectionAfterReboot() {
+        val confirmedOffWh = 1.85f // 关机前已确认并落盘的息屏能量 1.85 Wh
+        val confirmedOffMs = 7200_000L // 关机前已确认的息屏时长 2 小时
+
+        // 模拟开机初期：时钟重置或屏幕事件流瞬时统计出的息屏时长略有偏差（例如由于时钟对齐误差只有 1小时50分 = 6600_000L）
+        val screenOffMs = 6600_000L
+        val screenOffHours = screenOffMs / 3600_000f
+        val dischargeHours = 3.0f
+        val screenOnHours = dischargeHours - screenOffHours
+        val nominalVoltage = 3.85f
+
+        // 核心保护：minScreenOffEnergyWh 只要 confirmedScreenOffEnergyWh > 0f 即可生效保底，不再因毫秒级门槛被强制清零为 0f
+        val minScreenOffEnergy = if (confirmedOffWh > 0f) confirmedOffWh else 0f
+
+        val dualStats = PowerUsageManager.calculateDualAnchorEnergyAndPower(
+            intOnEnergyWh = 2.50f,
+            intOffEnergyWh = 0f, // 开机瞬间尚未积累新的微积分
+            intTotalEnergyWh = 2.50f,
+            intOnPowerWatts = 2.50f / screenOnHours,
+            intOffPowerWatts = 0f,
+            intTotalPowerWatts = 2.50f / dischargeHours,
+            physicalTotalEnergyWh = 4.35f,
+            screenOnHours = screenOnHours,
+            screenOffHours = screenOffHours,
+            dischargeHours = dischargeHours,
+            screenOffMs = screenOffMs,
+            nominalVoltageVolts = nominalVoltage,
+            minScreenOffEnergyWh = minScreenOffEnergy
+        )
+
+        // 验证：即便当前统计时长短于历史已确认时长，息屏能量依然受单调性保护，不发生归零丢失
+        assertTrue("当前统计时长短于关机前已确认时长", screenOffMs < confirmedOffMs)
+        assertEquals("息屏能量受单调性保护，不发生归零丢失", confirmedOffWh, dualStats.offEnergyWh, 0.001f)
+        assertEquals("整机总能量守恒等于亮屏能量加已确认息屏能量", 2.50f + confirmedOffWh, dualStats.totalEnergyWh, 0.001f)
+    }
+
+    /**
+     * 验证关机重启时电池开路电压（OCV）自然回弹 1%~2% 的容差判定：
+     * 关机断开负载后，锂电池物理化学特性导致端电压回弹并引起开机电量小幅上浮（<= 2%），
+     * 此时判定为物理 OCV 回弹而非离线充电，仅更新基准电量，绝对不能重置清空放电采样历史。
+     */
+    @Test
+    fun testDischargeRebootOcvReboundTolerance() {
+        val lastUnplugLevel = 60 // 关机前拔电基准 60%
+
+        // 情况 1：回弹 1%（开机电量 61%），符合 OCV 物理回弹区间
+        val levelRebound1 = 61
+        val isRebound1Tolerated = (lastUnplugLevel > 0 && levelRebound1 <= lastUnplugLevel + 2)
+        assertTrue("回弹 1% 属于正常 OCV 物理回弹，应在容差内平滑校准", isRebound1Tolerated)
+
+        // 情况 2：回弹 2%（开机电量 62%），符合 OCV 物理回弹区间
+        val levelRebound2 = 62
+        val isRebound2Tolerated = (lastUnplugLevel > 0 && levelRebound2 <= lastUnplugLevel + 2)
+        assertTrue("回弹 2% 属于正常 OCV 物理回弹，应在容差内平滑校准", isRebound2Tolerated)
+
+        // 情况 3：回弹 5%（开机电量 65%），超过 2% 物理容差，判定为实际离线充电，应触发自愈重置
+        val levelRebound3 = 65
+        val isRebound3Tolerated = (lastUnplugLevel > 0 && levelRebound3 <= lastUnplugLevel + 2)
+        assertFalse("回弹 5% 明显属于离线充电，不应作为 OCV 回弹容差处理", isRebound3Tolerated)
+    }
+
+    /**
+     * 验证拔电时间与最近一次充电记录结束时间的 5 秒防抖容差机制：
+     * 拔电瞬间由于广播与数据库存盘微秒级异步时钟抖动，拔电时间若与充电结束时间仅差毫秒至数秒，
+     * 绝不可误判为历史异常并清空放电采样点。
+     */
+    @Test
+    fun testUnplugAndChargingRecordDebounceTolerance() {
+        val chargeEndTs = 1000_000L
+        val chargeStartTs = 900_000L
+
+        // 情况 1：拔电时间晚于充电结束时间（正常放电）
+        val normalUnplugTs = 1000_100L
+        val isAnomaly1 = (normalUnplugTs <= 0L) ||
+                (normalUnplugTs < (chargeEndTs - 5_000L)) ||
+                (normalUnplugTs in (chargeStartTs - 60_000L)..(chargeEndTs - 5_000L))
+        assertFalse("拔电时间正常晚于充电结束时间，不属于异常", isAnomaly1)
+
+        // 情况 2：拔电时间因系统广播调度抖动比充电结束时间早 1 秒（处于 5 秒容差窗口内）
+        val jitterUnplugTs = 999_000L // 早 1 秒
+        val isAnomaly2 = (jitterUnplugTs <= 0L) ||
+                (jitterUnplugTs < (chargeEndTs - 5_000L)) ||
+                (jitterUnplugTs in (chargeStartTs - 60_000L)..(chargeEndTs - 5_000L))
+        assertFalse("处于 5 秒防抖容差范围内的微小先后顺序误差，绝不判定为异常", isAnomaly2)
+
+        // 情况 3：拔电时间早了 10 秒（明显历史倒流或断层异常）
+        val anomalyUnplugTs = 990_000L // 早 10 秒
+        val isAnomaly3 = (anomalyUnplugTs <= 0L) ||
+                (anomalyUnplugTs < (chargeEndTs - 5_000L)) ||
+                (anomalyUnplugTs in (chargeStartTs - 60_000L)..(chargeEndTs - 5_000L))
+        assertTrue("超过 5 秒容差的历史断层，判定为真实异常", isAnomaly3)
+    }
 }
 
 

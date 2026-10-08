@@ -110,6 +110,8 @@
                 <action android:name="android.intent.action.POWER_CONNECTED" />
                 <action android:name="android.intent.action.POWER_DISCONNECTED" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- 监听系统关机广播，在设备断电前同步刷盘保存放电采样点与会话草稿 -->
+                <action android:name="android.intent.action.ACTION_SHUTDOWN" />
                 <!-- 监听自身应用覆盖升级安装完成广播，实现常驻服务自愈与数据无缝对接 -->
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>

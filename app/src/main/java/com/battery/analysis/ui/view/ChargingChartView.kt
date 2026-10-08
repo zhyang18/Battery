@@ -10,8 +10,10 @@ import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
 import android.util.AttributeSet
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import com.battery.analysis.model.ChargingSamplePoint
 import com.battery.analysis.timeline.domain.AppTimelineEvent
 import com.battery.analysis.timeline.presentation.TimelineMetric
@@ -330,11 +332,38 @@ class ChargingChartView @JvmOverloads constructor(
         }
     }
 
-    // 手势交互状态
+    // 手势交互状态（严格遵循“图表中的触摸事件只有在长按时触发”的交互规范）
     private var isTouching = false
     private var touchX = 0f
     private var touchY = 0f
     private var selectedIndex = -1
+
+    private var touchDownX = 0f
+    private var touchDownY = 0f
+    private var isTouchMoved = false
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    private val longPressTimeout = ViewConfiguration.getLongPressTimeout().toLong().coerceAtLeast(400L)
+
+    /**
+     * 长按触发任务：用户在图表区域内按住不动达到长按门限后，激活垂直标尺并触发轻微震动反馈。
+     */
+    private val longPressRunnable = Runnable {
+        if (!isAttachedToWindow || isTouchMoved) return@Runnable
+        isTouching = true
+        parent?.requestDisallowInterceptTouchEvent(true)
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        touchX = touchDownX
+        findClosestIndex(touchX)
+        invalidate()
+    }
+
+    /**
+     * 取消尚未触发的长按检测定时器。
+     */
+    private fun cancelLongPressTimer() {
+        removeCallbacks(longPressRunnable)
+    }
+
 
     private var pointSelectedListener: OnPointSelectedListener? = null
 
@@ -1329,35 +1358,84 @@ class ChargingChartView @JvmOverloads constructor(
     }
 
     /**
-     * 处理用户单指滑动探查图表手势。
+     * 视图从窗口脱附时的生命周期回调，安全移除长按定时任务并重置触控状态。
+     */
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        cancelLongPressTimer()
+        if (isTouching) {
+            isTouching = false
+            pointSelectedListener?.onPointSelected(null)
+        }
+    }
+
+    /**
+     * 处理用户手势交互事件。
+     * 严格遵循“图表中的触摸事件只有在长按时触发”的交互规范：
+     * 1. 手指按下时不拦截父容器，启动长按倒计时，确保列表垂直滚动具备最高优先级；
+     * 2. 未长按状态下，手指发生任何移动（dx > touchSlop || dy > touchSlop）立即取消长按定时器并完全放行给列表滚动，绝对不误触图表；
+     * 3. 只有当用户按住不动达到长按门限后，才激活标尺探查并锁定父容器，跟随手指横向探查数据；
+     * 4. 手指抬起或取消时重置长按状态并释放父容器。
      *
-     * @param event 触摸手势事件
-     * @return 消耗事件返回 true
+     * @param event 触摸手势事件 [MotionEvent]
+     * @return 消耗事件返回 true，放行返回 false
      */
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (dataPoints.isEmpty()) return super.onTouchEvent(event)
 
-        when (event.action) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-                isTouching = true
-                touchX = event.x
-                touchY = event.y
-                parent?.requestDisallowInterceptTouchEvent(true)
-                findClosestIndex(touchX)
-                invalidate()
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                touchDownX = event.x
+                touchDownY = event.y
+                isTouchMoved = false
+                cancelLongPressTimer()
+                postDelayed(longPressRunnable, longPressTimeout)
                 return true
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                isTouching = false
-                touchY = 0f
-                parent?.requestDisallowInterceptTouchEvent(false)
-                pointSelectedListener?.onPointSelected(null)
-                invalidate()
+
+            MotionEvent.ACTION_MOVE -> {
+                // 若标尺已长按激活，跟随手指横向移动更新选点与顶部看板
+                if (isTouching) {
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    touchX = event.x
+                    touchY = event.y
+                    findClosestIndex(touchX)
+                    invalidate()
+                    return true
+                }
+
+                if (isTouchMoved) {
+                    return false
+                }
+
+                // 未长按状态下：检测位移。只要手指发生任何有效移动，立即彻底取消长按判定并完全放行给列表滚动
+                val totalDx = abs(event.x - touchDownX)
+                val totalDy = abs(event.y - touchDownY)
+                if (totalDx > touchSlop || totalDy > touchSlop) {
+                    isTouchMoved = true
+                    cancelLongPressTimer()
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    return false
+                }
+
                 return true
+            }
+
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                cancelLongPressTimer()
+                if (isTouching) {
+                    isTouching = false
+                    touchY = 0f
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    pointSelectedListener?.onPointSelected(null)
+                    invalidate()
+                    return true
+                }
+                parent?.requestDisallowInterceptTouchEvent(false)
             }
         }
-        return super.onTouchEvent(event)
+        return isTouching || super.onTouchEvent(event)
     }
 
     /**

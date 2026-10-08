@@ -54,6 +54,9 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED -> {
                 handleBootCompleted(context)
             }
+            Intent.ACTION_SHUTDOWN -> {
+                handleShutdown(context)
+            }
         }
     }
 
@@ -197,11 +200,14 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                // 1. 执行充放电状态自愈对齐（修复进程被杀期间的状态断层）
+                // 1. 开机第一时间确保放电采样点与能量累加器从本地存储完整恢复加载至内存
+                PowerUsageManager.getInstance(appContext).ensureDischargeSamplesLoaded()
+
+                // 2. 执行充放电状态自愈对齐（修复进程被杀期间的状态断层）
                 ChargingStatsManager.getInstance(appContext).checkAndReconcileChargingState()
                 PowerUsageManager.getInstance(appContext).checkAndReconcileDischargeState()
 
-                // 2. 若用户开启了后台常驻服务与开机自启，恢复启动前台监控服务
+                // 3. 若用户开启了后台常驻服务与开机自启，恢复启动前台监控服务
                 if (BatteryMonitorService.isServiceEnabled(appContext) &&
                     BatteryMonitorService.isBootAutoStartEnabled(appContext)) {
                     BatteryMonitorService.start(appContext)
@@ -212,6 +218,30 @@ class BatteryUnplugReceiver : BroadcastReceiver() {
                 pendingResult.finish()
                 wakeLock?.release()
             }
+        }
+    }
+
+    /**
+     * 处理设备关机广播 [Intent.ACTION_SHUTDOWN]。
+     * 申请紧急 WakeLock，同步将放电瞬时采样点序列、物理能量累加器与放电草稿 Checkpoint 写入本地持久化存储，
+     * 确保即使后台监控服务此前被系统杀死，关机前数据亦 100% 完整留存不丢失。
+     *
+     * @param context 应用程序上下文
+     */
+    private fun handleShutdown(context: Context) {
+        val appContext = context.applicationContext
+        val wakeLock = acquireWakeLock(appContext, "battery:shutdown")
+        try {
+            val powerManager = PowerUsageManager.getInstance(appContext)
+            val currentBattery = powerManager.getCurrentBatteryStatus()
+            if (!currentBattery.isCharging) {
+                powerManager.flushDischargeSamplesToDiskSync()
+                powerManager.checkpointDischargeSession(isFinal = false)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        } finally {
+            wakeLock?.release()
         }
     }
 

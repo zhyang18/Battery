@@ -193,6 +193,13 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         val concatAdapter = ConcatAdapter(headerAdapter, appAdapter)
         binding.recyclerHistoryDetail.layoutManager = LinearLayoutManager(this)
         binding.recyclerHistoryDetail.adapter = concatAdapter
+        binding.recyclerHistoryDetail.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+            override fun onScrollStateChanged(recyclerView: androidx.recyclerview.widget.RecyclerView, newState: Int) {
+                super.onScrollStateChanged(recyclerView, newState)
+                val isScrolling = (newState != androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE)
+                headerBinding?.batteryTimelineView?.setScrolling(isScrolling)
+            }
+        })
     }
 
     /**

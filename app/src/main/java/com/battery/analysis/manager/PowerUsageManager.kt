@@ -1453,6 +1453,28 @@ class PowerUsageManager private constructor(private val context: Context) {
     private var lastKernelOffDurationMs: Long = 0L
 
     /**
+     * 放电采样点与物理能量累加器是否已从本地持久化存储（或运行中草稿）完成恢复加载的状态标记。
+     */
+    @Volatile
+    private var isDischargeSamplesLoaded: Boolean = false
+
+    init {
+        ensureDischargeSamplesLoaded()
+    }
+
+    /**
+     * 确保当前放电周期的秒级瞬时采样点、物理能量累加器及温度采样点已完整从持久化介质恢复加载至内存。
+     * 若尚未加载，则触发加载；若已加载，则直接返回。
+     * 具备双重检查锁定，保证多线程安全与幂等性。
+     */
+    @Synchronized
+    fun ensureDischargeSamplesLoaded() {
+        if (isDischargeSamplesLoaded) return
+        loadDischargeSamplesFromPrefs()
+        isDischargeSamplesLoaded = true
+    }
+
+    /**
      * 记录一次息屏区间的唤醒与深度睡眠时长增量，以及首尾硬件芯片库仑计差分计算出的物理电荷与动态电压能量。
      * 由 BatteryMonitorService 在屏幕点亮瞬间差分 SystemClock.elapsedRealtime 与 uptimeMillis 触发上报。
      *
@@ -1470,6 +1492,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         hwEnergyWh: Float = 0f
     ) {
         if (screenOffRealtimeMs > 0L) {
+            ensureDischargeSamplesLoaded()
             localScreenOffAwakeDurationMs += screenOffAwakeMs
             localScreenOffDeepSleepDurationMs += deepSleepMs
             if (hwDrainMah > 0f) {
@@ -1487,14 +1510,20 @@ class PowerUsageManager private constructor(private val context: Context) {
      *
      * @return 息屏放电量（毫安时 mAh）
      */
-    fun getLocalScreenOffHwDrainMah(): Float = localScreenOffHwDrainMah
+    fun getLocalScreenOffHwDrainMah(): Float {
+        ensureDischargeSamplesLoaded()
+        return localScreenOffHwDrainMah
+    }
 
     /**
      * 获取当前放电周期内通过首尾硬件库仑计与动态端电压积分累加的息屏能量（瓦时 Wh）。
      *
      * @return 息屏能量（瓦时 Wh）
      */
-    fun getLocalScreenOffHwEnergyWh(): Float = localScreenOffHwEnergyWh
+    fun getLocalScreenOffHwEnergyWh(): Float {
+        ensureDischargeSamplesLoaded()
+        return localScreenOffHwEnergyWh
+    }
 
     /**
      * 异步后台 I/O 线程池，用于执行大采样点序列的持久化存储，杜绝主线程与轮询线程阻塞。
@@ -1654,6 +1683,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         isScreenOn: Boolean,
         packageName: String? = null
     ) {
+        ensureDischargeSamplesLoaded()
         val lastPoint = dischargeRealtimeSamples.lastOrNull()
         // 1 秒内防抖，避免同一秒内密集重复写入
         if (lastPoint != null && (timestamp - lastPoint.timestamp) < 1000L) {
@@ -1815,6 +1845,7 @@ class PowerUsageManager private constructor(private val context: Context) {
      */
     @Synchronized
     fun downsampleDischargeSamplesUniformly(targetCount: Int = 3000) {
+        ensureDischargeSamplesLoaded()
         if (dischargeRealtimeSamples.size <= targetCount) return
         val downsampled = downsampleDischargeSamplesUniformly(dischargeRealtimeSamples, targetCount)
         dischargeRealtimeSamples.clear()
@@ -1823,32 +1854,38 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 获取放电全周期常驻物理能量累加器副本。
+     * 具备持久化数据懒加载守护，确保返回最新的完整累积焦耳数与时长。
      *
      * @return 包含实时累积焦耳数与有效时长的物理累加器 [RealtimeDischargeAccumulator]
      */
     @Synchronized
     fun getDischargeAccumulator(): RealtimeDischargeAccumulator {
+        ensureDischargeSamplesLoaded()
         return dischargeAccumulator.copy()
     }
 
     /**
      * 获取各应用前台独占运行即时物理能量与温度映射表副本。
+     * 具备持久化数据懒加载守护，确保各应用物理能量完整恢复。
      *
      * @return 包含各包名即时物理累加器副本的映射表 [Map<String, AppRealtimeEnergyAccumulator>]
      */
     @Synchronized
     fun getAppRealtimeEnergyMap(): Map<String, AppRealtimeEnergyAccumulator> {
+        ensureDischargeSamplesLoaded()
         return appRealtimeEnergyMap.toMap()
     }
 
     /**
      * 获取指定包名在当前放电周期内秒级硬件采样累计的真实前台活跃工时（毫秒）。
+     * 具备持久化数据懒加载守护。
      *
      * @param packageName 目标应用程序包名
      * @return 实际采样前台毫秒数，未记录则返回 0L
      */
     @Synchronized
     fun getAppRealtimeDurationMs(packageName: String): Long {
+        ensureDischargeSamplesLoaded()
         return appRealtimeEnergyMap[packageName]?.durationMs ?: 0L
     }
 
@@ -1862,24 +1899,31 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 主动将当前内存中的放电瞬时采样点序列刷入本地持久化存储。
-     * 适合在息屏休眠、电源插拔、清空重置等关键生命周期节点调用。
+     * 主动将当前内存中的放电瞬时采样点序列刷入本地持久化存储（异步提交至后台线程）。
+     * 适合在息屏休眠、电源插拔、清空重置等日常关键生命周期节点调用。
      */
     fun flushDischargeSamplesToDisk() {
         saveDischargeSamplesToPrefsAsync()
     }
 
     /**
+     * 同步将当前内存中的放电瞬时采样点序列、物理能量累加器及温度走势刷入本地持久化存储。
+     * 阻塞调用线程直至写盘完成，专供系统关机广播（ACTION_SHUTDOWN）或进程销毁等必须保证 100% 同步落盘的紧急场景使用。
+     */
+    @Synchronized
+    fun flushDischargeSamplesToDiskSync() {
+        saveDischargeSamplesToPrefs()
+    }
+
+    /**
      * 获取当前放电周期记录的所有秒级瞬时采样点列表。
-     * 若内存中为空，则自动尝试从本地持久化中恢复读取。
+     * 具备严格的持久化存储懒加载保护，确保历史采样数据 100% 完整继承。
      *
      * @return 瞬时物理采样点列表 [List<PowerDischargePoint>]
      */
     @Synchronized
     fun getDischargeRealtimeSamples(): List<PowerDischargePoint> {
-        if (dischargeRealtimeSamples.isEmpty()) {
-            loadDischargeSamplesFromPrefs()
-        }
+        ensureDischargeSamplesLoaded()
         return dischargeRealtimeSamples.toList()
     }
 
@@ -1889,6 +1933,7 @@ class PowerUsageManager private constructor(private val context: Context) {
      */
     @Synchronized
     fun clearDischargeRealtimeSamples() {
+        isDischargeSamplesLoaded = true
         dischargeRealtimeSamples.clear()
         unsavedDischargeSamplesCount = 0
 
@@ -1939,6 +1984,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         initialPower: Float = 0f,
         isScreenOn: Boolean = true
     ) {
+        isDischargeSamplesLoaded = true
         dischargeRealtimeSamples.clear()
         unsavedDischargeSamplesCount = 0
 
@@ -1984,17 +2030,23 @@ class PowerUsageManager private constructor(private val context: Context) {
      * 将当前放电周期的秒级瞬时采样点序列及物理能量累加器持久化保存至专属私有文件，避免膨胀主 SharedPreferences。
      * 采用轻量流式 [StringBuilder] 纯文本格式化输出，彻底消除高频创建数万个 [org.json.JSONObject]
      * 与哈希表节点带来的巨量堆内存分配与垃圾回收（GC）暂停开销。
+     * 具备空数据守卫，非充电状态下绝不误删磁盘已有历史数据。
      */
     @Synchronized
     private fun saveDischargeSamplesToPrefs() {
         try {
+            ensureDischargeSamplesLoaded()
             lastDischargeSaveTimeMs = System.currentTimeMillis()
             val snapshot = ArrayList(dischargeRealtimeSamples)
             if (snapshot.isEmpty()) {
-                val targetFile = java.io.File(context.filesDir, "discharge_samples.json")
-                if (targetFile.exists()) targetFile.delete()
-                val accFile = java.io.File(context.filesDir, "discharge_accumulators.json")
-                if (accFile.exists()) accFile.delete()
+                val isCharging = getCurrentBatteryStatus().isCharging
+                val lastUnplug = getLastUnplugTime()
+                if (isCharging || lastUnplug <= 0L) {
+                    val targetFile = java.io.File(context.filesDir, "discharge_samples.json")
+                    if (targetFile.exists()) targetFile.delete()
+                    val accFile = java.io.File(context.filesDir, "discharge_accumulators.json")
+                    if (accFile.exists()) accFile.delete()
+                }
                 return
             }
 
@@ -2072,7 +2124,8 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
-     * 从专属私有文件（及兼容旧 SharedPreferences）恢复加载已保存的秒级瞬时放电采样点序列与物理累加器。
+     * 从专属私有文件（及兼容旧 SharedPreferences，极端情况下从 SQLite 运行中草稿两级容灾）恢复加载已保存的秒级瞬时放电采样点序列、物理累加器与温度走势。
+     * 具备严格的空值与异常保护，确保在关机重启或进程重建后完整恢复历史放电上下文。
      */
     @Synchronized
     private fun loadDischargeSamplesFromPrefs() {
@@ -2091,7 +2144,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 legacyStr
             }
 
-            if (jsonStr != null) {
+            if (!jsonStr.isNullOrEmpty()) {
                 val jsonArray = org.json.JSONArray(jsonStr)
                 dischargeRealtimeSamples.clear()
                 for (i in 0 until jsonArray.length()) {
@@ -2116,39 +2169,122 @@ class PowerUsageManager private constructor(private val context: Context) {
             val accFile = java.io.File(context.filesDir, "discharge_accumulators.json")
             if (accFile.exists() && accFile.canRead()) {
                 val accStr = accFile.readText(Charsets.UTF_8)
-                val accObj = org.json.JSONObject(accStr)
-                dischargeAccumulator.screenOnJoules = accObj.optDouble("onJ", 0.0)
-                dischargeAccumulator.screenOffJoules = accObj.optDouble("offJ", 0.0)
-                dischargeAccumulator.screenOnDurationMs = accObj.optLong("onMs", 0L)
-                dischargeAccumulator.screenOffDurationMs = accObj.optLong("offMs", 0L)
-                dischargeAccumulator.lastSampleTs = accObj.optLong("lastTs", 0L)
-                dischargeAccumulator.lastSampleWatts = accObj.optDouble("lastW", 0.0).toFloat()
-                dischargeAccumulator.lastSampleScreenOn = accObj.optBoolean("lastOn", false)
-                dischargeAccumulator.lastSampleTemp = accObj.optDouble("lastT", 0.0).toFloat()
-                localScreenOffAwakeDurationMs = accObj.optLong("offAwakeMs", 0L)
-                localScreenOffDeepSleepDurationMs = accObj.optLong("offSleepMs", 0L)
-                localScreenOffHwDrainMah = accObj.optDouble("offHwMah", 0.0).toFloat()
-                localScreenOffHwEnergyWh = accObj.optDouble("offHwWh", 0.0).toFloat()
-                confirmedScreenOffEnergyWh = accObj.optDouble("confOffWh", 0.0).toFloat()
-                confirmedScreenOffDurationMs = accObj.optLong("confOffMs", 0L)
-                lastKernelOffEnergyWh = accObj.optDouble("lastKOffWh", 0.0).toFloat()
-                lastKernelOffDurationMs = accObj.optLong("lastKOffMs", 0L)
+                if (accStr.isNotEmpty()) {
+                    val accObj = org.json.JSONObject(accStr)
+                    dischargeAccumulator.screenOnJoules = accObj.optDouble("onJ", 0.0)
+                    dischargeAccumulator.screenOffJoules = accObj.optDouble("offJ", 0.0)
+                    dischargeAccumulator.screenOnDurationMs = accObj.optLong("onMs", 0L)
+                    dischargeAccumulator.screenOffDurationMs = accObj.optLong("offMs", 0L)
+                    dischargeAccumulator.lastSampleTs = accObj.optLong("lastTs", 0L)
+                    dischargeAccumulator.lastSampleWatts = accObj.optDouble("lastW", 0.0).toFloat()
+                    dischargeAccumulator.lastSampleScreenOn = accObj.optBoolean("lastOn", false)
+                    dischargeAccumulator.lastSampleTemp = accObj.optDouble("lastT", 0.0).toFloat()
+                    localScreenOffAwakeDurationMs = accObj.optLong("offAwakeMs", 0L)
+                    localScreenOffDeepSleepDurationMs = accObj.optLong("offSleepMs", 0L)
+                    localScreenOffHwDrainMah = accObj.optDouble("offHwMah", 0.0).toFloat()
+                    localScreenOffHwEnergyWh = accObj.optDouble("offHwWh", 0.0).toFloat()
+                    confirmedScreenOffEnergyWh = accObj.optDouble("confOffWh", 0.0).toFloat()
+                    confirmedScreenOffDurationMs = accObj.optLong("confOffMs", 0L)
+                    lastKernelOffEnergyWh = accObj.optDouble("lastKOffWh", 0.0).toFloat()
+                    lastKernelOffDurationMs = accObj.optLong("lastKOffMs", 0L)
 
-                appRealtimeEnergyMap.clear()
-                val appsArray = accObj.optJSONArray("apps")
-                if (appsArray != null) {
-                    for (i in 0 until appsArray.length()) {
-                        val aObj = appsArray.getJSONObject(i)
-                        val pkg = aObj.optString("pkg")
-                        if (pkg.isNotEmpty()) {
-                            appRealtimeEnergyMap[pkg] = AppRealtimeEnergyAccumulator(
-                                packageName = pkg,
-                                energyJoules = aObj.optDouble("j", 0.0),
-                                durationMs = aObj.optLong("ms", 0L),
-                                tempWeightSum = aObj.optDouble("tSum", 0.0),
-                                maxTempCelsius = aObj.optDouble("maxT", 0.0).toFloat()
-                            )
+                    appRealtimeEnergyMap.clear()
+                    val appsArray = accObj.optJSONArray("apps")
+                    if (appsArray != null) {
+                        for (i in 0 until appsArray.length()) {
+                            val aObj = appsArray.getJSONObject(i)
+                            val pkg = aObj.optString("pkg")
+                            if (pkg.isNotEmpty()) {
+                                appRealtimeEnergyMap[pkg] = AppRealtimeEnergyAccumulator(
+                                    packageName = pkg,
+                                    energyJoules = aObj.optDouble("j", 0.0),
+                                    durationMs = aObj.optLong("ms", 0L),
+                                    tempWeightSum = aObj.optDouble("tSum", 0.0),
+                                    maxTempCelsius = aObj.optDouble("maxT", 0.0).toFloat()
+                                )
+                            }
                         }
+                    }
+                }
+            }
+
+            // 二级容灾：若本地文件丢失或解析为空，尝试从 SQLite 数据库中的未结案 RUNNING 放电草稿回溯恢复
+            if (dischargeRealtimeSamples.isEmpty() || (dischargeAccumulator.screenOnJoules <= 0.0 && dischargeAccumulator.screenOffJoules <= 0.0)) {
+                try {
+                    val powerDbHelper = PowerUsageDbHelper.getInstance(context)
+                    val runningRecord = powerDbHelper.getRunningDischargeRecord()
+                    if (runningRecord != null) {
+                        // 1. 若采样点为空，从数据库草稿中保存的 trendPointsJson 恢复
+                        if (dischargeRealtimeSamples.isEmpty() && !runningRecord.trendPointsJson.isNullOrEmpty()) {
+                            try {
+                                val jsonArray = org.json.JSONArray(runningRecord.trendPointsJson)
+                                for (i in 0 until jsonArray.length()) {
+                                    val obj = jsonArray.getJSONObject(i)
+                                    val pkgName = obj.optString("pkg").takeIf { it.isNotEmpty() }
+                                    dischargeRealtimeSamples.add(
+                                        PowerDischargePoint(
+                                            timestamp = obj.optLong("ts", 0L),
+                                            elapsedHours = obj.optDouble("elapsed", 0.0).toFloat(),
+                                            batteryLevel = obj.optInt("lvl", runningRecord.levelPercent),
+                                            voltageVolts = obj.optDouble("volt", runningRecord.voltageVolts.toDouble()).toFloat(),
+                                            temperature = obj.optDouble("temp", runningRecord.temperature.toDouble()).toFloat(),
+                                            powerWatts = obj.optDouble("pwr", runningRecord.avgPowerWatts.toDouble()).toFloat(),
+                                            isScreenOn = obj.optBoolean("screenOn", false),
+                                            packageName = pkgName
+                                        )
+                                    )
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        // 2. 若累加器为 0，从草稿的已统计能量和时长无缝恢复累加器与基准值
+                        val recOffMs = runningRecord.screenOffAwakeDurationMs + runningRecord.screenOffDeepSleepDurationMs
+                        val recTotalMs = if (runningRecord.lastCheckpointTime > runningRecord.id) {
+                            runningRecord.lastCheckpointTime - runningRecord.id
+                        } else {
+                            recOffMs
+                        }
+                        val recOnMs = (recTotalMs - recOffMs).coerceAtLeast(0L)
+                        if (dischargeAccumulator.screenOnJoules <= 0.0 && runningRecord.screenOnEnergyWh > 0f) {
+                            dischargeAccumulator.screenOnJoules = runningRecord.screenOnEnergyWh.toDouble() * 3600.0
+                            dischargeAccumulator.screenOnDurationMs = recOnMs
+                        }
+                        if (dischargeAccumulator.screenOffJoules <= 0.0 && runningRecord.screenOffEnergyWh > 0f) {
+                            dischargeAccumulator.screenOffJoules = runningRecord.screenOffEnergyWh.toDouble() * 3600.0
+                            dischargeAccumulator.screenOffDurationMs = recOffMs
+                        }
+                        if (confirmedScreenOffEnergyWh <= 0f && runningRecord.screenOffEnergyWh > 0f) {
+                            confirmedScreenOffEnergyWh = runningRecord.screenOffEnergyWh
+                            confirmedScreenOffDurationMs = recOffMs
+                        }
+                        if (localScreenOffAwakeDurationMs <= 0L && runningRecord.screenOffAwakeDurationMs > 0L) {
+                            localScreenOffAwakeDurationMs = runningRecord.screenOffAwakeDurationMs
+                        }
+                        if (localScreenOffDeepSleepDurationMs <= 0L && runningRecord.screenOffDeepSleepDurationMs > 0L) {
+                            localScreenOffDeepSleepDurationMs = runningRecord.screenOffDeepSleepDurationMs
+                        }
+                        if (currentDischargeSessionId <= 0L) {
+                            currentDischargeSessionId = runningRecord.id
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 对齐累加器末次采样时间戳与末次采样状态
+            if (dischargeAccumulator.lastSampleTs <= 0L && dischargeRealtimeSamples.isNotEmpty()) {
+                val last = dischargeRealtimeSamples.last()
+                dischargeAccumulator.lastSampleTs = last.timestamp
+                dischargeAccumulator.lastSampleWatts = last.powerWatts
+                dischargeAccumulator.lastSampleScreenOn = last.isScreenOn
+                dischargeAccumulator.lastSampleTemp = last.temperature
+            }
+
+            // 同步恢复时序温度采样点：从已恢复的放电时序采样点序列中提取温度记录
+            if (dischargeTempPoints.isEmpty() && dischargeRealtimeSamples.isNotEmpty()) {
+                for (p in dischargeRealtimeSamples) {
+                    val formatted = (Math.round(p.temperature * 10f) / 10f)
+                    val lastPoint = dischargeTempPoints.lastOrNull()
+                    if (lastPoint == null || (p.timestamp - lastPoint.first) >= 10000L || Math.abs(formatted - lastPoint.second) >= 0.2f) {
+                        dischargeTempPoints.add(Pair(p.timestamp, formatted))
                     }
                 }
             }
@@ -2158,12 +2294,14 @@ class PowerUsageManager private constructor(private val context: Context) {
     /**
      * 记录放电期间的一个电池温度采样点。
      * 内置 10 秒时间或 0.2℃ 温差防抖过滤，防止无意义重复采样。
+     * 具备持久化数据懒加载守护。
      *
      * @param timestamp 采样时间戳（毫秒）
      * @param tempCelsius 采集到的温度数值（摄氏度）
      */
     @Synchronized
     fun recordDischargeTempSample(timestamp: Long, tempCelsius: Float) {
+        ensureDischargeSamplesLoaded()
         val formatted = (Math.round(tempCelsius * 10f) / 10f)
         val lastPoint = dischargeTempPoints.lastOrNull()
         if (lastPoint == null || (timestamp - lastPoint.first) >= 10000L || Math.abs(formatted - lastPoint.second) >= 0.2f) {
@@ -2185,11 +2323,13 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 获取当前放电周期记录的所有时序温度采样点。
+     * 具备持久化数据懒加载守护。
      *
      * @return 时序温度采样点列表 [List<Pair<Long, Float>>]
      */
     @Synchronized
     fun getDischargeTempPoints(): List<Pair<Long, Float>> {
+        ensureDischargeSamplesLoaded()
         return dischargeTempPoints.toList()
     }
 
@@ -2318,6 +2458,7 @@ class PowerUsageManager private constructor(private val context: Context) {
      */
     @Synchronized
     fun checkpointDischargeSession(isFinal: Boolean = false): PowerUsageRecord? {
+        ensureDischargeSamplesLoaded()
         val batteryStatus = getCurrentBatteryStatus()
         // 严格守卫：如果是日常增量检查点且设备当前处于充电状态，严禁保存为耗电记录
         if (!isFinal && batteryStatus.isCharging) {
@@ -2540,6 +2681,7 @@ class PowerUsageManager private constructor(private val context: Context) {
     @Synchronized
     fun reconcileWithLatestChargingRecord(currentLevel: Int, currentIsCharging: Boolean): Boolean {
         if (currentIsCharging) return false
+        ensureDischargeSamplesLoaded()
 
         val chargingDb = com.battery.analysis.db.ChargingHistoryDbHelper.getInstance(context)
         val latestCharge = chargingDb.getAllRecords().firstOrNull() ?: return false
@@ -2551,11 +2693,11 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         // 判定异常条件：
         // 1. 未记录拔电时间（<= 0L）；
-        // 2. 记录的拔电时间早于最近一次充电结束时间（例如充电 11:48~12:18，拔电时间被记为 11:48 或更早）；
+        // 2. 记录的拔电时间显著早于最近一次充电结束时间（允许 5 秒防抖容差，避免并发插拔广播微秒级先后顺序误差）；
         // 3. 记录的拔电时间落在充电起止时间窗口内；
         // 4. 充电结束时间合法且在合理时间窗口内
         val isAnomaly = (currentUnplugTs <= 0L) ||
-                (currentUnplugTs < chargeEndTs) ||
+                (currentUnplugTs < (chargeEndTs - 5_000L)) ||
                 (currentUnplugTs in (chargeStartTs - 60_000L)..(chargeEndTs - 5_000L))
 
         if (!isAnomaly) return false
@@ -2630,6 +2772,7 @@ class PowerUsageManager private constructor(private val context: Context) {
      * @return 若执行了自愈校准返回 true，否则返回 false
      */
     fun checkAndReconcileDischargeState(): Boolean {
+        ensureDischargeSamplesLoaded()
         val batterySnapshot = getCurrentBatteryStatus()
         val currentLevel = batterySnapshot.levelPercent
         val isCharging = batterySnapshot.isCharging
@@ -2711,9 +2854,17 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
 
                 if (!syncedViaShizuku) {
-                    // 普通模式兜底自愈：重置基准电量为当前电量，拔电时间重置为当前时刻
-                    onPowerDisconnected(currentLevel)
-                    reconciled = true
+                    if (lastUnplugLevel > 0 && currentLevel <= lastUnplugLevel + 2) {
+                        // 物理化学常态：关机静置 OCV 开路电压自然回弹仅引起 1%~2% 的轻微电量上浮，
+                        // 属于真实物理特性而非外部充电。仅校准记录的拔电基准电量，绝不重置放电历史采样点与累加器
+                        prefs.edit().putInt(PREF_KEY_LAST_UNPLUG_LEVEL, currentLevel).apply()
+                        saveUnplugEnergy(currentLevel)
+                        reconciled = true
+                    } else {
+                        // 普通模式兜底自愈：重置基准电量为当前电量，拔电时间重置为当前时刻
+                        onPowerDisconnected(currentLevel)
+                        reconciled = true
+                    }
                 }
             } else if (lastUnplugTime <= 0L || (now - lastUnplugTime) > 48 * 3600000L) {
                 // 首次进入无记录或长期未更新拔电时间，自动修正基准
@@ -3288,6 +3439,7 @@ class PowerUsageManager private constructor(private val context: Context) {
      * @return 完整的功耗与应用列表数据包装 [FullPowerDataPackage]
      */
     fun loadPowerData(mode: Int, enableBackgroundStats: Boolean = false): FullPowerDataPackage {
+        ensureDischargeSamplesLoaded()
         val batterySnapshot = getCurrentBatteryStatus()
         if (!batterySnapshot.isCharging) {
             reconcileWithLatestChargingRecord(batterySnapshot.levelPercent, batterySnapshot.isCharging)
@@ -3515,11 +3667,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val offEnergyWh: Float
 
                 if (hasValidHardwareIntegration) {
-                    val minScreenOffEnergy = if (screenOffMs >= (confirmedScreenOffDurationMs - 10000L).coerceAtLeast(0L)) {
-                        confirmedScreenOffEnergyWh
-                    } else {
-                        0f
-                    }
+                    val minScreenOffEnergy = if (confirmedScreenOffEnergyWh > 0f) confirmedScreenOffEnergyWh else 0f
                     val dualStats = calculateDualAnchorEnergyAndPower(
                         intOnEnergyWh = intOnEnergyWh,
                         intOffEnergyWh = safeIntOffEnergyWh,
@@ -3544,7 +3692,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
                     if (dualStats.offEnergyWh > 0f && (screenOffMs > confirmedScreenOffDurationMs || confirmedScreenOffDurationMs == 0L)) {
                         confirmedScreenOffEnergyWh = maxOf(confirmedScreenOffEnergyWh, dualStats.offEnergyWh)
-                        confirmedScreenOffDurationMs = screenOffMs
+                        confirmedScreenOffDurationMs = maxOf(confirmedScreenOffDurationMs, screenOffMs)
                     }
                 } else if (physicalTotalEnergyWh > 0f) {
                     // 2. 无硬件连续采样点时，忠实采用系统底层库仑计/掉电量计算的真实物理能耗：
@@ -3555,11 +3703,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                         onEnergyWh = 0f
                         offEnergyWh = if (offIntegrated.offEnergyWh > 0f) offIntegrated.offEnergyWh else physicalTotalEnergyWh
                     } else {
-                        val minScreenOffEnergy = if (screenOffMs >= (confirmedScreenOffDurationMs - 10000L).coerceAtLeast(0L)) {
-                            confirmedScreenOffEnergyWh
-                        } else {
-                            0f
-                        }
+                        val minScreenOffEnergy = if (confirmedScreenOffEnergyWh > 0f) confirmedScreenOffEnergyWh else 0f
                         val rawOffWh = if (offIntegrated.offEnergyWh > 0f) {
                             offIntegrated.offEnergyWh
                         } else if (localScreenOffHwEnergyWh > 0f) {
@@ -3582,7 +3726,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
                     if (offEnergyWh > 0f && (screenOffMs > confirmedScreenOffDurationMs || confirmedScreenOffDurationMs == 0L)) {
                         confirmedScreenOffEnergyWh = maxOf(confirmedScreenOffEnergyWh, offEnergyWh)
-                        confirmedScreenOffDurationMs = screenOffMs
+                        confirmedScreenOffDurationMs = maxOf(confirmedScreenOffDurationMs, screenOffMs)
                     }
                 } else {
                     // 3. 既无硬件采样点且系统无任何掉电量（如刚拔掉充电器数秒内）：真实数值均为 0
@@ -5886,11 +6030,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         val offEnergyWh: Float
 
         if (hasValidHardwareIntegration) {
-            val minScreenOffEnergy = if (screenOffMs >= (confirmedScreenOffDurationMs - 10000L).coerceAtLeast(0L)) {
-                confirmedScreenOffEnergyWh
-            } else {
-                0f
-            }
+            val minScreenOffEnergy = if (confirmedScreenOffEnergyWh > 0f) confirmedScreenOffEnergyWh else 0f
             val dualStats = calculateDualAnchorEnergyAndPower(
                 intOnEnergyWh = intOnEnergyWh,
                 intOffEnergyWh = safeIntOffEnergyWh,
@@ -5915,7 +6055,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
             if (dualStats.offEnergyWh > 0f && (screenOffMs > confirmedScreenOffDurationMs || confirmedScreenOffDurationMs == 0L)) {
                 confirmedScreenOffEnergyWh = maxOf(confirmedScreenOffEnergyWh, dualStats.offEnergyWh)
-                confirmedScreenOffDurationMs = screenOffMs
+                confirmedScreenOffDurationMs = maxOf(confirmedScreenOffDurationMs, screenOffMs)
             }
         } else if (physicalTotalEnergyWh > 0f) {
             // 2. 无硬件连续采样点时，忠实采用系统底层库仑计/掉电量计算的真实物理能耗：
@@ -5926,11 +6066,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 onEnergyWh = 0f
                 offEnergyWh = if (offIntegrated.offEnergyWh > 0f) offIntegrated.offEnergyWh else physicalTotalEnergyWh
             } else {
-                val minScreenOffEnergy = if (screenOffMs >= (confirmedScreenOffDurationMs - 10000L).coerceAtLeast(0L)) {
-                    confirmedScreenOffEnergyWh
-                } else {
-                    0f
-                }
+                val minScreenOffEnergy = if (confirmedScreenOffEnergyWh > 0f) confirmedScreenOffEnergyWh else 0f
                 val rawOffWh = if (offIntegrated.offEnergyWh > 0f) {
                     offIntegrated.offEnergyWh
                 } else if (localScreenOffHwEnergyWh > 0f) {
@@ -5953,7 +6089,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
             if (offEnergyWh > 0f && (screenOffMs > confirmedScreenOffDurationMs || confirmedScreenOffDurationMs == 0L)) {
                 confirmedScreenOffEnergyWh = maxOf(confirmedScreenOffEnergyWh, offEnergyWh)
-                confirmedScreenOffDurationMs = screenOffMs
+                confirmedScreenOffDurationMs = maxOf(confirmedScreenOffDurationMs, screenOffMs)
             }
         } else {
             // 3. 既无硬件采样点且系统无任何掉电量（如刚拔掉充电器数秒内）：真实数值均为 0

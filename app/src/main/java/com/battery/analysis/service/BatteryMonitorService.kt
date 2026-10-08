@@ -135,6 +135,17 @@ class BatteryMonitorService : Service() {
             val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
             val savedRealtime = prefs.getLong(KEY_LAST_SCREEN_OFF_REALTIME, 0L)
             if (savedRealtime > 0L) {
+                val currentRealtime = SystemClock.elapsedRealtime()
+                // 核心时钟守卫：SystemClock.elapsedRealtime() 在开机时从 0 重置。
+                // 若持久化的 savedRealtime 大于当前 currentRealtime，说明设备经历了关机重启，该时钟基准已失效，必须立即清除
+                if (savedRealtime > currentRealtime) {
+                    clearPersistedScreenOffBaseline(context)
+                    lastScreenOffRealtime = 0L
+                    lastScreenOffUptime = 0L
+                    lastScreenOffChargeCounterUah = 0
+                    lastScreenOffVoltageVolts = 0f
+                    return
+                }
                 lastScreenOffRealtime = savedRealtime
                 lastScreenOffUptime = prefs.getLong(KEY_LAST_SCREEN_OFF_UPTIME, 0L)
                 lastScreenOffChargeCounterUah = prefs.getInt(KEY_LAST_SCREEN_OFF_COUNTER_UAH, 0)
@@ -397,9 +408,15 @@ class BatteryMonitorService : Service() {
                     }
                 }
                 Intent.ACTION_SHUTDOWN -> {
-                    // 系统关机广播：尽最大可能执行一次 Checkpoint 存盘（保持 RUNNING 状态，绝不标记为 COMPLETED）
+                    // 系统关机广播：同步执行放电瞬时采样点与累加器落盘，并执行一次 Checkpoint 存盘（保持 RUNNING 状态，绝不标记为 COMPLETED）
                     if (!cachedIsCharging) {
-                        PowerUsageManager.getInstance(appContext).checkpointDischargeSession(isFinal = false)
+                        try {
+                            val pm = PowerUsageManager.getInstance(appContext)
+                            pm.flushDischargeSamplesToDiskSync()
+                            pm.checkpointDischargeSession(isFinal = false)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
                     }
                 }
             }
@@ -440,6 +457,10 @@ class BatteryMonitorService : Service() {
         isServiceActive = true
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
+
+        // 核心保护：开机或服务创建第一时间确保放电采样点与物理能量累加器已从本地持久化加载至内存，
+        // 杜绝后续采样协程直接向空集合写入并误覆盖磁盘历史文件
+        PowerUsageManager.getInstance(applicationContext).ensureDischargeSamplesLoaded()
 
         // 即时同步最新系统底层电池状态（电量、电压、温度、充电状态与初始硬件功耗），消除冷启动 10 秒空窗
         syncInstantBatteryStatus()
@@ -575,7 +596,7 @@ class BatteryMonitorService : Service() {
             notificationManager.cancel(NOTIFICATION_ID)
         } catch (_: Exception) {}
         try {
-            PowerUsageManager.getInstance(applicationContext).flushDischargeSamplesToDisk()
+            PowerUsageManager.getInstance(applicationContext).flushDischargeSamplesToDiskSync()
         } catch (_: Exception) {}
         try {
             PowerUsageManager.getInstance(applicationContext).shutdownDiskIoExecutor()

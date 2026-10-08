@@ -44,6 +44,9 @@ object DrawableBitmapCache {
         }
     }
 
+    // 阴性缓存集合，记录确认无法在系统和磁盘中检索到图标的无效包名，杜绝 onDraw 阶段每帧重复抛出异常或扫描磁盘
+    private val negativeCache = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     /**
      * 获取指定包名与指定像素尺寸的 Bitmap 图标对象。
      * 若已缓存则直接返回；若未缓存且传入了 Drawable 则转换为 Bitmap 并缓存。
@@ -105,6 +108,11 @@ object DrawableBitmapCache {
     ): Bitmap? {
         if (sizePx <= 0 || packageName.isBlank()) return null
         val cacheKey = "${packageName}_$sizePx"
+
+        // 0. 阴性缓存快速短路：若之前已确认无法解析，直接跳过，杜绝高频 onDraw 期间反复 IPC 与磁盘扫描
+        if (negativeCache.contains(cacheKey)) {
+            return null
+        }
 
         // 1. 优先从 L1 内存 LRU 缓存获取
         val cached = cache.get(cacheKey)
@@ -183,6 +191,9 @@ object DrawableBitmapCache {
 
         if (loadedBitmap != null && !loadedBitmap.isRecycled) {
             cache.put(cacheKey, loadedBitmap)
+            negativeCache.remove(cacheKey)
+        } else {
+            negativeCache.add(cacheKey)
         }
         return loadedBitmap
     }
@@ -224,7 +235,10 @@ object DrawableBitmapCache {
      */
     fun trimToLevel(level: Int) {
         when {
-            level >= 80 -> cache.evictAll() // TRIM_MEMORY_COMPLETE 严重缺内存时彻底清空
+            level >= 80 -> {
+                cache.evictAll() // TRIM_MEMORY_COMPLETE 严重缺内存时彻底清空
+                negativeCache.clear()
+            }
             level >= 40 -> cache.trimToSize(cache.size() / 2) // TRIM_MEMORY_BACKGROUND 减半
         }
     }
@@ -234,5 +248,6 @@ object DrawableBitmapCache {
      */
     fun clear() {
         cache.evictAll()
+        negativeCache.clear()
     }
 }

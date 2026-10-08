@@ -526,11 +526,14 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         }
 
         // 核心功耗指标卡片能量数值点击弹出等效电量（mAh）详细说明气泡弹框
+        val totalEnergyInfo = PowerUsageManager.getInstance(this@PowerHistoryDetailActivity).getTotalEnergyInfo()
+
         hBinding.tvMetricScreenOnEnergy.setOnClickListener {
             val message = BatteryEnergyCalculator.formatEnergyConversionMessage(
                 title = "亮屏",
                 energyWh = onEnergy,
-                ratioStr = onEnergyRatioStr.takeIf { it != "--%" }
+                ratioStr = onEnergyRatioStr.takeIf { it != "--%" },
+                totalEnergyInfo = totalEnergyInfo
             )
             showBubbleTooltip(hBinding.tvMetricScreenOnEnergy, message, autoDismissMs = 0L)
         }
@@ -538,7 +541,8 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             val message = BatteryEnergyCalculator.formatEnergyConversionMessage(
                 title = "息屏",
                 energyWh = offEnergy,
-                ratioStr = offEnergyRatioStr.takeIf { it != "--%" }
+                ratioStr = offEnergyRatioStr.takeIf { it != "--%" },
+                totalEnergyInfo = totalEnergyInfo
             )
             showBubbleTooltip(hBinding.tvMetricScreenOffEnergy, message, autoDismissMs = 0L)
         }
@@ -546,7 +550,8 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             val message = BatteryEnergyCalculator.formatEnergyConversionMessage(
                 title = "全局",
                 energyWh = totalEnergy,
-                ratioStr = "100%"
+                ratioStr = "100%",
+                totalEnergyInfo = totalEnergyInfo
             )
             showBubbleTooltip(hBinding.tvMetricGlobalEnergy, message, autoDismissMs = 0L)
         }

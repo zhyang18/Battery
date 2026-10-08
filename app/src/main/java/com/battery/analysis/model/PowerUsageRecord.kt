@@ -98,7 +98,8 @@ data class PowerUsageRecord(
     fun toFullPowerPackage(context: Context): FullPowerDataPackage {
         val pm = context.packageManager
 
-        val batteryTotalEnergyWh = com.battery.analysis.util.BatteryEnergyCalculator.calculateTotalEnergyWh(
+        val totalEnergyInfo = com.battery.analysis.manager.PowerUsageManager.getInstance(context).getTotalEnergyInfo()
+        val batteryTotalEnergyWh = totalEnergyInfo?.totalWh ?: com.battery.analysis.util.BatteryEnergyCalculator.calculateTotalEnergyWh(
             effectiveCapacityMah = com.battery.analysis.manager.PowerUsageManager.getInstance(context).getEffectiveDeviceCapacityMah(),
             nominalVoltageVolts = com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
         )
@@ -108,7 +109,8 @@ data class PowerUsageRecord(
             temperature = temperature,
             energyWh = energyWh,
             isCharging = isCharging,
-            totalEnergyWh = batteryTotalEnergyWh
+            totalEnergyWh = batteryTotalEnergyWh,
+            totalEnergyInfo = totalEnergyInfo
         )
 
         val awakeWatts = if (screenOffAwakeDurationMs > 0L && screenOffAwakeEnergyWh > 0f) {

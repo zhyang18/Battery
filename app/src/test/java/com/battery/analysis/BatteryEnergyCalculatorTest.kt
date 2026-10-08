@@ -173,11 +173,43 @@ class BatteryEnergyCalculatorTest {
     }
 
     /**
+     * 测试底层硬件能量计数器（nWh）结合当前电量百分比反推满电总能量的准确性。
+     */
+    @Test
+    fun testCalculateTotalEnergyWhWithHardwareEnergyNwh() {
+        // 50% 电量时剩余 9.625 Wh (9_625_000_000 nWh)，反推 100% 满电总能量应为 19.25 Wh
+        val totalEnergy = BatteryEnergyCalculator.calculateTotalEnergyWh(
+            hardwareEnergyNwh = 9_625_000_000L,
+            hardwareChargeCounterUah = null,
+            batteryPercent = 50,
+            effectiveCapacityMah = 0f
+        )
+        org.junit.Assert.assertNotNull(totalEnergy)
+        assertEquals(19.25f, totalEnergy!!, 0.01f)
+    }
+
+    /**
+     * 测试硬件电荷计数器（uAh）结合当前电量百分比与标称电压推算满电总能量的准确性。
+     */
+    @Test
+    fun testCalculateTotalEnergyWhWithChargeCounterUah() {
+        // 50% 电量时剩余 2500 mAh (2_500_000 uAh)，反推满电 5000 mAh，按 3.85V 折算应为 19.25 Wh
+        val totalEnergy = BatteryEnergyCalculator.calculateTotalEnergyWh(
+            hardwareEnergyNwh = null,
+            hardwareChargeCounterUah = 2_500_000,
+            batteryPercent = 50,
+            effectiveCapacityMah = 0f
+        )
+        org.junit.Assert.assertNotNull(totalEnergy)
+        assertEquals(19.25f, totalEnergy!!, 0.01f)
+    }
+
+    /**
      * 测试电池基准容量无效或缺失时如实返回 null，严禁假数据。
      */
     @Test
     fun testCalculateTotalEnergyWhInvalidCapacity() {
-        // 容量为 0 时返回 null
+        // 容量为 0 且无硬件计数器时返回 null
         val zeroResult = BatteryEnergyCalculator.calculateTotalEnergyWh(0f)
         org.junit.Assert.assertNull(zeroResult)
 
@@ -216,5 +248,95 @@ class BatteryEnergyCalculatorTest {
 
         val negativeResult = BatteryEnergyCalculator.formatCapacityWithNominalWh(-500f)
         assertEquals("-500.0 mAh", negativeResult)
+    }
+
+    /**
+     * 测试底层物理优先级逻辑获取总能量详情（BatteryTotalEnergyInfo）的多级判定策略。
+     */
+    @Test
+    fun testCalculateTotalEnergyInfoMultiTier() {
+        // 1. 硬件原生能量计数器优先
+        val hwEnergyInfo = BatteryEnergyCalculator.calculateTotalEnergyInfo(
+            hardwareEnergyNwh = 9_625_000_000L,
+            hardwareChargeCounterUah = 2_500_000,
+            batteryPercent = 50,
+            effectiveCapacityMah = 4500f,
+            capacitySource = "出厂设计容量"
+        )
+        org.junit.Assert.assertNotNull(hwEnergyInfo)
+        assertEquals("硬件原生能量计数器", hwEnergyInfo!!.sourceDescription)
+        assertEquals(19.25f, hwEnergyInfo.totalWh, 0.01f)
+        assertEquals(5000f, hwEnergyInfo.equivalentMah, 0.1f)
+
+        // 2. 硬件电荷计数器次级优先
+        val chargeInfo = BatteryEnergyCalculator.calculateTotalEnergyInfo(
+            hardwareEnergyNwh = null,
+            hardwareChargeCounterUah = 2_500_000,
+            batteryPercent = 50,
+            effectiveCapacityMah = 4500f,
+            capacitySource = "出厂设计容量"
+        )
+        org.junit.Assert.assertNotNull(chargeInfo)
+        assertEquals("硬件实时电荷计数器", chargeInfo!!.sourceDescription)
+        assertEquals(19.25f, chargeInfo.totalWh, 0.01f)
+        assertEquals(5000f, chargeInfo.equivalentMah, 0.1f)
+
+        // 3. 有效容量降级（出厂设计容量）
+        val designInfo = BatteryEnergyCalculator.calculateTotalEnergyInfo(
+            hardwareEnergyNwh = null,
+            hardwareChargeCounterUah = null,
+            batteryPercent = null,
+            effectiveCapacityMah = 2960.8f,
+            capacitySource = "出厂设计容量"
+        )
+        org.junit.Assert.assertNotNull(designInfo)
+        assertEquals("出厂设计容量", designInfo!!.sourceDescription)
+        assertEquals(11.40f, designInfo.totalWh, 0.01f)
+        assertEquals(2960.8f, designInfo.equivalentMah, 0.1f)
+
+        // 4. 有效容量降级（真实满充容量）
+        val fccInfo = BatteryEnergyCalculator.calculateTotalEnergyInfo(
+            hardwareEnergyNwh = null,
+            hardwareChargeCounterUah = null,
+            batteryPercent = null,
+            effectiveCapacityMah = 4800f,
+            capacitySource = "真实满充容量"
+        )
+        org.junit.Assert.assertNotNull(fccInfo)
+        assertEquals("真实满充容量", fccInfo!!.sourceDescription)
+        assertEquals(18.48f, fccInfo.totalWh, 0.01f)
+
+        // 5. 数据缺失返回 null
+        val nullInfo = BatteryEnergyCalculator.calculateTotalEnergyInfo(
+            hardwareEnergyNwh = null,
+            hardwareChargeCounterUah = null,
+            batteryPercent = null,
+            effectiveCapacityMah = 0f
+        )
+        org.junit.Assert.assertNull(nullInfo)
+    }
+
+    /**
+     * 测试 formatEnergyConversionMessage 在传入 totalEnergyInfo 时正确渲染总能量数据行。
+     */
+    @Test
+    fun testFormatEnergyConversionMessageWithTotalEnergyInfo() {
+        val totalInfo = com.battery.analysis.util.BatteryTotalEnergyInfo(
+            totalWh = 11.399f,
+            sourceDescription = "出厂设计容量",
+            equivalentMah = 2960.8f
+        )
+        val message = BatteryEnergyCalculator.formatEnergyConversionMessage(
+            title = "全局",
+            energyWh = 3.226f,
+            ratioStr = "28.3%",
+            totalEnergyInfo = totalInfo
+        )
+
+        org.junit.Assert.assertTrue("包含全局消耗能量与占比", message.contains("全局消耗能量：3.226Wh (28.3%)"))
+        org.junit.Assert.assertTrue("包含折算等效电量", message.contains("折算等效电量：约 837.9 mAh (≈ 838mAh)"))
+        org.junit.Assert.assertTrue("包含换算基准标称电压", message.contains("换算基准：标称电压 3.85V"))
+        org.junit.Assert.assertTrue("包含出厂设计容量获得的总能量", message.contains("出厂设计容量获得的总能量：11.399Wh (≈ 2961mAh)"))
+        org.junit.Assert.assertTrue("包含换算说明", message.contains("💡 换算说明："))
     }
 }

@@ -2837,6 +2837,38 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
+     * 获取设备电池总容量对应的物理总能量（瓦时 Wh）。
+     * 遵循底层物理优先级：优先采用硬件原生能量/电荷计数器反推满电总能量，其次基于设备有效基准容量与标称电压物理折算；
+     * 若均无法获取则如实返回 null，忠实反映系统真实状态。
+     *
+     * @return 设备电池总能量（单位：Wh），若无有效数据则返回 null
+     */
+    fun getTotalEnergyWh(): Float? {
+        return getTotalEnergyInfo()?.totalWh
+    }
+
+    /**
+     * 获取设备电池物理总能量及底层物理获取方式详情。
+     *
+     * @return 设备电池总能量详情对象 [com.battery.analysis.util.BatteryTotalEnergyInfo]，若无有效数据则返回 null
+     */
+    fun getTotalEnergyInfo(): com.battery.analysis.util.BatteryTotalEnergyInfo? {
+        val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+        val nwh = bm?.getLongProperty(BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER)
+        val uah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
+        val level = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+        val (effCap, source) = getEffectiveDeviceCapacityWithSource()
+        return BatteryEnergyCalculator.calculateTotalEnergyInfo(
+            hardwareEnergyNwh = nwh,
+            hardwareChargeCounterUah = uah,
+            batteryPercent = level.takeIf { it in 1..100 },
+            effectiveCapacityMah = effCap,
+            capacitySource = source,
+            nominalVoltageVolts = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
+        )
+    }
+
+    /**
      * 计算并持久化保存拔电时刻的基准能量（瓦时 Wh）。
      *
      * @param unplugLevel 拔电时刻的电量百分比
@@ -3050,7 +3082,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         val hardwareEnergyNwh = bm?.getLongProperty(BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER)
         val hardwareChargeCounterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
 
-        val effectiveCapacity = getEffectiveDeviceCapacityMah()
+        val (effectiveCapacity, capacitySource) = getEffectiveDeviceCapacityWithSource()
         val energyWh = BatteryEnergyCalculator.calculateRemainingEnergyWh(
             hardwareEnergyNwh = hardwareEnergyNwh,
             hardwareChargeCounterUah = hardwareChargeCounterUah,
@@ -3058,10 +3090,15 @@ class PowerUsageManager private constructor(private val context: Context) {
             nominalVoltageVolts = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS,
             effectiveCapacityMah = effectiveCapacity
         )
-        val totalEnergyWh = BatteryEnergyCalculator.calculateTotalEnergyWh(
+        val totalEnergyInfo = BatteryEnergyCalculator.calculateTotalEnergyInfo(
+            hardwareEnergyNwh = hardwareEnergyNwh,
+            hardwareChargeCounterUah = hardwareChargeCounterUah,
+            batteryPercent = percent,
             effectiveCapacityMah = effectiveCapacity,
+            capacitySource = capacitySource,
             nominalVoltageVolts = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
         )
+        val totalEnergyWh = totalEnergyInfo?.totalWh
 
         return BatteryStatusSnapshot(
             levelPercent = percent,
@@ -3069,7 +3106,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             temperature = tempCelsius,
             energyWh = energyWh,
             isCharging = isCharging,
-            totalEnergyWh = totalEnergyWh
+            totalEnergyWh = totalEnergyWh,
+            totalEnergyInfo = totalEnergyInfo
         )
     }
 
@@ -3086,28 +3124,33 @@ class PowerUsageManager private constructor(private val context: Context) {
     @Volatile
     private var cachedEffectiveCapacity: Float? = null
     @Volatile
+    private var cachedCapacitySource: String? = null
+    @Volatile
     private var lastCapacityCachedTime: Long = 0L
 
     /**
-     * 获取设备当前最精准的基准电池容量（优先实际满充容量 FCC，其次设计容量）。
+     * 获取设备有效基准电池容量及其物理获取来源。
      *
      * 优先级策略：
      * 1. 历史数据库中优先按 "Shizuku" 分类获取最新记录的真实满充容量 [HistoryRecord.fullChargeCapacity]（反映真实电池健康衰减）或设计容量；
      * 2. 历史数据库中若无 Shizuku 记录，按 "系统api" 分类获取最新记录的真实满充容量或设计容量；
      * 3. 若数据库中均无有效记录，尝试从系统内置 PowerProfile.xml 反射获取出厂设计容量；
-     * 4. 若均无法获取则如实返回 0f（严禁伪造假数据）。
+     * 4. 尝试从底层库仑计实时电荷与当前百分比推算满电容量；
+     * 5. 若均无法获取则如实返回 0f（严禁伪造假数据）。
      * 内部具备 60 秒轻量内存缓存与单例复用，消除高频统计计算中的重复数据库 I/O 开销与连接泄漏。
      *
-     * @return 设备基准电池容量（单位：mAh）
+     * @return 包含设备有效容量数值（单位：mAh）与来源描述（如“真实满充容量”、“出厂设计容量”等）的键值对 [Pair<Float, String>]
      */
-    fun getEffectiveDeviceCapacityMah(): Float {
+    fun getEffectiveDeviceCapacityWithSource(): Pair<Float, String> {
         val now = SystemClock.elapsedRealtime()
-        val cached = cachedEffectiveCapacity
-        if (cached != null && (now - lastCapacityCachedTime) < 60_000L) {
-            return cached
+        val cachedCap = cachedEffectiveCapacity
+        val cachedSource = cachedCapacitySource
+        if (cachedCap != null && cachedSource != null && (now - lastCapacityCachedTime) < 60_000L) {
+            return Pair(cachedCap, cachedSource)
         }
 
         var capacity = 0f
+        var source = "未知"
         // 1. 优先从历史快照记录中获取经过算法融合或 Shizuku/Bugreport 提取到的真实满充容量与设计容量
         try {
             val dbHelper = HistoryDbHelper.getInstance(context)
@@ -3115,10 +3158,12 @@ class PowerUsageManager private constructor(private val context: Context) {
             val fcc = latestRecord?.fullChargeCapacity
             if (fcc != null && fcc > 0f) {
                 capacity = fcc
+                source = "真实满充容量"
             } else {
                 val design = latestRecord?.designCapacity
                 if (design != null && design > 0f) {
                     capacity = design
+                    source = "出厂设计容量"
                 }
             }
         } catch (e: Exception) {
@@ -3130,13 +3175,39 @@ class PowerUsageManager private constructor(private val context: Context) {
             val powerProfileCap = NormalApiProvider.getDesignCapacity(context)
             if (powerProfileCap != null && powerProfileCap > 0f) {
                 capacity = powerProfileCap
+                source = "出厂设计容量"
             }
         }
 
-        // 3. 若均无法获取则如实返回 0f（不伪造保底数据）
+        // 3. 尝试从底层库仑计实时电荷与当前百分比推算满电容量
+        if (capacity <= 0f) {
+            val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+            val chargeCounter = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: 0
+            val level = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+            if (chargeCounter > 0 && level in 1..100) {
+                val currentMah = if (chargeCounter < 100000) chargeCounter.toFloat() else chargeCounter / 1000f
+                val fullMah = (currentMah / level) * 100f
+                if (fullMah > 0f) {
+                    capacity = fullMah
+                    source = "硬件实时电荷计数器"
+                }
+            }
+        }
+
+        // 4. 若均无法获取则如实返回 0f（不伪造保底数据）
         cachedEffectiveCapacity = capacity
+        cachedCapacitySource = source
         lastCapacityCachedTime = now
-        return capacity
+        return Pair(capacity, source)
+    }
+
+    /**
+     * 获取设备当前最精准的基准电池容量（优先实际满充容量 FCC，其次设计容量）。
+     *
+     * @return 设备基准电池容量（单位：mAh）
+     */
+    fun getEffectiveDeviceCapacityMah(): Float {
+        return getEffectiveDeviceCapacityWithSource().first
     }
 
     /**
@@ -6634,6 +6705,7 @@ class PowerUsageManager private constructor(private val context: Context) {
  * @property energyWh 能量
  * @property isCharging 充电状态
  * @property totalEnergyWh 电池总能量（单位：Wh，若无法获取真实基准容量则为 null）
+ * @property totalEnergyInfo 电池物理总能量及获取来源详情（可选，若无法获取则为 null）
  */
 data class BatteryStatusSnapshot(
     val levelPercent: Int,
@@ -6641,7 +6713,8 @@ data class BatteryStatusSnapshot(
     val temperature: Float,
     val energyWh: Float,
     val isCharging: Boolean,
-    val totalEnergyWh: Float? = null
+    val totalEnergyWh: Float? = null,
+    val totalEnergyInfo: com.battery.analysis.util.BatteryTotalEnergyInfo? = null
 )
 
 /**

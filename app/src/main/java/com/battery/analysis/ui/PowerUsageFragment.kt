@@ -1120,25 +1120,32 @@ class PowerUsageFragment : Fragment() {
             return
         }
 
-        val lastUnplugWh = powerManager.getLastUnplugEnergyWh()?.takeIf { it > 0f }
+        val totalEnergyInfo = pkg.batterySnapshot.totalEnergyInfo ?: powerManager.getTotalEnergyInfo()
+        val totalCapacityWh = pkg.batterySnapshot.totalEnergyWh
+            ?: totalEnergyInfo?.totalWh
+            ?: powerManager.getTotalEnergyWh()
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
+                BatteryEnergyCalculator.calculateTotalEnergyWh(it)
+            }
+        val baseTotalEnergy = totalCapacityWh?.takeIf { it > 0f }
         val (title, energyWh, ratioStr) = when (rowType) {
             ROW_SCREEN_ON -> {
-                val ratio = if (lastUnplugWh != null) {
-                    val r = (overview.screenOnEnergyWh / lastUnplugWh * 100f)
+                val ratio = if (baseTotalEnergy != null) {
+                    val r = (overview.screenOnEnergyWh / baseTotalEnergy * 100f)
                     String.format(Locale.getDefault(), "%.1f%%", r)
                 } else null
                 Triple("亮屏", overview.screenOnEnergyWh, ratio)
             }
             ROW_SCREEN_OFF -> {
-                val ratio = if (lastUnplugWh != null) {
-                    val r = (overview.screenOffEnergyWh / lastUnplugWh * 100f)
+                val ratio = if (baseTotalEnergy != null) {
+                    val r = (overview.screenOffEnergyWh / baseTotalEnergy * 100f)
                     String.format(Locale.getDefault(), "%.1f%%", r)
                 } else null
                 Triple("息屏", overview.screenOffEnergyWh, ratio)
             }
             ROW_GLOBAL -> {
-                val ratio = if (lastUnplugWh != null) {
-                    val r = (overview.totalEnergyWh / lastUnplugWh * 100f)
+                val ratio = if (baseTotalEnergy != null) {
+                    val r = (overview.totalEnergyWh / baseTotalEnergy * 100f)
                     String.format(Locale.getDefault(), "%.1f%%", r)
                 } else null
                 Triple("全局", overview.totalEnergyWh, ratio)
@@ -1149,7 +1156,8 @@ class PowerUsageFragment : Fragment() {
         val message = BatteryEnergyCalculator.formatEnergyConversionMessage(
             title = title,
             energyWh = energyWh,
-            ratioStr = ratioStr
+            ratioStr = ratioStr,
+            totalEnergyInfo = totalEnergyInfo
         )
         showBubbleTooltip(anchorView, message, autoDismissMs = 0L)
     }
@@ -1771,24 +1779,29 @@ class PowerUsageFragment : Fragment() {
         val onEnergy = overview.screenOnEnergyWh
         val offEnergy = overview.screenOffEnergyWh
         val totalEnergy = overview.totalEnergyWh
-        val baseUnplugEnergy = lastUnplugWh?.takeIf { it > 0f }
+        val totalCapacityWh = snapshot.totalEnergyWh
+            ?: powerManager.getTotalEnergyWh()
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
+                BatteryEnergyCalculator.calculateTotalEnergyWh(it)
+            }
+        val baseTotalEnergy = totalCapacityWh?.takeIf { it > 0f }
 
-        val onEnergyRatioStr = if (baseUnplugEnergy != null) {
-            val ratio = (onEnergy / baseUnplugEnergy * 100f)
+        val onEnergyRatioStr = if (baseTotalEnergy != null) {
+            val ratio = (onEnergy / baseTotalEnergy * 100f)
             String.format(Locale.getDefault(), "%.1f%%", ratio)
         } else {
             "--%"
         }
 
-        val offEnergyRatioStr = if (baseUnplugEnergy != null) {
-            val ratio = (offEnergy / baseUnplugEnergy * 100f)
+        val offEnergyRatioStr = if (baseTotalEnergy != null) {
+            val ratio = (offEnergy / baseTotalEnergy * 100f)
             String.format(Locale.getDefault(), "%.1f%%", ratio)
         } else {
             "--%"
         }
 
-        val globalEnergyRatioStr = if (baseUnplugEnergy != null) {
-            val ratio = (totalEnergy / baseUnplugEnergy * 100f)
+        val globalEnergyRatioStr = if (baseTotalEnergy != null) {
+            val ratio = (totalEnergy / baseTotalEnergy * 100f)
             String.format(Locale.getDefault(), "%.1f%%", ratio)
         } else {
             "--%"
@@ -1851,10 +1864,6 @@ class PowerUsageFragment : Fragment() {
         binding.tvMetricGlobalRemaining.text = overview.remainingCompositeText
 
         // 2.1 刷新列表内放电速度概览卡片（包含全局放电速度、亮屏放电速度、息屏放电速度三个主要模块）
-        val totalCapacityWh = snapshot.totalEnergyWh
-            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
-                BatteryEnergyCalculator.calculateTotalEnergyWh(it)
-            }
         adapter.updateOverviewStats(overview, totalCapacityWh)
 
         // 异步更新过去 7 天加权放电统计速度与充满电使用时间

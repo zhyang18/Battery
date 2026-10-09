@@ -92,6 +92,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * @property historyLevelPoints 解析得到的系统权威电量历史时间点与电量百分比序列列表 [List<Pair<Long, Int>>]
      * @property detectedUnplugTs 从底层历史账本中精确探测到的最近一次断开充电器的物理时间戳（毫秒，可选）
      * @property detectedUnplugLevel 从底层历史账本中精确探测到的最近一次断开充电器瞬间的电池电量（百分比，可选）
+     * @property totalWakeupCount 自断开充电以来的系统内核或唤醒锁总唤醒次数（若无法获取为 null）
+     * @property screenOnCount 自断开充电以来的屏幕点亮次数（若无法获取为 null）
      */
     data class BatteryStatsResult(
         val capacityMah: Float,
@@ -113,7 +115,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val historyLevelPoints: List<Pair<Long, Int>> = emptyList(),
         val historyTempPoints: List<Pair<Long, Float>> = emptyList(),
         val detectedUnplugTs: Long? = null,
-        val detectedUnplugLevel: Int? = null
+        val detectedUnplugLevel: Int? = null,
+        val totalWakeupCount: Int? = null,
+        val screenOnCount: Int? = null
     )
 
     /**
@@ -765,7 +769,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             historyLevelPoints = filteredHistoryPoints,
             historyTempPoints = effectiveTempPoints,
             detectedUnplugTs = finalUnplugTs,
-            detectedUnplugLevel = finalUnplugLevel
+            detectedUnplugLevel = finalUnplugLevel,
+            totalWakeupCount = summary.totalWakeupCount,
+            screenOnCount = summary.screenOnCount
         )
     }
 
@@ -1867,6 +1873,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         private val REGEX_HISTORY_LEVEL = Pattern.compile("\\(\\d+\\)\\s*(\\d{1,3})\\b", Pattern.CASE_INSENSITIVE)
         private val REGEX_HISTORY_TEMP = Pattern.compile("(?:^|\\s)[+-]?temp=(\\d+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_DISCHARGE_STEP = Pattern.compile("#\\d+:\\s*\\+([\\w\\d]+)\\s+to\\s+(\\d{1,3})", Pattern.CASE_INSENSITIVE)
+        private val REGEX_SCREEN_ON_TIMES = Pattern.compile("Screen on:\\s*[^\\n\\(]+?(?:\\s*\\([^)]+\\))?\\s*(\\d+)x", Pattern.CASE_INSENSITIVE)
+        private val REGEX_WAKEUP_REASON_TIMES = Pattern.compile("Wakeup reason.*?:\\s*(\\d+)\\s*times", Pattern.CASE_INSENSITIVE)
+        private val REGEX_PARTIAL_WAKELOCK_TIMES = Pattern.compile("Wake lock\\s+[^:\\n]+?:\\s*[^\\n]+?\\((\\d+)\\s*times\\)", Pattern.CASE_INSENSITIVE)
 
         /** 已废弃：按需求移除人为物理功耗上限，不再进行人工截断 */
         @Deprecated("已按用户要求移除人为物理功耗上限")
@@ -1893,6 +1902,8 @@ class ShizukuBatteryStatsParser(private val context: Context) {
          * @property wifiDrainMah Wi-Fi 放电量（毫安时 mAh）
          * @property bluetoothDrainMah 蓝牙放电量（毫安时 mAh）
          * @property screenDrainMah 屏幕硬件放电量（毫安时 mAh）
+         * @property totalWakeupCount 自断开充电以来的系统内核或唤醒锁总唤醒次数（若无法获取为 null）
+         * @property screenOnCount 自断开充电以来的屏幕点亮次数（若无法获取为 null）
          */
         data class DischargeSummary(
             val capacityMah: Float,
@@ -1909,7 +1920,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             val cellularDrainMah: Float,
             val wifiDrainMah: Float,
             val bluetoothDrainMah: Float,
-            val screenDrainMah: Float
+            val screenDrainMah: Float,
+            val totalWakeupCount: Int? = null,
+            val screenOnCount: Int? = null
         )
 
         /**
@@ -2101,6 +2114,34 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 screenOffDeepSleepDrainMah = rawIdleDrain
             }
 
+            var screenOnCount: Int? = null
+            val screenOnTimesMatcher = REGEX_SCREEN_ON_TIMES.matcher(rawText)
+            if (screenOnTimesMatcher.find()) {
+                screenOnCount = screenOnTimesMatcher.group(1)?.toIntOrNull()
+            }
+
+            var wakeupSum = 0
+            var hasWakeup = false
+            val wakeupReasonMatcher = REGEX_WAKEUP_REASON_TIMES.matcher(rawText)
+            while (wakeupReasonMatcher.find()) {
+                val times = wakeupReasonMatcher.group(1)?.toIntOrNull() ?: 0
+                if (times > 0) {
+                    wakeupSum += times
+                    hasWakeup = true
+                }
+            }
+            if (!hasWakeup) {
+                val pwlMatcher = REGEX_PARTIAL_WAKELOCK_TIMES.matcher(rawText)
+                while (pwlMatcher.find()) {
+                    val times = pwlMatcher.group(1)?.toIntOrNull() ?: 0
+                    if (times > 0) {
+                        wakeupSum += times
+                        hasWakeup = true
+                    }
+                }
+            }
+            val totalWakeupCount: Int? = if (hasWakeup) wakeupSum else null
+
             return DischargeSummary(
                 capacityMah = capacityMah,
                 computedDrainMah = computedDrainMah,
@@ -2116,7 +2157,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 cellularDrainMah = cellularDrainMah,
                 wifiDrainMah = wifiDrainMah,
                 bluetoothDrainMah = bluetoothDrainMah,
-                screenDrainMah = screenDrainMah
+                screenDrainMah = screenDrainMah,
+                totalWakeupCount = totalWakeupCount,
+                screenOnCount = screenOnCount
             )
         }
 

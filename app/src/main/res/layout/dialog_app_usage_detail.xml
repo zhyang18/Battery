@@ -35,7 +35,7 @@
                 android:layout_width="38dp"
                 android:layout_height="38dp"
                 android:scaleType="centerCrop"
-                tools:src="@mipmap/ic_launcher" />
+                tools:src="@drawable/ic_default_app" />
 
             <LinearLayout
                 android:layout_width="0dp"

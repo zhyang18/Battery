@@ -180,7 +180,10 @@ data class AppPowerUsageItem(
          * @return 若属于系统界面/桌面待机条目返回 true，否则返回 false
          */
         fun isSystemUiStandbyPackage(packageName: String?): Boolean {
-            return packageName == PACKAGE_SYSTEM_UI_STANDBY
+            if (packageName.isNullOrBlank()) return false
+            return packageName == PACKAGE_SYSTEM_UI_STANDBY ||
+                    packageName == "com.android.systemui.standby" ||
+                    packageName.startsWith("systemui.standby")
         }
     }
 

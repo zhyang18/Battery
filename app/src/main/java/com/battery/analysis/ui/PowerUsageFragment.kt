@@ -1065,6 +1065,11 @@ class PowerUsageFragment : Fragment() {
                 showBubbleTooltip(anchorView, message)
             }
         }
+
+        // 列表内息屏、唤醒与深度睡眠指标卡片点击弹出详细信息说明气泡弹框
+        adapter.onSleepAwakeCardClickedListener = { anchorView, cardType ->
+            showSleepAwakeCardDetailBubble(anchorView, cardType)
+        }
     }
 
     /**
@@ -1166,6 +1171,59 @@ class PowerUsageFragment : Fragment() {
             ratioStr = ratioStr,
             totalEnergyInfo = totalEnergyInfo
         )
+        showBubbleTooltip(anchorView, message, autoDismissMs = 0L)
+    }
+
+    /**
+     * 弹出息屏、唤醒与深度睡眠各卡片的详细信息说明气泡弹框。
+     * 息屏卡片呈现息屏指标及亮屏总耗电数据对比；唤醒卡片呈现唤醒指标及唤醒总次数与频次；深度睡眠卡片呈现深睡指标及深度睡眠率等健康度数据。
+     *
+     * @param anchorView 触发气泡弹窗的目标锚点卡片视图
+     * @param cardType 卡片分类标识（[AppPowerUsageAdapter.CARD_SCREEN_OFF] 为息屏卡片，[AppPowerUsageAdapter.CARD_AWAKE] 为唤醒卡片，[AppPowerUsageAdapter.CARD_DEEP_SLEEP] 为深度睡眠卡片）
+     */
+    private fun showSleepAwakeCardDetailBubble(anchorView: View, cardType: Int) {
+        val pkg = lastRenderedPackage
+        val overview = pkg?.overviewStats
+        if (overview == null) {
+            showBubbleTooltip(anchorView, getString(R.string.power_metric_no_record), autoDismissMs = 0L)
+            return
+        }
+
+        val totalEnergyInfo = pkg.batterySnapshot?.totalEnergyInfo ?: powerManager.getTotalEnergyInfo()
+        val totalCapacityWh = pkg.batterySnapshot?.totalEnergyWh
+            ?: totalEnergyInfo?.totalWh
+            ?: powerManager.getTotalEnergyWh()
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
+                BatteryEnergyCalculator.calculateTotalEnergyWh(it)
+            }
+        val nominalTotalWh = totalCapacityWh?.takeIf { it > 0f }
+        val nominalVoltage = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
+
+        val message = when (cardType) {
+            AppPowerUsageAdapter.CARD_SCREEN_OFF -> {
+                BatteryEnergyCalculator.formatScreenOffCardDetailMessage(
+                    overview = overview,
+                    nominalTotalWh = nominalTotalWh,
+                    nominalVoltageVolts = nominalVoltage
+                )
+            }
+            AppPowerUsageAdapter.CARD_AWAKE -> {
+                BatteryEnergyCalculator.formatAwakeCardDetailMessage(
+                    overview = overview,
+                    nominalTotalWh = nominalTotalWh,
+                    nominalVoltageVolts = nominalVoltage
+                )
+            }
+            AppPowerUsageAdapter.CARD_DEEP_SLEEP -> {
+                BatteryEnergyCalculator.formatDeepSleepCardDetailMessage(
+                    overview = overview,
+                    nominalTotalWh = nominalTotalWh,
+                    nominalVoltageVolts = nominalVoltage
+                )
+            }
+            else -> return
+        }
+
         showBubbleTooltip(anchorView, message, autoDismissMs = 0L)
     }
 

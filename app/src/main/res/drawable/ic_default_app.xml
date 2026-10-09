@@ -1,0 +1,17 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="42dp"
+    android:height="42dp"
+    android:viewportWidth="42"
+    android:viewportHeight="42">
+    <!-- 圆角卡片底色（平滑 Squircle 规范与列表应用图标完全对齐） -->
+    <path
+        android:fillColor="@color/default_app_icon_bg"
+        android:pathData="M10,0 L32,0 A10,10 0 0,1 42,10 L42,32 A10,10 0 0,1 32,42 L10,42 A10,10 0 0,1 0,32 L0,10 A10,10 0 0,1 10,0 Z"/>
+    <!-- 极简 4 格应用网格 (2x2 Rounded App Grid) 前景标识 -->
+    <path
+        android:fillColor="@color/default_app_icon_fg"
+        android:pathData="M15.3,13.5 h2.4 c1,0 1.8,0.8 1.8,1.8 v2.4 c0,1 -0.8,1.8 -1.8,1.8 h-2.4 c-1,0 -1.8,-0.8 -1.8,-1.8 v-2.4 c0,-1 0.8,-1.8 1.8,-1.8 Z
+                          M24.3,13.5 h2.4 c1,0 1.8,0.8 1.8,1.8 v2.4 c0,1 -0.8,1.8 -1.8,1.8 h-2.4 c-1,0 -1.8,-0.8 -1.8,-1.8 v-2.4 c0,-1 0.8,-1.8 1.8,-1.8 Z
+                          M15.3,22.5 h2.4 c1,0 1.8,0.8 1.8,1.8 v2.4 c0,1 -0.8,1.8 -1.8,1.8 h-2.4 c-1,0 -1.8,-0.8 -1.8,-1.8 v-2.4 c0,-1 0.8,-1.8 1.8,-1.8 Z
+                          M24.3,22.5 h2.4 c1,0 1.8,0.8 1.8,1.8 v2.4 c0,1 -0.8,1.8 -1.8,1.8 h-2.4 c-1,0 -1.8,-0.8 -1.8,-1.8 v-2.4 c0,-1 0.8,-1.8 1.8,-1.8 Z"/>
+</vector>

@@ -1428,6 +1428,14 @@ class PowerUsageManager private constructor(private val context: Context) {
     @Volatile
     private var localScreenOffDeepSleepDurationMs: Long = 0L
 
+    /** 本地放电周期内累加的息屏唤醒发生次数 */
+    @Volatile
+    private var localScreenOffAwakeCount: Int = 0
+
+    /** 本地放电周期内累加的进入深度休眠次数 */
+    @Volatile
+    private var localScreenOffDeepSleepCount: Int = 0
+
     /** 本地放电周期内通过首尾硬件库仑计快照差分累加的真实息屏物理放电电荷（毫安时 mAh） */
     @Volatile
     private var localScreenOffHwDrainMah: Float = 0f
@@ -1495,6 +1503,12 @@ class PowerUsageManager private constructor(private val context: Context) {
             ensureDischargeSamplesLoaded()
             localScreenOffAwakeDurationMs += screenOffAwakeMs
             localScreenOffDeepSleepDurationMs += deepSleepMs
+            if (screenOffAwakeMs > 0L) {
+                localScreenOffAwakeCount++
+            }
+            if (deepSleepMs > 0L) {
+                localScreenOffDeepSleepCount++
+            }
             if (hwDrainMah > 0f) {
                 localScreenOffHwDrainMah += hwDrainMah
             }
@@ -1953,6 +1967,8 @@ class PowerUsageManager private constructor(private val context: Context) {
         // 重置息屏唤醒与深度睡眠时钟累加指标
         localScreenOffAwakeDurationMs = 0L
         localScreenOffDeepSleepDurationMs = 0L
+        localScreenOffAwakeCount = 0
+        localScreenOffDeepSleepCount = 0
         localScreenOffHwDrainMah = 0f
         localScreenOffHwEnergyWh = 0f
         confirmedScreenOffEnergyWh = 0f
@@ -2004,6 +2020,8 @@ class PowerUsageManager private constructor(private val context: Context) {
         // 重置息屏唤醒与深度睡眠时钟累加指标
         localScreenOffAwakeDurationMs = 0L
         localScreenOffDeepSleepDurationMs = 0L
+        localScreenOffAwakeCount = 0
+        localScreenOffDeepSleepCount = 0
         localScreenOffHwDrainMah = 0f
         localScreenOffHwEnergyWh = 0f
         confirmedScreenOffEnergyWh = 0f
@@ -2087,6 +2105,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                 .append(",\"offMs\":").append(dischargeAccumulator.screenOffDurationMs)
                 .append(",\"offAwakeMs\":").append(localScreenOffAwakeDurationMs)
                 .append(",\"offSleepMs\":").append(localScreenOffDeepSleepDurationMs)
+                .append(",\"offAwakeCount\":").append(localScreenOffAwakeCount)
+                .append(",\"offSleepCount\":").append(localScreenOffDeepSleepCount)
                 .append(",\"offHwMah\":").append(localScreenOffHwDrainMah)
                 .append(",\"offHwWh\":").append(localScreenOffHwEnergyWh)
                 .append(",\"confOffWh\":").append(confirmedScreenOffEnergyWh)
@@ -2181,6 +2201,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                     dischargeAccumulator.lastSampleTemp = accObj.optDouble("lastT", 0.0).toFloat()
                     localScreenOffAwakeDurationMs = accObj.optLong("offAwakeMs", 0L)
                     localScreenOffDeepSleepDurationMs = accObj.optLong("offSleepMs", 0L)
+                    localScreenOffAwakeCount = accObj.optInt("offAwakeCount", 0)
+                    localScreenOffDeepSleepCount = accObj.optInt("offSleepCount", 0)
                     localScreenOffHwDrainMah = accObj.optDouble("offHwMah", 0.0).toFloat()
                     localScreenOffHwEnergyWh = accObj.optDouble("offHwWh", 0.0).toFloat()
                     confirmedScreenOffEnergyWh = accObj.optDouble("confOffWh", 0.0).toFloat()
@@ -2376,6 +2398,8 @@ class PowerUsageManager private constructor(private val context: Context) {
         resetDischargeRealtimeSamples(now, unplugLevel, status.voltageVolts, status.temperature, initPower, true)
         localScreenOffAwakeDurationMs = 0L
         localScreenOffDeepSleepDurationMs = 0L
+        localScreenOffAwakeCount = 0
+        localScreenOffDeepSleepCount = 0
         localScreenOffHwDrainMah = 0f
         localScreenOffHwEnergyWh = 0f
 
@@ -3858,13 +3882,19 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val targetCapacityMah = if (stats.capacityMah > 0f) stats.capacityMah else effectiveCapacity
                 val nominalTotalWh = if (targetCapacityMah > 0f && nominalVoltageVolts > 0f) (targetCapacityMah * nominalVoltageVolts / 1000f) else realTotalEnergyWh
                 val screenOffPercent = if (nominalTotalWh > 0f && offEnergyWh > 0f) (offEnergyWh / nominalTotalWh) * 100f else 0f
+                val screenOnPercent = if (nominalTotalWh > 0f && onEnergyWh > 0f) (onEnergyWh / nominalTotalWh) * 100f else 0f
                 val isDecomposedAvailable = decomposedOff.isDecomposedAvailable
                 val awakePercent = if (isDecomposedAvailable && nominalTotalWh > 0f && awakeEnergyWh > 0f) (awakeEnergyWh / nominalTotalWh) * 100f else 0f
                 val deepSleepPercent = if (isDecomposedAvailable && nominalTotalWh > 0f && deepSleepEnergyWh > 0f) (deepSleepEnergyWh / nominalTotalWh) * 100f else 0f
 
                 val screenOffDrainMah = if (nominalVoltageVolts > 0f) (offEnergyWh * 1000f) / nominalVoltageVolts else 0f
+                val screenOnDrainMah = if (nominalVoltageVolts > 0f) (onEnergyWh * 1000f) / nominalVoltageVolts else 0f
                 val awakeDrainMah = if (isDecomposedAvailable && nominalVoltageVolts > 0f) (awakeEnergyWh * 1000f) / nominalVoltageVolts else 0f
                 val deepSleepDrainMah = if (isDecomposedAvailable && nominalVoltageVolts > 0f) (deepSleepEnergyWh * 1000f) / nominalVoltageVolts else 0f
+
+                val effectiveAwakeCount = stats.totalWakeupCount ?: if (localScreenOffAwakeCount > 0) localScreenOffAwakeCount else null
+                val effectiveDeepSleepCount = if (localScreenOffDeepSleepCount > 0) localScreenOffDeepSleepCount else null
+                val effectiveScreenOnCount = stats.screenOnCount ?: if (screenIntervals.isNotEmpty()) screenIntervals.size else null
 
                 val screenOffDurStr = formatCompactDuration(screenOffMs)
                 val awakeDurStr = formatCompactDuration(awakeMs)
@@ -3906,7 +3936,12 @@ class PowerUsageManager private constructor(private val context: Context) {
                     screenOffDrainMah = screenOffDrainMah,
                     screenOffAwakeDrainMah = awakeDrainMah,
                     screenOffDeepSleepDrainMah = deepSleepDrainMah,
-                    isScreenOffDecomposedAvailable = isDecomposedAvailable
+                    isScreenOffDecomposedAvailable = isDecomposedAvailable,
+                    screenOnPercent = screenOnPercent,
+                    screenOnDrainMah = screenOnDrainMah,
+                    screenOffAwakeCount = effectiveAwakeCount,
+                    screenOffDeepSleepCount = effectiveDeepSleepCount,
+                    screenOnCount = effectiveScreenOnCount
                 )
 
                 val points = getDischargeTrendPoints(
@@ -6144,13 +6179,18 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         val nominalTotalWh = if (effectiveCapacity > 0f && nominalVoltageVolts > 0f) (effectiveCapacity * nominalVoltageVolts / 1000f) else realTotalEnergyWh
         val screenOffPercent = if (nominalTotalWh > 0f && offEnergyWh > 0f) (offEnergyWh / nominalTotalWh) * 100f else 0f
+        val screenOnPercent = if (nominalTotalWh > 0f && onEnergyWh > 0f) (onEnergyWh / nominalTotalWh) * 100f else 0f
         val isDecomposedAvailable = decomposedOff.isDecomposedAvailable
         val awakePercent = if (isDecomposedAvailable && nominalTotalWh > 0f && awakeEnergyWh > 0f) (awakeEnergyWh / nominalTotalWh) * 100f else 0f
         val deepSleepPercent = if (isDecomposedAvailable && nominalTotalWh > 0f && deepSleepEnergyWh > 0f) (deepSleepEnergyWh / nominalTotalWh) * 100f else 0f
 
         val screenOffDrainMah = if (nominalVoltageVolts > 0f) (offEnergyWh * 1000f) / nominalVoltageVolts else 0f
+        val screenOnDrainMah = if (nominalVoltageVolts > 0f && onEnergyWh > 0f) (onEnergyWh * 1000f) / nominalVoltageVolts else 0f
         val awakeDrainMah = if (isDecomposedAvailable && nominalVoltageVolts > 0f) (awakeEnergyWh * 1000f) / nominalVoltageVolts else 0f
         val deepSleepDrainMah = if (isDecomposedAvailable && nominalVoltageVolts > 0f) (deepSleepEnergyWh * 1000f) / nominalVoltageVolts else 0f
+
+        val effectiveAwakeCount = if (localScreenOffAwakeCount > 0) localScreenOffAwakeCount else null
+        val effectiveDeepSleepCount = if (localScreenOffDeepSleepCount > 0) localScreenOffDeepSleepCount else null
 
         val screenOffDurStr = formatCompactDuration(screenOffMs)
         val awakeDurStr = formatCompactDuration(awakeMs)
@@ -6192,7 +6232,11 @@ class PowerUsageManager private constructor(private val context: Context) {
             screenOffDrainMah = screenOffDrainMah,
             screenOffAwakeDrainMah = awakeDrainMah,
             screenOffDeepSleepDrainMah = deepSleepDrainMah,
-            isScreenOffDecomposedAvailable = isDecomposedAvailable
+            isScreenOffDecomposedAvailable = isDecomposedAvailable,
+            screenOnPercent = screenOnPercent,
+            screenOnDrainMah = screenOnDrainMah,
+            screenOffAwakeCount = effectiveAwakeCount,
+            screenOffDeepSleepCount = effectiveDeepSleepCount
         )
     }
 
@@ -6965,6 +7009,11 @@ data class BatteryStatusSnapshot(
  * @property screenOffAwakeDrainMah 息屏唤醒期间消耗电荷量（单位：毫安时 mAh）
  * @property screenOffDeepSleepDrainMah 深度睡眠期间消耗电荷量（单位：毫安时 mAh）
  * @property isScreenOffDecomposedAvailable 息屏唤醒与深度休眠细分能耗是否真实可得（若无底层依据则为 false，UI 展示未获取）
+ * @property screenOnPercent 亮屏消耗能量占整机总容量百分比
+ * @property screenOnDrainMah 亮屏消耗总电荷量（单位：毫安时 mAh）
+ * @property screenOffAwakeCount 息屏唤醒总次数（若未获取为 null）
+ * @property screenOffDeepSleepCount 进入深度睡眠总次数（若未获取为 null）
+ * @property screenOnCount 屏幕点亮总次数（若未获取为 null）
  */
 data class PowerOverviewStats(
     val avgPowerWatts: Float,
@@ -7002,7 +7051,12 @@ data class PowerOverviewStats(
     val screenOffDrainMah: Float = 0f,
     val screenOffAwakeDrainMah: Float = 0f,
     val screenOffDeepSleepDrainMah: Float = 0f,
-    val isScreenOffDecomposedAvailable: Boolean = true
+    val isScreenOffDecomposedAvailable: Boolean = true,
+    val screenOnPercent: Float = 0f,
+    val screenOnDrainMah: Float = 0f,
+    val screenOffAwakeCount: Int? = null,
+    val screenOffDeepSleepCount: Int? = null,
+    val screenOnCount: Int? = null
 )
 
 /**

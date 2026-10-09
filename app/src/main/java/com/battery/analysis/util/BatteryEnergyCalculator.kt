@@ -1,6 +1,8 @@
 package com.battery.analysis.util
 
 import java.util.Locale
+import com.battery.analysis.manager.PowerOverviewStats
+import com.battery.analysis.manager.PowerUsageManager
 
 /**
  * 设备电池物理总能量及获取方式详情实体类。
@@ -287,6 +289,302 @@ object BatteryEnergyCalculator {
             String.format(Locale.getDefault(), "%.1f mAh (%.2f Wh)", capacityMah, totalWh)
         } else {
             String.format(Locale.getDefault(), "%.1f mAh", capacityMah)
+        }
+    }
+
+    /**
+     * 格式化息屏卡片点击弹框展示的详细说明文本。
+     * 全面呈现息屏掉电占比、时长、能量、电量、平均功率及亮屏对比数据，真实反映设备在息屏与亮屏下的能耗分配。
+     *
+     * @param overview 耗电概览核心统计数据实体
+     * @param nominalTotalWh 设备电池满电物理总能量（单位：Wh，若不可用传入 null）
+     * @param nominalVoltageVolts 电池标称工作电压（单位：V，默认 3.85V）
+     * @return 息屏卡片弹框说明文本字符串
+     */
+    fun formatScreenOffCardDetailMessage(
+        overview: PowerOverviewStats,
+        nominalTotalWh: Float? = null,
+        nominalVoltageVolts: Float = DEFAULT_NOMINAL_VOLTAGE_VOLTS
+    ): String {
+        val safeNominalVoltage = if (nominalVoltageVolts > 0f) nominalVoltageVolts else DEFAULT_NOMINAL_VOLTAGE_VOLTS
+        val offPercentStr = if (overview.screenOffPercent > 0f) {
+            String.format(Locale.getDefault(), "%.1f%%", overview.screenOffPercent)
+        } else if (overview.screenOffAwakePercent > 0f || overview.screenOffDeepSleepPercent > 0f) {
+            String.format(Locale.getDefault(), "%.1f%%", overview.screenOffAwakePercent + overview.screenOffDeepSleepPercent)
+        } else {
+            "--"
+        }
+        val offDurStr = if (overview.screenOffDurationMs > 0L) {
+            PowerUsageManager.formatCompactDuration(overview.screenOffDurationMs)
+        } else {
+            overview.screenOffDurationText.ifBlank { "--" }
+        }
+        val offEnergyStr = String.format(Locale.getDefault(), "%.3f Wh", overview.screenOffEnergyWh)
+        val offMah = if (overview.screenOffDrainMah > 0f) {
+            overview.screenOffDrainMah
+        } else if (overview.screenOffEnergyWh > 0f) {
+            (overview.screenOffEnergyWh * 1000f) / safeNominalVoltage
+        } else {
+            0f
+        }
+        val offMahStr = if (offMah > 0f) String.format(Locale.getDefault(), "%.1f mAh", offMah) else "--"
+        val offWatts = if (overview.screenOffPowerWatts > 0f) {
+            overview.screenOffPowerWatts
+        } else if (overview.screenOffDurationMs > 0L && overview.screenOffEnergyWh > 0f) {
+            (overview.screenOffEnergyWh / (overview.screenOffDurationMs.toDouble() / 3600000.0)).toFloat()
+        } else {
+            0f
+        }
+        val offWattsStr = if (offWatts > 0f) String.format(Locale.getDefault(), "%.2f W", offWatts) else "--"
+
+        // 亮屏总耗电数据对比
+        val onPercentStr = if (overview.screenOnPercent > 0f) {
+            String.format(Locale.getDefault(), "%.1f%%", overview.screenOnPercent)
+        } else if (nominalTotalWh != null && nominalTotalWh > 0f && overview.screenOnEnergyWh > 0f) {
+            String.format(Locale.getDefault(), "%.1f%%", (overview.screenOnEnergyWh / nominalTotalWh) * 100f)
+        } else {
+            "--"
+        }
+        val onDurStr = if (overview.screenOnDurationMs > 0L) {
+            PowerUsageManager.formatCompactDuration(overview.screenOnDurationMs)
+        } else {
+            overview.screenOnDurationText.ifBlank { "--" }
+        }
+        val onEnergyStr = String.format(Locale.getDefault(), "%.3f Wh", overview.screenOnEnergyWh)
+        val onMah = if (overview.screenOnDrainMah > 0f) {
+            overview.screenOnDrainMah
+        } else if (overview.screenOnEnergyWh > 0f) {
+            (overview.screenOnEnergyWh * 1000f) / safeNominalVoltage
+        } else {
+            0f
+        }
+        val onMahStr = if (onMah > 0f) String.format(Locale.getDefault(), "%.1f mAh", onMah) else "--"
+        val onWatts = if (overview.screenOnPowerWatts > 0f) {
+            overview.screenOnPowerWatts
+        } else if (overview.screenOnDurationMs > 0L && overview.screenOnEnergyWh > 0f) {
+            (overview.screenOnEnergyWh / (overview.screenOnDurationMs.toDouble() / 3600000.0)).toFloat()
+        } else {
+            0f
+        }
+        val onWattsStr = if (onWatts > 0f) String.format(Locale.getDefault(), "%.2f W", onWatts) else "--"
+
+        return buildString {
+            append("【息屏耗电说明】\n")
+            append("• 息屏掉电占比：$offPercentStr（占满电总容量）\n")
+            append("• 息屏待机时长：$offDurStr\n")
+            append("• 息屏释放能量：$offEnergyStr\n")
+            append("• 息屏折算电量：$offMahStr\n")
+            append("• 息屏平均功率：$offWattsStr\n\n")
+            append("【亮屏耗电对比】\n")
+            append("• 亮屏掉电占比：$onPercentStr（占满电总容量）\n")
+            append("• 亮屏累计时长：$onDurStr\n")
+            append("• 亮屏释放能量：$onEnergyStr\n")
+            append("• 亮屏折算电量：$onMahStr\n")
+            append("• 亮屏平均功率：$onWattsStr\n\n")
+            append("💡 提示说明：\n")
+            append("息屏掉电由“唤醒活跃耗电”与“深度休眠底噪”守恒闭合构成。\n")
+            append("亮屏与息屏耗电占比均基于整机电池满电总能量基准计算，客观反映设备在不同状态下的电量分配。")
+        }
+    }
+
+    /**
+     * 格式化唤醒卡片点击弹框展示的详细说明文本。
+     * 呈现息屏唤醒掉电占比、唤醒时长、能量、电量、唤醒平均功率以及唤醒总次数与频次等核心数据。
+     *
+     * @param overview 耗电概览核心统计数据实体
+     * @param nominalTotalWh 设备电池满电物理总能量（单位：Wh，若不可用传入 null）
+     * @param nominalVoltageVolts 电池标称工作电压（单位：V，默认 3.85V）
+     * @return 唤醒卡片弹框说明文本字符串
+     */
+    fun formatAwakeCardDetailMessage(
+        overview: PowerOverviewStats,
+        nominalTotalWh: Float? = null,
+        nominalVoltageVolts: Float = DEFAULT_NOMINAL_VOLTAGE_VOLTS
+    ): String {
+        val safeNominalVoltage = if (nominalVoltageVolts > 0f) nominalVoltageVolts else DEFAULT_NOMINAL_VOLTAGE_VOLTS
+        val awakePercentStr = if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakePercent > 0f) {
+            String.format(Locale.getDefault(), "%.1f%%", overview.screenOffAwakePercent)
+        } else if (nominalTotalWh != null && nominalTotalWh > 0f && overview.screenOffAwakeEnergyWh > 0f) {
+            String.format(Locale.getDefault(), "%.1f%%", (overview.screenOffAwakeEnergyWh / nominalTotalWh) * 100f)
+        } else if (overview.screenOffAwakeDurationMs > 0L) {
+            "0.0%"
+        } else {
+            "--"
+        }
+        val awakeDurStr = if (overview.screenOffAwakeDurationMs > 0L) {
+            PowerUsageManager.formatCompactDuration(overview.screenOffAwakeDurationMs)
+        } else {
+            overview.screenOffAwakeDurationText.ifBlank { "0s" }
+        }
+        val awakeEnergyStr = if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakeEnergyWh >= 0.001f) {
+            String.format(Locale.getDefault(), "%.3f Wh", overview.screenOffAwakeEnergyWh)
+        } else if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakeEnergyWh > 0f) {
+            "<0.001 Wh"
+        } else if (overview.screenOffAwakeDurationMs > 0L) {
+            "0.000 Wh"
+        } else {
+            "--"
+        }
+        val awakeMah = if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakeDrainMah > 0f) {
+            overview.screenOffAwakeDrainMah
+        } else if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakeEnergyWh > 0f) {
+            (overview.screenOffAwakeEnergyWh * 1000f) / safeNominalVoltage
+        } else {
+            0f
+        }
+        val awakeMahStr = if (awakeMah >= 0.1f) {
+            String.format(Locale.getDefault(), "%.1f mAh", awakeMah)
+        } else if (overview.screenOffAwakeDurationMs > 0L) {
+            "0.0 mAh"
+        } else {
+            "--"
+        }
+        val awakeWatts = if (overview.screenOffAwakePowerWatts > 0f) {
+            overview.screenOffAwakePowerWatts
+        } else if (overview.screenOffAwakeDurationMs > 0L && overview.screenOffAwakeEnergyWh > 0f) {
+            (overview.screenOffAwakeEnergyWh / (overview.screenOffAwakeDurationMs.toDouble() / 3600000.0)).toFloat()
+        } else {
+            0f
+        }
+        val awakeWattsStr = if (awakeWatts > 0f) String.format(Locale.getDefault(), "%.2f W", awakeWatts) else "--"
+
+        val awakeCountStr = if (overview.screenOffAwakeCount != null) {
+            val count = overview.screenOffAwakeCount
+            val offHours = overview.screenOffDurationMs / 3600000.0
+            if (offHours > 0.1) {
+                val perHour = count / offHours
+                String.format(Locale.getDefault(), "%d 次 (约 %.1f 次/小时)", count, perHour)
+            } else {
+                String.format(Locale.getDefault(), "%d 次", count)
+            }
+        } else {
+            "未获取"
+        }
+
+        val awakeTimeRatioStr = if (overview.screenOffDurationMs > 0L && overview.screenOffAwakeDurationMs >= 0L) {
+            val ratio = (overview.screenOffAwakeDurationMs.toDouble() / overview.screenOffDurationMs.toDouble() * 100.0).coerceIn(0.0, 100.0)
+            String.format(Locale.getDefault(), "%.1f%%", ratio)
+        } else {
+            "--"
+        }
+
+        return buildString {
+            append("【息屏唤醒说明】\n")
+            append("• 唤醒掉电占比：$awakePercentStr（占满电总容量）\n")
+            append("• 唤醒活跃时长：$awakeDurStr\n")
+            append("• 唤醒消耗能量：$awakeEnergyStr\n")
+            append("• 唤醒折算电量：$awakeMahStr\n")
+            append("• 唤醒平均功率：$awakeWattsStr\n\n")
+            append("【唤醒频次详情】\n")
+            append("• 唤醒总次数：$awakeCountStr\n")
+            append("• 唤醒时长占比：$awakeTimeRatioStr（唤醒时长 / 息屏总时长）\n\n")
+            append("💡 提示说明：\n")
+            append("息屏期间，系统服务、推送通知、后台唤醒锁（Wakelock）或定时任务拉起 CPU 运行时处于唤醒活跃状态。\n")
+            append("唤醒功耗通常显著高于深度休眠底噪；若唤醒次数频繁或唤醒时间过长，通常为后台应用频繁保活或异常拉起所致。")
+        }
+    }
+
+    /**
+     * 格式化深度睡眠卡片点击弹框展示的详细说明文本。
+     * 呈现深度睡眠掉电占比、休眠时长、能量、电量、底噪功率以及深度睡眠率、进入休眠次数等待机健康度详情数据。
+     *
+     * @param overview 耗电概览核心统计数据实体
+     * @param nominalTotalWh 设备电池满电物理总能量（单位：Wh，若不可用传入 null）
+     * @param nominalVoltageVolts 电池标称工作电压（单位：V，默认 3.85V）
+     * @return 深度睡眠卡片弹框说明文本字符串
+     */
+    fun formatDeepSleepCardDetailMessage(
+        overview: PowerOverviewStats,
+        nominalTotalWh: Float? = null,
+        nominalVoltageVolts: Float = DEFAULT_NOMINAL_VOLTAGE_VOLTS
+    ): String {
+        val safeNominalVoltage = if (nominalVoltageVolts > 0f) nominalVoltageVolts else DEFAULT_NOMINAL_VOLTAGE_VOLTS
+        val sleepPercentStr = if (overview.isScreenOffDecomposedAvailable && overview.screenOffDeepSleepPercent > 0f) {
+            String.format(Locale.getDefault(), "%.1f%%", overview.screenOffDeepSleepPercent)
+        } else if (nominalTotalWh != null && nominalTotalWh > 0f && overview.screenOffDeepSleepEnergyWh > 0f) {
+            String.format(Locale.getDefault(), "%.1f%%", (overview.screenOffDeepSleepEnergyWh / nominalTotalWh) * 100f)
+        } else if (overview.screenOffDeepSleepDurationMs > 0L) {
+            "0.0%"
+        } else {
+            "--"
+        }
+        val sleepDurStr = if (overview.screenOffDeepSleepDurationMs > 0L) {
+            PowerUsageManager.formatCompactDuration(overview.screenOffDeepSleepDurationMs)
+        } else {
+            overview.screenOffDeepSleepDurationText.ifBlank { "0s" }
+        }
+        val sleepEnergyStr = if (overview.isScreenOffDecomposedAvailable && overview.screenOffDeepSleepEnergyWh >= 0.001f) {
+            String.format(Locale.getDefault(), "%.3f Wh", overview.screenOffDeepSleepEnergyWh)
+        } else if (overview.isScreenOffDecomposedAvailable && overview.screenOffDeepSleepEnergyWh > 0f) {
+            "<0.001 Wh"
+        } else if (overview.screenOffDeepSleepDurationMs > 0L) {
+            "0.000 Wh"
+        } else {
+            "--"
+        }
+        val sleepMah = if (overview.isScreenOffDecomposedAvailable && overview.screenOffDeepSleepDrainMah > 0f) {
+            overview.screenOffDeepSleepDrainMah
+        } else if (overview.isScreenOffDecomposedAvailable && overview.screenOffDeepSleepEnergyWh > 0f) {
+            (overview.screenOffDeepSleepEnergyWh * 1000f) / safeNominalVoltage
+        } else {
+            0f
+        }
+        val sleepMahStr = if (sleepMah >= 0.1f) {
+            String.format(Locale.getDefault(), "%.1f mAh", sleepMah)
+        } else if (overview.screenOffDeepSleepDurationMs > 0L) {
+            "0.0 mAh"
+        } else {
+            "--"
+        }
+        val sleepWatts = if (overview.screenOffDeepSleepPowerWatts > 0f) {
+            overview.screenOffDeepSleepPowerWatts
+        } else if (overview.screenOffDeepSleepDurationMs > 0L && overview.screenOffDeepSleepEnergyWh > 0f) {
+            (overview.screenOffDeepSleepEnergyWh / (overview.screenOffDeepSleepDurationMs.toDouble() / 3600000.0)).toFloat()
+        } else {
+            0f
+        }
+        val sleepWattsStr = if (sleepWatts > 0f) String.format(Locale.getDefault(), "%.2f W", sleepWatts) else "--"
+
+        val deepSleepRatio = if (overview.screenOffDurationMs > 0L && overview.screenOffDeepSleepDurationMs >= 0L) {
+            (overview.screenOffDeepSleepDurationMs.toDouble() / overview.screenOffDurationMs.toDouble() * 100.0).coerceIn(0.0, 100.0)
+        } else {
+            null
+        }
+        val deepSleepRatioStr = if (deepSleepRatio != null) String.format(Locale.getDefault(), "%.1f%%", deepSleepRatio) else "--"
+
+        val sleepCountStr = if (overview.screenOffDeepSleepCount != null) {
+            String.format(Locale.getDefault(), "%d 次", overview.screenOffDeepSleepCount)
+        } else {
+            "未获取"
+        }
+
+        val deepSleepHours = overview.screenOffDeepSleepDurationMs / 3600000.0
+        val sleepRateStr = if (deepSleepHours > 0.1 && sleepMah > 0f) {
+            val mahPerHour = sleepMah / deepSleepHours
+            if (overview.screenOffDeepSleepPercent > 0f) {
+                val percentPerHour = overview.screenOffDeepSleepPercent / deepSleepHours
+                String.format(Locale.getDefault(), "%.2f %%/h (%.1f mAh/h)", percentPerHour, mahPerHour)
+            } else {
+                String.format(Locale.getDefault(), "%.1f mAh/h", mahPerHour)
+            }
+        } else {
+            "--"
+        }
+
+        return buildString {
+            append("【深度休眠说明】\n")
+            append("• 深睡掉电占比：$sleepPercentStr（占满电总容量）\n")
+            append("• 深睡累计时长：$sleepDurStr\n")
+            append("• 深睡消耗能量：$sleepEnergyStr\n")
+            append("• 深睡折算电量：$sleepMahStr\n")
+            append("• 深度休眠功率：$sleepWattsStr\n\n")
+            append("【待机健康度详情】\n")
+            append("• 深度睡眠率：$deepSleepRatioStr（休眠时长 / 息屏总时长）\n")
+            append("• 进入休眠次数：$sleepCountStr\n")
+            append("• 休眠放电速率：$sleepRateStr\n\n")
+            append("💡 提示说明：\n")
+            append("深度睡眠（Deep Sleep）是设备灭屏后 CPU 挂起暂停工作的极低功耗待机模式，仅保留基带待机与硬件底噪。\n")
+            append("深度睡眠率越接近 100%，表明待机期间系统休眠越充分、耗电越平稳。")
         }
     }
 }

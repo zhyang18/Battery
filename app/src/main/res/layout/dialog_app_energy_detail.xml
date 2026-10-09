@@ -31,7 +31,7 @@
             android:layout_width="44dp"
             android:layout_height="44dp"
             android:contentDescription="@string/app_name"
-            tools:src="@mipmap/ic_launcher" />
+            tools:src="@drawable/ic_default_app" />
 
         <LinearLayout
             android:layout_width="0dp"

@@ -7,7 +7,9 @@ import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
 import com.battery.analysis.R
+import com.battery.analysis.model.AppPowerUsageItem
 import com.battery.analysis.timeline.domain.AppTimelineEvent
+import com.battery.analysis.timeline.util.DrawableBitmapCache
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -59,10 +61,17 @@ class AppEnergyDetailBottomSheetDialog(
         val tvSource = root.findViewById<TextView>(R.id.tv_detail_source)
 
         // 图标与基本信息
-        if (event.icon != null) {
+        val targetIconPx = (context.resources.displayMetrics.density * 44f).toInt()
+        val bmp = DrawableBitmapCache.getOrLoadBitmap(context, event.packageName, targetIconPx, event.icon)
+        if (bmp != null && !bmp.isRecycled) {
+            ivIcon.setImageBitmap(bmp)
+        } else if (event.icon != null) {
             ivIcon.setImageDrawable(event.icon)
+        } else if (AppPowerUsageItem.isUninstalledPackage(event.packageName)) {
+            ivIcon.setImageResource(R.drawable.ic_uninstalled_app)
         } else {
-            ivIcon.setImageResource(R.mipmap.ic_launcher)
+            // 未命中真实应用图标时，展示专属极简默认应用矢量图标，杜绝误展示为桌面启动图标
+            ivIcon.setImageResource(R.drawable.ic_default_app)
         }
         tvName.text = event.appName
         tvPackage.text = "${event.packageName} (UID: ${event.uid})"

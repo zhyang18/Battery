@@ -120,7 +120,8 @@ class AppUsageDetailBottomSheetDialog(
         } else if (item.isUninstalledApp()) {
             ivIcon.setImageResource(R.drawable.ic_uninstalled_app)
         } else {
-            ivIcon.setImageResource(R.mipmap.ic_launcher)
+            // 未命中真实应用图标时，展示专属极简默认应用矢量图标，杜绝误展示为桌面启动图标
+            ivIcon.setImageResource(R.drawable.ic_default_app)
         }
 
         tvName.text = item.appName

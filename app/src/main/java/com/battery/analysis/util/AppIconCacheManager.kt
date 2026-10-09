@@ -8,6 +8,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import com.battery.analysis.model.AppPowerUsageItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -49,14 +50,15 @@ object AppIconCacheManager {
      * @param context 运行上下文
      * @param packageName 目标应用程序包名
      * @param bitmap 待保存的图标位图对象
+     * @param forceOverwrite 是否强制覆盖本地已有图标文件，默认为 false
      * @return 若持久化保存成功返回 true，发生异常或参数无效返回 false
      */
-    fun saveAppIcon(context: Context, packageName: String, bitmap: Bitmap): Boolean {
+    fun saveAppIcon(context: Context, packageName: String, bitmap: Bitmap, forceOverwrite: Boolean = false): Boolean {
         if (packageName.isBlank() || bitmap.isRecycled) return false
         return try {
             val dir = getIconCacheDir(context)
             val file = File(dir, "${packageName}.png")
-            if (file.exists() && file.length() > 0L) {
+            if (!forceOverwrite && file.exists() && file.length() > 0L) {
                 return true
             }
             val tempFile = File(dir, "${packageName}.tmp")
@@ -76,12 +78,30 @@ object AppIconCacheManager {
      * @param context 运行上下文
      * @param packageName 目标应用程序包名
      * @param bitmap 待保存的图标位图对象
+     * @param forceOverwrite 是否强制覆盖本地已有图标文件，默认为 false
      */
-    fun saveAppIconAsync(context: Context, packageName: String, bitmap: Bitmap) {
+    fun saveAppIconAsync(context: Context, packageName: String, bitmap: Bitmap, forceOverwrite: Boolean = false) {
         if (packageName.isBlank() || bitmap.isRecycled) return
         val appCtx = context.applicationContext
         ioScope.launch {
-            saveAppIcon(appCtx, packageName, bitmap)
+            saveAppIcon(appCtx, packageName, bitmap, forceOverwrite)
+        }
+    }
+
+    /**
+     * 从本地磁盘中彻底删除指定包名的缓存图标文件。
+     *
+     * @param context 运行上下文
+     * @param packageName 目标应用程序包名
+     * @return 若删除成功或文件原本不存在返回 true，发生异常返回 false
+     */
+    fun deleteAppIcon(context: Context, packageName: String): Boolean {
+        if (packageName.isBlank()) return false
+        return try {
+            val file = File(getIconCacheDir(context), "${packageName}.png")
+            if (file.exists()) file.delete() else true
+        } catch (_: Throwable) {
+            false
         }
     }
 
@@ -106,7 +126,7 @@ object AppIconCacheManager {
      * @return 解码成功的应用图标 [Bitmap]，若文件不存在或损坏则返回 null
      */
     fun loadAppIcon(context: Context, packageName: String): Bitmap? {
-        if (packageName.isBlank()) return null
+        if (packageName.isBlank() || AppPowerUsageItem.isSystemUiStandbyPackage(packageName)) return null
         return try {
             val file = File(getIconCacheDir(context), "${packageName}.png")
             if (file.exists() && file.length() > 0L) {
@@ -260,6 +280,11 @@ object AppIconCacheManager {
         val appCtx = context.applicationContext
         ioScope.launch {
             try {
+                // 清理历史残留的待机与系统虚拟包名磁盘图标，杜绝误读旧桌面启动器图标
+                deleteAppIcon(appCtx, AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY)
+                deleteAppIcon(appCtx, "com.android.systemui.standby")
+                deleteAppIcon(appCtx, "systemui.standby")
+
                 val pm = appCtx.packageManager
                 val apps = pm.getInstalledApplications(0)
                 val targetSizePx = (appCtx.resources.displayMetrics.density * 42f).toInt().coerceAtLeast(1)

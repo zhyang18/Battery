@@ -1,7 +1,6 @@
 package com.battery.analysis.timeline.util
 
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -129,18 +128,21 @@ object DrawableBitmapCache {
             return bmp
         }
 
-        // 3. 处理系统桌面或待机虚拟包名
-        val pm = context.packageManager
-        if (packageName == "com.android.systemui.standby" || packageName.startsWith("systemui.standby") || packageName == AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY) {
-            val launcherDrawable = getDefaultHomeLauncherIcon(context) ?: try { pm.defaultActivityIcon } catch (_: Throwable) { null }
-            val bmp = getOrConvertBitmap(packageName, launcherDrawable, sizePx)
+        // 3. 处理系统待机与未识别前台界面等未命中前台归集包名：展示专属极简默认应用/待机矢量图标，绝不误用桌面启动器图标
+        if (AppPowerUsageItem.isSystemUiStandbyPackage(packageName)) {
+            val defaultDrawable = androidx.core.content.ContextCompat.getDrawable(
+                context,
+                com.battery.analysis.R.drawable.ic_default_app
+            )
+            val bmp = getOrConvertBitmap(packageName, defaultDrawable, sizePx)
             if (bmp != null) {
-                AppIconCacheManager.saveAppIconAsync(context, packageName, bmp)
+                AppIconCacheManager.saveAppIconAsync(context, packageName, bmp, forceOverwrite = true)
             }
             return bmp
         }
 
         // 4. 尝试从系统已安装的应用信息中解码图标（安装状态）
+        val pm = context.packageManager
         var loadedBitmap: Bitmap? = null
         var isUninstalled = false
 
@@ -196,34 +198,6 @@ object DrawableBitmapCache {
             negativeCache.add(cacheKey)
         }
         return loadedBitmap
-    }
-
-    /**
-     * 获取系统当前默认桌面启动器的应用图标 Drawable。
-     *
-     * @param context 运行上下文
-     * @return 默认桌面图标 Drawable，获取失败返回 null
-     */
-    private fun getDefaultHomeLauncherIcon(context: Context): Drawable? {
-        return try {
-            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-            val resolveInfo = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                context.packageManager.resolveActivity(intent, PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong()))
-            } else {
-                @Suppress("DEPRECATION")
-                context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
-            }
-            val homePkg = resolveInfo?.activityInfo?.packageName
-            if (!homePkg.isNullOrEmpty()) {
-                val pm = context.packageManager
-                val ai = pm.getApplicationInfo(homePkg, 0)
-                pm.getApplicationIcon(ai)
-            } else {
-                null
-            }
-        } catch (_: Throwable) {
-            null
-        }
     }
 
     /**

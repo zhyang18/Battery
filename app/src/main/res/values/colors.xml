@@ -36,4 +36,8 @@
     <!-- 已卸载应用通用图标颜色体系（浅色模式） -->
     <color name="uninstalled_icon_bg">#E2E8F0</color>
     <color name="uninstalled_icon_fg">#64748B</color>
+
+    <!-- 未命中/默认应用通用图标颜色体系（浅色模式） -->
+    <color name="default_app_icon_bg">#F1F5F9</color>
+    <color name="default_app_icon_fg">#94A3B8</color>
 </resources>

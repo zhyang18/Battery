@@ -67,6 +67,13 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         const val TYPE_DISCHARGE_SPEED = 8
         /** 视图类型：唤醒与深度睡眠耗电指标双卡片 */
         const val TYPE_SLEEP_AWAKE_METRICS = 9
+
+        /** 睡眠卡片点击分类标识：息屏卡片 */
+        const val CARD_SCREEN_OFF = 1
+        /** 睡眠卡片点击分类标识：唤醒卡片 */
+        const val CARD_AWAKE = 2
+        /** 睡眠卡片点击分类标识：深度睡眠卡片 */
+        const val CARD_DEEP_SLEEP = 3
     }
 
     // 当前供 RecyclerView 绑定的完整平铺条目数据列表
@@ -148,6 +155,13 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     var onMetricsChangedListener: ((Set<com.battery.analysis.timeline.presentation.TimelineMetric>) -> Unit)? = null
     var onEnergyClickListener: ((View, Float, Float) -> Unit)? = null
     var onMetricModuleClickedListener: ((View, Int) -> Unit)? = null
+
+    /**
+     * 息屏、唤醒与深度睡眠卡片点击事件监听回调。
+     * 参数 1：触发点击的卡片锚点 View
+     * 参数 2：卡片分类标识（[CARD_SCREEN_OFF] 为息屏卡片，[CARD_AWAKE] 为唤醒卡片，[CARD_DEEP_SLEEP] 为深度睡眠卡片）
+     */
+    var onSleepAwakeCardClickedListener: ((View, Int) -> Unit)? = null
 
     // ==================== ViewHolder 定义 ====================
 
@@ -772,6 +786,17 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                     tvSleepMah.text = "--"
                 }
             }
+
+            // 绑定息屏、唤醒与深度睡眠卡片点击事件监听
+            cardScreenOff.setOnClickListener {
+                onSleepAwakeCardClickedListener?.invoke(cardScreenOff, CARD_SCREEN_OFF)
+            }
+            cardAwake.setOnClickListener {
+                onSleepAwakeCardClickedListener?.invoke(cardAwake, CARD_AWAKE)
+            }
+            cardDeepSleep.setOnClickListener {
+                onSleepAwakeCardClickedListener?.invoke(cardDeepSleep, CARD_DEEP_SLEEP)
+            }
         }
     }
 
@@ -1138,7 +1163,8 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 // 已卸载应用且磁盘尚未命中原生图标时，展示专属已卸载矢量图标，杜绝误展示为本应用自身图标
                 ivAppIcon.setImageResource(R.drawable.ic_uninstalled_app)
             } else {
-                ivAppIcon.setImageResource(R.mipmap.ic_launcher)
+                // 未命中真实应用图标时，展示专属极简默认应用矢量图标，杜绝误展示为桌面启动图标
+                ivAppIcon.setImageResource(R.drawable.ic_default_app)
             }
 
             if (item.foregroundTimeMs > 0L) {

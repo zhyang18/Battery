@@ -705,7 +705,8 @@ class BatteryTimelineView @JvmOverloads constructor(
             slotGapPx = 0f,
             rowGapPx = 0f,
             maxRows = maxDisplayRows,
-            leftMarginPx = contentLeft
+            leftMarginPx = contentLeft,
+            screenEvents = timelineState.screenEvents
         )
         cachedSlotItems.addAll(laidOut)
         val currentMaxRow = cachedSlotItems.maxOfOrNull { it.rowIndex } ?: -1

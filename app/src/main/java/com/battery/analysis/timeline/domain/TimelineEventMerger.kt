@@ -1,5 +1,6 @@
 package com.battery.analysis.timeline.domain
 
+import com.battery.analysis.model.AppPowerUsageItem
 import kotlin.math.max
 
 /**
@@ -29,15 +30,37 @@ object TimelineEventMerger {
         val groupedByPkg = rawEvents.groupBy { it.packageName }
         val mergedGroupedList = mutableListOf<AppTimelineEvent>()
 
-        for ((_, eventsForPkg) in groupedByPkg) {
+        for ((pkg, eventsForPkg) in groupedByPkg) {
+            val isStandbyPkg = AppPowerUsageItem.isSystemUiStandbyPackage(pkg)
+            val effectiveTolerance = if (isStandbyPkg) {
+                // 针对系统界面/桌面待机条目，严格采用紧凑门限（1000ms），绝不可使用 120 秒超大容差跨时段长龙串联
+                1000L
+            } else {
+                mergeToleranceMs
+            }
+
             val sorted = eventsForPkg.sortedBy { it.startTime }
             var current = sorted[0]
 
             for (i in 1 until sorted.size) {
                 val next = sorted[i]
-                if (next.startTime <= (current.endTime + mergeToleranceMs)) {
+                // 核心防污染保护：系统待机条目若在两个离散碎片之间存在其他第三方前台应用，严禁跨越其他应用强行合并
+                val hasOtherAppBetween = if (isStandbyPkg) {
+                    rawEvents.any { other ->
+                        !AppPowerUsageItem.isSystemUiStandbyPackage(other.packageName) &&
+                                other.startTime < next.startTime && other.endTime > current.endTime
+                    }
+                } else {
+                    false
+                }
+
+                if (!hasOtherAppBetween && next.startTime <= (current.endTime + effectiveTolerance)) {
                     val newEndTime = max(current.endTime, next.endTime)
-                    val newDuration = (newEndTime - current.startTime).coerceAtLeast(0L)
+                    val newDuration = if (isStandbyPkg) {
+                        current.durationMs + next.durationMs
+                    } else {
+                        (newEndTime - current.startTime).coerceAtLeast(0L)
+                    }
                     val totalEnergy = if (current.energyMwh != null || next.energyMwh != null) {
                         (current.energyMwh ?: 0.0) + (next.energyMwh ?: 0.0)
                     } else null

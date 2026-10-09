@@ -1,6 +1,7 @@
 package com.battery.analysis.timeline.util
 
 import com.battery.analysis.timeline.domain.AppTimelineEvent
+import com.battery.analysis.timeline.domain.ScreenEvent
 import com.battery.analysis.timeline.domain.TimelineEventMerger
 import kotlin.math.max
 
@@ -53,6 +54,7 @@ object TimelineLayoutCalculator {
      * @param rowGapPx 上下行之间的垂直间距（像素，默认为 0f 无缝堆叠）
      * @param maxRows 允许向上堆叠的最大行数（默认不作限制）
      * @param leftMarginPx 左侧起始偏移像素（默认 0f）
+     * @param screenEvents 屏幕点亮与休眠状态事件列表 [List<ScreenEvent>]，用于确保息屏休眠时间槽不绘制前台应用
      * @return 经过分槽和多行堆叠排布后的徽章渲染单元列表 [List<LaidOutAppSlotItem>]
      */
     fun calculateSlotItems(
@@ -65,7 +67,8 @@ object TimelineLayoutCalculator {
         slotGapPx: Float = 3f,
         rowGapPx: Float = 0f,
         maxRows: Int = Int.MAX_VALUE,
-        leftMarginPx: Float = 0f
+        leftMarginPx: Float = 0f,
+        screenEvents: List<ScreenEvent> = emptyList()
     ): List<LaidOutAppSlotItem> {
         if (events.isEmpty() || canvasWidth <= 0f || visibleEndTs <= visibleStartTs) return emptyList()
 
@@ -106,6 +109,14 @@ object TimelineLayoutCalculator {
             // 均等切分可视时间范围，确保全时段连续覆盖
             val slotStartTs = visibleStartTs + (totalTimeSpan * (slotIndex.toDouble() / numSlots)).toLong()
             val slotEndTs = visibleStartTs + (totalTimeSpan * ((slotIndex + 1).toDouble() / numSlots)).toLong()
+
+            // 屏幕状态感知：若提供了屏幕事件流，核验当前时间槽内是否存在有效亮屏时间；息屏休眠槽杜绝绘制前台应用或待机图标
+            if (screenEvents.isNotEmpty()) {
+                val hasScreenOn = screenEvents.any { event ->
+                    event.isScreenOn && maxOf(event.startTime, slotStartTs) < minOf(event.endTime, slotEndTs)
+                }
+                if (!hasScreenOn) continue
+            }
 
             // 查找在该时间槽区间内处于活跃状态的应用
             val activeEvents = visibleEvents.filter {

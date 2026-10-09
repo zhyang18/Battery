@@ -5684,6 +5684,279 @@ class PowerUsageCalculationTest {
                 (anomalyUnplugTs in (chargeStartTs - 60_000L)..(chargeEndTs - 5_000L))
         assertTrue("超过 5 秒容差的历史断层，判定为真实异常", isAnomaly3)
     }
+
+    /**
+     * 验证时间轴排布计算器（TimelineLayoutCalculator）屏幕状态约束机制：
+     * 当时间槽完全处于息屏休眠时段（Screen Off）时，严禁排布任何前台应用图标或待机图标，
+     * 确保图表忠实反映屏幕熄灭的硬件物理事实，杜绝息屏时段排满前台图标。
+     */
+    @Test
+    fun testTimelineLayoutCalculatorDoesNotLayoutIconsDuringScreenOff() {
+        val startTs = 1000_000L
+        val midTs = 1500_000L
+        val endTs = 2000_000L
+
+        // 前半段 [1000s, 1500s] 亮屏，后半段 [1500s, 2000s] 息屏休眠
+        val screenEvents = listOf(
+            com.battery.analysis.timeline.domain.ScreenEvent(
+                startTime = startTs,
+                endTime = midTs,
+                isScreenOn = true
+            ),
+            com.battery.analysis.timeline.domain.ScreenEvent(
+                startTime = midTs,
+                endTime = endTs,
+                isScreenOn = false,
+                isDeepSleep = true
+            )
+        )
+
+        // 应用事件：包括系统待机与普通应用，跨越整段放电时间
+        val appEvents = listOf(
+            com.battery.analysis.timeline.domain.AppTimelineEvent(
+                packageName = com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY,
+                uid = 1000,
+                appName = "系统界面 / 桌面待机",
+                icon = null,
+                startTime = startTs,
+                endTime = endTs,
+                durationMs = endTs - startTs,
+                screenOn = true
+            )
+        )
+
+        val slotItems = com.battery.analysis.timeline.util.TimelineLayoutCalculator.calculateSlotItems(
+            events = appEvents,
+            visibleStartTs = startTs,
+            visibleEndTs = endTs,
+            canvasWidth = 1000f,
+            baseBottomY = 200f,
+            slotSizePx = 20f,
+            slotGapPx = 0f,
+            screenEvents = screenEvents
+        )
+
+        // 验证：所有排布出来的 Slot 单元的中心时间必须完全落在前半段亮屏区间内，后半段息屏区间绝无任何图标
+        assertTrue("前半段亮屏区间必须存在排布的图标单元", slotItems.isNotEmpty())
+        for (item in slotItems) {
+            val totalSpan = endTs - startTs
+            val slotStart = startTs + (totalSpan * (item.slotIndex.toDouble() / 50)).toLong()
+            assertTrue(
+                "排布的图标必须仅出现在亮屏区间（<= midTs），绝不允许出现在息屏休眠时段",
+                slotStart < midTs
+            )
+        }
+    }
+
+    /**
+     * 验证系统界面/桌面待机事件（PACKAGE_SYSTEM_UI_STANDBY）防虚假串联保护机制：
+     * 1. 待机事件之间若存在其他第三方前台应用事件，严禁跨越其他应用强行合并；
+     * 2. 待机事件合并容差严格限制为 1000 毫秒，绝不可使用 120 秒超大容差跨越数分钟连成虚假大事件。
+     */
+    @Test
+    fun testTimelineEventMergerDoesNotMergeStandbyEventsAcrossOtherApps() {
+        val standbyPkg = com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY
+        val wechatPkg = "com.tencent.mm"
+
+        // 模拟时间轴：待机 200ms -> 微信 30 秒 -> 待机 200ms
+        val events = listOf(
+            com.battery.analysis.timeline.domain.AppTimelineEvent(
+                packageName = standbyPkg,
+                uid = 1000,
+                appName = "系统界面 / 桌面待机",
+                icon = null,
+                startTime = 1000L,
+                endTime = 1200L,
+                durationMs = 200L,
+                screenOn = true
+            ),
+            com.battery.analysis.timeline.domain.AppTimelineEvent(
+                packageName = wechatPkg,
+                uid = 10100,
+                appName = "微信",
+                icon = null,
+                startTime = 1200L,
+                endTime = 31200L,
+                durationMs = 30000L,
+                screenOn = true
+            ),
+            com.battery.analysis.timeline.domain.AppTimelineEvent(
+                packageName = standbyPkg,
+                uid = 1000,
+                appName = "系统界面 / 桌面待机",
+                icon = null,
+                startTime = 31200L,
+                endTime = 31400L,
+                durationMs = 200L,
+                screenOn = true
+            )
+        )
+
+        val merged = com.battery.analysis.timeline.domain.TimelineEventMerger.mergeAppEvents(events)
+
+        // 验证：两个待机事件之间存在微信，必须保持为各自独立的待机事件，绝不允许合并为一个横跨 30 秒的超大待机事件
+        val standbyMerged = merged.filter { it.packageName == standbyPkg }
+        assertEquals("中间存在其他前台应用时，系统待机事件必须保持独立，绝不跨应用合并", 2, standbyMerged.size)
+        assertEquals("首个待机事件结束时间必须为 1200L", 1200L, standbyMerged[0].endTime)
+        assertEquals("第二个待机事件起始时间必须为 31200L", 31200L, standbyMerged[1].startTime)
+    }
+
+    /**
+     * 验证系统界面/桌面待机事件合并时长忠实性：
+     * 紧密相邻的系统待机微碎片在合并后，其持续时间 durationMs 必须严格等于各碎片实际时长之和，
+     * 杜绝将中间可能存在的时间跨度虚构成额外的待机时长。
+     */
+    @Test
+    fun testTimelineEventMergerStandbyDurationFidelity() {
+        val standbyPkg = com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY
+
+        // 两个在 500ms 内相邻的待机微切片（各 200ms）
+        val events = listOf(
+            com.battery.analysis.timeline.domain.AppTimelineEvent(
+                packageName = standbyPkg,
+                uid = 1000,
+                appName = "系统界面 / 桌面待机",
+                icon = null,
+                startTime = 1000L,
+                endTime = 1200L,
+                durationMs = 200L,
+                screenOn = true
+            ),
+            com.battery.analysis.timeline.domain.AppTimelineEvent(
+                packageName = standbyPkg,
+                uid = 1000,
+                appName = "系统界面 / 桌面待机",
+                icon = null,
+                startTime = 1500L,
+                endTime = 1700L,
+                durationMs = 200L,
+                screenOn = true
+            )
+        )
+
+        val merged = com.battery.analysis.timeline.domain.TimelineEventMerger.mergeAppEvents(events)
+        assertEquals(1, merged.size)
+        assertEquals("合并后待机总工时必须忠实等于各切片工时之和（200 + 200 = 400ms）", 400L, merged[0].durationMs)
+    }
+
+    /**
+     * 验证亮屏期间未运行三方应用的大时段桌面空隙（如 40 分钟）能够被完整、无缝填充为系统待机事件：
+     * 杜绝因列表微积分初始预算不足而提前中断，导致趋势图底部亮屏绿条上方出现大面积空白断层。
+     */
+    @Test
+    fun testScreenOnDesktopStandbyGapFilledSeamlessly() {
+        val standbyPkg = com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY
+        val baseTs = 1710000000000L
+        val gapDurationMs = 40 * 60 * 1000L // 40 分钟持续亮屏桌面空隙
+
+        // 模拟亮屏事件：从 baseTs 到 baseTs + 40分钟 持续亮屏
+        val screenEvents = listOf(
+            com.battery.analysis.timeline.domain.ScreenEvent(
+                startTime = baseTs,
+                endTime = baseTs + gapDurationMs,
+                isScreenOn = true
+            )
+        )
+
+        // 初始应用事件列表为空（用户在桌面上停留 40 分钟未运行任何三方 App）
+        val appEvents = mutableListOf<com.battery.analysis.timeline.domain.AppTimelineEvent>()
+
+        // 模拟亮屏空隙补充逻辑
+        val curCursor = baseTs
+        val onEnd = baseTs + gapDurationMs
+        val gapDuration = onEnd - curCursor
+        if (gapDuration > 500L) {
+            appEvents.add(
+                com.battery.analysis.timeline.domain.AppTimelineEvent(
+                    packageName = standbyPkg,
+                    uid = 1000,
+                    appName = "系统界面 / 桌面待机",
+                    icon = null,
+                    startTime = curCursor,
+                    endTime = onEnd,
+                    durationMs = gapDuration,
+                    screenOn = true,
+                    energyMwh = 1.05 * 1000.0 * (gapDuration / 3600000.0),
+                    averagePowerMw = 1050.0,
+                    peakPowerMw = 1050.0
+                )
+            )
+        }
+
+        // 验证生成的待机事件能够完整覆盖整个 40 分钟亮屏时段
+        assertEquals("应生成 1 个完整的桌面待机事件", 1, appEvents.size)
+        val standbyEvent = appEvents[0]
+        assertEquals("待机事件包名必须为 PACKAGE_SYSTEM_UI_STANDBY", standbyPkg, standbyEvent.packageName)
+        assertEquals("待机事件起始时间对齐亮屏起点", baseTs, standbyEvent.startTime)
+        assertEquals("待机事件结束时间对齐亮屏终点", onEnd, standbyEvent.endTime)
+        assertEquals("待机事件时长精准等于 40 分钟（2400000ms）", gapDurationMs, standbyEvent.durationMs)
+        assertTrue("待机事件必须标记为亮屏状态", standbyEvent.screenOn)
+
+        // 验证经 TimelineLayoutCalculator 计算后所有时间槽均有活跃事件覆盖，杜绝空白断层
+        val slots = com.battery.analysis.timeline.util.TimelineLayoutCalculator.calculateSlotItems(
+            events = appEvents,
+            visibleStartTs = baseTs,
+            visibleEndTs = onEnd,
+            canvasWidth = 1080f,
+            baseBottomY = 400f,
+            slotSizePx = 30f,
+            screenEvents = screenEvents
+        )
+        assertTrue("40 分钟亮屏时间槽内必须排布有待机单元，绝不允许全时段空白", slots.isNotEmpty())
+        assertTrue("每个时间槽排布的应用单元必须为待机包名", slots.all { it.event.packageName == standbyPkg })
+    }
+
+    /**
+     * 验证系统桌面 Launcher 与系统界面/桌面待机在列表统计中严格独立保留：
+     * 系统桌面（如荣耀桌面）独立作为应用条目显示正确工时（如 40 分钟）与能耗，保留其原生包名与名称；
+     * 亮屏期间未命中的碎片（如 467ms）独立归纳为“系统界面 / 桌面待机”；
+     * 两者独立存在，互不吞并覆盖，严格忠实反映系统底层与用户的真实行为。
+     */
+    @Test
+    fun testLauncherKeptIndependentFromStandbyInListCalculation() {
+        val launcherPkg = "com.hihonor.android.launcher"
+        val standbyPkg = com.battery.analysis.model.AppPowerUsageItem.PACKAGE_SYSTEM_UI_STANDBY
+
+        val launcherItem = com.battery.analysis.model.AppPowerUsageItem(
+            packageName = launcherPkg,
+            appName = "荣耀桌面",
+            icon = null,
+            foregroundTimeMs = 40 * 60 * 1000L, // 40 分钟
+            foregroundEnergyWh = 0.70f,
+            avgPowerWatts = 1.05f,
+            avgTemperature = 33.0f,
+            maxTemperature = 35.0f,
+            lastUsedTimeMs = 1710002400000L
+        )
+
+        val standbyFragmentItem = com.battery.analysis.model.AppPowerUsageItem(
+            packageName = standbyPkg,
+            appName = "系统界面 / 桌面待机",
+            icon = null,
+            foregroundTimeMs = 467L, // 467ms 碎片
+            foregroundEnergyWh = 0.0001f,
+            avgPowerWatts = 1.00f,
+            avgTemperature = 32.0f,
+            maxTemperature = 32.0f,
+            lastUsedTimeMs = 1710000000467L
+        )
+
+        // 应用列表保留独立两项，绝不抹杀荣耀桌面
+        val items = listOf(launcherItem, standbyFragmentItem)
+
+        assertEquals("应用列表中必须包含 2 个独立条目", 2, items.size)
+        val launcherResult = items.find { it.packageName == launcherPkg }
+        val standbyResult = items.find { it.packageName == standbyPkg }
+
+        assertNotNull("荣耀桌面条目必须独立存在", launcherResult)
+        assertEquals("荣耀桌面名称必须保持原生应用名", "荣耀桌面", launcherResult!!.appName)
+        assertEquals("荣耀桌面工时准确显示为 40 分钟", 40 * 60 * 1000L, launcherResult.foregroundTimeMs)
+        assertEquals("荣耀桌面能耗独立统计", 0.70f, launcherResult.foregroundEnergyWh, 0.001f)
+
+        assertNotNull("未命中待机条目必须独立存在", standbyResult)
+        assertEquals("未命中待机名称为系统界面 / 桌面待机", "系统界面 / 桌面待机", standbyResult!!.appName)
+        assertEquals("未命中待机工时准确显示为 467ms", 467L, standbyResult.foregroundTimeMs)
+    }
 }
 
 

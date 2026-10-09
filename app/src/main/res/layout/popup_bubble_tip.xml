@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<com.battery.analysis.ui.view.BubbleTooltipLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/layout_bubble_root"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
-    android:background="@drawable/bg_bubble_tooltip"
     android:elevation="6dp"
-    android:orientation="vertical"
     android:paddingStart="12dp"
     android:paddingTop="8dp"
     android:paddingEnd="12dp"
@@ -17,4 +16,4 @@
         android:lineSpacingExtra="3dp"
         android:textColor="@color/popup_item_text"
         android:textSize="13sp" />
-</LinearLayout>
+</com.battery.analysis.ui.view.BubbleTooltipLayout>

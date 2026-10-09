@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:anim/accelerate_interpolator">
+    <!-- 气泡位于锚点上方时，向底部对齐位置平滑缩小收起并淡出 -->
+    <scale
+        android:duration="160"
+        android:fromXScale="1.0"
+        android:fromYScale="1.0"
+        android:pivotX="50%"
+        android:pivotY="100%"
+        android:toXScale="0.82"
+        android:toYScale="0.82" />
+    <alpha
+        android:duration="160"
+        android:fromAlpha="1.0"
+        android:toAlpha="0.0" />
+</set>

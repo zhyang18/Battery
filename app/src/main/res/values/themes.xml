@@ -26,6 +26,18 @@
         <item name="android:windowExitAnimation">@anim/anim_popup_top_right_exit</item>
     </style>
 
+    <!-- 气泡在锚点上方弹出时的平滑进入与退出动画样式 -->
+    <style name="Animation.BubbleTooltip.Above" parent="@android:style/Animation">
+        <item name="android:windowEnterAnimation">@anim/anim_bubble_tooltip_above_enter</item>
+        <item name="android:windowExitAnimation">@anim/anim_bubble_tooltip_above_exit</item>
+    </style>
+
+    <!-- 气泡在锚点下方弹出时的平滑进入与退出动画样式 -->
+    <style name="Animation.BubbleTooltip.Below" parent="@android:style/Animation">
+        <item name="android:windowEnterAnimation">@anim/anim_bubble_tooltip_below_enter</item>
+        <item name="android:windowExitAnimation">@anim/anim_bubble_tooltip_below_exit</item>
+    </style>
+
     <style name="ShapeAppearance_SceneHeader" parent="">
         <item name="cornerFamily">rounded</item>
         <item name="cornerSizeTopLeft">14dp</item>

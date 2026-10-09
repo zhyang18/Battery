@@ -47,9 +47,9 @@
     <string name="power_discharge_full_label">Full</string>
     <string name="power_discharge_full_duration_format">%s Full</string>
     <string name="power_discharge_full_duration_no_data">--</string>
-    <string name="power_screen_on_discharge_speed_tip">Current Screen-on Drain Rate\n7-Day Screen-on Drain Rate\nFull Battery Screen-on Time</string>
-    <string name="power_screen_off_discharge_speed_tip">Current Screen-off Drain Rate\n7-Day Screen-off Drain Rate\nFull Battery Screen-off Time</string>
-    <string name="power_global_discharge_speed_tip">Current Global Drain Rate\n7-Day Global Drain Rate\nFull Battery Global Time</string>
+    <string name="power_screen_on_discharge_speed_tip">Current Screen-on Drain Rate\nLast 7 Days Screen-on Drain Rate\nFull Battery Screen-on Time</string>
+    <string name="power_screen_off_discharge_speed_tip">Current Screen-off Drain Rate\nLast 7 Days Screen-off Drain Rate\nFull Battery Screen-off Time</string>
+    <string name="power_global_discharge_speed_tip">Current Global Drain Rate\nLast 7 Days Global Drain Rate\nFull Battery Global Time</string>
     <string name="power_remaining_prefix">Left %s</string>
     <string name="power_value_format">%s</string>
     <string name="power_value_format_with_energy">%1$s (%2$s)</string>

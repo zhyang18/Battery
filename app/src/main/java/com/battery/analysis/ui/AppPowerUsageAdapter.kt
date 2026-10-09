@@ -1003,7 +1003,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      * @param durationMs 对应时段实际持续时长（毫秒）
      * @return 计算得到的每小时放电百分比（单位：%/h），若数据缺失或非正数则返回 null
      */
-    private fun calculateDischargeRatePercentPerHour(
+    fun calculateDischargeRatePercentPerHour(
         powerWatts: Float,
         totalCapacityWh: Float?,
         durationMs: Long
@@ -1564,6 +1564,13 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         cachedSevenDaysStats = stats
         dischargeSpeedHolder?.let { bindDischargeSpeed(it) }
     }
+
+    /**
+     * 获取当前适配器内缓存的过去 7 天核心放电统计实体。
+     *
+     * @return 缓存的 [SevenDaysDischargeStats] 实例，若尚未统计或数据为空则返回 null
+     */
+    fun getCachedSevenDaysStats(): SevenDaysDischargeStats? = cachedSevenDaysStats
 
     /**
      * 获取充电卡片中的内部控件绑定实例，供充电实时数据更新。

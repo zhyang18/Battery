@@ -1053,17 +1053,9 @@ class PowerUsageFragment : Fragment() {
         binding.tvMetricScreenOffEnergy.setOnClickListener { showMetricEnergyDetailBubble(binding.tvMetricScreenOffEnergy, ROW_SCREEN_OFF) }
         binding.tvMetricGlobalEnergy.setOnClickListener { showMetricEnergyDetailBubble(binding.tvMetricGlobalEnergy, ROW_GLOBAL) }
 
-        // 列表内放电速度概览卡片（作为 RecyclerView 子项可滚动）点击弹出分三行对应的模块说明气泡弹框
+        // 列表内放电速度概览卡片（作为 RecyclerView 子项可滚动）点击弹出详细信息说明气泡弹框（不自动消失）
         adapter.onMetricModuleClickedListener = { anchorView, rowType ->
-            val message = when (rowType) {
-                ROW_SCREEN_ON -> getString(R.string.power_screen_on_discharge_speed_tip)
-                ROW_SCREEN_OFF -> getString(R.string.power_screen_off_discharge_speed_tip)
-                ROW_GLOBAL -> getString(R.string.power_global_discharge_speed_tip)
-                else -> null
-            }
-            if (message != null) {
-                showBubbleTooltip(anchorView, message)
-            }
+            showDischargeSpeedDetailBubble(anchorView, rowType)
         }
 
         // 列表内息屏、唤醒与深度睡眠指标卡片点击弹出详细信息说明气泡弹框
@@ -1225,6 +1217,77 @@ class PowerUsageFragment : Fragment() {
         }
 
         showBubbleTooltip(anchorView, message, autoDismissMs = 0L)
+    }
+
+    /**
+     * 弹出放电速度卡片（亮屏、息屏、全局）的详细信息说明气泡弹框。
+     * 呈现当前放电速度、最近7天内统计放电速度与有效时长、满电可用时长以及对应原理说明；
+     * 并在亮屏卡片弹框中特别呈现预测真实容量（单位：Wh 与 mAh）。气泡弹窗不自动超时关闭，需用户手动轻触关闭。
+     *
+     * @param anchorView 触发气泡弹窗的目标锚点卡片视图
+     * @param rowType 行分类标识（[ROW_SCREEN_ON] 为亮屏行，[ROW_SCREEN_OFF] 为息屏行，[ROW_GLOBAL] 为全局行）
+     */
+    private fun showDischargeSpeedDetailBubble(anchorView: View, rowType: Int) {
+        val pkg = lastRenderedPackage
+        val overview = pkg?.overviewStats
+
+        val totalEnergyInfo = pkg?.batterySnapshot?.totalEnergyInfo ?: powerManager.getTotalEnergyInfo()
+        val totalCapacityWh = pkg?.batterySnapshot?.totalEnergyWh
+            ?: totalEnergyInfo?.totalWh
+            ?: powerManager.getTotalEnergyWh()
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
+                BatteryEnergyCalculator.calculateTotalEnergyWh(it)
+            }
+        val capacityMah = totalEnergyInfo?.equivalentMah
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }
+            ?: totalCapacityWh?.takeIf { it > 0f }?.let { (it * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+
+        val currentRate = if (overview != null) {
+            val totalDurationMs = if (overview.totalDurationMs > 0L) overview.totalDurationMs else parseDurationTextToMs(overview.totalDurationText)
+            val onDurationMs = if (overview.screenOnDurationMs > 0L) overview.screenOnDurationMs else parseDurationTextToMs(overview.screenOnDurationText)
+            val offDurationMs = if (overview.screenOffDurationMs > 0L) overview.screenOffDurationMs else parseDurationTextToMs(overview.screenOffDurationText)
+            when (rowType) {
+                ROW_SCREEN_ON -> adapter.calculateDischargeRatePercentPerHour(overview.screenOnPowerWatts, totalCapacityWh, onDurationMs)
+                ROW_SCREEN_OFF -> adapter.calculateDischargeRatePercentPerHour(overview.screenOffPowerWatts, totalCapacityWh, offDurationMs)
+                ROW_GLOBAL -> adapter.calculateDischargeRatePercentPerHour(overview.avgPowerWatts, totalCapacityWh, totalDurationMs)
+                else -> null
+            }
+        } else {
+            null
+        }
+
+        val sevenDays = adapter.getCachedSevenDaysStats()
+        val (sevenDaysRate, sevenDaysDurationMs, fullDurationMs) = when (rowType) {
+            ROW_SCREEN_ON -> Triple(
+                sevenDays?.screenOnDischargeRatePercentPerHour,
+                sevenDays?.screenOnDurationMs,
+                sevenDays?.fullChargeScreenOnDurationMs
+            )
+            ROW_SCREEN_OFF -> Triple(
+                sevenDays?.screenOffDischargeRatePercentPerHour,
+                sevenDays?.screenOffDurationMs,
+                sevenDays?.fullChargeScreenOffDurationMs
+            )
+            ROW_GLOBAL -> Triple(
+                sevenDays?.globalDischargeRatePercentPerHour,
+                sevenDays?.globalDurationMs,
+                sevenDays?.fullChargeGlobalDurationMs
+            )
+            else -> Triple(null, null, null)
+        }
+
+        val message = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = rowType,
+            currentRatePercentPerHour = currentRate,
+            sevenDaysRatePercentPerHour = sevenDaysRate,
+            sevenDaysDurationMs = sevenDaysDurationMs,
+            fullDurationMs = fullDurationMs,
+            predictedCapacityWh = totalCapacityWh,
+            predictedCapacityMah = capacityMah
+        )
+        if (message.isNotBlank()) {
+            showBubbleTooltip(anchorView, message, autoDismissMs = 0L)
+        }
     }
 
 

@@ -339,4 +339,89 @@ class BatteryEnergyCalculatorTest {
         org.junit.Assert.assertTrue("包含出厂设计容量获得的总能量", message.contains("出厂设计容量获得的总能量：11.399Wh (≈ 2961mAh)"))
         org.junit.Assert.assertTrue("包含换算说明", message.contains("💡 换算说明："))
     }
+
+    /**
+     * 测试亮屏放电速度卡片弹框详细格式化，验证包含“最近7天内”、满电续航及“预测真实容量：多少Wh（多少mAh）”。
+     */
+    @Test
+    fun testFormatScreenOnDischargeSpeedDetailMessage() {
+        val message = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_ON,
+            currentRatePercentPerHour = 6.3f,
+            sevenDaysRatePercentPerHour = 6.1f,
+            sevenDaysDurationMs = (2 * 86400 + 5 * 3600) * 1000L, // 02d05h
+            fullDurationMs = (16 * 3600 + 24 * 60) * 1000L, // 16h24m
+            predictedCapacityWh = 19.25f,
+            predictedCapacityMah = 5000f
+        )
+
+        assertTrue("标题包含亮屏放电速度", message.contains("【亮屏放电速度】"))
+        assertTrue("包含当前放电速度", message.contains("• 当前放电速度：6.3%/h"))
+        assertTrue("包含最近7天内放电速度与统计时长", message.contains("• 最近7天内放电速度：6.1%/h（统计时长 02d05h）"))
+        assertTrue("包含满电亮屏续航", message.contains("• 满电亮屏续航：16h24m"))
+        assertTrue("包含预测真实容量（多少Wh（多少mAh））", message.contains("• 预测真实容量：19.25 Wh (5000 mAh)"))
+        assertTrue("包含说明模块", message.contains("💡 说明："))
+    }
+
+    /**
+     * 测试息屏放电速度卡片弹框详细格式化，验证包含“最近7天内”与对应数值。
+     */
+    @Test
+    fun testFormatScreenOffDischargeSpeedDetailMessage() {
+        val message = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_OFF,
+            currentRatePercentPerHour = null, // 暂无数据 "--"
+            sevenDaysRatePercentPerHour = 1.0f,
+            sevenDaysDurationMs = (4 * 86400 + 1 * 3600) * 1000L, // 04d01h
+            fullDurationMs = (4 * 86400 + 1 * 3600) * 1000L // 04d01h
+        )
+
+        assertTrue("标题包含息屏放电速度", message.contains("【息屏放电速度】"))
+        assertTrue("当前息屏暂无数据展示--", message.contains("• 当前放电速度：--"))
+        assertTrue("包含最近7天内放电速度与统计时长", message.contains("• 最近7天内放电速度：1.0%/h（统计时长 04d01h）"))
+        assertTrue("包含满电待机时长", message.contains("• 满电待机时长：04d01h"))
+        assertTrue("包含说明模块", message.contains("💡 说明："))
+    }
+
+    /**
+     * 测试全局放电速度卡片弹框详细格式化，验证包含“最近7天内”与对应数值。
+     */
+    @Test
+    fun testFormatGlobalDischargeSpeedDetailMessage() {
+        val message = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_GLOBAL,
+            currentRatePercentPerHour = 6.3f,
+            sevenDaysRatePercentPerHour = 2.8f,
+            sevenDaysDurationMs = (6 * 86400 + 7 * 3600) * 1000L, // 06d07h
+            fullDurationMs = (1 * 86400 + 11 * 3600) * 1000L // 01d11h
+        )
+
+        assertTrue("标题包含全局放电速度", message.contains("【全局放电速度】"))
+        assertTrue("包含当前放电速度", message.contains("• 当前放电速度：6.3%/h"))
+        assertTrue("包含最近7天内放电速度与统计时长", message.contains("• 最近7天内放电速度：2.8%/h（统计时长 06d07h）"))
+        assertTrue("包含满电综合续航", message.contains("• 满电综合续航：01d11h"))
+        assertTrue("包含说明模块", message.contains("💡 说明："))
+    }
+
+    /**
+     * 测试预测真实容量在数据缺失时如实展示“未获取”，绝不虚构数据。
+     */
+    @Test
+    fun testFormatPredictedCapacityWhenDataMissing() {
+        val result = BatteryEnergyCalculator.formatPredictedCapacity(null, null)
+        assertEquals("数据缺失时如实展示未获取", "未获取", result)
+
+        val resultZero = BatteryEnergyCalculator.formatPredictedCapacity(0f, 0f)
+        assertEquals("数值为零时如实展示未获取", "未获取", resultZero)
+    }
+
+    /**
+     * 验证 BatteryEnergyCalculator 与 PowerUsageFragment 的行分类常量值严格对齐（0/1/2），防止错配导致空内容。
+     */
+    @Test
+    fun testRowConstantsAlignment() {
+        assertEquals("亮屏常量严格为0", 0, BatteryEnergyCalculator.ROW_SCREEN_ON)
+        assertEquals("息屏常量严格为1", 1, BatteryEnergyCalculator.ROW_SCREEN_OFF)
+        assertEquals("全局常量严格为2", 2, BatteryEnergyCalculator.ROW_GLOBAL)
+    }
 }

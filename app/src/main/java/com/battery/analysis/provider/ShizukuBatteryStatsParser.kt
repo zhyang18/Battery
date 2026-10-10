@@ -1874,8 +1874,14 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         private val REGEX_HISTORY_TEMP = Pattern.compile("(?:^|\\s)[+-]?temp=(\\d+)", Pattern.CASE_INSENSITIVE)
         private val REGEX_DISCHARGE_STEP = Pattern.compile("#\\d+:\\s*\\+([\\w\\d]+)\\s+to\\s+(\\d{1,3})", Pattern.CASE_INSENSITIVE)
         private val REGEX_SCREEN_ON_TIMES = Pattern.compile("Screen on:\\s*[^\\n\\(]+?(?:\\s*\\([^)]+\\))?\\s*(\\d+)x", Pattern.CASE_INSENSITIVE)
-        private val REGEX_WAKEUP_REASON_TIMES = Pattern.compile("Wakeup reason.*?:\\s*(\\d+)\\s*times", Pattern.CASE_INSENSITIVE)
-        private val REGEX_PARTIAL_WAKELOCK_TIMES = Pattern.compile("Wake lock\\s+[^:\\n]+?:\\s*[^\\n]+?\\((\\d+)\\s*times\\)", Pattern.CASE_INSENSITIVE)
+        /**
+         * 匹配 dumpsys batterystats 真实系统内核硬件唤醒原因及唤醒次数的正则表达式。
+         * 兼容 "Wakeup reason 200:qpnp_rtc_alarm: 15m 30s (12 times) real" 以及 "Wakeup reason foo: 12 times" 等标准 Android 内核格式。
+         */
+        private val REGEX_WAKEUP_REASON_LINE = Pattern.compile(
+            "(?m)^\\s*Wakeup reason\\b.*?(?:\\((\\d+)\\s*times\\)|:\\s*(\\d+)\\s*times)",
+            Pattern.CASE_INSENSITIVE
+        )
 
         /** 已废弃：按需求移除人为物理功耗上限，不再进行人工截断 */
         @Deprecated("已按用户要求移除人为物理功耗上限")
@@ -2122,24 +2128,16 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
             var wakeupSum = 0
             var hasWakeup = false
-            val wakeupReasonMatcher = REGEX_WAKEUP_REASON_TIMES.matcher(rawText)
+            val wakeupReasonMatcher = REGEX_WAKEUP_REASON_LINE.matcher(rawText)
             while (wakeupReasonMatcher.find()) {
-                val times = wakeupReasonMatcher.group(1)?.toIntOrNull() ?: 0
+                val times = (wakeupReasonMatcher.group(1) ?: wakeupReasonMatcher.group(2))?.toIntOrNull() ?: 0
                 if (times > 0) {
                     wakeupSum += times
                     hasWakeup = true
                 }
             }
-            if (!hasWakeup) {
-                val pwlMatcher = REGEX_PARTIAL_WAKELOCK_TIMES.matcher(rawText)
-                while (pwlMatcher.find()) {
-                    val times = pwlMatcher.group(1)?.toIntOrNull() ?: 0
-                    if (times > 0) {
-                        wakeupSum += times
-                        hasWakeup = true
-                    }
-                }
-            }
+            // 忠实反映系统真实状态：仅在获取到系统真实的内核硬件中断唤醒原因时统计唤醒总次数；
+            // 严禁使用全系统软件 Partial Wake Lock 申请次数进行冒充与脏数据兜底（全局准则：缺失时如实返回 null）。
             val totalWakeupCount: Int? = if (hasWakeup) wakeupSum else null
 
             return DischargeSummary(

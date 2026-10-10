@@ -3,6 +3,7 @@ package com.battery.analysis
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.regex.Pattern
@@ -5956,6 +5957,115 @@ class PowerUsageCalculationTest {
         assertNotNull("未命中待机条目必须独立存在", standbyResult)
         assertEquals("未命中待机名称为系统界面 / 桌面待机", "系统界面 / 桌面待机", standbyResult!!.appName)
         assertEquals("未命中待机工时准确显示为 467ms", 467L, standbyResult.foregroundTimeMs)
+    }
+
+    /**
+     * 验证 dumpsys batterystats 文本中包含真实系统内核硬件唤醒原因（包含中断号冒号格式与频次括号）时，
+     * 算法能够精准提取并累计真正的硬件唤醒次数，杜绝因冒号匹配缺陷导致的解析丢失。
+     */
+    @Test
+    fun testShizukuWakeupReasonExtractionWithColonAndInterrupts() {
+        val rawDumpsysText = """
+            Battery History:
+            0 (1) 100 -plugged
+            
+            Statistics since last charge:
+              Time on battery: 7h 11m 11s 0ms (100.0%) realtime, 1h 0m 50s 0ms (14.1%) uptime
+              Total run time: 7h 11m 11s 0ms realtime, 1h 0m 50s 0ms uptime
+              Screen on: 0s 0ms (0.0%), Screen off: 7h 11m 11s 0ms (100.0%)
+              Screen off discharge: 354.9 mAh
+              Amount discharged while screen off: 4
+              
+            All wakeup reasons:
+              Wakeup reason 200:qpnp_rtc_alarm: 15m 30s 0ms (12 times) real
+              Wakeup reason 440:qcom,smp2p-modem: 30m 10s 0ms (45 times) real
+              Wakeup reason Abort:Last active ...: 2m 0s 0ms (3 times) real
+              Wakeup reason wlan_wake: 10 times
+              
+            All partial wake locks:
+              Wake lock AudioMix: 1h 0m 0s (50000 times) real
+              Wake lock *alarm*: 10m 0s (20000 times) real
+              
+            Estimated power use (mAh):
+              Capacity: 5000, Computed drain: 355, actual drain: 355
+        """.trimIndent()
+
+        val parsed = com.battery.analysis.provider.ShizukuBatteryStatsParser.parseDischargeSummaryFromText(
+            rawText = rawDumpsysText,
+            unplugTime = 0L
+        )
+
+        // 验证：真实内核硬件中断唤醒次数准确解析为 12 + 45 + 3 + 10 = 70 次
+        // 绝不错误计入 All partial wake locks 的 70000 次软件持锁
+        assertEquals("系统真实内核唤醒次数准确解析为 70 次", 70, parsed.totalWakeupCount)
+    }
+
+    /**
+     * 验证在 dumpsys batterystats 文本中仅存在全系统软件 Partial Wake Lock 但缺失真实内核 Wakeup reason 时，
+     * 解析器忠实反映系统真实状态并返回 null，绝不使用全系统数万次 Partial Wake Lock 越界冒充唤醒频次。
+     */
+    @Test
+    fun testShizukuWakeupCountReturnsNullWhenNoWakeupReasonAndDoesNotFallbackToWakeLocks() {
+        val rawDumpsysText = """
+            Battery History:
+            0 (1) 100 -plugged
+            
+            Statistics since last charge:
+              Time on battery: 7h 11m 11s 0ms (100.0%) realtime, 1h 0m 50s 0ms (14.1%) uptime
+              Screen on: 0s 0ms (0.0%), Screen off: 7h 11m 11s 0ms (100.0%)
+              Screen off discharge: 354.9 mAh
+              
+            All partial wake locks:
+              Wake lock AudioMix: 1h 0m 0s (150000 times) real
+              Wake lock ConnectivityService: 10m 0s (53038 times) real
+              
+            Estimated power use (mAh):
+              Capacity: 5000, Computed drain: 355, actual drain: 355
+        """.trimIndent()
+
+        val parsed = com.battery.analysis.provider.ShizukuBatteryStatsParser.parseDischargeSummaryFromText(
+            rawText = rawDumpsysText,
+            unplugTime = 0L
+        )
+
+        // 验证：缺失系统真实唤醒原因时，忠实返回 null，严禁使用 203038 次软件 WakeLock 进行违规保底
+        assertNull("缺失真实内核唤醒原因时必须如实返回 null，杜绝软件 WakeLock 冒充", parsed.totalWakeupCount)
+    }
+
+    /**
+     * 验证深度睡眠卡片详情弹框文案中成功包含唤醒频次数据。
+     * 当存在真实唤醒次数时准确展示总次数与每小时均值；缺失时如实显示未获取。
+     */
+    @Test
+    fun testDeepSleepCardDetailMessageIncludesWakeupFrequency() {
+        val overviewWithAwakeCount = com.battery.analysis.manager.PowerOverviewStats(
+            avgPowerWatts = 0.5f,
+            screenOffDurationMs = 2908000L, // 48m28s (约 0.8078 小时)
+            screenOffDeepSleepDurationMs = 2006000L, // 33m26s
+            screenOffAwakeDurationMs = 820000L, // 13m40s
+            screenOffAwakeCount = 869,
+            screenOffDeepSleepCount = 1,
+            screenOffDeepSleepDrainMah = 15.2f,
+            screenOffDeepSleepEnergyWh = 0.058f,
+            screenOffDeepSleepPowerWatts = 0.10f,
+            screenOffDeepSleepPercent = 0.3f,
+            isScreenOffDecomposedAvailable = true
+        )
+
+        val messageWithCount = com.battery.analysis.util.BatteryEnergyCalculator.formatDeepSleepCardDetailMessage(
+            overview = overviewWithAwakeCount
+        )
+
+        // 验证包含唤醒频次且数值准确计算（869 次，约 1075.8 次/小时）
+        assertTrue("深度睡眠弹框文案必须包含唤醒频次", messageWithCount.contains("• 唤醒频次：869 次"))
+        assertTrue("深度睡眠弹框文案必须包含每小时唤醒频次换算", messageWithCount.contains("次/小时"))
+
+        // 验证当未获取到唤醒次数时如实显示“未获取”
+        val overviewWithoutCount = overviewWithAwakeCount.copy(screenOffAwakeCount = null)
+        val messageWithoutCount = com.battery.analysis.util.BatteryEnergyCalculator.formatDeepSleepCardDetailMessage(
+            overview = overviewWithoutCount
+        )
+        assertTrue("未获取唤醒次数时必须如实显示未获取", messageWithoutCount.contains("• 唤醒频次：未获取"))
     }
 }
 

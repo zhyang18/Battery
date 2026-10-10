@@ -353,9 +353,16 @@ class BatteryMonitorService : Service() {
                     } else {
                         val powerManager = PowerUsageManager.getInstance(appContext)
 
-                        // 状态由充电转为未充电的二次对齐兜底：若拔电广播丢失或被拦截导致放电起点异常，自动补齐开启放电周期
-                        if (prevIsCharging && powerManager.getLastUnplugTime() <= 0L) {
-                            powerManager.onPowerDisconnected(cachedLevelPercent, force = true)
+                        // 状态由充电转为未充电的二次对齐兜底：若拔电广播丢失或被拦截，自动补齐固化充电账本并开启放电周期
+                        if (prevIsCharging) {
+                            try {
+                                ChargingStatsManager.getInstance(appContext).onPowerDisconnected()
+                            } catch (e: Throwable) {
+                                e.printStackTrace()
+                            }
+                            if (powerManager.getLastUnplugTime() <= 0L) {
+                                powerManager.onPowerDisconnected(cachedLevelPercent, force = true)
+                            }
                         }
 
                         // 检测电量下降，按 5% 步进阈值防抖触发放电 Checkpoint 增量持久化
@@ -731,41 +738,45 @@ class BatteryMonitorService : Service() {
                 }
 
                 if (shouldSample) {
-                    if (isCharging) {
-                        chargingManager.sampleCurrentPoint()
-                    } else {
-                        val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
-                            context = this@BatteryMonitorService,
-                            fallbackVoltageVolts = cachedVoltageVolts,
-                            fallbackTempCelsius = cachedTemperature,
-                            allowProcessFork = false // 亮屏 1 秒高频采样严格禁止 Fork 进程，杜绝拉高 CPU 频率
-                        )
-                        val pWatts = hwSample?.powerWatts ?: 0f
-                        val currentVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
-                        val currentTemp = hwSample?.temperatureCelsius ?: cachedTemperature
-                        val currentPkg = if (isInteractive) getForegroundPackageName() else null
+                    try {
+                        if (isCharging) {
+                            chargingManager.sampleCurrentPoint()
+                        } else {
+                            val hwSample = SysfsBatterySampler.sampleHardwareDischarge(
+                                context = this@BatteryMonitorService,
+                                fallbackVoltageVolts = cachedVoltageVolts,
+                                fallbackTempCelsius = cachedTemperature,
+                                allowProcessFork = false // 亮屏 1 秒高频采样严格禁止 Fork 进程，杜绝拉高 CPU 频率
+                            )
+                            val pWatts = hwSample?.powerWatts ?: 0f
+                            val currentVolt = hwSample?.voltageVolts ?: cachedVoltageVolts
+                            val currentTemp = hwSample?.temperatureCelsius ?: cachedTemperature
+                            val currentPkg = if (isInteractive) getForegroundPackageName() else null
 
-                        // 同步刷新本地缓存
-                        if (hwSample?.voltageVolts != null) cachedVoltageVolts = currentVolt
-                        if (hwSample?.temperatureCelsius != null) cachedTemperature = currentTemp
-                        if (hwSample?.powerWatts != null) {
-                            if (isInteractive) {
-                                cachedScreenOnDischargePowerWatts = pWatts
-                            } else {
-                                cachedScreenOffDischargePowerWatts = pWatts
+                            // 同步刷新本地缓存
+                            if (hwSample?.voltageVolts != null) cachedVoltageVolts = currentVolt
+                            if (hwSample?.temperatureCelsius != null) cachedTemperature = currentTemp
+                            if (hwSample?.powerWatts != null) {
+                                if (isInteractive) {
+                                    cachedScreenOnDischargePowerWatts = pWatts
+                                } else {
+                                    cachedScreenOffDischargePowerWatts = pWatts
+                                }
+                                cachedDischargePowerWatts = pWatts
                             }
-                            cachedDischargePowerWatts = pWatts
-                        }
 
-                        powerManager.recordDischargeRealtimeSample(
-                            timestamp = System.currentTimeMillis(),
-                            batteryLevel = cachedLevelPercent,
-                            voltageVolts = currentVolt,
-                            temperature = currentTemp,
-                            powerWatts = pWatts,
-                            isScreenOn = isInteractive,
-                            packageName = currentPkg
-                        )
+                            powerManager.recordDischargeRealtimeSample(
+                                timestamp = System.currentTimeMillis(),
+                                batteryLevel = cachedLevelPercent,
+                                voltageVolts = currentVolt,
+                                temperature = currentTemp,
+                                powerWatts = pWatts,
+                                isScreenOn = isInteractive,
+                                packageName = currentPkg
+                            )
+                        }
+                    } catch (e: Throwable) {
+                        e.printStackTrace()
                     }
                 }
 

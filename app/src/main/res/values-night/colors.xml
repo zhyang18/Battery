@@ -27,4 +27,16 @@
     <!-- 未命中/默认应用通用图标颜色体系（深色模式） -->
     <color name="default_app_icon_bg">#28282E</color>
     <color name="default_app_icon_fg">#94A3B8</color>
+
+    <!-- 切换开关（Switch）色彩体系 - 深色模式：深邃高质感科技蓝 -->
+    <color name="switch_track_checked">#2196F3</color>
+    <color name="switch_track_unchecked">#27272A</color>
+    <color name="switch_track_checked_disabled">#802196F3</color>
+    <color name="switch_track_unchecked_disabled">#6627272A</color>
+    <color name="switch_thumb_checked">#FFFFFF</color>
+    <color name="switch_thumb_unchecked">#A1A1AA</color>
+    <color name="switch_thumb_checked_disabled">#80FFFFFF</color>
+    <color name="switch_thumb_unchecked_disabled">#66A1A1AA</color>
+    <color name="switch_track_outline_checked">@android:color/transparent</color>
+    <color name="switch_track_outline_unchecked">#3F3F46</color>
 </resources>

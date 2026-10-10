@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Switch 打开时的背景轨道颜色使用 white 资源 -->
-    <item android:state_checked="true" android:color="@color/white" />
-    <!-- 关闭时的背景轨道颜色为深灰 -->
-    <item android:state_checked="false" android:color="#3F3F46" />
-    <item android:color="#3F3F46" />
+    <!-- 禁用状态 -->
+    <item android:state_enabled="false" android:state_checked="true" android:color="@color/switch_track_checked_disabled" />
+    <item android:state_enabled="false" android:state_checked="false" android:color="@color/switch_track_unchecked_disabled" />
+    <!-- 开启状态背景轨道颜色：亮色下为活力科技蓝，深色下为深邃科技蓝 -->
+    <item android:state_checked="true" android:color="@color/switch_track_checked" />
+    <!-- 关闭状态背景轨道颜色：亮色下为温润浅灰蓝，深色下为低调深灰 -->
+    <item android:state_checked="false" android:color="@color/switch_track_unchecked" />
+    <item android:color="@color/switch_track_unchecked" />
 </selector>

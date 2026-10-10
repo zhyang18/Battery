@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Switch 打开（白色背景）时：呈现精致清晰的科技蓝边框 -->
-    <item android:state_checked="true" android:color="#2196F3" />
-    <!-- Switch 关闭时：呈现低调的深灰边框 -->
-    <item android:state_checked="false" android:color="#4B5563" />
-    <item android:color="#4B5563" />
+    <!-- 禁用状态：透明无描边 -->
+    <item android:state_enabled="false" android:color="@android:color/transparent" />
+    <!-- 开启状态：透明无描边，呈现饱满清爽的科技蓝 -->
+    <item android:state_checked="true" android:color="@color/switch_track_outline_checked" />
+    <!-- 关闭状态：细腻微描边，亮色下为浅灰蓝轮廓，深色下为低调深灰轮廓 -->
+    <item android:state_checked="false" android:color="@color/switch_track_outline_unchecked" />
+    <item android:color="@color/switch_track_outline_unchecked" />
 </selector>

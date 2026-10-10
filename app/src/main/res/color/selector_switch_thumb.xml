@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Switch 打开时滑块为深色，与白色轨道高对比度 -->
-    <item android:state_checked="true" android:color="#18181B" />
-    <!-- 关闭时滑块为中灰 -->
-    <item android:state_checked="false" android:color="#9CA3AF" />
-    <item android:color="#9CA3AF" />
+    <!-- 禁用状态 -->
+    <item android:state_enabled="false" android:state_checked="true" android:color="@color/switch_thumb_checked_disabled" />
+    <item android:state_enabled="false" android:state_checked="false" android:color="@color/switch_thumb_unchecked_disabled" />
+    <!-- 开启状态滑块颜色：纯白高质感滑块，在科技蓝轨道上明亮清澈 -->
+    <item android:state_checked="true" android:color="@color/switch_thumb_checked" />
+    <!-- 关闭状态滑块颜色：亮色下为纯白精致圆钮，深色下为柔和中灰 -->
+    <item android:state_checked="false" android:color="@color/switch_thumb_unchecked" />
+    <item android:color="@color/switch_thumb_unchecked" />
 </selector>

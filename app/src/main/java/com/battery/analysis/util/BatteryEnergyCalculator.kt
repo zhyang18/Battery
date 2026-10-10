@@ -550,19 +550,6 @@ object BatteryEnergyCalculator {
         }
         val deepSleepRatioStr = if (deepSleepRatio != null) String.format(Locale.getDefault(), "%.1f%%", deepSleepRatio) else "--"
 
-        val awakeCountStr = if (overview.screenOffAwakeCount != null) {
-            val count = overview.screenOffAwakeCount
-            val offHours = overview.screenOffDurationMs / 3600000.0
-            if (offHours > 0.1) {
-                val perHour = count / offHours
-                String.format(Locale.getDefault(), "%d 次 (约 %.1f 次/小时)", count, perHour)
-            } else {
-                String.format(Locale.getDefault(), "%d 次", count)
-            }
-        } else {
-            "未获取"
-        }
-
         val sleepCountStr = if (overview.screenOffDeepSleepCount != null) {
             String.format(Locale.getDefault(), "%d 次", overview.screenOffDeepSleepCount)
         } else {
@@ -588,11 +575,10 @@ object BatteryEnergyCalculator {
             append("• 消耗能量：$sleepEnergyStr (折合 $sleepMahStr)\n")
             append("• 休眠功率：$sleepWattsStr\n")
             append("• 深度睡眠率：$deepSleepRatioStr\n")
-            append("• 唤醒频次：$awakeCountStr\n")
             append("• 进入休眠：$sleepCountStr（速率 $sleepRateStr）\n\n")
             append("💡 说明：\n")
             append("• 灭屏后 CPU 挂起仅留硬件底噪的极低功耗模式；\n")
-            append("• 睡眠率越接近 100%、唤醒频次越低，表明待机休眠越充分、耗电越平稳。")
+            append("• 睡眠率越接近 100%，表明待机休眠越充分、耗电越平稳。")
         }
     }
 

@@ -2,6 +2,7 @@ package com.battery.analysis.ui.view
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -64,6 +65,7 @@ class ChargingChartView @JvmOverloads constructor(
     private val dp1_5 = dpToPx(1.5f)
     private val dp2 = dpToPx(2f)
     private val dp2_2 = dpToPx(2.2f)
+    private val dp2_5 = dpToPx(2.5f)
     private val dp3 = dpToPx(3f)
     private val dp4 = dpToPx(4f)
     private val dp5 = dpToPx(5f)
@@ -1186,7 +1188,21 @@ class ChargingChartView @JvmOverloads constructor(
         chartLeft: Float,
         chartRight: Float
     ) {
-        badgeTextPaint.color = textColor
+        val isNight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        badgeHaloPaint.color = if (isNight) Color.parseColor("#D9212121") else Color.parseColor("#F5FFFFFF")
+        badgeHaloPaint.strokeWidth = if (isNight) dp2_2 else dp2_5
+        badgeTextPaint.color = if (isNight) {
+            textColor
+        } else {
+            when (textColor) {
+                colorPowerCharge -> Color.parseColor("#0288D1")
+                colorPowerDischarge -> Color.parseColor("#E65100")
+                colorLevel -> Color.parseColor("#1976D2")
+                colorTemp -> Color.parseColor("#D32F2F")
+                colorVoltage -> Color.parseColor("#C77800")
+                else -> textColor
+            }
+        }
         val textWidth = badgeTextPaint.measureText(text)
         val halfW = textWidth / 2f
 
@@ -1367,6 +1383,16 @@ class ChargingChartView @JvmOverloads constructor(
             isTouching = false
             pointSelectedListener?.onPointSelected(null)
         }
+    }
+
+    /**
+     * 当系统配置（例如深浅色模式切换）发生变化时触发视图重绘。
+     *
+     * @param newConfig 最新的系统配置信息 [Configuration]
+     */
+    override fun onConfigurationChanged(newConfig: Configuration?) {
+        super.onConfigurationChanged(newConfig)
+        invalidate()
     }
 
     /**

@@ -12,6 +12,14 @@
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="textAllCaps">false</item>
         <item name="android:textAllCaps">false</item>
+        <item name="materialSwitchStyle">@style/Widget.Battery.MaterialSwitch</item>
+    </style>
+    
+    <!-- 全局 MaterialSwitch 样式：美观精致现代科技质感 -->
+    <style name="Widget.Battery.MaterialSwitch" parent="Widget.Material3.CompoundButton.MaterialSwitch">
+        <item name="thumbTint">@color/selector_switch_thumb</item>
+        <item name="trackTint">@color/selector_switch_track</item>
+        <item name="trackDecorationTint">@color/selector_switch_track_outline</item>
     </style>
     
     <style name="TextAppearance.TabTitle" parent="TextAppearance.Design.Tab">

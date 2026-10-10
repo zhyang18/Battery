@@ -496,6 +496,7 @@
                         android:scaleX="0.75"
                         android:scaleY="0.75"
                         app:thumbTint="@color/selector_switch_thumb"
+                        app:trackDecorationTint="@color/selector_switch_track_outline"
                         app:trackTint="@color/selector_switch_track" />
                 </LinearLayout>
 

@@ -158,8 +158,21 @@ class ChargingStatsManager private constructor(private val context: Context) {
         // 场景 1：持久化显示还在充电中，但实际确认已拔掉充电器
         if (currentSummary.isCharging && !confirmedCharging) {
             val duration = (now - currentSummary.startTimestamp).coerceAtLeast(0L)
-            val levelGain = (currentLevel - currentSummary.startLevel).coerceAtLeast(0)
-            val finalChargedEnergyWh = currentSummary.chargedEnergyWh
+            val realEndLevel = if (currentLevel in 1..100) currentLevel else currentSummary.currentLevel
+            val levelGain = (realEndLevel - currentSummary.startLevel).coerceAtLeast(0)
+
+            val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 0f
+            val volt = info.voltage?.let { it / 1000f } ?: (samplePoints.lastOrNull()?.voltageVolts ?: 3.85f)
+            val levelGainEnergyWh = if (designCapMah > 0f && volt > 0f && levelGain > 0) {
+                (levelGain / 100.0f) * designCapMah * volt / 1000.0f
+            } else 0f
+            val finalChargedEnergyWh = if (currentSummary.chargedEnergyWh > 0.005f) {
+                currentSummary.chargedEnergyWh
+            } else if (levelGain > 0) {
+                levelGainEnergyWh
+            } else {
+                currentSummary.chargedEnergyWh
+            }
 
             val durationHours = duration / 3600000.0f
             val finalAvgPower = if (durationHours > 0.001f && finalChargedEnergyWh > 0f) {
@@ -182,7 +195,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
                         endTimestamp = now,
                         durationMs = duration,
                         startLevel = currentSummary.startLevel,
-                        endLevel = currentLevel,
+                        endLevel = realEndLevel,
                         levelGain = levelGain,
                         chargedEnergyWh = finalChargedEnergyWh,
                         avgPowerWatts = finalAvgPower,
@@ -204,7 +217,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
 
             currentSummary = currentSummary.copy(
                 endTimestamp = now,
-                currentLevel = currentLevel,
+                currentLevel = realEndLevel,
                 isCharging = false,
                 chargedEnergyWh = finalChargedEnergyWh,
                 avgPowerWatts = finalAvgPower
@@ -235,7 +248,48 @@ class ChargingStatsManager private constructor(private val context: Context) {
                 reconciled = true
             }
         } else if (!currentSummary.isCharging && !confirmedCharging) {
-            // 场景 3：均未充电，仅同步当前真实电量，严禁伪造离线充电记录
+            // 场景 3：均未充电，首先检查是否存在未归档的孤儿充电会话（如应用曾被强制杀死且未触发拔电回调）
+            val orphanDuration = (currentSummary.endTimestamp - currentSummary.startTimestamp).coerceAtLeast(0L)
+            val orphanLevelGain = (currentSummary.currentLevel - currentSummary.startLevel).coerceAtLeast(0)
+            val isOrphanUnsaved = currentSummary.startTimestamp > 0L &&
+                    !hasPersistedCurrentSession &&
+                    currentSummary.startTimestamp != lastPersistedStartTimestamp &&
+                    (orphanDuration >= 10000L || currentSummary.chargedEnergyWh > 0.005f || orphanLevelGain > 0)
+
+            if (isOrphanUnsaved) {
+                try {
+                    val recordTime = dateFormatter.get()!!.format(Date(currentSummary.endTimestamp.coerceAtLeast(currentSummary.startTimestamp)))
+                    val snapshotPoints = synchronized(samplePoints) { samplePoints.toList() }
+                    val pointsJson = ChargingHistoryRecord.pointsToJson(snapshotPoints)
+
+                    val record = ChargingHistoryRecord(
+                        id = currentSummary.endTimestamp.coerceAtLeast(currentSummary.startTimestamp),
+                        recordTime = recordTime,
+                        startTimestamp = currentSummary.startTimestamp,
+                        endTimestamp = currentSummary.endTimestamp.coerceAtLeast(currentSummary.startTimestamp),
+                        durationMs = orphanDuration,
+                        startLevel = currentSummary.startLevel,
+                        endLevel = currentSummary.currentLevel,
+                        levelGain = orphanLevelGain,
+                        chargedEnergyWh = currentSummary.chargedEnergyWh,
+                        avgPowerWatts = currentSummary.avgPowerWatts,
+                        maxPowerWatts = currentSummary.maxPowerWatts,
+                        maxTemperature = currentSummary.maxTemperature,
+                        chargeType = currentSummary.chargeType,
+                        screenOffDurationMs = currentSummary.screenOffDurationMs,
+                        screenOffLevelGain = currentSummary.screenOffLevelGain,
+                        screenOffEnergyWh = currentSummary.screenOffEnergyWh,
+                        samplePointsJson = pointsJson
+                    )
+                    ChargingHistoryDbHelper.getInstance(context).insertRecord(record)
+                    hasPersistedCurrentSession = true
+                    lastPersistedStartTimestamp = currentSummary.startTimestamp
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            // 同步当前真实电量，严禁伪造离线充电记录
             if (currentSummary.currentLevel != currentLevel && currentLevel > 0) {
                 currentSummary = currentSummary.copy(
                     currentLevel = currentLevel
@@ -663,6 +717,12 @@ class ChargingStatsManager private constructor(private val context: Context) {
      * 当断开充电器（拔出电源）时触发，固化本次充电周期的完整数据，并自动归档至充电历史数据库中。
      * 内部具备线程级互斥加锁（@Synchronized）与会话持久化状态守卫，杜绝 Service 与 Receiver
      * 并发广播导致的重复归档，确保每次拔电仅生成唯一一份充电历史记录。
+     *
+     * 针对慢充、边充边用（高负载看视频/游戏）工况进行全面加固：
+     * 1. 严格使用拔电物理时刻与会话起始时刻之差核算持续时长，杜绝依赖旧采样时间戳导致时长计算归零；
+     * 2. 拔电瞬间强制向系统查询断电时刻真实底层物理电量，杜绝因内存变量滞后导致电量增量归零；
+     * 3. 能量微积分在物理功率为 0 或负（边充边用净放电）但电量实际净增时，依据电池额定容量与真实电压进行物理守恒补偿；
+     * 4. 充电持续时长超过 10 秒或充入能量大于 0.005Wh 或有电量增量时，100% 持久化入库。
      */
     @Synchronized
     fun onPowerDisconnected() {
@@ -679,10 +739,35 @@ class ChargingStatsManager private constructor(private val context: Context) {
 
         isCurrentlyCharging = false
         val now = System.currentTimeMillis()
-        val duration = currentSummary.getDurationMs()
-        val levelGain = currentSummary.getLevelGain()
 
-        val finalEnergy = currentSummary.chargedEnergyWh
+        // 关键修正 1：严格以拔电时刻当前系统时间与起始时刻差值核准持续时长，杜绝依赖旧 endTimestamp
+        val duration = if (currentSummary.startTimestamp > 0L) {
+            (now - currentSummary.startTimestamp).coerceAtLeast(0L)
+        } else {
+            currentSummary.getDurationMs()
+        }
+
+        // 关键修正 2：主动向系统跨进程查询断电瞬间真实的物理电量与电压
+        val sysStatus = getOrRefreshSystemBatteryStatus(force = true)
+        val realEndLevel = if (sysStatus.level in 1..100) sysStatus.level else currentSummary.currentLevel
+        val levelGain = (realEndLevel - currentSummary.startLevel).coerceAtLeast(0)
+
+        // 关键修正 3：能量守恒补偿，当慢充边充边用导致微积分读数不足但电量实际有净增时，基于真实额定容量补偿能量
+        val accumulatedEnergy = currentSummary.chargedEnergyWh
+        val designCapMah = NormalApiProvider.getDesignCapacity(context) ?: 0f
+        val volt = sysStatus.voltageVolts ?: (samplePoints.lastOrNull()?.voltageVolts ?: 3.85f)
+        val levelGainEnergyWh = if (designCapMah > 0f && volt > 0f && levelGain > 0) {
+            (levelGain / 100.0f) * designCapMah * volt / 1000.0f
+        } else {
+            0f
+        }
+        val finalEnergy = if (accumulatedEnergy > 0.005f) {
+            accumulatedEnergy
+        } else if (levelGain > 0) {
+            levelGainEnergyWh
+        } else {
+            accumulatedEnergy
+        }
 
         val durationHours = duration / 3600000.0f
         val finalAvgPower = if (durationHours > 0.001f && finalEnergy > 0f) {
@@ -691,8 +776,29 @@ class ChargingStatsManager private constructor(private val context: Context) {
             currentSummary.avgPowerWatts
         }
 
+        // 关键修正 4：断电收尾采样点补齐，确保时序走势图首尾时间轴连续完整
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val isInteractive = pm?.isInteractive ?: true
+        synchronized(samplePoints) {
+            val lastPoint = samplePoints.lastOrNull()
+            if (lastPoint == null || (now - lastPoint.timestamp) >= 5000L || lastPoint.batteryLevel != realEndLevel) {
+                samplePoints.add(
+                    ChargingSamplePoint(
+                        timestamp = now,
+                        powerWatts = 0f,
+                        batteryLevel = realEndLevel,
+                        temperature = sysStatus.temperatureCelsius ?: (lastPoint?.temperature ?: 0f),
+                        voltageVolts = volt,
+                        currentMa = 0f,
+                        isScreenOn = isInteractive
+                    )
+                )
+            }
+        }
+
         currentSummary = currentSummary.copy(
             endTimestamp = now,
+            currentLevel = realEndLevel,
             isCharging = false,
             chargedEnergyWh = finalEnergy,
             avgPowerWatts = finalAvgPower
@@ -713,7 +819,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
                     endTimestamp = now,
                     durationMs = duration,
                     startLevel = currentSummary.startLevel,
-                    endLevel = currentSummary.currentLevel,
+                    endLevel = realEndLevel,
                     levelGain = levelGain,
                     chargedEnergyWh = finalEnergy,
                     avgPowerWatts = finalAvgPower,

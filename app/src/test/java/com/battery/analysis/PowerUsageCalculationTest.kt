@@ -6033,11 +6033,11 @@ class PowerUsageCalculationTest {
     }
 
     /**
-     * 验证深度睡眠卡片详情弹框文案中成功包含唤醒频次数据。
+     * 验证息屏唤醒卡片详情弹框文案中成功包含唤醒频次数据。
      * 当存在真实唤醒次数时准确展示总次数与每小时均值；缺失时如实显示未获取。
      */
     @Test
-    fun testDeepSleepCardDetailMessageIncludesWakeupFrequency() {
+    fun testAwakeCardDetailMessageIncludesWakeupFrequency() {
         val overviewWithAwakeCount = com.battery.analysis.manager.PowerOverviewStats(
             avgPowerWatts = 0.5f,
             screenOffDurationMs = 2908000L, // 48m28s (约 0.8078 小时)
@@ -6052,20 +6052,50 @@ class PowerUsageCalculationTest {
             isScreenOffDecomposedAvailable = true
         )
 
-        val messageWithCount = com.battery.analysis.util.BatteryEnergyCalculator.formatDeepSleepCardDetailMessage(
+        val messageWithCount = com.battery.analysis.util.BatteryEnergyCalculator.formatAwakeCardDetailMessage(
             overview = overviewWithAwakeCount
         )
 
         // 验证包含唤醒频次且数值准确计算（869 次，约 1075.8 次/小时）
-        assertTrue("深度睡眠弹框文案必须包含唤醒频次", messageWithCount.contains("• 唤醒频次：869 次"))
-        assertTrue("深度睡眠弹框文案必须包含每小时唤醒频次换算", messageWithCount.contains("次/小时"))
+        assertTrue("息屏唤醒弹框文案必须包含唤醒频次", messageWithCount.contains("• 唤醒频次：869 次"))
+        assertTrue("息屏唤醒弹框文案必须包含每小时唤醒频次换算", messageWithCount.contains("次/小时"))
 
         // 验证当未获取到唤醒次数时如实显示“未获取”
         val overviewWithoutCount = overviewWithAwakeCount.copy(screenOffAwakeCount = null)
-        val messageWithoutCount = com.battery.analysis.util.BatteryEnergyCalculator.formatDeepSleepCardDetailMessage(
+        val messageWithoutCount = com.battery.analysis.util.BatteryEnergyCalculator.formatAwakeCardDetailMessage(
             overview = overviewWithoutCount
         )
         assertTrue("未获取唤醒次数时必须如实显示未获取", messageWithoutCount.contains("• 唤醒频次：未获取"))
+    }
+
+    /**
+     * 验证深度睡眠卡片详情弹框文案专注于休眠率与休眠次数指标，不重复展示息屏唤醒频次。
+     */
+    @Test
+    fun testDeepSleepCardDetailMessageFocusesOnSleepMetrics() {
+        val overview = com.battery.analysis.manager.PowerOverviewStats(
+            avgPowerWatts = 0.5f,
+            screenOffDurationMs = 2908000L, // 48m28s (约 0.8078 小时)
+            screenOffDeepSleepDurationMs = 2006000L, // 33m26s
+            screenOffAwakeDurationMs = 820000L, // 13m40s
+            screenOffAwakeCount = 869,
+            screenOffDeepSleepCount = 1,
+            screenOffDeepSleepDrainMah = 15.2f,
+            screenOffDeepSleepEnergyWh = 0.058f,
+            screenOffDeepSleepPowerWatts = 0.10f,
+            screenOffDeepSleepPercent = 0.3f,
+            isScreenOffDecomposedAvailable = true
+        )
+
+        val message = com.battery.analysis.util.BatteryEnergyCalculator.formatDeepSleepCardDetailMessage(
+            overview = overview
+        )
+
+        // 验证不包含重复的唤醒频次
+        assertFalse("深度睡眠弹框文案不应重复展示唤醒频次", message.contains("• 唤醒频次："))
+        // 验证包含深度睡眠率和进入休眠次数
+        assertTrue("深度睡眠弹框文案包含深度睡眠率", message.contains("• 深度睡眠率："))
+        assertTrue("深度睡眠弹框文案包含进入休眠", message.contains("• 进入休眠：1 次"))
     }
 }
 

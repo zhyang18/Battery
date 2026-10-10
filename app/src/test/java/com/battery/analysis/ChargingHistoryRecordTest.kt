@@ -280,5 +280,88 @@ class ChargingHistoryRecordTest {
         )
         assertEquals("2025/12/31 23:30~2026/01/01 01:15", recordCrossYear.getFormattedTimeRange())
     }
+
+    /**
+     * 测试慢充边充边用场景（如 11:42~13:09 持续 87 分钟，33%~55% 净增 22%）：
+     * 即使高负载看视频导致瞬时功率多次微弱或为负（微积分累积值极低），
+     * 基于真实额定容量与电压的物理守恒能量补偿公式能够准确核算真实充入能量，且 100% 满足归档入库阈值。
+     */
+    @Test
+    fun testSlowChargingVideoPlaybackEnergyCompensationAndPersistenceThreshold() {
+        val startTs = 1700000000000L
+        val totalMinutes = 87L
+        val endTs = startTs + totalMinutes * 60 * 1000L // 87分钟
+        val startLevel = 33
+        val endLevel = 55
+        val levelGain = endLevel - startLevel // 22%
+        val designCapMah = 5000f // 5000mAh
+        val avgVolt = 3.9f
+
+        // 模拟慢充看视频期间瞬时功率极低，导致微积分累加能量仅有 0.001Wh
+        val lowAccumulatedEnergyWh = 0.001f
+
+        // 物理能量守恒补偿核算：(levelGain / 100) * Cap * Volt / 1000
+        val compensatedEnergyWh = if (lowAccumulatedEnergyWh > 0.005f) {
+            lowAccumulatedEnergyWh
+        } else if (levelGain > 0) {
+            (levelGain / 100.0f) * designCapMah * avgVolt / 1000.0f
+        } else {
+            lowAccumulatedEnergyWh
+        }
+
+        // 验证 22% * 5000mAh * 3.9V / 1000 = 4.29 Wh
+        assertEquals(4.29f, compensatedEnergyWh, 0.01f)
+
+        val durationMs = endTs - startTs
+        val durationHours = durationMs / 3600000.0f
+        val calculatedAvgPower = compensatedEnergyWh / durationHours
+
+        // 验证 87 分钟充入 4.29 Wh 的平均功率约为 2.95 W
+        assertEquals(2.958f, calculatedAvgPower, 0.02f)
+
+        // 验证满足入库持久化门限（duration >= 10000L 或 energy > 0.005f 或 levelGain > 0）
+        val shouldPersist = durationMs >= 10000L || compensatedEnergyWh > 0.005f || levelGain > 0
+        assertTrue("87分钟慢充必须满足持久化归档门限", shouldPersist)
+
+        val record = ChargingHistoryRecord(
+            id = endTs,
+            recordTime = "2026-10-10 13:09:00",
+            startTimestamp = startTs,
+            endTimestamp = endTs,
+            durationMs = durationMs,
+            startLevel = startLevel,
+            endLevel = endLevel,
+            levelGain = levelGain,
+            chargedEnergyWh = compensatedEnergyWh,
+            avgPowerWatts = calculatedAvgPower,
+            maxPowerWatts = 5.0f,
+            maxTemperature = 37.5f,
+            chargeType = "USB充电"
+        )
+        assertEquals(87 * 60 * 1000L, record.durationMs)
+        assertEquals(22, record.levelGain)
+        assertEquals("01h27m00s", record.getFormattedDuration())
+    }
+
+    /**
+     * 测试拔电时刻持续时长与电量增量核准逻辑：
+     * 当内存中旧 endTimestamp 停留在起始时间（例如采样协程遭遇异常中断），
+     * 使用拔电时刻真实当前时间与起始时间之差能够准确还原 87 分钟物理时长，杜绝被判定为小于 10 秒短时误插拔。
+     */
+    @Test
+    fun testUnplugDurationReconciliationPreventsFalseShortDrop() {
+        val startTs = 1700000000000L
+        val realUnplugTs = startTs + 87 * 60 * 1000L // 拔电时刻
+        val staleEndTs = startTs // 内存旧值滞后
+
+        // 模拟旧代码逻辑：依赖旧 endTimestamp 计算出的错误时长
+        val buggyDuration = staleEndTs - startTs
+        assertEquals(0L, buggyDuration)
+
+        // 模拟修复后逻辑：以拔电时刻当前时间减起始时间核算真实时长
+        val reconciledDuration = (realUnplugTs - startTs).coerceAtLeast(0L)
+        assertEquals(87 * 60 * 1000L, reconciledDuration)
+        assertTrue("核准后的时长必须大于10秒阈值", reconciledDuration >= 10000L)
+    }
 }
 

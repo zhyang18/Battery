@@ -2,6 +2,7 @@ package com.battery.analysis.timeline.presentation
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -223,6 +224,37 @@ class BatteryTimelineView @JvmOverloads constructor(
         strokeWidth = dp2
         strokeJoin = Paint.Join.ROUND
         color = Color.parseColor("#CC121820")
+    }
+
+    /**
+     * 判断当前系统上下文是否处于深色/暗色主题模式。
+     *
+     * @return 若当前为暗色模式返回 true，否则返回 false
+     */
+    private val isNightMode: Boolean
+        get() = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+
+    /**
+     * 根据当前系统深色/浅色主题模式动态配置图表小数值标签与描边光晕画笔的样式属性。
+     * 暗色模式下严格保持原有微暗描边光晕（#CC121820）与常规字重，确保既有视觉体验不受影响；
+     * 亮色模式下动态应用柔白高透描边光晕（#F5FFFFFF）与加粗字重，彻底消除深色描边在浅色背景上的脏污模糊缺陷。
+     *
+     * @param isNight 当前是否处于暗色/深色主题模式
+     */
+    private fun applyMetricLabelTheme(isNight: Boolean) {
+        if (isNight) {
+            metricLabelHaloPaint.color = Color.parseColor("#CC121820")
+            metricLabelHaloPaint.strokeWidth = dp2
+            metricLabelHaloPaint.strokeCap = Paint.Cap.BUTT
+            metricLabelHaloPaint.isFakeBoldText = false
+            metricLabelPaint.isFakeBoldText = false
+        } else {
+            metricLabelHaloPaint.color = Color.parseColor("#F5FFFFFF")
+            metricLabelHaloPaint.strokeWidth = dp2_5
+            metricLabelHaloPaint.strokeCap = Paint.Cap.ROUND
+            metricLabelHaloPaint.isFakeBoldText = true
+            metricLabelPaint.isFakeBoldText = true
+        }
     }
 
     /**
@@ -754,6 +786,18 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
+     * 当系统配置（例如深浅色模式切换）发生改变时重置曲线缓存并触发界面重绘。
+     *
+     * @param newConfig 最新的系统配置信息 [Configuration]
+     */
+    override fun onConfigurationChanged(newConfig: Configuration?) {
+        super.onConfigurationChanged(newConfig)
+        isCurveCacheValid = false
+        applyMetricLabelTheme(isNightMode)
+        invalidate()
+    }
+
+    /**
      * 核心 Canvas 绘制流程：
      * 1. 绘制横向基准虚线网格；
      * 2. 多选曲线自适应锚点绘制（功耗、电量阶梯折线及百分比点标、温度阶梯折线及数值点标、电压阶梯折线及数值点标）；
@@ -1122,6 +1166,7 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         val sharedOccupiedRects = mutableListOf<RectF>()
         val metrics = timelineState.selectedMetrics
+        applyMetricLabelTheme(isNightMode)
         if (metrics.contains(TimelineMetric.BATTERY)) {
             buildBatteryCurveCache(cachedBatteryCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, rawSamples)
             layoutSmartMarkers(cachedBatteryCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
@@ -1342,6 +1387,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         canvas: Canvas,
         cache: CachedCurveData
     ) {
+        val isNight = isNightMode
         val strokeColor = Color.parseColor("#B390CAF9")
         linePaint.color = strokeColor
 
@@ -1354,8 +1400,11 @@ class BatteryTimelineView @JvmOverloads constructor(
             canvas.drawPath(cache.verticalPath, powerVerticalLinePaint)
         }
 
-        metricDotPaint.color = strokeColor
-        metricLabelPaint.color = strokeColor
+        applyMetricLabelTheme(isNight)
+        val markerColor = if (isNight) strokeColor else Color.parseColor("#0288D1")
+        val dotColor = if (isNight) strokeColor else Color.parseColor("#0288D1")
+        metricDotPaint.color = dotColor
+        metricLabelPaint.color = markerColor
         drawSmartMarkers(canvas, cache, metricLabelPaint, metricLabelHaloPaint, metricDotPaint)
     }
 
@@ -1443,12 +1492,16 @@ class BatteryTimelineView @JvmOverloads constructor(
         canvas: Canvas,
         cache: CachedCurveData
     ) {
+        val isNight = isNightMode
         val color = Color.parseColor("#B33A7FF0")
         linePaint.color = color
-        metricDotPaint.color = Color.parseColor("#3A7FF0")
-        metricLabelPaint.color = color
 
         canvas.drawPath(cache.path, linePaint)
+        applyMetricLabelTheme(isNight)
+        val markerColor = if (isNight) color else Color.parseColor("#1976D2")
+        val dotColor = if (isNight) Color.parseColor("#3A7FF0") else Color.parseColor("#1976D2")
+        metricDotPaint.color = dotColor
+        metricLabelPaint.color = markerColor
         drawSmartMarkers(canvas, cache, metricLabelPaint, metricLabelHaloPaint, metricDotPaint)
     }
 
@@ -1529,12 +1582,16 @@ class BatteryTimelineView @JvmOverloads constructor(
         canvas: Canvas,
         cache: CachedCurveData
     ) {
+        val isNight = isNightMode
         val color = Color.parseColor("#B3FF5252")
         linePaint.color = color
-        metricDotPaint.color = color
-        metricLabelPaint.color = color
 
         canvas.drawPath(cache.path, linePaint)
+        applyMetricLabelTheme(isNight)
+        val markerColor = if (isNight) color else Color.parseColor("#D32F2F")
+        val dotColor = if (isNight) color else Color.parseColor("#D32F2F")
+        metricDotPaint.color = dotColor
+        metricLabelPaint.color = markerColor
         drawSmartMarkers(canvas, cache, metricLabelPaint, metricLabelHaloPaint, metricDotPaint)
     }
 
@@ -1616,12 +1673,16 @@ class BatteryTimelineView @JvmOverloads constructor(
         canvas: Canvas,
         cache: CachedCurveData
     ) {
+        val isNight = isNightMode
         val color = Color.parseColor("#B3FFCA28")
         linePaint.color = color
-        metricDotPaint.color = color
-        metricLabelPaint.color = color
 
         canvas.drawPath(cache.path, linePaint)
+        applyMetricLabelTheme(isNight)
+        val markerColor = if (isNight) color else Color.parseColor("#C77800")
+        val dotColor = if (isNight) color else Color.parseColor("#C77800")
+        metricDotPaint.color = dotColor
+        metricLabelPaint.color = markerColor
         drawSmartMarkers(canvas, cache, metricLabelPaint, metricLabelHaloPaint, metricDotPaint)
     }
 

@@ -532,6 +532,17 @@
     <string name="charging_guide_archive_mode">智能双模：插上电源自动进入充电监测，拔出电源自动生成历史记录并切回耗电统计。</string>
     <string name="charging_guide_archive_screen">常亮选项：支持设置充电时屏幕常亮，方便实时观察快充曲线走势。</string>
 
+    <!-- 充电核心指标气泡注解说明 -->
+    <string name="charging_annotation_battery_power">• 电池端充放电实时功率 (W)\n• 当前电芯两端的实时能量流动速率（当前电压 × 当前电流）。\n• 正值 (+) 表示电芯正在充入电量，负值 (-) 表示电芯正在对外放电。</string>
+    <string name="charging_annotation_usb_power" formatted="false">• 充电器输入端预估总功率 (W)\n• 充电器向手机端输入的总功率。基于电池实时功率与开关充电电路能效（约 88%~90%）物理折算。</string>
+    <string name="charging_annotation_avg_power">• 本次充电全程平均功率 (W)\n• 自连接充电器以来的时间加权平准充电功率，真实反映整段快充过程的综合能量供给效率与温控表现。</string>
+    <string name="charging_annotation_max_power">• 本次充电最高瞬时功率 (W)\n• 记录本次充电会话期间录得的最大瞬时峰值，反映充电器与手机快充协议握手时的最大瞬时承载上限。</string>
+    <string name="charging_annotation_temp">• 电池电芯实时温度 (℃)\n• 由电池内置 NTC 热敏电阻传感器实时采样，反映电芯当前热负荷。过高温度（>42℃）将触发系统保护机制以保障安全。</string>
+    <string name="charging_annotation_max_temp">• 本次充电全程最高温度 (℃)\n• 记录本次充电开始至今电芯达到的最高温升点，用于评估充电散热条件对电池热负荷的综合影响。</string>
+    <string name="charging_annotation_current">• 电池瞬时充放电流 (mA)\n• 由硬件库仑计/电荷检测芯片实时采样。快充阶段电流充沛，随着电量接近饱和转入恒压阶段，电流逐渐减小。</string>
+    <string name="charging_annotation_voltage">• 电池电芯当前端电压 (V)\n• 锂电池工作电压区间常规为 3.4V~4.45V。电压随电量充入持续上升，充至截止电压后转入恒压涓流充电阶段。</string>
+    <string name="charging_annotation_capacity_energy">• 电池物理容量与额定总能量\n• 前者为电荷容量（毫安时 mAh），后者为基于标称工作电压折算的物理能量储备（单位：瓦时 Wh，能量 = 容量 × 标称电压 ÷ 1000）。</string>
+
     <!-- 充电历史与详情 -->
     <string name="clear_history">清空记录</string>
     <string name="charging_history_title">充电历史记录</string>

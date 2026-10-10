@@ -1,14 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    峰值功率图标：折线冲顶脉冲与最高点极值跃迁箭头。
+    清晰表达充电过程中的瞬时极值巅峰（Peak / Max Power）。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="20dp"
     android:height="20dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- 美化版峰值功率图标：向上冲顶极值箭头与能量闪电 -->
+    <!-- 脉冲折线（带线宽） -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M3,19h3.5l3,-8 3,5 4,-10 1.5,3H21" />
+    <!-- 冲顶最高点向上箭头 -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M12,2l-4.5,4.5h3v4h3v-4h3L12,2z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M11,11.5L6.5,17.5h4v5l5.5,-6.5h-4L13.5,11.5h-2.5z" />
+        android:pathData="M15.5,2.5l1.8,1.8 -2.6,2.6 1.4,1.4 2.6,-2.6L20.5,7.5V2.5h-5z" />
 </vector>

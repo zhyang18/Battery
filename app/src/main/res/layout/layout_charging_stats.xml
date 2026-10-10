@@ -103,13 +103,20 @@
 
                     <!-- 电池端功率 -->
                     <LinearLayout
+                        android:id="@+id/layout_metric_battery_power"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
                         android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="2dp"
+                        android:paddingVertical="2dp">
 
                         <ImageView
+                            android:id="@+id/iv_metric_battery_power"
                             android:layout_width="17dp"
                             android:layout_height="17dp"
                             android:src="@drawable/ic_battery_power"
@@ -128,13 +135,20 @@
 
                     <!-- USB输入充电功率 -->
                     <LinearLayout
+                        android:id="@+id/layout_metric_usb_power"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
                         android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="2dp"
+                        android:paddingVertical="2dp">
 
                         <ImageView
+                            android:id="@+id/iv_metric_usb_power"
                             android:layout_width="17dp"
                             android:layout_height="17dp"
                             android:src="@drawable/ic_plug_power"
@@ -162,13 +176,20 @@
 
                     <!-- 平均充电功率 -->
                     <LinearLayout
+                        android:id="@+id/layout_metric_avg_power"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
                         android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="2dp"
+                        android:paddingVertical="2dp">
 
                         <ImageView
+                            android:id="@+id/iv_metric_avg_power"
                             android:layout_width="17dp"
                             android:layout_height="17dp"
                             android:src="@drawable/ic_avg_power"
@@ -187,13 +208,20 @@
 
                     <!-- 峰值功率 -->
                     <LinearLayout
+                        android:id="@+id/layout_metric_max_power"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
                         android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="2dp"
+                        android:paddingVertical="2dp">
 
                         <ImageView
+                            android:id="@+id/iv_metric_max_power"
                             android:layout_width="17dp"
                             android:layout_height="17dp"
                             android:src="@drawable/ic_peak_power"
@@ -221,13 +249,20 @@
 
                     <!-- 当前温度 -->
                     <LinearLayout
+                        android:id="@+id/layout_metric_temp"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
                         android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="2dp"
+                        android:paddingVertical="2dp">
 
                         <ImageView
+                            android:id="@+id/iv_metric_temp"
                             android:layout_width="17dp"
                             android:layout_height="17dp"
                             android:src="@drawable/ic_flame_temp"
@@ -246,13 +281,20 @@
 
                     <!-- 充电最高温度 -->
                     <LinearLayout
+                        android:id="@+id/layout_metric_max_temp"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
                         android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="2dp"
+                        android:paddingVertical="2dp">
 
                         <ImageView
+                            android:id="@+id/iv_metric_max_temp"
                             android:layout_width="17dp"
                             android:layout_height="17dp"
                             android:src="@drawable/ic_max_temp"
@@ -280,13 +322,20 @@
 
                     <!-- 充电瞬时电流 -->
                     <LinearLayout
+                        android:id="@+id/layout_metric_current"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
                         android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="2dp"
+                        android:paddingVertical="2dp">
 
                         <ImageView
+                            android:id="@+id/iv_metric_current"
                             android:layout_width="17dp"
                             android:layout_height="17dp"
                             android:src="@drawable/ic_electric_current"
@@ -305,13 +354,20 @@
 
                     <!-- 电池电压 -->
                     <LinearLayout
+                        android:id="@+id/layout_metric_voltage"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
                         android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="2dp"
+                        android:paddingVertical="2dp">
 
                         <ImageView
+                            android:id="@+id/iv_metric_voltage"
                             android:layout_width="17dp"
                             android:layout_height="17dp"
                             android:src="@drawable/ic_battery_voltage"
@@ -331,13 +387,20 @@
 
                 <!-- 核心指标第 5 行：循环容量与等效能量 -->
                 <LinearLayout
+                    android:id="@+id/layout_metric_capacity_energy"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
                     android:gravity="center_vertical"
-                    android:orientation="horizontal">
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="2dp"
+                    android:paddingVertical="2dp">
 
                     <ImageView
+                        android:id="@+id/iv_metric_capacity_energy"
                         android:layout_width="17dp"
                         android:layout_height="17dp"
                         android:src="@drawable/ic_recycle_capacity"

@@ -1,14 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    瞬时电流图标：国际电工委员会 IEC 规范安培表符号 [A]。
+    全球电气测量权威公认标准，与电压表 [V] 形成严谨对称，彻底终结线条涂鸦感。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="20dp"
     android:height="20dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- 美化版充电瞬时电流图标：高精度正弦电流波形与流向箭头 -->
+    <!-- 圆表外框 -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.2"
+        android:pathData="M12,3c4.97,0 9,4.03 9,9s-4.03,9 -9,9 -9,-4.03 -9,-9 4.03,-9 9,-9z" />
+    <!-- 居中粗体字母 A -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M2,13c2.2,-5.5 4.3,-5.5 6.5,0s4.3,5.5 6.5,0l1.2,1.8 -1.2,1.2c-3.1,5.2 -5.9,5.2 -8.5,0s-4,-5.2 -4.5,-3H2z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M16.5,5h5.5v5.5l-2.2,-2.2 -3.3,3.3 -1.4,-1.4 3.3,-3.3L16.5,5z" />
+        android:pathData="M12,5.8l-3.5,10.4h2l0.75,-2.3h3.5l0.75,2.3h2L12,5.8zm-0.3,2.4l1.2,4.2h-2.4l1.2,-4.2z" />
 </vector>

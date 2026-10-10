@@ -1,15 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    电池电压图标：国际电工委员会 IEC 规范伏特表符号 [V]。
+    解决此前使用电量格电池导致被严重误认为“剩余电量”的问题。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="20dp"
     android:height="20dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- 美化版立式带刻度电池电压图标 -->
+    <!-- 圆表外框 -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.2"
+        android:pathData="M12,3c4.97,0 9,4.03 9,9s-4.03,9 -9,9 -9,-4.03 -9,-9 4.03,-9 9,-9z" />
+    <!-- 居中粗体字母 V -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M15,4h-1V2.5c0,-0.28 -0.22,-0.5 -0.5,-0.5h-3c-0.28,0 -0.5,0.22 -0.5,0.5V4H9C7.9,4 7,4.9 7,6v14c0,1.1 0.9,2 2,2h6c1.1,0 2,-0.9 2,-2V6C17,4.9 16.1,4 15,4z M15.5,20c0,0.28 -0.22,0.5 -0.5,0.5H9c-0.28,0 -0.5,-0.22 -0.5,-0.5V6c0,-0.28 0.22,-0.5 0.5,-0.5h6c0.28,0 0.5,0.22 0.5,0.5v14z" />
-    <!-- 内部精致刻度线 -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M9.75,8.25h4.5v1.2h-4.5z M9.75,12h4.5v1.2h-4.5z M9.75,15.75h4.5v1.2h-4.5z" />
+        android:pathData="M7.5,7h2.3l2.2,7.8 2.2,-7.8h2.3l-3.3,10h-2.4L7.5,7z" />
 </vector>

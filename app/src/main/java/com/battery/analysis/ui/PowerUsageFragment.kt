@@ -1091,6 +1091,109 @@ class PowerUsageFragment : Fragment() {
         chargingView.ivChargingBulb.setOnClickListener {
             toggleKeepScreenOn()
         }
+
+        // 配置 9 项充电核心指标条目的点击注解气泡弹框（涵盖图标与文本）
+        setupChargingMetricClickListeners(chargingView)
+    }
+
+    /**
+     * 充电核心指标分类枚举。
+     * 用于标识充电全景大卡片矩阵中的 9 项实时物理参数。
+     */
+    private enum class ChargingMetricType {
+        /** 电池端实时功率 */
+        BATTERY_POWER,
+        /** 充电器 USB 输入端预估总功率 */
+        USB_POWER,
+        /** 本次充电全程平均功率 */
+        AVG_POWER,
+        /** 本次充电最高瞬时峰值功率 */
+        MAX_POWER,
+        /** 电池电芯当前实时温度 */
+        CURRENT_TEMP,
+        /** 本次充电全程最高温度 */
+        MAX_TEMP,
+        /** 电池瞬时充放电流 */
+        CURRENT,
+        /** 电池电芯当前端电压 */
+        VOLTAGE,
+        /** 电池物理设计容量与额定总能量 */
+        CAPACITY_ENERGY
+    }
+
+    /**
+     * 为充电核心指标矩阵中的各指标项（包含图标与文本整块热区）配置点击事件监听器。
+     * 用户点击任一指标时，触发弹出详细的物理含义注解说明气泡弹框。
+     *
+     * @param chargingView 充电布局视图绑定对象 [com.battery.analysis.databinding.LayoutChargingStatsBinding]
+     */
+    private fun setupChargingMetricClickListeners(chargingView: com.battery.analysis.databinding.LayoutChargingStatsBinding) {
+        val clickMap = mapOf(
+            chargingView.layoutMetricBatteryPower to ChargingMetricType.BATTERY_POWER,
+            chargingView.tvMetricBatteryPower to ChargingMetricType.BATTERY_POWER,
+            chargingView.ivMetricBatteryPower to ChargingMetricType.BATTERY_POWER,
+
+            chargingView.layoutMetricUsbPower to ChargingMetricType.USB_POWER,
+            chargingView.tvMetricUsbPower to ChargingMetricType.USB_POWER,
+            chargingView.ivMetricUsbPower to ChargingMetricType.USB_POWER,
+
+            chargingView.layoutMetricAvgPower to ChargingMetricType.AVG_POWER,
+            chargingView.tvMetricAvgPower to ChargingMetricType.AVG_POWER,
+            chargingView.ivMetricAvgPower to ChargingMetricType.AVG_POWER,
+
+            chargingView.layoutMetricMaxPower to ChargingMetricType.MAX_POWER,
+            chargingView.tvMetricMaxPower to ChargingMetricType.MAX_POWER,
+            chargingView.ivMetricMaxPower to ChargingMetricType.MAX_POWER,
+
+            chargingView.layoutMetricTemp to ChargingMetricType.CURRENT_TEMP,
+            chargingView.tvMetricTemp to ChargingMetricType.CURRENT_TEMP,
+            chargingView.ivMetricTemp to ChargingMetricType.CURRENT_TEMP,
+
+            chargingView.layoutMetricMaxTemp to ChargingMetricType.MAX_TEMP,
+            chargingView.tvMetricMaxTemp to ChargingMetricType.MAX_TEMP,
+            chargingView.ivMetricMaxTemp to ChargingMetricType.MAX_TEMP,
+
+            chargingView.layoutMetricCurrent to ChargingMetricType.CURRENT,
+            chargingView.tvMetricCurrent to ChargingMetricType.CURRENT,
+            chargingView.ivMetricCurrent to ChargingMetricType.CURRENT,
+
+            chargingView.layoutMetricVoltage to ChargingMetricType.VOLTAGE,
+            chargingView.tvMetricVoltage to ChargingMetricType.VOLTAGE,
+            chargingView.ivMetricVoltage to ChargingMetricType.VOLTAGE,
+
+            chargingView.layoutMetricCapacityEnergy to ChargingMetricType.CAPACITY_ENERGY,
+            chargingView.tvMetricCapacityEnergy to ChargingMetricType.CAPACITY_ENERGY,
+            chargingView.ivMetricCapacityEnergy to ChargingMetricType.CAPACITY_ENERGY
+        )
+
+        for ((view, metricType) in clickMap) {
+            view.setOnClickListener { anchor ->
+                showChargingMetricAnnotationBubble(anchor, metricType)
+            }
+        }
+    }
+
+    /**
+     * 弹出指定充电指标项的注解说明气泡弹框。
+     * 呈现该指标项的物理定义、单位、计算依据及硬件采集说明。
+     *
+     * @param anchorView 触发气泡弹窗的目标锚点视图（图标、文本或其父布局容器）
+     * @param metricType 充电核心指标类型枚举 [ChargingMetricType]
+     */
+    private fun showChargingMetricAnnotationBubble(anchorView: View, metricType: ChargingMetricType) {
+        val stringResId = when (metricType) {
+            ChargingMetricType.BATTERY_POWER -> R.string.charging_annotation_battery_power
+            ChargingMetricType.USB_POWER -> R.string.charging_annotation_usb_power
+            ChargingMetricType.AVG_POWER -> R.string.charging_annotation_avg_power
+            ChargingMetricType.MAX_POWER -> R.string.charging_annotation_max_power
+            ChargingMetricType.CURRENT_TEMP -> R.string.charging_annotation_temp
+            ChargingMetricType.MAX_TEMP -> R.string.charging_annotation_max_temp
+            ChargingMetricType.CURRENT -> R.string.charging_annotation_current
+            ChargingMetricType.VOLTAGE -> R.string.charging_annotation_voltage
+            ChargingMetricType.CAPACITY_ENERGY -> R.string.charging_annotation_capacity_energy
+        }
+        val message = getString(stringResId)
+        showBubbleTooltip(anchorView, message, autoDismissMs = 0L)
     }
 
     /**

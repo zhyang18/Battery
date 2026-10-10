@@ -1,22 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    电池端功率指示图标：横向锂电池外框与居中能量闪电。
+    摆脱笨重的铅酸蓄电池外形，更契合现代智能手机电池语境。
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="20dp"
     android:height="20dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
-    <!-- 美化版电池功率图标：精致蓄电池外框与标准正负极符号 -->
+    <!-- 横向电池外框与极柱 -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M3,7c-0.83,0 -1.5,0.67 -1.5,1.5v7c0,0.83 0.67,1.5 1.5,1.5h18c0.83,0 1.5,-0.67 1.5,-1.5v-7c0,-0.83 -0.67,-1.5 -1.5,-1.5H3z M3.2,8.5h17.6c0.11,0 0.2,0.09 0.2,0.2v6.6c0,0.11 -0.09,0.2 -0.2,0.2H3.2c-0.11,0 -0.2,-0.09 -0.2,-0.2V8.7c0,-0.11 0.09,-0.2 0.2,-0.2z" />
+        android:pathData="M17,6H4c-1.1,0 -2,0.9 -2,2v8c0,1.1 0.9,2 2,2h13c1.1,0 2,-0.9 2,-2v-1.5h2c0.55,0 1,-0.45 1,-1v-4c0,-0.55 -0.45,-1 -1,-1h-2V8c0,-1.1 -0.9,-2 -2,-2zm0,10H4V8h13v8z" />
+    <!-- 内部能量闪电 -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M5.5,5h2.5v1.5H5.5z M16,5h2.5v1.5H16z" />
-    <!-- 负极 - -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M6.5,11.25h3.5v1.5H6.5z" />
-    <!-- 正极 + -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M15.5,10.25h-1.25V9h-1.5v1.25H11.5v1.5h1.25v1.25h1.5V11.75h1.25z" />
+        android:pathData="M11.5,8.8l-3.2,3.7h3.2l-1,3.5 4.2,-4.7h-3.2l1,-2.5z" />
 </vector>

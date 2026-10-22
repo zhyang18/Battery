@@ -64,7 +64,7 @@
                     android:textSize="12sp" />
             </LinearLayout>
 
-            <!-- 第二行：剩余续航时间（时长靠左，剩余续航标签靠右） -->
+            <!-- 第二行：剩余续航 / 满电预测续航时间（居中斜杠分割符，两侧数值样式完全一致） -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -84,19 +84,48 @@
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="11.5sp"
                     android:textStyle="bold"
-                    tools:text="17h46m" />
+                    tools:text="04h37m" />
+
+                <TextView
+                    android:id="@+id/tv_screen_on_divider"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="2dp"
+                    android:gravity="center"
+                    android:singleLine="true"
+                    android:text="/"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="11.5sp" />
 
                 <TextView
                     android:id="@+id/tv_screen_on_remaining_label"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="2dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
                     android:gravity="end|center_vertical"
+                    android:letterSpacing="-0.01"
                     android:singleLine="true"
-                    android:text="@string/power_discharge_remaining_label"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="10sp" />
+                    android:text="--"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="11.5sp"
+                    android:textStyle="bold"
+                    tools:text="15h40m" />
             </LinearLayout>
+
+            <!-- 第三行：剩余续航与满电续航进度占比指示条 (高度 5dp) -->
+            <com.google.android.material.progressindicator.LinearProgressIndicator
+                android:id="@+id/progress_screen_on_remaining"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:max="1000"
+                app:indicatorColor="@color/power_remaining_progress_indicator"
+                app:indicatorInset="0dp"
+                app:trackColor="#20888888"
+                app:trackCornerRadius="2.5dp"
+                app:trackThickness="5dp"
+                tools:progress="510" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
@@ -154,7 +183,7 @@
                     android:textSize="12sp" />
             </LinearLayout>
 
-            <!-- 第二行：剩余续航时间（时长靠左，剩余续航标签靠右） -->
+            <!-- 第二行：剩余续航 / 满电预测续航时间（居中斜杠分割符，两侧数值样式完全一致） -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -174,19 +203,48 @@
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="11.5sp"
                     android:textStyle="bold"
-                    tools:text="03d09h" />
+                    tools:text="01d00h" />
+
+                <TextView
+                    android:id="@+id/tv_screen_off_divider"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="2dp"
+                    android:gravity="center"
+                    android:singleLine="true"
+                    android:text="/"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="11.5sp" />
 
                 <TextView
                     android:id="@+id/tv_screen_off_remaining_label"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="2dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
                     android:gravity="end|center_vertical"
+                    android:letterSpacing="-0.01"
                     android:singleLine="true"
-                    android:text="@string/power_discharge_remaining_label"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="10sp" />
+                    android:text="--"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="11.5sp"
+                    android:textStyle="bold"
+                    tools:text="03d09h" />
             </LinearLayout>
+
+            <!-- 第三行：剩余续航与满电续航进度占比指示条 (高度 5dp) -->
+            <com.google.android.material.progressindicator.LinearProgressIndicator
+                android:id="@+id/progress_screen_off_remaining"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:max="1000"
+                app:indicatorColor="@color/power_remaining_progress_indicator"
+                app:indicatorInset="0dp"
+                app:trackColor="#20888888"
+                app:trackCornerRadius="2.5dp"
+                app:trackThickness="5dp"
+                tools:progress="650" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
@@ -243,7 +301,7 @@
                     android:textSize="12sp" />
             </LinearLayout>
 
-            <!-- 第二行：剩余续航时间（时长靠左，剩余续航标签靠右） -->
+            <!-- 第二行：剩余续航 / 满电预测续航时间（居中斜杠分割符，两侧数值样式完全一致） -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -263,19 +321,48 @@
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="11.5sp"
                     android:textStyle="bold"
-                    tools:text="01d04h" />
+                    tools:text="11h14m" />
+
+                <TextView
+                    android:id="@+id/tv_global_divider"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginHorizontal="2dp"
+                    android:gravity="center"
+                    android:singleLine="true"
+                    android:text="/"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="11.5sp" />
 
                 <TextView
                     android:id="@+id/tv_global_remaining_label"
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="2dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
                     android:gravity="end|center_vertical"
+                    android:letterSpacing="-0.01"
                     android:singleLine="true"
-                    android:text="@string/power_discharge_remaining_label"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="10sp" />
+                    android:text="--"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="11.5sp"
+                    android:textStyle="bold"
+                    tools:text="01d04h" />
             </LinearLayout>
+
+            <!-- 第三行：剩余续航与满电续航进度占比指示条 (高度 5dp) -->
+            <com.google.android.material.progressindicator.LinearProgressIndicator
+                android:id="@+id/progress_global_remaining"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:max="1000"
+                app:indicatorColor="@color/power_remaining_progress_indicator"
+                app:indicatorInset="0dp"
+                app:trackColor="#20888888"
+                app:trackCornerRadius="2.5dp"
+                app:trackThickness="5dp"
+                tools:progress="450" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 </LinearLayout>

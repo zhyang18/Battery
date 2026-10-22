@@ -362,5 +362,56 @@ class PowerDischargeMetricsViewBinderTest {
         val formatted = PowerDischargeMetricsViewBinder.formatDischargeSpeedBubbleMessage(rawText)
         org.junit.Assert.assertNotNull(formatted)
     }
+
+    /**
+     * 测试升级模型满电预测续航斜杠分割前缀格式化，验证有效时长与无效时长对应的展示文本规范。
+     */
+    @Test
+    fun testFormatFullDurationWithSlash() {
+        // 15 小时 41 分钟 -> 期望 "/ 15h41m"
+        val dur1Ms = (15 * 3600 + 41 * 60) * 1000L
+        assertEquals("/ 15h41m", PowerDischargeMetricsViewBinder.formatFullDurationWithSlash(dur1Ms))
+
+        // 3 天 9 小时 -> 期望 "/ 03d09h"
+        val dur2Ms = (3 * 86400 + 9 * 3600) * 1000L
+        assertEquals("/ 03d09h", PowerDischargeMetricsViewBinder.formatFullDurationWithSlash(dur2Ms))
+
+        // 45 分钟 -> 期望 "/ 45m"
+        val dur3Ms = 45 * 60 * 1000L
+        assertEquals("/ 45m", PowerDischargeMetricsViewBinder.formatFullDurationWithSlash(dur3Ms))
+
+        // null 或 <= 0L -> 真实返回 "/ --"
+        assertEquals("/ --", PowerDischargeMetricsViewBinder.formatFullDurationWithSlash(null))
+        assertEquals("/ --", PowerDischargeMetricsViewBinder.formatFullDurationWithSlash(0L))
+        assertEquals("/ --", PowerDischargeMetricsViewBinder.formatFullDurationWithSlash(-5000L))
+    }
+
+    /**
+     * 测试剩余续航与升级模型满电续航进度占比数值换算，验证 0~1000 标度、空值边界与超量程保护。
+     */
+    @Test
+    fun testCalculateRuntimeProgress() {
+        val remMs = 8 * 3600 * 1000L
+        val fullMs = 16 * 3600 * 1000L
+
+        // 8h / 16h = 50.0% -> 期望 500
+        assertEquals(500, PowerDischargeMetricsViewBinder.calculateRuntimeProgress(remMs, fullMs))
+
+        // 12h / 16h = 75.0% -> 期望 750
+        val rem2Ms = 12 * 3600 * 1000L
+        assertEquals(750, PowerDischargeMetricsViewBinder.calculateRuntimeProgress(rem2Ms, fullMs))
+
+        // 剩余续航大于满电续航（工况突变超轻载）：18h / 16h -> 期望 1000（封顶）
+        val remOverMs = 18 * 3600 * 1000L
+        assertEquals(1000, PowerDischargeMetricsViewBinder.calculateRuntimeProgress(remOverMs, fullMs))
+
+        // 任一参数为 null 或非正数 -> 真实返回 0
+        assertEquals(0, PowerDischargeMetricsViewBinder.calculateRuntimeProgress(null, fullMs))
+        assertEquals(0, PowerDischargeMetricsViewBinder.calculateRuntimeProgress(remMs, null))
+        assertEquals(0, PowerDischargeMetricsViewBinder.calculateRuntimeProgress(0L, fullMs))
+        assertEquals(0, PowerDischargeMetricsViewBinder.calculateRuntimeProgress(remMs, 0L))
+        assertEquals(0, PowerDischargeMetricsViewBinder.calculateRuntimeProgress(-100L, fullMs))
+        assertEquals(0, PowerDischargeMetricsViewBinder.calculateRuntimeProgress(remMs, -100L))
+    }
 }
 

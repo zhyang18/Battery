@@ -17,7 +17,7 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:clipChildren="false"
-        android:paddingHorizontal="6dp"
+        android:paddingHorizontal="0dp"
         android:paddingTop="5dp"
         android:paddingBottom="10dp">
 
@@ -33,6 +33,7 @@
             android:id="@+id/metric_selector_view"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginHorizontal="16dp"
             android:layout_marginTop="6dp" />
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

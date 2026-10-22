@@ -21,7 +21,9 @@ import com.battery.analysis.model.SevenDaysDischargeStats
 import com.battery.analysis.util.BatteryEnergyCalculator
 import com.battery.analysis.util.UnitSpanFormatter
 import com.battery.analysis.util.setUnitText
+import com.google.android.material.progressindicator.LinearProgressIndicator
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * 放电速度与息屏休眠指标卡片通用视图绑定辅助工具类。
@@ -114,9 +116,26 @@ object PowerDischargeMetricsViewBinder {
                 currentTrendPoints = currentTrendPoints
             )
 
-            tvScreenOnRemaining.setUnitText(formatRemainingDurationOnly(tripleResult.screenOnEstimate.remainingMs))
-            tvScreenOffRemaining.setUnitText(formatRemainingDurationOnly(tripleResult.screenOffEstimate.remainingMs))
-            tvGlobalRemaining.setUnitText(formatRemainingDurationOnly(tripleResult.globalEstimate.remainingMs))
+            val remOnMs = tripleResult.screenOnEstimate.remainingMs
+            val remOffMs = tripleResult.screenOffEstimate.remainingMs
+            val remGlobalMs = tripleResult.globalEstimate.remainingMs
+
+            tvScreenOnRemaining.setUnitText(formatRemainingDurationOnly(remOnMs))
+            tvScreenOffRemaining.setUnitText(formatRemainingDurationOnly(remOffMs))
+            tvGlobalRemaining.setUnitText(formatRemainingDurationOnly(remGlobalMs))
+
+            val fullOnMs = sevenDaysStats?.v2Result?.screenOnFullRuntimeMs
+            val fullOffMs = sevenDaysStats?.v2Result?.screenOffFullRuntimeMs
+            val fullGlobalMs = sevenDaysStats?.v2Result?.fullRuntimeMs
+
+            tvScreenOnRemainingLabel.setUnitText(formatRemainingDurationOnly(fullOnMs))
+            tvScreenOffRemainingLabel.setUnitText(formatRemainingDurationOnly(fullOffMs))
+            tvGlobalRemainingLabel.setUnitText(formatRemainingDurationOnly(fullGlobalMs))
+
+            // --- 3. 第三行：剩余续航与满电续航进度占比指示条 (高度 5dp) ---
+            updateRuntimeProgressBar(progressScreenOnRemaining, remOnMs, fullOnMs)
+            updateRuntimeProgressBar(progressScreenOffRemaining, remOffMs, fullOffMs)
+            updateRuntimeProgressBar(progressGlobalRemaining, remGlobalMs, fullGlobalMs)
 
             // 卡片点击事件监听
             if (onCardClick != null) {
@@ -963,6 +982,54 @@ object PowerDischargeMetricsViewBinder {
         }
         val durText = BatteryEnergyCalculator.formatCardRemainingDuration(ms)
         return if (durText == "--") "--" else durText
+    }
+
+    /**
+     * 将升级模型满电预测续航物理时长格式化为带斜杠分割符号的紧凑显示文本（如 "/ 15h41m"）。
+     * 遵循系统底层物理数据真实性规范，若时长无效、小于等于 0 或数据缺失则如实返回 "/ --"，严禁伪造或虚构数据。
+     *
+     * @param ms 升级模型满电预测可用物理时长毫秒数（单位：毫秒，若无数据传入 null）
+     * @return 包含斜杠分割符的前缀文本（如 "/ 15h41m" 或 "/ --"）
+     */
+    fun formatFullDurationWithSlash(ms: Long?): String {
+        if (ms == null || ms <= 0L) return "/ --"
+        val durText = formatFullDurationText(ms)
+        return if (durText == "--") "/ --" else "/ $durText"
+    }
+
+    /**
+     * 计算剩余续航相较于升级模型满电预测续航的进度占比数值（取值范围 0 ~ 1000）。
+     * 遵循系统数据真实性规范，严禁编写任何假数据或虚构占位数据；
+     * 当剩余续航或满电续航任一无效、为 null 或小于等于 0 时，如实返回 0；
+     * 当两者均有效且为正数时，计算真实物理比例并换算为 0 ~ 1000 范围整数（若比例超出 1.0 则以 1000 封顶）。
+     *
+     * @param remainingMs 剩余可用物理时长（单位：毫秒，若无数据传入 null）
+     * @param fullMs 升级模型满电预测可用物理时长（单位：毫秒，若无数据传入 null）
+     * @return 换算为 0 ~ 1000 标度的进度整数值
+     */
+    fun calculateRuntimeProgress(remainingMs: Long?, fullMs: Long?): Int {
+        if (remainingMs == null || fullMs == null || remainingMs <= 0L || fullMs <= 0L) {
+            return 0
+        }
+        val ratio = (remainingMs.toDouble() / fullMs.toDouble()).coerceIn(0.0, 1.0)
+        return (ratio * 1000.0).roundToInt().coerceIn(0, 1000)
+    }
+
+    /**
+     * 计算剩余续航与升级模型满电续航的进度占比并更新线性进度指示条。
+     * 进度指示条采用平滑无动画模式更新，杜绝在列表滚动或下拉刷新时引起闪烁。
+     *
+     * @param progressBar 目标线性进度指示条组件 [LinearProgressIndicator]
+     * @param remainingMs 剩余可用物理时长（单位：毫秒，若无数据传入 null）
+     * @param fullMs 升级模型满电预测可用物理时长（单位：毫秒，若无数据传入 null）
+     */
+    fun updateRuntimeProgressBar(
+        progressBar: LinearProgressIndicator,
+        remainingMs: Long?,
+        fullMs: Long?
+    ) {
+        val progress = calculateRuntimeProgress(remainingMs, fullMs)
+        progressBar.setProgressCompat(progress, false)
     }
 
     /**

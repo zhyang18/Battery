@@ -140,7 +140,9 @@ class BatteryTimelineView @JvmOverloads constructor(
     private val sp6 = spToPx(6f)
     private val sp7 = spToPx(7f)
     private val sp7_5 = spToPx(7.5f)
+    private val sp8 = spToPx(8f)
     private val sp8_5 = spToPx(8.5f)
+    private val sp9 = spToPx(9f)
     private val sp9_5 = spToPx(9.5f)
     private val sp10_5 = spToPx(10.5f)
 
@@ -763,8 +765,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        val contentLeft = dp8
-        val contentRight = w - dp8
+        val contentLeft = dp16
+        val contentRight = w - dp16
         val contentWidth = max(0f, contentRight - contentLeft)
 
         val visibleStart = timelineState.visibleStartTimestamp
@@ -871,8 +873,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         if (visibleStart <= 0L) visibleStart = now - 1800_000L
         if (visibleEnd <= visibleStart) visibleEnd = visibleStart + 1800_000L
 
-        val contentLeft = dp8
-        val contentRight = w - dp8
+        val contentLeft = dp16
+        val contentRight = w - dp16
         val contentWidth = max(0f, contentRight - contentLeft)
 
         // 底部向上严格锚定布局：
@@ -959,8 +961,8 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     /**
      * 绘制时间轴网格虚线与底部时间刻度文字。
-     * 所有时间刻度文字（包括左端起始时间、中间各时间点与右端当前时间）均以对应时间刻度点 x 严格居中对齐绘制，
-     * 确保文字中心与上方垂直虚线网格、刻度小短线以及状态条端点完全中心对齐。
+     * 垂直虚线网格与刻度小短线严格对齐图表各刻度点 x（保持图表左右各 16dp 边距与上方状态条端点完全一致）；
+     * 底部时间刻度文字除不设 16dp 边距外，在视口边缘做安全留白保护，确保首尾时间文字 100% 完整显示不被卡片裁切。
      *
      * @param canvas 绘图画布 [Canvas]
      * @param contentLeft 图表左边界 X 坐标
@@ -979,14 +981,24 @@ class BatteryTimelineView @JvmOverloads constructor(
     ) {
         val ticks = cachedTicks
         textPaint.textAlign = Paint.Align.CENTER
+        val totalWidth = width.toFloat()
         for (tick in ticks) {
             val x = contentLeft + tick.xRatio * contentWidth
             // 垂直虚线网格
             canvas.drawLine(x, dp6, x, mainHeight, gridPaint)
             // 刻度小短线
             canvas.drawLine(x, tickTop, x, tickTop + dp3, gridPaint)
-            // 时间文本以对应时间点 x 为中心严格居中对齐绘制
-            canvas.drawText(tick.label, x, textY, textPaint)
+            // 时间文字不设 8dp 边距，充分利用卡片边缘空间；首尾文字自适应视口安全范围，确保完整显示且不被截断
+            val textWidth = textPaint.measureText(tick.label)
+            val halfTextWidth = textWidth / 2f
+            val minTextX = halfTextWidth + dp2
+            val maxTextX = totalWidth - dp2 - halfTextWidth
+            val textDrawX = if (maxTextX >= minTextX) {
+                x.coerceIn(minTextX, maxTextX)
+            } else {
+                totalWidth / 2f
+            }
+            canvas.drawText(tick.label, textDrawX, textY, textPaint)
         }
     }
 
@@ -998,8 +1010,8 @@ class BatteryTimelineView @JvmOverloads constructor(
     private fun drawAppEventsLayer(canvas: Canvas) {
         val cornerRadius = dp1_5
         val iconRenderSize = dp11.toInt().coerceAtLeast(1)
-        val cLeft = dp8
-        val cRight = width.toFloat() - dp8
+        val cLeft = dp16
+        val cRight = width.toFloat() - dp16
 
         for (item in cachedSlotItems) {
             // 视口横向可见性过滤裁剪（Culling）：完全超出内容边界的图标直接跳过
@@ -2547,8 +2559,8 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         // 顶部固定看板底部为 dp24，卡片固定定位在 dp26 处（即看板正下方）
         val boxTop = dp26
-        val minLeft = dp8
-        val maxLeft = maxOf(minLeft, width - dp8 - boxWidth)
+        val minLeft = dp16
+        val maxLeft = maxOf(minLeft, width - dp16 - boxWidth)
         val boxLeft = (pX - boxWidth / 2f).coerceIn(minLeft, maxLeft)
 
         // 5. 绘制卡片圆角背景与微暗边框
@@ -2814,14 +2826,14 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     /**
      * 通知游标移动回调。
-     * 精确对齐图表可视内容左右边距（左右统一各 dp8 边距），
+     * 精确对齐图表可视内容左右边距（左右统一各 dp16 边距），
      * 确保向外部派发的时间戳与图表内部高亮游标指示看板 100% 像素级一致。
      *
      * @param x 游标当前 X 像素坐标
      */
     private fun notifyCursorMove(x: Float) {
-        val contentLeft = dp8
-        val contentRight = width.toFloat() - dp8
+        val contentLeft = dp16
+        val contentRight = width.toFloat() - dp16
         val contentWidth = maxOf(0f, contentRight - contentLeft)
         if (contentWidth <= 0f) return
         val clampedX = x.coerceIn(contentLeft, contentRight)

@@ -52,4 +52,7 @@
     <color name="switch_thumb_unchecked_disabled">#B3FFFFFF</color>
     <color name="switch_track_outline_checked">@android:color/transparent</color>
     <color name="switch_track_outline_unchecked">#CBD5E1</color>
+
+    <!-- 放电速度卡片续航进度条指示器色彩（浅色模式：同剩余续航文字颜色一致） -->
+    <color name="power_remaining_progress_indicator">@color/text_primary_light</color>
 </resources>

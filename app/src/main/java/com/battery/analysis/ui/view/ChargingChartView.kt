@@ -584,8 +584,8 @@ class ChargingChartView @JvmOverloads constructor(
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        val paddingLeft = dp8
-        val paddingRight = dp8
+        val paddingLeft = dp16
+        val paddingRight = dp16
         // 预留顶部固定看板高度 (dp2 ~ dp24)，折线图绘制区始于 dp30
         val chartTop = dp30
         val chartBottom = h - dp24
@@ -789,6 +789,7 @@ class ChargingChartView @JvmOverloads constructor(
         // 8. 绘制 X 轴时间刻度线与时间刻度文字（所有时间文字均以对应时间刻度点 tickX 严格居中对齐显示）
         axisTextPaint.textAlign = Paint.Align.CENTER
         val timeStepCount = 4
+        val totalWidth = w
         for (step in 0..timeStepCount) {
             val ratio = step.toFloat() / timeStepCount
             val tickX = paddingLeft + chartWidth * ratio
@@ -804,8 +805,17 @@ class ChargingChartView @JvmOverloads constructor(
             // 刻度小短线
             canvas.drawLine(tickX, chartBottom, tickX, chartBottom + dp2, gridPaint)
 
-            // 文字以刻度点 tickX 为中心严格居中对齐绘制
-            canvas.drawText(timeText, tickX, h - dp5, axisTextPaint)
+            // 时间文字不设 8dp 边距，充分利用卡片边缘空间；首尾文字自适应视口安全范围，确保完整显示且不被截断
+            val textWidth = axisTextPaint.measureText(timeText)
+            val halfTextWidth = textWidth / 2f
+            val minTextX = halfTextWidth + dp2
+            val maxTextX = totalWidth - dp2 - halfTextWidth
+            val textDrawX = if (maxTextX >= minTextX) {
+                tickX.coerceIn(minTextX, maxTextX)
+            } else {
+                totalWidth / 2f
+            }
+            canvas.drawText(timeText, textDrawX, h - dp5, axisTextPaint)
         }
 
         // 9. 绘制触控标尺（取消浮动弹框，仅保留垂直十字标尺线与曲线上高亮点）
@@ -1501,8 +1511,8 @@ class ChargingChartView @JvmOverloads constructor(
 
         // 顶部固定看板底部为 dp24，卡片固定定位在 dp26 处（即看板正下方）
         val boxTop = dp26
-        val minLeft = dp8
-        val maxLeft = maxOf(minLeft, width - dp8 - boxWidth)
+        val minLeft = dp16
+        val maxLeft = maxOf(minLeft, width - dp16 - boxWidth)
         val boxLeft = (pX - boxWidth / 2f).coerceIn(minLeft, maxLeft)
 
         // 5. 绘制卡片圆角背景与微暗边框

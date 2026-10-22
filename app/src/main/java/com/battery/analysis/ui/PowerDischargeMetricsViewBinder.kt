@@ -461,7 +461,8 @@ object PowerDischargeMetricsViewBinder {
                 powerRate ?: win?.dischargeRatePercentPerHour ?: sessionPercentRate
             }
             BatteryEnergyCalculator.ROW_SCREEN_OFF -> {
-                val win = rollingBuffer?.extractRollingScreenOffWindow(14400_000L, baselineSleepWatts = offLowW)
+                // 升级为 12 小时（43200_000L）大跨度切片，完整覆盖一整夜深度睡眠底噪与半天长待机周期
+                val win = rollingBuffer?.extractRollingScreenOffWindow(43200_000L, baselineSleepWatts = offLowW)
                 val w = win?.avgPowerWatts?.takeIf { it > 0f } ?: overview?.screenOffPowerWatts?.takeIf { it > 0f } ?: 0f
                 val dur = win?.effectiveDurationMs?.takeIf { it > 0L } ?: (overview?.screenOffDurationMs ?: 0L)
                 val powerRate = calculateDischargeRatePercentPerHour(w, totalCapacityWh, dur)
@@ -472,7 +473,8 @@ object PowerDischargeMetricsViewBinder {
                 powerRate ?: win?.dischargeRatePercentPerHour ?: sessionPercentRate
             }
             BatteryEnergyCalculator.ROW_GLOBAL -> {
-                val win = rollingBuffer?.extractRollingGlobalWindow(21600_000L, baselineSleepWatts = offLowW)
+                // 升级为 24 小时（86400_000L）宏观昼夜闭环切片，彻底消除早晚相位偏态
+                val win = rollingBuffer?.extractRollingGlobalWindow(86400_000L, baselineSleepWatts = offLowW)
                 val w = win?.avgPowerWatts?.takeIf { it > 0f } ?: overview?.avgPowerWatts?.takeIf { it > 0f } ?: 0f
                 val dur = win?.effectiveDurationMs?.takeIf { it > 0L } ?: (overview?.totalDurationMs ?: 0L)
                 val powerRate = calculateDischargeRatePercentPerHour(w, totalCapacityWh, dur)

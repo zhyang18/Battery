@@ -600,12 +600,12 @@ class RuntimeEstimator(
         val offHighW = profile?.offHighPowerW
         val offLowW = profile?.offLowPowerW
 
-        // 优先尝试从线性向前滑动放电时序缓冲区中提取成熟滑动做功切片（亮屏 120m、息屏 4h、全局 6h）
+        // 优先尝试从线性向前滑动放电时序缓冲区中提取成熟滑动做功切片（亮屏 120m、息屏 24h、全局 24h）
         // 动态注入真实设备画像中的休眠底噪 offLowW，严禁硬编码虚拟底噪
         val rollingBuffer = RollingDischargeBuffer.getInstanceOrNull()
         val rollingOnWindow = rollingBuffer?.extractRollingScreenOnWindow(7200_000L) // 最多向前线性回溯 120 分钟（2小时）有效亮屏做功切片
-        val rollingOffWindow = rollingBuffer?.extractRollingScreenOffWindow(14400_000L, baselineSleepWatts = offLowW) // 4小时有效息屏待机切片（覆盖半天待机与完整Doze周期）
-        val rollingGlobalWindow = rollingBuffer?.extractRollingGlobalWindow(21600_000L, baselineSleepWatts = offLowW) // 6小时有效全局放电切片（覆盖半天综合用机大周期）
+        val rollingOffWindow = rollingBuffer?.extractRollingScreenOffWindow(43200_000L, baselineSleepWatts = offLowW) // 12小时有效息屏待机切片（完整覆盖整夜休眠底噪与半天长待机周期）
+        val rollingGlobalWindow = rollingBuffer?.extractRollingGlobalWindow(86400_000L, baselineSleepWatts = offLowW) // 24小时有效全局放电切片（覆盖完整昼夜交替自然大周期）
 
         // 1. 构建亮屏多时间尺度估计器（配置亮屏专属动态平衡权重）
         val onEstimator = PowerEstimator(profile = EstimatorProfile.SCREEN_ON)
@@ -758,12 +758,12 @@ class RuntimeEstimator(
             (effectiveOnScopeDur.toDouble() / effectiveTotalScopeDur.toDouble()).coerceIn(0.0, 1.0)
         } else null
 
-        // 依据有效观测时长自适应确定近期占空比可信度权重 alpha (0~6h 随观测时间从 0.0 连续平滑递增至最高 0.35)
+        // 依据有效观测时长自适应确定近期占空比可信度权重 alpha (0~24h 随观测时间从 0.0 连续平滑递增至最高 0.35)
         // 遵循生理与昼夜节律物理阻尼：全天日常作息保底占 65% 以上，杜绝单次日间连续用机行为被过度放大为全天预期
         val screenOnRatio = when {
             longScreenOnRatio != null && recentScreenOnRatio != null -> {
                 val alpha = if (effectiveTotalScopeDur > 0L) {
-                    ((effectiveTotalScopeDur.toDouble() / 21600_000.0) * 0.35).coerceIn(0.0, 0.35)
+                    ((effectiveTotalScopeDur.toDouble() / 86400_000.0) * 0.35).coerceIn(0.0, 0.35)
                 } else {
                     0.0
                 }

@@ -192,6 +192,71 @@ class PowerDischargeMetricsViewBinderTest {
     }
 
     /**
+     * 测试通过滑动时序缓冲区计算 24 小时全局与 12 小时息屏放电速度。
+     * 验证物理微积分功率至放电速率的无损折算与时间尺度扩展后的高准确度。
+     */
+    @Test
+    fun testGetEffectiveDischargeRate_With24hGlobalAnd12hScreenOff() {
+        val testDir = java.io.File(System.getProperty("java.io.tmpdir"), "test_binder_rolling_" + System.currentTimeMillis())
+        testDir.mkdirs()
+        com.battery.analysis.domain.estimator.RollingDischargeBuffer.resetForTesting()
+        val buffer = com.battery.analysis.domain.estimator.RollingDischargeBuffer.initForTesting(testDir)
+
+        val baseTs = 1_700_000_000_000L
+        val points = mutableListOf<com.battery.analysis.model.PowerDischargePoint>()
+        // 模拟 24 小时全局放电数据（每 5 分钟 1 点，共 288 点）
+        // 8小时夜间休眠（0.20W 息屏） + 16小时日间（其中 8h 亮屏 2.0W，8h 白天待机 0.30W）
+        for (i in 0 until 288) {
+            val ts = baseTs + i * 300_000L
+            val min = (i * 5) % 1440
+            val (isScreenOn, watts) = when {
+                min < 480 -> false to 0.20f // 8h 夜间深睡
+                min in 480 until 960 -> true to 2.00f // 8h 白天用机
+                else -> false to 0.30f // 8h 白天待机
+            }
+            points.add(
+                com.battery.analysis.model.PowerDischargePoint(
+                    timestamp = ts,
+                    elapsedHours = (i * 300_000L) / 3600_000f,
+                    batteryLevel = 100 - (i / 4),
+                    voltageVolts = 4.0f,
+                    temperature = 28.0f,
+                    powerWatts = watts,
+                    activeAppIcons = emptyList(),
+                    isScreenOn = isScreenOn,
+                    activeAppNames = emptyList()
+                )
+            )
+        }
+        buffer.appendSamplesBatch(points)
+
+        val totalCapacityWh = 30.0f
+
+        // 1. 全局 24 小时滑动窗口测试
+        // 理论全天平均功率：(8h * 0.20W + 8h * 2.00W + 8h * 0.30W) / 24h = (1.6 + 16.0 + 2.4) / 24 = 20.0 / 24 ≈ 0.833W
+        // 对应放电速率：0.833W / 30.0Wh * 100% ≈ 2.78%/h
+        val globalRate = PowerDischargeMetricsViewBinder.getEffectiveDischargeRate(
+            rowType = BatteryEnergyCalculator.ROW_GLOBAL,
+            totalCapacityWh = totalCapacityWh,
+            overview = null
+        )
+        org.junit.Assert.assertNotNull("24小时全局滑动放电速度不应为 null", globalRate)
+        assertEquals(2.78f, globalRate!!, 0.08f)
+
+        // 2. 息屏 12 小时滑动窗口测试
+        // 逆序回溯最近 12 小时（全为息屏待机 0.30W 或混合后段深睡）
+        val offRate = PowerDischargeMetricsViewBinder.getEffectiveDischargeRate(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_OFF,
+            totalCapacityWh = totalCapacityWh,
+            overview = null
+        )
+        org.junit.Assert.assertNotNull("12小时息屏滑动放电速度不应为 null", offRate)
+        assertTrue("息屏放电速度应处于真实待机区间", offRate!! > 0f && offRate < 2.0f)
+
+        testDir.deleteRecursively()
+    }
+
+    /**
      * 测试当前会话实测放电速度计算，验证基于功率做功积分物理速率与会话有效时长的精准度。
      */
     @Test

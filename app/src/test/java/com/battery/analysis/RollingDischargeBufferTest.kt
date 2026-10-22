@@ -269,6 +269,93 @@ class RollingDischargeBufferTest {
     }
 
     /**
+     * 测试 12 小时（43,200,000 ms）大跨度息屏待机滑动切片。
+     * 验证能够完整覆盖一整夜深度休眠（如 8 小时深睡）与半天工作待机，平滑滤除偶发后台唤醒脉冲。
+     */
+    @Test
+    fun testExtractRollingScreenOffWindow_Covers12HoursExtendedSleepAndStandby() {
+        val baseTs = 1_700_000_000_000L
+        val points = mutableListOf<PowerDischargePoint>()
+
+        // 模拟 12 小时（720分钟）息屏待机：每 1 分钟 1 点（共 720 点）
+        // 绝大多数点为深睡（0.12W），每 20 分钟发生一次维持唤醒脉冲（1.2W）
+        for (m in 0 until 720) {
+            val isWakeup = (m % 20 == 0) // 每 20 分钟发生一次唤醒脉冲
+            val watts = if (isWakeup) 1.2f else 0.12f
+            points.add(
+                PowerDischargePoint(
+                    timestamp = baseTs + m * 60_000L,
+                    elapsedHours = (m * 60_000L) / 3600_000f,
+                    batteryLevel = 90 - (m / 72),
+                    voltageVolts = 4.05f,
+                    temperature = 28.0f,
+                    powerWatts = watts,
+                    activeAppIcons = emptyList(),
+                    isScreenOn = false,
+                    activeAppNames = emptyList()
+                )
+            )
+        }
+
+        buffer.appendSamplesBatch(points)
+
+        // 线性向前回溯 12 小时（43,200,000 ms）息屏待机时序
+        val window12h = buffer.extractRollingScreenOffWindow(43200_000L)
+        assertNotNull("12小时息屏滑动窗口提取不可为空", window12h)
+        assertTrue("有效回溯时长应覆盖 12 小时", window12h!!.effectiveDurationMs >= 43000_000L)
+
+        // 理论加权平均：深睡 0.12W 占 19/20，唤醒 1.2W 占 1/20，均值约 0.174W
+        assertTrue("12小时待机平均功耗应平滑在 0.15W~0.22W 之间（当前: ${window12h.avgPowerWatts}W）",
+            window12h.avgPowerWatts in 0.15f..0.22f)
+    }
+
+    /**
+     * 测试 24 小时（86,400,000 ms）全局综合放电滑动切片。
+     * 验证能够完整闭环覆盖一整天的昼夜交替周期（夜间 8 小时待机 + 白天 16 小时复合用机），
+     * 准确平抑白昼与夜晚之间的相位偏态。
+     */
+    @Test
+    fun testExtractRollingGlobalWindow_Covers24HoursCircadianCompositeDischarge() {
+        val baseTs = 1_700_000_000_000L
+        val points = mutableListOf<PowerDischargePoint>()
+
+        // 模拟 24 小时（1440分钟）全局放电：每 4 分钟 1 点（共 360 点）
+        // 8 小时夜间休眠（0.15W 息屏） + 16 小时日间复合（其中 6h 亮屏 1.8W，10h 白天待机 0.25W）
+        for (i in 0 until 360) {
+            val ts = baseTs + i * 240_000L
+            val minuteOfDay = (i * 4) % 1440
+            val (isScreenOn, watts) = when {
+                minuteOfDay < 480 -> false to 0.15f // 00:00~08:00 夜间深睡 (8小时)
+                minuteOfDay in 480 until 840 -> true to 1.80f // 08:00~14:00 白天高频用机 (6小时亮屏)
+                else -> false to 0.25f // 14:00~24:00 白天与晚间空闲待机 (10小时息屏)
+            }
+            points.add(
+                PowerDischargePoint(
+                    timestamp = ts,
+                    elapsedHours = (i * 240_000L) / 3600_000f,
+                    batteryLevel = 100 - (i / 5),
+                    voltageVolts = 3.95f,
+                    temperature = 28.5f,
+                    powerWatts = watts,
+                    activeAppIcons = emptyList(),
+                    isScreenOn = isScreenOn,
+                    activeAppNames = emptyList()
+                )
+            )
+        }
+
+        buffer.appendSamplesBatch(points)
+
+        // 线性向前回溯 24 小时（86,400,000 ms）全局综合时序
+        val window24h = buffer.extractRollingGlobalWindow(86400_000L)
+        assertNotNull("24小时全局滑动窗口提取不可为空", window24h)
+        assertTrue("有效回溯时长应覆盖 24 小时", window24h!!.effectiveDurationMs >= 86000_000L)
+
+        // 理论加权平均：(8h * 0.15W + 6h * 1.80W + 10h * 0.25W) / 24h = (1.2 + 10.8 + 2.5) / 24 = 14.5 / 24 ≈ 0.604W
+        assertEquals(0.604f, window24h.avgPowerWatts, 0.05f)
+    }
+
+    /**
      * 验证跨夜整夜长充电（如 10 小时插电）后，拔电瞬间滑动缓冲区中昨日的历史放电记忆完好保留。
      * 挂钟时间放宽至 48 小时，杜绝 8 小时修剪导致整夜充电后历史放电点被全部清空的缺陷。
      */

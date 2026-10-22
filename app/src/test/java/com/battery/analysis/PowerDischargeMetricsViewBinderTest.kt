@@ -301,5 +301,66 @@ class PowerDischargeMetricsViewBinderTest {
         assertEquals(5.0f, globalRate!!, 0.01f)
         assertEquals(3600_000L * 3, globalDur)
     }
+
+    /**
+     * 测试气泡弹窗关键预测数据正则表达式匹配。
+     * 验证能够精准提取升级模型满电续航时长、预测基准放电速度数值以及当前剩余（或待机）续航数值，且不包含多余标签或括号。
+     */
+    @Test
+    fun testFormatDischargeSpeedBubbleMessage_RegexMatchesExpectedFields() {
+        val sampleText = """
+            【亮屏续航预测】
+            • 当前会话放电速度：5.6%/h (亮屏 05h36m44s)
+            • 近7天放电速度：5.6%/h (亮屏 02d22h)
+            • 满电亮屏续航：17h41m59s
+            • 升级模型(v2.2)：15h41m53s (可信度高)
+            • 预测基准放电速度：7.4%/h
+            • 当前剩余续航：07h22m44s (可信度高)
+        """.trimIndent()
+
+        val v2Match = PowerDischargeMetricsViewBinder.REGEX_V2_MODEL_DURATION.find(sampleText)
+        org.junit.Assert.assertNotNull(v2Match)
+        assertEquals("15h41m53s", v2Match!!.groups[1]?.value)
+
+        val speedMatch = PowerDischargeMetricsViewBinder.REGEX_PREDICTION_BENCHMARK_RATE.find(sampleText)
+        org.junit.Assert.assertNotNull(speedMatch)
+        assertEquals("7.4%/h", speedMatch!!.groups[1]?.value)
+
+        val remMatch = PowerDischargeMetricsViewBinder.REGEX_CURRENT_REMAINING_DURATION.find(sampleText)
+        org.junit.Assert.assertNotNull(remMatch)
+        assertEquals("07h22m44s", remMatch!!.groups[1]?.value)
+
+        val sampleOffText = """
+            【息屏续航预测】
+            • 升级模型(v2.2)：01d01h00m00s (可信度高)
+            • 预测基准放电速度：2.8%/h
+            • 当前待机续航：01d01h00m00s (可信度高)
+        """.trimIndent()
+
+        val offV2Match = PowerDischargeMetricsViewBinder.REGEX_V2_MODEL_DURATION.find(sampleOffText)
+        org.junit.Assert.assertNotNull(offV2Match)
+        assertEquals("01d01h00m00s", offV2Match!!.groups[1]?.value)
+
+        val offSpeedMatch = PowerDischargeMetricsViewBinder.REGEX_PREDICTION_BENCHMARK_RATE.find(sampleOffText)
+        org.junit.Assert.assertNotNull(offSpeedMatch)
+        assertEquals("2.8%/h", offSpeedMatch!!.groups[1]?.value)
+
+        val offRemMatch = PowerDischargeMetricsViewBinder.REGEX_CURRENT_REMAINING_DURATION.find(sampleOffText)
+        org.junit.Assert.assertNotNull(offRemMatch)
+        assertEquals("01d01h00m00s", offRemMatch!!.groups[1]?.value)
+    }
+
+    /**
+     * 测试气泡弹窗预测数据格式化方法，验证空串安全返回且非空输入返回非空富文本对象。
+     */
+    @Test
+    fun testFormatDischargeSpeedBubbleMessage_PreservesTextContent() {
+        val emptyResult = PowerDischargeMetricsViewBinder.formatDischargeSpeedBubbleMessage("")
+        assertEquals("", emptyResult.toString())
+
+        val rawText = "【亮屏续航预测】\n• 预测基准放电速度：7.4%/h\n• 当前剩余续航：07h22m44s"
+        val formatted = PowerDischargeMetricsViewBinder.formatDischargeSpeedBubbleMessage(rawText)
+        org.junit.Assert.assertNotNull(formatted)
+    }
 }
 

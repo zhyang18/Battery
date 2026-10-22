@@ -7,6 +7,7 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.battery.analysis.databinding.ItemPowerHistoryRecordBinding
 import com.battery.analysis.model.PowerUsageRecord
+import com.battery.analysis.util.setUnitText
 import java.util.Locale
 
 /**
@@ -176,18 +177,18 @@ class PowerHistoryAdapter(
 //            binding.tvHistoryTime.text = if (!record.isCompleted) baseTimeRange else baseTimeRange
 
             // 2. 右上：功耗数值（如 "2.48 W"）
-            binding.tvHistoryPowerValue.text = String.format(
+            binding.tvHistoryPowerValue.setUnitText(String.format(
                 Locale.getDefault(),
                 "%.2f W",
                 record.getDisplayPowerWatts()
-            )
+            ))
 
             // 3. 左下：时长与电量变化区间（如 "46m · 76%~69%(-7%)"）
             val baseSubInfo = record.getFormattedDurationAndLevel()
-            binding.tvHistorySubInfo.text = if (!record.isCompleted) "$baseSubInfo · 进行中" else baseSubInfo
+            binding.tvHistorySubInfo.setUnitText(if (!record.isCompleted) "$baseSubInfo · 进行中" else baseSubInfo)
 
             // 4. 右下：亮屏时间数值（与右上角平均功耗值保持相同的大字粗体样式，如 "1h55m"）
-            binding.tvHistoryScreenOnTime.text = record.getDisplayScreenOnDuration()
+            binding.tvHistoryScreenOnTime.setUnitText(record.getDisplayScreenOnDuration())
 
             // 5. 多选删除选择框显示与选中联动
             if (isSelectionMode) {

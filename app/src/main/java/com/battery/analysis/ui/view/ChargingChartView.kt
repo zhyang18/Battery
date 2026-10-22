@@ -23,6 +23,7 @@ import com.battery.analysis.timeline.presentation.TimelineMetric
 import com.battery.analysis.timeline.util.DrawableBitmapCache
 import com.battery.analysis.timeline.util.TimelineLayoutCalculator
 import com.battery.analysis.util.BatteryEnergyCalculator
+import com.battery.analysis.util.UnitSpanFormatter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -242,6 +243,12 @@ class ChargingChartView @JvmOverloads constructor(
 
     private val headerMetricValuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = sp9_5
+        isFakeBoldText = true
+    }
+
+    // 顶部固定信息栏单位文本画笔（字号比数值缩小 2sp，为 7.5sp）
+    private val headerMetricUnitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp7_5
         isFakeBoldText = true
     }
 
@@ -577,8 +584,8 @@ class ChargingChartView @JvmOverloads constructor(
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        val paddingLeft = dp14
-        val paddingRight = dp14
+        val paddingLeft = dp8
+        val paddingRight = dp8
         // 预留顶部固定看板高度 (dp2 ~ dp24)，折线图绘制区始于 dp30
         val chartTop = dp30
         val chartBottom = h - dp24
@@ -779,7 +786,8 @@ class ChargingChartView @JvmOverloads constructor(
             drawAppIconStacks(canvas, paddingLeft, chartWidth, chartBottom)
         }
 
-        // 8. 绘制 X 轴时间刻度线与时间刻度文字（严格对应时间轴刻度居中显示）
+        // 8. 绘制 X 轴时间刻度线与时间刻度文字（所有时间文字均以对应时间刻度点 tickX 严格居中对齐显示）
+        axisTextPaint.textAlign = Paint.Align.CENTER
         val timeStepCount = 4
         for (step in 0..timeStepCount) {
             val ratio = step.toFloat() / timeStepCount
@@ -796,13 +804,8 @@ class ChargingChartView @JvmOverloads constructor(
             // 刻度小短线
             canvas.drawLine(tickX, chartBottom, tickX, chartBottom + dp2, gridPaint)
 
-            // 文字以刻度点 tickX 为中心严格居中对齐，并在左右屏幕物理边缘做防截断保护
-            val textWidth = axisTextPaint.measureText(timeText)
-            val halfW = textWidth / 2f
-            val minTextX = halfW + dp2
-            val maxTextX = maxOf(minTextX, w - halfW - dp2)
-            val textX = tickX.coerceIn(minTextX, maxTextX)
-            canvas.drawText(timeText, textX, h - dp5, axisTextPaint)
+            // 文字以刻度点 tickX 为中心严格居中对齐绘制
+            canvas.drawText(timeText, tickX, h - dp5, axisTextPaint)
         }
 
         // 9. 绘制触控标尺（取消浮动弹框，仅保留垂直十字标尺线与曲线上高亮点）
@@ -1100,25 +1103,63 @@ class ChargingChartView @JvmOverloads constructor(
 
         // 绘制电量（深天蓝 #3A7FF0，第 1 列居中）
         headerMetricValuePaint.color = colorLevel
-        canvas.drawText(levelStr, colLevelCenter, textY, headerMetricValuePaint)
+        drawMetricTextWithSmallUnit(canvas, levelStr, colLevelCenter, textY, headerMetricValuePaint, headerMetricUnitPaint)
 
         // 绘制能量（紧随电量之后，同深天蓝 #3A7FF0，第 2 列居中）
         if (energyStr != null) {
             headerMetricValuePaint.color = colorLevel
-            canvas.drawText(energyStr, colEnergyCenter, textY, headerMetricValuePaint)
+            drawMetricTextWithSmallUnit(canvas, energyStr, colEnergyCenter, textY, headerMetricValuePaint, headerMetricUnitPaint)
         }
 
         // 绘制功率（充电浅天蓝 #90CAF9 / 放电橙色 #FF9800，第 3 列居中）
         headerMetricValuePaint.color = pColor
-        canvas.drawText(pLabel, colPowerCenter, textY, headerMetricValuePaint)
+        drawMetricTextWithSmallUnit(canvas, pLabel, colPowerCenter, textY, headerMetricValuePaint, headerMetricUnitPaint)
 
         // 绘制温度（红色 #FF5252，第 4 列居中）
         headerMetricValuePaint.color = colorTemp
-        canvas.drawText(tempStr, colTempCenter, textY, headerMetricValuePaint)
+        drawMetricTextWithSmallUnit(canvas, tempStr, colTempCenter, textY, headerMetricValuePaint, headerMetricUnitPaint)
 
         // 绘制电压（金黄 #FFD54F，第 5 列居中）
         headerMetricValuePaint.color = colorVoltage
-        canvas.drawText(voltStr, colVoltCenter, textY, headerMetricValuePaint)
+        drawMetricTextWithSmallUnit(canvas, voltStr, colVoltCenter, textY, headerMetricValuePaint, headerMetricUnitPaint)
+    }
+
+    /**
+     * 绘制带有微缩单位的单行居中文本（单位字号比前面的主数值缩小 2sp 绘制）。
+     *
+     * @param canvas 画布对象
+     * @param text 待绘制的文本（如 "75%", "+18.50W", "32.5℃"）
+     * @param centerX 该列水平中心 X 坐标
+     * @param y 基线 Y 坐标
+     * @param basePaint 主数值画笔（9.5sp）
+     * @param unitPaint 单位画笔（7.5sp，缩小 2sp）
+     */
+    private fun drawMetricTextWithSmallUnit(
+        canvas: Canvas,
+        text: String,
+        centerX: Float,
+        y: Float,
+        basePaint: Paint,
+        unitPaint: Paint
+    ) {
+        val split = UnitSpanFormatter.splitValueAndUnit(text)
+        if (split == null || split.second.isEmpty()) {
+            basePaint.textAlign = Paint.Align.CENTER
+            canvas.drawText(text, centerX, y, basePaint)
+            return
+        }
+        val (valuePart, unitPart) = split
+        basePaint.textAlign = Paint.Align.LEFT
+        unitPaint.textAlign = Paint.Align.LEFT
+        unitPaint.color = basePaint.color
+
+        val valueWidth = basePaint.measureText(valuePart)
+        val unitWidth = unitPaint.measureText(unitPart)
+        val totalWidth = valueWidth + unitWidth
+
+        val startX = centerX - totalWidth * 0.5f
+        canvas.drawText(valuePart, startX, y, basePaint)
+        canvas.drawText(unitPart, startX + valueWidth, y, unitPaint)
     }
 
     /**
@@ -1460,8 +1501,8 @@ class ChargingChartView @JvmOverloads constructor(
 
         // 顶部固定看板底部为 dp24，卡片固定定位在 dp26 处（即看板正下方）
         val boxTop = dp26
-        val minLeft = dp14
-        val maxLeft = maxOf(minLeft, width - dp14 - boxWidth)
+        val minLeft = dp8
+        val maxLeft = maxOf(minLeft, width - dp8 - boxWidth)
         val boxLeft = (pX - boxWidth / 2f).coerceIn(minLeft, maxLeft)
 
         // 5. 绘制卡片圆角背景与微暗边框

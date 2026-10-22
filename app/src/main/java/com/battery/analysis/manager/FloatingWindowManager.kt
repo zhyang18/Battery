@@ -28,6 +28,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import com.battery.analysis.R
 import com.battery.analysis.service.BatteryMonitorService
+import com.battery.analysis.util.setUnitText
 import java.util.Locale
 import kotlin.math.abs
 
@@ -1136,7 +1137,7 @@ object FloatingWindowManager {
 
         // 格式化实时功率展示
         if (showPower) {
-            vh.tvPower.text = formatPowerText(cachedPowerWatts, cachedIsCharging, showUnit)
+            vh.tvPower.setUnitText(formatPowerText(cachedPowerWatts, cachedIsCharging, showUnit))
         }
 
         // 格式化实时温度展示
@@ -1148,7 +1149,7 @@ object FloatingWindowManager {
             } else {
                 if (showUnit) "--℃" else "--"
             }
-            vh.tvTemp.text = tempText
+            vh.tvTemp.setUnitText(tempText)
         }
     }
 

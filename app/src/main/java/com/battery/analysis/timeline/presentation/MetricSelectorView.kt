@@ -140,7 +140,8 @@ class MetricSelectorView @JvmOverloads constructor(
 
     /**
      * 初始化 6 个指标选项标签视图（电量、能量、功耗、温度、电压、应用）。
-     * 前置圆角点与充电趋势图规范严格对齐（8.5dp x 8.5dp，圆角 2.5dp，间距 4dp）。
+     * 左右内边距统一设置为 8dp，严格与上方耗电与充电趋势图表的 8dp 内容边距保持垂直对齐；
+     * 前置圆角点与趋势图规范严格对齐（8.5dp x 8.5dp，圆角 2.5dp，间距 4dp）。
      */
     private fun initViews() {
         removeAllViews()
@@ -149,7 +150,11 @@ class MetricSelectorView @JvmOverloads constructor(
         textViews.clear()
 
         val dp4 = dpToPx(4f)
+        val dp8 = dpToPx(8f)
         val dp8_5 = dpToPx(8.5f)
+
+        // 左右内边距同步设置为 8dp，与趋势图表内容边距完全垂直对齐
+        setPadding(dp8, 0, dp8, 0)
 
         for (item in buildMetricItems()) {
             val (metric, title) = item

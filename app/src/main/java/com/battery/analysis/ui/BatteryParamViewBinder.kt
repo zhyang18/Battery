@@ -5,6 +5,7 @@ import com.battery.analysis.R
 import com.battery.analysis.databinding.LayoutBatteryParamItemsBinding
 import com.battery.analysis.model.BatteryInfo
 import com.battery.analysis.util.BatteryEnergyCalculator
+import com.battery.analysis.util.setUnitText
 
 /**
  * 电池详细参数视图绑定辅助工具类。
@@ -44,22 +45,22 @@ object BatteryParamViewBinder {
         }
 
         // 详细参数列表绑定
-        binding.tvValLevel.text = info.level?.let { "$it%" } ?: unknownText
+        binding.tvValLevel.setUnitText(info.level?.let { "$it%" } ?: unknownText)
         binding.tvValStatus.text = localizeBatteryStatus(context, info.status) ?: unknownText
         binding.tvValHealthStatus.text = localizeBatteryHealthStatus(context, info.healthStatus) ?: unknownText
-        binding.tvValHealthPercent.text = info.batteryHealth?.let { String.format("%.2f%%", it) } ?: unknownText
+        binding.tvValHealthPercent.setUnitText(info.batteryHealth?.let { String.format("%.2f%%", it) } ?: unknownText)
         binding.tvValCycleCount.text = info.cycleCount?.let { "$it" } ?: unknownText
-        binding.tvValTemperature.text = info.temperature?.let { String.format("%.1f℃", it) } ?: unknownText
-        binding.tvValVoltage.text = info.voltage?.let { String.format("%.0f mV (%.3f V)", it, it / 1000f) } ?: unknownText
-        binding.tvValCurrent.text = info.currentNow?.let {
+        binding.tvValTemperature.setUnitText(info.temperature?.let { String.format("%.1f℃", it) } ?: unknownText)
+        binding.tvValVoltage.setUnitText(info.voltage?.let { String.format("%.0f mV (%.3f V)", it, it / 1000f) } ?: unknownText)
+        binding.tvValCurrent.setUnitText(info.currentNow?.let {
             if (it > 0f) String.format("+%.0f mA", it) else String.format("%.0f mA", it)
-        } ?: unknownText
-        binding.tvValPower.text = info.powerWatts?.let {
+        } ?: unknownText)
+        binding.tvValPower.setUnitText(info.powerWatts?.let {
             if (it > 0f) String.format("+%.2f W", it) else String.format("%.2f W", it)
-        } ?: unknownText
-        binding.tvValDesignCapacity.text = BatteryEnergyCalculator.formatCapacityWithNominalWh(info.designCapacity) ?: unknownText
-        binding.tvValFullCapacity.text = BatteryEnergyCalculator.formatCapacityWithNominalWh(info.fullChargeCapacity) ?: unknownText
-        binding.tvValCurrentCapacity.text = BatteryEnergyCalculator.formatCapacityWithNominalWh(info.currentCapacity) ?: unknownText
+        } ?: unknownText)
+        binding.tvValDesignCapacity.setUnitText(BatteryEnergyCalculator.formatCapacityWithNominalWh(info.designCapacity) ?: unknownText)
+        binding.tvValFullCapacity.setUnitText(BatteryEnergyCalculator.formatCapacityWithNominalWh(info.fullChargeCapacity) ?: unknownText)
+        binding.tvValCurrentCapacity.setUnitText(BatteryEnergyCalculator.formatCapacityWithNominalWh(info.currentCapacity) ?: unknownText)
         binding.tvValDualCell.text = info.isDualCell?.let {
             if (it) context.getString(R.string.yes) else context.getString(R.string.no)
         } ?: unknownText

@@ -19,6 +19,8 @@ import com.battery.analysis.model.PowerDischargePoint
 import com.battery.analysis.model.PowerDisplayUnit
 import com.battery.analysis.model.SevenDaysDischargeStats
 import com.battery.analysis.util.BatteryEnergyCalculator
+import com.battery.analysis.util.UnitSpanFormatter
+import com.battery.analysis.util.setUnitText
 import java.util.Locale
 
 /**
@@ -44,8 +46,28 @@ object PowerDischargeMetricsViewBinder {
     const val CARD_DEEP_SLEEP = 3
 
     /**
+     * 预测基准放电速度与续航预测核心数据高亮强调色彩（十六进制代码 #AA5AB6）。
+     */
+    const val COLOR_PREDICTION_HIGHLIGHT = 0xFFAA5AB6.toInt()
+
+    /**
+     * 升级模型满电续航时长数值匹配正则表达式（如匹配 "• 升级模型(v2.2)：15h41m53s (可信度高)" 中的 "15h41m53s"）。
+     */
+    val REGEX_V2_MODEL_DURATION = Regex("""•\s*升级模型\([^)]+\)[：:]\s*([^\s(]+)""")
+
+    /**
+     * 预测基准放电速度数值匹配正则表达式（如匹配 "• 预测基准放电速度：7.4%/h" 中的 "7.4%/h"）。
+     */
+    val REGEX_PREDICTION_BENCHMARK_RATE = Regex("""•\s*预测基准放电速度[：:]\s*([^\s\n]+)""")
+
+    /**
+     * 当前剩余续航或当前待机续航时长数值匹配正则表达式（如匹配 "• 当前剩余续航：07h22m44s (可信度高)" 中的 "07h22m44s"）。
+     */
+    val REGEX_CURRENT_REMAINING_DURATION = Regex("""•\s*(?:当前剩余续航|当前待机续航)[：:]\s*([^\s(]+)""")
+
+    /**
      * 将放电速度矩阵（亮屏、息屏、全局）数据绑定至对应的视图组件并配置点击回调。
-     * 第一行展示自本次拔电以来的当前会话放电速度百分比速率，第二行展示基于物理能量与自适应多时间尺度计算的剩余续航时长。
+     * 第一行展示预测基准放电速度百分比速率，第二行展示基于物理能量与自适应多时间尺度计算的剩余续航时长。
      *
      * @param binding 放电速度布局绑定对象 [ItemPowerDischargeSpeedBinding]
      * @param overview 核心功耗指标概览数据实体 [PowerOverviewStats]，若无数据传入 null
@@ -72,14 +94,14 @@ object PowerDischargeMetricsViewBinder {
         onCardClick: ((anchorView: View, rowType: Int) -> Unit)? = null
     ): com.battery.analysis.domain.estimator.TripleRuntimeResult {
         with(binding) {
-            val (onSessionRate, _) = calculateSessionDischargeRate(BatteryEnergyCalculator.ROW_SCREEN_ON, totalCapacityWh, overview)
-            val (offSessionRate, _) = calculateSessionDischargeRate(BatteryEnergyCalculator.ROW_SCREEN_OFF, totalCapacityWh, overview)
-            val (globalSessionRate, _) = calculateSessionDischargeRate(BatteryEnergyCalculator.ROW_GLOBAL, totalCapacityWh, overview)
+            val onEffectiveRate = getEffectiveDischargeRate(BatteryEnergyCalculator.ROW_SCREEN_ON, totalCapacityWh, overview, sevenDaysStats)
+            val offEffectiveRate = getEffectiveDischargeRate(BatteryEnergyCalculator.ROW_SCREEN_OFF, totalCapacityWh, overview, sevenDaysStats)
+            val globalEffectiveRate = getEffectiveDischargeRate(BatteryEnergyCalculator.ROW_GLOBAL, totalCapacityWh, overview, sevenDaysStats)
 
-            // --- 1. 第一行：当前会话放电速度百分比速率 ---
-            tvScreenOnSpeed.text = formatDischargeRateSpannable(onSessionRate)
-            tvScreenOffSpeed.text = formatDischargeRateSpannable(offSessionRate)
-            tvGlobalSpeed.text = formatDischargeRateSpannable(globalSessionRate)
+            // --- 1. 第一行：预测基准放电速度百分比速率 ---
+            tvScreenOnSpeed.setUnitText(formatDischargeRateSpannable(onEffectiveRate))
+            tvScreenOffSpeed.setUnitText(formatDischargeRateSpannable(offEffectiveRate))
+            tvGlobalSpeed.setUnitText(formatDischargeRateSpannable(globalEffectiveRate))
 
             // --- 2. 第二行：剩余续航时间（优先消费外部传入的预计算缓存结果；若无则降级现场估算，保障严格跟随下拉刷新机制） ---
             val tripleResult = precalculatedRuntimeResult ?: BatteryEnergyCalculator.estimateTripleRuntimes(
@@ -92,9 +114,9 @@ object PowerDischargeMetricsViewBinder {
                 currentTrendPoints = currentTrendPoints
             )
 
-            tvScreenOnRemaining.text = formatRemainingDurationOnly(tripleResult.screenOnEstimate.remainingMs)
-            tvScreenOffRemaining.text = formatRemainingDurationOnly(tripleResult.screenOffEstimate.remainingMs)
-            tvGlobalRemaining.text = formatRemainingDurationOnly(tripleResult.globalEstimate.remainingMs)
+            tvScreenOnRemaining.setUnitText(formatRemainingDurationOnly(tripleResult.screenOnEstimate.remainingMs))
+            tvScreenOffRemaining.setUnitText(formatRemainingDurationOnly(tripleResult.screenOffEstimate.remainingMs))
+            tvGlobalRemaining.setUnitText(formatRemainingDurationOnly(tripleResult.globalEstimate.remainingMs))
 
             // 卡片点击事件监听
             if (onCardClick != null) {
@@ -110,6 +132,40 @@ object PowerDischargeMetricsViewBinder {
             }
             return tripleResult
         }
+    }
+
+    /**
+     * 将放电速度与续航预测气泡弹窗的详细说明文案进行关键预测数据高亮强调格式化。
+     * 将弹框中的升级模型满电续航时长数值、预测基准放电速度数值以及当前剩余（或待机）续航数值着色为统一的高亮强调色（#AA5AB6），
+     * 辅助用户在信息密集的说明弹窗中快速聚焦核心算法预测结论。
+     *
+     * @param rawMessage 原始详细说明文案字符串
+     * @return 包含关键预测数据高亮颜色 Span 的富文本对象 [CharSequence]
+     */
+    fun formatDischargeSpeedBubbleMessage(rawMessage: String): CharSequence {
+        if (rawMessage.isBlank()) return rawMessage
+
+        val spannable = SpannableString(rawMessage)
+
+        fun highlightMatch(regex: Regex) {
+            regex.findAll(rawMessage).forEach { matchResult ->
+                val group = matchResult.groups[1]
+                if (group != null && group.range.first <= group.range.last) {
+                    spannable.setSpan(
+                        ForegroundColorSpan(COLOR_PREDICTION_HIGHLIGHT),
+                        group.range.first,
+                        group.range.last + 1,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
+            }
+        }
+
+        highlightMatch(REGEX_V2_MODEL_DURATION)
+        highlightMatch(REGEX_PREDICTION_BENCHMARK_RATE)
+        highlightMatch(REGEX_CURRENT_REMAINING_DURATION)
+
+        return spannable
     }
 
     /**
@@ -165,7 +221,7 @@ object PowerDischargeMetricsViewBinder {
                 } else {
                     overview.screenOffAwakePercent + overview.screenOffDeepSleepPercent
                 }
-                tvScreenOffPercent.text = if (offPercent > 0f) String.format(Locale.US, "%.1f%%", offPercent) else "--"
+                tvScreenOffPercent.setUnitText(if (offPercent > 0f) String.format(Locale.US, "%.1f%%", offPercent) else "--")
 
                 val durText = formatSleepAwakeCardDuration(
                     durationMs = if (overview.screenOffDurationMs > 0L) overview.screenOffDurationMs else parseDurationTextToMs(overview.screenOffDurationText),
@@ -195,12 +251,12 @@ object PowerDischargeMetricsViewBinder {
 
                 if (isMahUnit) {
                     val mahSubtitle = if (offDrainMah > 0f) String.format(Locale.US, "%.1fmAh", offDrainMah) else "--"
-                    tvScreenOffEnergy.text = mahSubtitle
-                    tvScreenOffCompare.text = String.format(Locale.US, "%.3fWh", overview.screenOffEnergyWh)
-                    tvScreenOffPower.text = offPowerText
+                    tvScreenOffEnergy.setUnitText(mahSubtitle)
+                    tvScreenOffCompare.setUnitText(String.format(Locale.US, "%.3fWh", overview.screenOffEnergyWh))
+                    tvScreenOffPower.setUnitText(offPowerText)
                 } else {
                     val energyText = String.format(Locale.US, "%.3fWh", overview.screenOffEnergyWh)
-                    tvScreenOffEnergy.text = energyText
+                    tvScreenOffEnergy.setUnitText(energyText)
                     val mahStr = if (offDrainMah > 0f) {
                         String.format(Locale.US, "%.1fmAh", offDrainMah)
                     } else if (overview.screenOffDurationMs > 0L) {
@@ -208,8 +264,8 @@ object PowerDischargeMetricsViewBinder {
                     } else {
                         "--"
                     }
-                    tvScreenOffCompare.text = mahStr
-                    tvScreenOffPower.text = offPowerText
+                    tvScreenOffCompare.setUnitText(mahStr)
+                    tvScreenOffPower.setUnitText(offPowerText)
                 }
             }
 
@@ -217,16 +273,16 @@ object PowerDischargeMetricsViewBinder {
             if (overview.screenOffAwakeDurationMs <= 0L && overview.screenOffAwakeEnergyWh <= 0f) {
                 if (overview.screenOffDurationMs > 0L) {
                     // 放电周期内经历过息屏，但唤醒时长与能耗均为 0（处于 100% 纯深度睡眠挂起状态）
-                    tvAwakePercent.text = "0.0%"
+                    tvAwakePercent.setUnitText("0.0%")
                     tvAwakeDuration.text = "00s"
                     if (isMahUnit) {
-                        tvAwakeEnergy.text = "0.0mAh"
-                        tvAwakeCompare.text = "0.000Wh"
-                        tvAwakePower.text = "0.00W"
+                        tvAwakeEnergy.setUnitText("0.0mAh")
+                        tvAwakeCompare.setUnitText("0.000Wh")
+                        tvAwakePower.setUnitText("0.00W")
                     } else {
-                        tvAwakeEnergy.text = "0.000Wh"
-                        tvAwakeCompare.text = "0.0mAh"
-                        tvAwakePower.text = "0.00W"
+                        tvAwakeEnergy.setUnitText("0.000Wh")
+                        tvAwakeCompare.setUnitText("0.0mAh")
+                        tvAwakePower.setUnitText("0.00W")
                     }
                 } else {
                     tvAwakePercent.text = "--"
@@ -245,7 +301,7 @@ object PowerDischargeMetricsViewBinder {
                 } else {
                     "--"
                 }
-                tvAwakePercent.text = awakePercentStr
+                tvAwakePercent.setUnitText(awakePercentStr)
 
                 val durText = formatSleepAwakeCardDuration(
                     durationMs = if (overview.screenOffAwakeDurationMs > 0L) overview.screenOffAwakeDurationMs else parseDurationTextToMs(overview.screenOffAwakeDurationText),
@@ -284,7 +340,7 @@ object PowerDischargeMetricsViewBinder {
                     } else {
                         "--"
                     }
-                    tvAwakeEnergy.text = awakeMahSubtitle
+                    tvAwakeEnergy.setUnitText(awakeMahSubtitle)
 
                     val energyDisplay = if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakeEnergyWh >= 0.001f) {
                         String.format(Locale.US, "%.3fWh", overview.screenOffAwakeEnergyWh)
@@ -295,8 +351,8 @@ object PowerDischargeMetricsViewBinder {
                     } else {
                         "--"
                     }
-                    tvAwakeCompare.text = energyDisplay
-                    tvAwakePower.text = awakePowerText
+                    tvAwakeCompare.setUnitText(energyDisplay)
+                    tvAwakePower.setUnitText(awakePowerText)
                 } else {
                     val energyText = if (overview.isScreenOffDecomposedAvailable && overview.screenOffAwakeEnergyWh >= 0.001f) {
                         String.format(Locale.US, "%.3fWh", overview.screenOffAwakeEnergyWh)
@@ -307,7 +363,7 @@ object PowerDischargeMetricsViewBinder {
                     } else {
                         "--"
                     }
-                    tvAwakeEnergy.text = energyText
+                    tvAwakeEnergy.setUnitText(energyText)
 
                     val mahText = if (awakeDrainMah >= 0.1f) {
                         String.format(Locale.US, "%.1fmAh", awakeDrainMah)
@@ -316,8 +372,8 @@ object PowerDischargeMetricsViewBinder {
                     } else {
                         "--"
                     }
-                    tvAwakeCompare.text = mahText
-                    tvAwakePower.text = awakePowerText
+                    tvAwakeCompare.setUnitText(mahText)
+                    tvAwakePower.setUnitText(awakePowerText)
                 }
             }
 
@@ -325,16 +381,16 @@ object PowerDischargeMetricsViewBinder {
             if (overview.screenOffDeepSleepDurationMs <= 0L && overview.screenOffDeepSleepEnergyWh <= 0f) {
                 if (overview.screenOffDurationMs > 0L) {
                     // 放电周期内经历过息屏，但深度睡眠时长为 0（息屏期间 CPU 全程被持有唤醒锁活跃工作）
-                    tvSleepPercent.text = "0.0%"
+                    tvSleepPercent.setUnitText("0.0%")
                     tvSleepDuration.text = "00s"
                     if (isMahUnit) {
-                        tvSleepEnergy.text = "0.0mAh"
-                        tvSleepCompare.text = "0.000Wh"
-                        tvSleepPower.text = "0.00W"
+                        tvSleepEnergy.setUnitText("0.0mAh")
+                        tvSleepCompare.setUnitText("0.000Wh")
+                        tvSleepPower.setUnitText("0.00W")
                     } else {
-                        tvSleepEnergy.text = "0.000Wh"
-                        tvSleepCompare.text = "0.0mAh"
-                        tvSleepPower.text = "0.00W"
+                        tvSleepEnergy.setUnitText("0.000Wh")
+                        tvSleepCompare.setUnitText("0.0mAh")
+                        tvSleepPower.setUnitText("0.00W")
                     }
                 } else {
                     tvSleepPercent.text = "--"
@@ -349,7 +405,7 @@ object PowerDischargeMetricsViewBinder {
                 } else {
                     "--"
                 }
-                tvSleepPercent.text = sleepPercentStr
+                tvSleepPercent.setUnitText(sleepPercentStr)
 
                 val durText = formatSleepAwakeCardDuration(
                     durationMs = if (overview.screenOffDeepSleepDurationMs > 0L) overview.screenOffDeepSleepDurationMs else parseDurationTextToMs(overview.screenOffDeepSleepDurationText),
@@ -388,22 +444,22 @@ object PowerDischargeMetricsViewBinder {
                     } else {
                         "--"
                     }
-                    tvSleepEnergy.text = sleepMahSubtitle
+                    tvSleepEnergy.setUnitText(sleepMahSubtitle)
 
                     val energyDisplay = if (overview.isScreenOffDecomposedAvailable && overview.screenOffDeepSleepEnergyWh > 0f) {
                         String.format(Locale.US, "%.3fWh", overview.screenOffDeepSleepEnergyWh)
                     } else {
                         "--"
                     }
-                    tvSleepCompare.text = energyDisplay
-                    tvSleepPower.text = sleepPowerText
+                    tvSleepCompare.setUnitText(energyDisplay)
+                    tvSleepPower.setUnitText(sleepPowerText)
                 } else {
                     val energyText = if (overview.isScreenOffDecomposedAvailable && overview.screenOffDeepSleepEnergyWh > 0f) {
                         String.format(Locale.US, "%.3fWh", overview.screenOffDeepSleepEnergyWh)
                     } else {
                         "--"
                     }
-                    tvSleepEnergy.text = energyText
+                    tvSleepEnergy.setUnitText(energyText)
 
                     val mahText = if (sleepDrainMah > 0f) {
                         String.format(Locale.US, "%.1fmAh", sleepDrainMah)
@@ -412,8 +468,8 @@ object PowerDischargeMetricsViewBinder {
                     } else {
                         "--"
                     }
-                    tvSleepCompare.text = mahText
-                    tvSleepPower.text = sleepPowerText
+                    tvSleepCompare.setUnitText(mahText)
+                    tvSleepPower.setUnitText(sleepPowerText)
                 }
             }
 
@@ -586,8 +642,7 @@ object PowerDischargeMetricsViewBinder {
     }
 
     /**
-     * 将放电速度数值与单位转换为复合富文本，数值部分保持较大字号（16sp），
-     * 单位部分（"%/h"）缩小至 11sp，以图文混排高质感样式呈现。
+     * 将放电速度数值与单位转换为复合富文本，单位部分（"%/h"）比前面的数值缩小 2 号显示。
      *
      * @param rate 放电速率百分比数值（单位：%/h），若为空或非正数则返回 "--"
      * @return 格式化后的富文本对象 [CharSequence]
@@ -599,19 +654,12 @@ object PowerDischargeMetricsViewBinder {
         val numberStr = String.format(Locale.getDefault(), "%.1f", rate)
         val unitStr = "%/h"
         val fullText = "$numberStr$unitStr"
-        val spannable = SpannableString(fullText)
-        spannable.setSpan(
-            AbsoluteSizeSpan(11, true),
-            numberStr.length,
-            fullText.length,
-            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
-        return spannable
+        return UnitSpanFormatter.format(fullText)
     }
 
     /**
      * 将实际统计放电速度与有效时长组合格式化为复合富文本。
-     * 放电百分比数值与单位的文字样式大小完全对齐第一行放电速度百分比（数值 16sp 加粗高亮突出，"%/h" 单位 11sp 加粗微缩），
+     * 放电百分比数值与单位的文字样式大小完全对齐第一行放电速度百分比（单位比数值缩小 2 号），
      * 实际有效统计时长紧随其后（如 "5.2%/h 1d08h"），采用次要文本颜色与紧凑字号（10sp 常规字重）呈现。
      * 若数据缺失则展示 "--"。
      *
@@ -634,9 +682,9 @@ object PowerDischargeMetricsViewBinder {
         val fullText = if (durStr.isNotBlank()) "$numberStr$unitStr $durStr" else "$numberStr$unitStr"
         val spannable = SpannableString(fullText)
 
-        // "%/h" 单位字号微缩至 11sp，与第一行放电速度单位样式及大小（11sp bold）完全一致
+        // "%/h" 单位字号比数值缩小 2 号
         spannable.setSpan(
-            AbsoluteSizeSpan(11, true),
+            UnitSpanFormatter.SmallerUnitSpan(2f),
             numberStr.length,
             numberStr.length + unitStr.length,
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
@@ -938,9 +986,9 @@ object PowerDischargeMetricsViewBinder {
 
         // 1. 刷新放电速度概览卡片第一行（当前阶段放电速度速率 %/h）
         with(speedBinding) {
-            tvScreenOnSpeed.text = formatDischargeRateSpannable(subStats.screenOnDischargeRate)
-            tvScreenOffSpeed.text = formatDischargeRateSpannable(subStats.screenOffDischargeRate)
-            tvGlobalSpeed.text = formatDischargeRateSpannable(subStats.globalDischargeRate)
+            tvScreenOnSpeed.setUnitText(formatDischargeRateSpannable(subStats.screenOnDischargeRate))
+            tvScreenOffSpeed.setUnitText(formatDischargeRateSpannable(subStats.screenOffDischargeRate))
+            tvGlobalSpeed.setUnitText(formatDischargeRateSpannable(subStats.globalDischargeRate))
         }
 
         // 2. 刷新息屏、唤醒与深度睡眠三卡片指标
@@ -954,9 +1002,9 @@ object PowerDischargeMetricsViewBinder {
                 tvScreenOffCompare.text = "--"
                 tvScreenOffPower.text = "--"
             } else {
-                tvScreenOffPercent.text = if (subStats.screenOffPercent > 0f) {
+                tvScreenOffPercent.setUnitText(if (subStats.screenOffPercent > 0f) {
                     String.format(Locale.US, "%.1f%%", subStats.screenOffPercent)
-                } else "--"
+                } else "--")
 
                 val durText = formatSleepAwakeCardDuration(subStats.screenOffDurationMs)
                 val energyText = String.format(Locale.US, "%.3fWh", subStats.screenOffEnergyWh)
@@ -967,29 +1015,29 @@ object PowerDischargeMetricsViewBinder {
                 if (isMahUnit) {
                     val mahSubtitle = if (subStats.screenOffDrainMah > 0f) String.format(Locale.US, "%.1fmAh", subStats.screenOffDrainMah) else "--"
                     val energyDisplay = String.format(Locale.US, "%.3fWh", subStats.screenOffEnergyWh)
-                    tvScreenOffEnergy.text = mahSubtitle
-                    tvScreenOffCompare.text = energyDisplay
-                    tvScreenOffPower.text = offPowerText
+                    tvScreenOffEnergy.setUnitText(mahSubtitle)
+                    tvScreenOffCompare.setUnitText(energyDisplay)
+                    tvScreenOffPower.setUnitText(offPowerText)
                 } else {
-                    tvScreenOffEnergy.text = energyText
-                    tvScreenOffCompare.text = mahStr
-                    tvScreenOffPower.text = offPowerText
+                    tvScreenOffEnergy.setUnitText(energyText)
+                    tvScreenOffCompare.setUnitText(mahStr)
+                    tvScreenOffPower.setUnitText(offPowerText)
                 }
             }
 
             // 2.2 唤醒卡片
             if (subStats.screenOffAwakeDurationMs <= 0L && subStats.screenOffAwakeEnergyWh <= 0f) {
                 if (subStats.screenOffDurationMs > 0L) {
-                    tvAwakePercent.text = "0.0%"
+                    tvAwakePercent.setUnitText("0.0%")
                     tvAwakeDuration.text = "00s"
                     if (isMahUnit) {
-                        tvAwakeEnergy.text = "0.0mAh"
-                        tvAwakeCompare.text = "0.000Wh"
-                        tvAwakePower.text = "0.00W"
+                        tvAwakeEnergy.setUnitText("0.0mAh")
+                        tvAwakeCompare.setUnitText("0.000Wh")
+                        tvAwakePower.setUnitText("0.00W")
                     } else {
-                        tvAwakeEnergy.text = "0.000Wh"
-                        tvAwakeCompare.text = "0.0mAh"
-                        tvAwakePower.text = "0.00W"
+                        tvAwakeEnergy.setUnitText("0.000Wh")
+                        tvAwakeCompare.setUnitText("0.0mAh")
+                        tvAwakePower.setUnitText("0.00W")
                     }
                 } else {
                     tvAwakePercent.text = "--"
@@ -1006,7 +1054,7 @@ object PowerDischargeMetricsViewBinder {
                 } else if (subStats.screenOffAwakeDurationMs > 0L) {
                     "0.0%"
                 } else "--"
-                tvAwakePercent.text = awakePercentStr
+                tvAwakePercent.setUnitText(awakePercentStr)
 
                 val durText = formatSleepAwakeCardDuration(subStats.screenOffAwakeDurationMs)
                 val energyText = if (subStats.isScreenOffDecomposedAvailable && subStats.screenOffAwakeEnergyWh >= 0.001f) {
@@ -1036,29 +1084,29 @@ object PowerDischargeMetricsViewBinder {
                         "0.000Wh"
                     } else "--"
 
-                    tvAwakeEnergy.text = awakeMahSubtitle
-                    tvAwakeCompare.text = energyDisplay
-                    tvAwakePower.text = awakePowerText
+                    tvAwakeEnergy.setUnitText(awakeMahSubtitle)
+                    tvAwakeCompare.setUnitText(energyDisplay)
+                    tvAwakePower.setUnitText(awakePowerText)
                 } else {
-                    tvAwakeEnergy.text = energyText
-                    tvAwakeCompare.text = mahStr
-                    tvAwakePower.text = awakePowerText
+                    tvAwakeEnergy.setUnitText(energyText)
+                    tvAwakeCompare.setUnitText(mahStr)
+                    tvAwakePower.setUnitText(awakePowerText)
                 }
             }
 
             // 2.3 深度睡眠卡片
             if (subStats.screenOffDeepSleepDurationMs <= 0L && subStats.screenOffDeepSleepEnergyWh <= 0f) {
                 if (subStats.screenOffDurationMs > 0L) {
-                    tvSleepPercent.text = "0.0%"
+                    tvSleepPercent.setUnitText("0.0%")
                     tvSleepDuration.text = "00s"
                     if (isMahUnit) {
-                        tvSleepEnergy.text = "0.0mAh"
-                        tvSleepCompare.text = "0.000Wh"
-                        tvSleepPower.text = "0.00W"
+                        tvSleepEnergy.setUnitText("0.0mAh")
+                        tvSleepCompare.setUnitText("0.000Wh")
+                        tvSleepPower.setUnitText("0.00W")
                     } else {
-                        tvSleepEnergy.text = "0.000Wh"
-                        tvSleepCompare.text = "0.0mAh"
-                        tvSleepPower.text = "0.00W"
+                        tvSleepEnergy.setUnitText("0.000Wh")
+                        tvSleepCompare.setUnitText("0.0mAh")
+                        tvSleepPower.setUnitText("0.00W")
                     }
                 } else {
                     tvSleepPercent.text = "--"
@@ -1071,7 +1119,7 @@ object PowerDischargeMetricsViewBinder {
                 val sleepPercentStr = if (subStats.isScreenOffDecomposedAvailable && subStats.screenOffDeepSleepPercent > 0f) {
                     String.format(Locale.US, "%.1f%%", subStats.screenOffDeepSleepPercent)
                 } else "--"
-                tvSleepPercent.text = sleepPercentStr
+                tvSleepPercent.setUnitText(sleepPercentStr)
 
                 val durText = formatSleepAwakeCardDuration(subStats.screenOffDeepSleepDurationMs)
                 val energyText = if (subStats.isScreenOffDecomposedAvailable && subStats.screenOffDeepSleepEnergyWh > 0f) {
@@ -1095,13 +1143,13 @@ object PowerDischargeMetricsViewBinder {
                         String.format(Locale.US, "%.3fWh", subStats.screenOffDeepSleepEnergyWh)
                     } else "--"
 
-                    tvSleepEnergy.text = sleepMahSubtitle
-                    tvSleepCompare.text = energyDisplay
-                    tvSleepPower.text = sleepPowerText
+                    tvSleepEnergy.setUnitText(sleepMahSubtitle)
+                    tvSleepCompare.setUnitText(energyDisplay)
+                    tvSleepPower.setUnitText(sleepPowerText)
                 } else {
-                    tvSleepEnergy.text = energyText
-                    tvSleepCompare.text = mahStr
-                    tvSleepPower.text = sleepPowerText
+                    tvSleepEnergy.setUnitText(energyText)
+                    tvSleepCompare.setUnitText(mahStr)
+                    tvSleepPower.setUnitText(sleepPowerText)
                 }
             }
         }

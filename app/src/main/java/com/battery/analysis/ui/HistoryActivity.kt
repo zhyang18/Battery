@@ -33,6 +33,7 @@ import com.battery.analysis.databinding.ActivityHistoryBinding
 import com.battery.analysis.model.DecayStatistics
 import com.battery.analysis.model.HistoryRecord
 import com.battery.analysis.model.PeriodicDecayItem
+import com.battery.analysis.util.setUnitText
 import com.battery.analysis.viewmodel.BatteryViewModel
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -538,46 +539,46 @@ class HistoryActivity : AppCompatActivity() {
         // 1. 填充健康度衰减卡片数值
         if (stats.hasSufficientData) {
             stats.dailyDecayRate?.let {
-                tvDailyVal.text = formatDecayValue(it, 3)
+                tvDailyVal.setUnitText(formatDecayValue(it, 3))
                 tvDailyVal.setTextColor(getDecayTextColor(it))
             }
             stats.monthlyDecayRate?.let {
-                tvMonthlyVal.text = formatDecayValue(it, 2)
+                tvMonthlyVal.setUnitText(formatDecayValue(it, 2))
                 tvMonthlyVal.setTextColor(getDecayTextColor(it))
             }
             stats.yearlyDecayRate?.let {
-                tvYearlyVal.text = formatDecayValue(it, 2)
+                tvYearlyVal.setUnitText(formatDecayValue(it, 2))
                 tvYearlyVal.setTextColor(getDecayTextColor(it))
             }
         } else {
-            tvDailyVal.text = "--"
+            tvDailyVal.setUnitText("--")
             tvDailyVal.setTextColor(Color.parseColor("#9CA3AF"))
-            tvMonthlyVal.text = "--"
+            tvMonthlyVal.setUnitText("--")
             tvMonthlyVal.setTextColor(Color.parseColor("#9CA3AF"))
-            tvYearlyVal.text = "--"
+            tvYearlyVal.setUnitText("--")
             tvYearlyVal.setTextColor(Color.parseColor("#9CA3AF"))
         }
 
         // 2. 填充循环消耗卡片数值
         if (stats.hasCycleData) {
             stats.dailyCycleRate?.let {
-                tvDailyCycle.text = formatCycleRate(it, 2)
+                tvDailyCycle.setUnitText(formatCycleRate(it, 2))
                 tvDailyCycle.setTextColor(Color.parseColor("#3B82F6"))
             }
             stats.monthlyCycleRate?.let {
-                tvMonthlyCycle.text = formatCycleRate(it, 1)
+                tvMonthlyCycle.setUnitText(formatCycleRate(it, 1))
                 tvMonthlyCycle.setTextColor(Color.parseColor("#3B82F6"))
             }
             stats.yearlyCycleRate?.let {
-                tvYearlyCycle.text = formatCycleRate(it, 0)
+                tvYearlyCycle.setUnitText(formatCycleRate(it, 0))
                 tvYearlyCycle.setTextColor(Color.parseColor("#3B82F6"))
             }
         } else {
-            tvDailyCycle.text = "--"
+            tvDailyCycle.setUnitText("--")
             tvDailyCycle.setTextColor(Color.parseColor("#9CA3AF"))
-            tvMonthlyCycle.text = "--"
+            tvMonthlyCycle.setUnitText("--")
             tvMonthlyCycle.setTextColor(Color.parseColor("#9CA3AF"))
-            tvYearlyCycle.text = "--"
+            tvYearlyCycle.setUnitText("--")
             tvYearlyCycle.setTextColor(Color.parseColor("#9CA3AF"))
         }
 
@@ -641,9 +642,9 @@ class HistoryActivity : AppCompatActivity() {
                     } else ""
 
                     tvSubInfo.text = "${getString(R.string.period_sample_count_format, item.sampleCount)}$cycleStr"
-                    tvDecayBadge.text = item.formatDecay(this@HistoryActivity)
+                    tvDecayBadge.setUnitText(item.formatDecay(this@HistoryActivity))
                     tvDecayBadge.setTextColor(getDecayTextColor(item.decay))
-                    tvRangeText.text = String.format(Locale.getDefault(), "%.2f%% → %.2f%%", item.startHealth, item.endHealth)
+                    tvRangeText.setUnitText(String.format(Locale.getDefault(), "%.2f%% → %.2f%%", item.startHealth, item.endHealth))
 
                     if (index == items.size - 1) {
                         divider.visibility = View.GONE

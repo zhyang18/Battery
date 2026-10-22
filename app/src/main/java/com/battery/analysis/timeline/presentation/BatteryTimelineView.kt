@@ -30,6 +30,7 @@ import com.battery.analysis.timeline.util.DrawableBitmapCache
 import com.battery.analysis.timeline.util.TimelineLayoutCalculator
 import com.battery.analysis.timeline.util.TimelineScaleCalculator
 import com.battery.analysis.util.BatteryEnergyCalculator
+import com.battery.analysis.util.UnitSpanFormatter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -352,6 +353,12 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     private val headerMetricValuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = sp9_5
+        isFakeBoldText = true
+    }
+
+    // 顶部固定信息栏单位文本画笔（字号比数值缩小 2sp，为 7.5sp）
+    private val headerMetricUnitPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp7_5
         isFakeBoldText = true
     }
 
@@ -756,8 +763,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         val h = height.toFloat()
         if (w <= 0f || h <= 0f) return
 
-        val contentLeft = dp14
-        val contentRight = w - dp14
+        val contentLeft = dp8
+        val contentRight = w - dp8
         val contentWidth = max(0f, contentRight - contentLeft)
 
         val visibleStart = timelineState.visibleStartTimestamp
@@ -864,8 +871,8 @@ class BatteryTimelineView @JvmOverloads constructor(
         if (visibleStart <= 0L) visibleStart = now - 1800_000L
         if (visibleEnd <= visibleStart) visibleEnd = visibleStart + 1800_000L
 
-        val contentLeft = dp14
-        val contentRight = w - dp14
+        val contentLeft = dp8
+        val contentRight = w - dp8
         val contentWidth = max(0f, contentRight - contentLeft)
 
         // 底部向上严格锚定布局：
@@ -951,7 +958,9 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
-     * 绘制时间轴网格虚线与底部时间刻度文字（以对应时间点为中心严格居中对齐）。
+     * 绘制时间轴网格虚线与底部时间刻度文字。
+     * 所有时间刻度文字（包括左端起始时间、中间各时间点与右端当前时间）均以对应时间刻度点 x 严格居中对齐绘制，
+     * 确保文字中心与上方垂直虚线网格、刻度小短线以及状态条端点完全中心对齐。
      *
      * @param canvas 绘图画布 [Canvas]
      * @param contentLeft 图表左边界 X 坐标
@@ -969,20 +978,15 @@ class BatteryTimelineView @JvmOverloads constructor(
         textY: Float
     ) {
         val ticks = cachedTicks
-        val w = width.toFloat()
+        textPaint.textAlign = Paint.Align.CENTER
         for (tick in ticks) {
             val x = contentLeft + tick.xRatio * contentWidth
             // 垂直虚线网格
             canvas.drawLine(x, dp6, x, mainHeight, gridPaint)
             // 刻度小短线
             canvas.drawLine(x, tickTop, x, tickTop + dp3, gridPaint)
-            // 时间文本以对应时间点 x 为中心严格居中对齐绘制，并在屏幕边缘做安全防截断
-            val textWidth = textPaint.measureText(tick.label)
-            val halfWidth = textWidth / 2f
-            val minTextX = halfWidth + dp2
-            val maxTextX = maxOf(minTextX, w - halfWidth - dp2)
-            val textX = x.coerceIn(minTextX, maxTextX)
-            canvas.drawText(tick.label, textX, textY, textPaint)
+            // 时间文本以对应时间点 x 为中心严格居中对齐绘制
+            canvas.drawText(tick.label, x, textY, textPaint)
         }
     }
 
@@ -994,8 +998,8 @@ class BatteryTimelineView @JvmOverloads constructor(
     private fun drawAppEventsLayer(canvas: Canvas) {
         val cornerRadius = dp1_5
         val iconRenderSize = dp11.toInt().coerceAtLeast(1)
-        val cLeft = dp14
-        val cRight = width.toFloat() - dp14
+        val cLeft = dp8
+        val cRight = width.toFloat() - dp8
 
         for (item in cachedSlotItems) {
             // 视口横向可见性过滤裁剪（Culling）：完全超出内容边界的图标直接跳过
@@ -2370,32 +2374,32 @@ class BatteryTimelineView @JvmOverloads constructor(
         // 绘制电量（深天蓝 #3A7FF0，第 1 列居中）
         if (levelStr != null) {
             headerMetricValuePaint.color = colorBattery
-            canvas.drawText(levelStr, colLevelCenter, textY, headerMetricValuePaint)
+            drawMetricTextWithSmallUnit(canvas, levelStr, colLevelCenter, textY, headerMetricValuePaint, headerMetricUnitPaint)
         }
 
         // 绘制能量（紧随电量之后，同深天蓝 #3A7FF0，第 2 列居中，触摸检测区域动态同步）
         energyTouchRect.set(colEnergyLeft, 0f, colEnergyRight, dp28)
         if (energyStr != null) {
             headerMetricValuePaint.color = colorBattery
-            canvas.drawText(energyStr, colEnergyCenter, textY, headerMetricValuePaint)
+            drawMetricTextWithSmallUnit(canvas, energyStr, colEnergyCenter, textY, headerMetricValuePaint, headerMetricUnitPaint)
         }
 
         // 绘制功耗（浅天蓝 #90CAF9，第 3 列居中）
         if (powerStr != null) {
             headerMetricValuePaint.color = colorPower
-            canvas.drawText(powerStr, colPowerCenter, textY, headerMetricValuePaint)
+            drawMetricTextWithSmallUnit(canvas, powerStr, colPowerCenter, textY, headerMetricValuePaint, headerMetricUnitPaint)
         }
 
         // 绘制温度（红色 #FF5252，第 4 列居中）
         if (tempStr != null) {
             headerMetricValuePaint.color = colorTemp
-            canvas.drawText(tempStr, colTempCenter, textY, headerMetricValuePaint)
+            drawMetricTextWithSmallUnit(canvas, tempStr, colTempCenter, textY, headerMetricValuePaint, headerMetricUnitPaint)
         }
 
         // 绘制电压（金黄 #FFD54F，第 5 列居中）
         if (voltStr != null) {
             headerMetricValuePaint.color = colorVoltage
-            canvas.drawText(voltStr, colVoltCenter, textY, headerMetricValuePaint)
+            drawMetricTextWithSmallUnit(canvas, voltStr, colVoltCenter, textY, headerMetricValuePaint, headerMetricUnitPaint)
         }
 
         // 3. 若处于触控活跃状态，绘制垂直虚线游标与各折线交点高亮点
@@ -2459,6 +2463,44 @@ class BatteryTimelineView @JvmOverloads constructor(
     }
 
     /**
+     * 绘制带有微缩单位的单行居中文本（单位字号比前面的主数值缩小 2sp 绘制）。
+     *
+     * @param canvas 画布对象
+     * @param text 待绘制的文本（如 "75%", "2.48W", "32.5℃"）
+     * @param centerX 该列水平中心 X 坐标
+     * @param y 基线 Y 坐标
+     * @param basePaint 主数值画笔（9.5sp）
+     * @param unitPaint 单位画笔（7.5sp，缩小 2sp）
+     */
+    private fun drawMetricTextWithSmallUnit(
+        canvas: Canvas,
+        text: String,
+        centerX: Float,
+        y: Float,
+        basePaint: Paint,
+        unitPaint: Paint
+    ) {
+        val split = UnitSpanFormatter.splitValueAndUnit(text)
+        if (split == null || split.second.isEmpty()) {
+            basePaint.textAlign = Paint.Align.CENTER
+            canvas.drawText(text, centerX, y, basePaint)
+            return
+        }
+        val (valuePart, unitPart) = split
+        basePaint.textAlign = Paint.Align.LEFT
+        unitPaint.textAlign = Paint.Align.LEFT
+        unitPaint.color = basePaint.color
+
+        val valueWidth = basePaint.measureText(valuePart)
+        val unitWidth = unitPaint.measureText(unitPart)
+        val totalWidth = valueWidth + unitWidth
+
+        val startX = centerX - totalWidth * 0.5f
+        canvas.drawText(valuePart, startX, y, basePaint)
+        canvas.drawText(unitPart, startX + valueWidth, y, unitPaint)
+    }
+
+    /**
      * 绘制触控探查时针对 "+N" 溢出折叠应用的自适应悬浮气泡卡片（Tooltip）。
      * 仅当选中的时间切片内存在超出纵向最大显示行数的 "+N" 溢出应用时才触发显示，
      * 卡片内部仅纯净展示溢出被折叠的 N 款应用图标，并精准定位在顶部探查看板的正下方。
@@ -2505,8 +2547,8 @@ class BatteryTimelineView @JvmOverloads constructor(
 
         // 顶部固定看板底部为 dp24，卡片固定定位在 dp26 处（即看板正下方）
         val boxTop = dp26
-        val minLeft = dp14
-        val maxLeft = maxOf(minLeft, width - dp14 - boxWidth)
+        val minLeft = dp8
+        val maxLeft = maxOf(minLeft, width - dp8 - boxWidth)
         val boxLeft = (pX - boxWidth / 2f).coerceIn(minLeft, maxLeft)
 
         // 5. 绘制卡片圆角背景与微暗边框
@@ -2772,14 +2814,14 @@ class BatteryTimelineView @JvmOverloads constructor(
 
     /**
      * 通知游标移动回调。
-     * 精确对齐图表可视内容左右边距（左右统一各 dp14 边距），
+     * 精确对齐图表可视内容左右边距（左右统一各 dp8 边距），
      * 确保向外部派发的时间戳与图表内部高亮游标指示看板 100% 像素级一致。
      *
      * @param x 游标当前 X 像素坐标
      */
     private fun notifyCursorMove(x: Float) {
-        val contentLeft = dp14
-        val contentRight = width.toFloat() - dp14
+        val contentLeft = dp8
+        val contentRight = width.toFloat() - dp8
         val contentWidth = maxOf(0f, contentRight - contentLeft)
         if (contentWidth <= 0f) return
         val clampedX = x.coerceIn(contentLeft, contentRight)

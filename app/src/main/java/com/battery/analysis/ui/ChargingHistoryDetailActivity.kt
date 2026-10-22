@@ -16,6 +16,7 @@ import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.ChargingHistoryRecord
 import com.battery.analysis.model.PowerDisplayUnit
 import com.battery.analysis.util.BatteryEnergyCalculator
+import com.battery.analysis.util.setUnitText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -149,54 +150,54 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
         binding.tvChargeTypeBadge.text = record.chargeType.ifEmpty { "外部供电" }
         binding.tvDetailTimeRange.text = record.getFormattedTimeRange()
 
-        binding.tvTotalDuration.text = record.getFormattedDuration()
-        binding.tvScreenOnDuration.text = record.getFormattedScreenOnDuration()
-        binding.tvScreenOffDuration.text = record.getFormattedScreenOffDuration()
+        binding.tvTotalDuration.setUnitText(record.getFormattedDuration())
+        binding.tvScreenOnDuration.setUnitText(record.getFormattedScreenOnDuration())
+        binding.tvScreenOffDuration.setUnitText(record.getFormattedScreenOffDuration())
 
         val effEnd = record.getEffectiveEndLevel()
         val effGain = record.getEffectiveLevelGain()
         val sign = if (effGain >= 0) "+${effGain}%" else "${effGain}%"
-        binding.tvLevelChange.text = "${record.startLevel}% → ${effEnd}% ($sign)"
+        binding.tvLevelChange.setUnitText("${record.startLevel}% → ${effEnd}% ($sign)")
 
         val prefs = getSharedPreferences(PowerDisplayUnit.PREFS_NAME, Context.MODE_PRIVATE)
         val unit = PowerDisplayUnit.fromId(prefs.getInt(PowerDisplayUnit.PREF_KEY_POWER_DISPLAY_UNIT, PowerDisplayUnit.WH.id))
         binding.chargingChartView.setDisplayUnit(unit)
 
-        binding.tvChargedEnergy.text = BatteryEnergyCalculator.formatChargingDetailEnergy(
+        binding.tvChargedEnergy.setUnitText(BatteryEnergyCalculator.formatChargingDetailEnergy(
             record.chargedEnergyWh,
             unit
-        )
+        ))
 
-        binding.tvAvgPower.text = String.format(
+        binding.tvAvgPower.setUnitText(String.format(
             Locale.getDefault(),
             "%.2f W",
             record.avgPowerWatts
-        )
+        ))
 
-        binding.tvPeakPower.text = String.format(
+        binding.tvPeakPower.setUnitText(String.format(
             Locale.getDefault(),
             "%.2f W",
             record.maxPowerWatts
-        )
+        ))
 
-        binding.tvMaxTemp.text = String.format(
+        binding.tvMaxTemp.setUnitText(String.format(
             Locale.getDefault(),
             "%.1f ℃",
             record.maxTemperature
-        )
+        ))
 
         val screenOnGain = record.getScreenOnLevelGain()
         val screenOnSign = if (screenOnGain >= 0) "+${screenOnGain}%" else "${screenOnGain}%"
-        binding.tvScreenOnLevelGain.text = screenOnSign
+        binding.tvScreenOnLevelGain.setUnitText(screenOnSign)
 
         if (record.screenOffDurationMs > 0L || record.durationMs > 0L) {
             binding.layoutScreenOffSpecial.visibility = View.VISIBLE
             val screenOffSign = if (record.screenOffLevelGain >= 0) "+${record.screenOffLevelGain}%" else "${record.screenOffLevelGain}%"
-            binding.tvScreenOffLevelGain.text = screenOffSign
-            binding.tvScreenOffEnergy.text = BatteryEnergyCalculator.formatChargingDetailEnergy(
+            binding.tvScreenOffLevelGain.setUnitText(screenOffSign)
+            binding.tvScreenOffEnergy.setUnitText(BatteryEnergyCalculator.formatChargingDetailEnergy(
                 record.screenOffEnergyWh,
                 unit
-            )
+            ))
         } else {
             binding.layoutScreenOffSpecial.visibility = View.GONE
         }
@@ -265,7 +266,7 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
         val effEnd = record.getEffectiveEndLevel()
         val effGain = record.getEffectiveLevelGain()
         val sign = if (effGain >= 0) "+${effGain}%" else "${effGain}%"
-        tvPreviewSummary.text = "⚡ $sign (${record.startLevel}% → ${effEnd}%)   •   ⏱️ ${record.getFormattedDuration()}"
+        tvPreviewSummary.setUnitText("⚡ $sign (${record.startLevel}% → ${effEnd}%)   •   ⏱️ ${record.getFormattedDuration()}")
 
         val dialog = AlertDialog.Builder(this)
             .setView(dialogView)

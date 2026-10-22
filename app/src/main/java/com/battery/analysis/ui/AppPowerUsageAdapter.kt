@@ -28,6 +28,7 @@ import com.battery.analysis.model.PowerUsageItem
 import com.battery.analysis.model.SevenDaysDischargeStats
 import com.battery.analysis.timeline.presentation.BatteryTimelineState
 import com.battery.analysis.timeline.util.DrawableBitmapCache
+import com.battery.analysis.util.setUnitText
 import com.google.android.material.shape.CornerFamily
 import com.google.android.material.shape.ShapeAppearanceModel
 import android.graphics.Typeface
@@ -951,24 +952,24 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             } else {
                 "Max:--"
             }
-            tvAvgInfo.text = "Avg:$pwrStr, $avgTempStr | $maxTempStr"
+            tvAvgInfo.setUnitText("Avg:$pwrStr, $avgTempStr | $maxTempStr")
 
             val effectiveTotalEnergy = if (cachedTotalAppEnergyWh > 0f) {
                 cachedTotalAppEnergyWh
             } else {
                 displayAppItems.sumOf { it.getForegroundEnergyValue().toDouble() }.toFloat()
             }
-            tvAppEnergy.text = formatAppEnergyWithPercentage(item, effectiveTotalEnergy, currentDisplayUnit)
+            tvAppEnergy.setUnitText(formatAppEnergyWithPercentage(item, effectiveTotalEnergy, currentDisplayUnit))
 
             val hasFg = item.foregroundTimeMs > 0L
             val hasBg = showBackgroundStats && item.backgroundTimeMs > 0L
 
             if (hasFg) {
                 layoutFgDuration.visibility = View.VISIBLE
-                tvFgDuration.text = item.getFormattedDuration()
+                tvFgDuration.setUnitText(item.getFormattedDuration())
             } else if (!hasBg) {
                 layoutFgDuration.visibility = View.VISIBLE
-                tvFgDuration.text = "00s"
+                tvFgDuration.setUnitText("00s")
             } else {
                 layoutFgDuration.visibility = View.GONE
             }
@@ -977,7 +978,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
             if (hasBg) {
                 layoutBgDuration.visibility = View.VISIBLE
-                tvBgDuration.text = item.getFormattedBackgroundDuration()
+                tvBgDuration.setUnitText(item.getFormattedBackgroundDuration())
             } else {
                 layoutBgDuration.visibility = View.GONE
             }

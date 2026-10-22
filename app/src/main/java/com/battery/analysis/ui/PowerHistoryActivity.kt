@@ -23,6 +23,7 @@ import com.battery.analysis.db.PowerUsageDbHelper
 import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.PowerHistorySummary
 import com.battery.analysis.model.PowerUsageRecord
+import com.battery.analysis.util.setUnitText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -609,7 +610,7 @@ class PowerHistoryActivity : AppCompatActivity() {
 
         // 1. 范围与累计掉电百分比
         val dropText = if (summary.totalLevelDropPercent > 0) " · 累计掉电 -${summary.totalLevelDropPercent}%" else ""
-        tvSubtitle.text = "📊 统计范围：共 ${summary.recordCount} 条放电记录$dropText"
+        tvSubtitle.setUnitText("📊 统计范围：共 ${summary.recordCount} 条放电记录$dropText")
 
         // 2. 时长行（纯数字时间简写与占比）
         val onDurPct = if (summary.totalDurationMs > 0L) {
@@ -618,11 +619,11 @@ class PowerHistoryActivity : AppCompatActivity() {
         val offDurPct = if (summary.totalDurationMs > 0L) {
             String.format(java.util.Locale.getDefault(), "(%.1f%%)", (summary.screenOffDurationMs.toDouble() / summary.totalDurationMs.toDouble()) * 100.0)
         } else ""
-        dialogView.findViewById<TextView>(R.id.tv_dialog_screen_on_dur).text = summary.getFormattedScreenOnDuration()
-        dialogView.findViewById<TextView>(R.id.tv_dialog_screen_on_dur_pct).text = onDurPct
-        dialogView.findViewById<TextView>(R.id.tv_dialog_screen_off_dur).text = summary.getFormattedScreenOffDuration()
-        dialogView.findViewById<TextView>(R.id.tv_dialog_screen_off_dur_pct).text = offDurPct
-        dialogView.findViewById<TextView>(R.id.tv_dialog_total_dur).text = summary.getFormattedTotalDuration()
+        dialogView.findViewById<TextView>(R.id.tv_dialog_screen_on_dur).setUnitText(summary.getFormattedScreenOnDuration())
+        dialogView.findViewById<TextView>(R.id.tv_dialog_screen_on_dur_pct).setUnitText(onDurPct)
+        dialogView.findViewById<TextView>(R.id.tv_dialog_screen_off_dur).setUnitText(summary.getFormattedScreenOffDuration())
+        dialogView.findViewById<TextView>(R.id.tv_dialog_screen_off_dur_pct).setUnitText(offDurPct)
+        dialogView.findViewById<TextView>(R.id.tv_dialog_total_dur).setUnitText(summary.getFormattedTotalDuration())
 
         // 3. 能量行（纯数值 Wh 与纯数值等效 mAh，单位已前置于左侧指标列）
         val onMah = summary.convertEnergyWhToMah(summary.screenOnEnergyWh)
@@ -663,7 +664,7 @@ class PowerHistoryActivity : AppCompatActivity() {
         // 6. 底部计算基准总能量
         val tvBaseline = dialogView.findViewById<TextView>(R.id.tv_dialog_baseline_energy)
         summary.batteryCapacityWh?.let { capWh ->
-            tvBaseline.text = String.format(java.util.Locale.getDefault(), "🔋 计算基准总能量：%.2f Wh", capWh)
+            tvBaseline.setUnitText(String.format(java.util.Locale.getDefault(), "🔋 计算基准总能量：%.2f Wh", capWh))
             tvBaseline.visibility = View.VISIBLE
         } ?: run {
             tvBaseline.visibility = View.GONE

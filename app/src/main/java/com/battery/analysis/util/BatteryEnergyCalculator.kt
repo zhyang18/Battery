@@ -750,7 +750,7 @@ object BatteryEnergyCalculator {
             ROW_SCREEN_ON -> {
                 val capacityStr = formatPredictedCapacity(predictedCapacityWh, predictedCapacityMah, nominalVoltageVolts)
                 buildString {
-                    append("【亮屏放电速度】\n")
+                    append("【亮屏续航预测】\n")
                     if (sessionDurStr.isNotBlank()) {
                         append("• 当前会话放电速度：$sessionRateStr (亮屏 $sessionDurStr)\n")
                     } else {
@@ -836,7 +836,7 @@ object BatteryEnergyCalculator {
             }
             ROW_SCREEN_OFF -> {
                 buildString {
-                    append("【息屏放电速度】\n")
+                    append("【息屏续航预测】\n")
                     if (sessionDurStr.isNotBlank()) {
                         append("• 当前会话放电速度：$sessionRateStr (息屏 $sessionDurStr)\n")
                     } else {
@@ -920,7 +920,7 @@ object BatteryEnergyCalculator {
             ROW_GLOBAL -> {
                 val sceneFullDurationStr = formatDurationWithSeconds(sceneFullDurationMs)
                 buildString {
-                    append("【全局放电速度】\n")
+                    append("【全局续航预测】\n")
                     if (sessionDurStr.isNotBlank()) {
                         append("• 当前会话放电速度：$sessionRateStr (放电 $sessionDurStr)\n")
                     } else {

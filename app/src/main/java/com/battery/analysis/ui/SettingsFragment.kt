@@ -39,6 +39,7 @@ import com.battery.analysis.databinding.FragmentSettingsBinding
 import com.battery.analysis.service.KeepAliveAccessibilityService
 import com.battery.analysis.manager.LanguageManager
 import com.battery.analysis.model.BackupData
+import com.battery.analysis.util.setUnitText
 import com.battery.analysis.viewmodel.BatteryViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
@@ -472,8 +473,8 @@ class SettingsFragment : Fragment() {
         fun updatePreview() {
             val dualFactor = if (switchDualCell.isChecked) 2.0f else 1.0f
             val calibratedMa = Math.abs(cachedRawCurrentMa * selectedMult * dualFactor)
-            tvRawCurrent.text = String.format(java.util.Locale.getDefault(), "%.1f mA", Math.abs(cachedRawCurrentMa))
-            tvCalibratedCurrent.text = String.format(java.util.Locale.getDefault(), "%.1f mA", calibratedMa)
+            tvRawCurrent.setUnitText(String.format(java.util.Locale.getDefault(), "%.1f mA", Math.abs(cachedRawCurrentMa)))
+            tvCalibratedCurrent.setUnitText(String.format(java.util.Locale.getDefault(), "%.1f mA", calibratedMa))
         }
 
         // 单选互斥逻辑与即时刷新预览
@@ -1190,12 +1191,12 @@ class SettingsFragment : Fragment() {
 
         val currentOpacity = com.battery.analysis.manager.FloatingWindowManager.getOpacity(ctx)
         seekOpacity.progress = currentOpacity
-        tvOpacityValue.text = "${currentOpacity}%"
+        tvOpacityValue.setUnitText("${currentOpacity}%")
 
         seekOpacity.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
                 val validProgress = progress.coerceIn(20, 100)
-                tvOpacityValue.text = "${validProgress}%"
+                tvOpacityValue.setUnitText("${validProgress}%")
                 if (fromUser) {
                     com.battery.analysis.manager.FloatingWindowManager.setOpacity(ctx, validProgress)
                 }
@@ -1210,7 +1211,7 @@ class SettingsFragment : Fragment() {
             val target = (current - 5).coerceIn(20, 100)
             if (target != current) {
                 seekOpacity.progress = target
-                tvOpacityValue.text = "${target}%"
+                tvOpacityValue.setUnitText("${target}%")
                 com.battery.analysis.manager.FloatingWindowManager.setOpacity(ctx, target)
             }
         }
@@ -1219,7 +1220,7 @@ class SettingsFragment : Fragment() {
             val target = (current + 5).coerceIn(20, 100)
             if (target != current) {
                 seekOpacity.progress = target
-                tvOpacityValue.text = "${target}%"
+                tvOpacityValue.setUnitText("${target}%")
                 com.battery.analysis.manager.FloatingWindowManager.setOpacity(ctx, target)
             }
         }

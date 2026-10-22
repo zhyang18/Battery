@@ -42,6 +42,8 @@ import com.battery.analysis.timeline.presentation.AppEnergyDetailBottomSheetDial
 import com.battery.analysis.timeline.presentation.TimelineMetric
 import com.battery.analysis.util.BatteryEnergyCalculator
 import com.battery.analysis.util.BubbleTooltipHelper
+import com.battery.analysis.util.UnitSpanFormatter
+import com.battery.analysis.util.setUnitText
 import android.os.PowerManager
 import com.battery.analysis.provider.NormalApiProvider
 import kotlinx.coroutines.Dispatchers
@@ -1488,7 +1490,8 @@ class PowerUsageFragment : Fragment() {
             sessionDurationMs = sessionDurationMs
         )
         if (message.isNotBlank()) {
-            showBubbleTooltip(anchorView, message, autoDismissMs = 0L)
+            val styledMessage = PowerDischargeMetricsViewBinder.formatDischargeSpeedBubbleMessage(message)
+            showBubbleTooltip(anchorView, styledMessage, autoDismissMs = 0L)
         }
     }
 
@@ -1734,9 +1737,9 @@ class PowerUsageFragment : Fragment() {
             "--"
         }
 
-        binding.tvMetricScreenOnPower.text = onPowerStr
-        binding.tvMetricGlobalPower.text = avgPowerStr
-        binding.tvMetricScreenOffPower.text = offPowerStr
+        binding.tvMetricScreenOnPower.setUnitText(onPowerStr)
+        binding.tvMetricGlobalPower.setUnitText(avgPowerStr)
+        binding.tvMetricScreenOffPower.setUnitText(offPowerStr)
 
         // 刷新列表内放电速度概览卡片（包含全局放电速度、亮屏放电速度、息屏放电速度三个主要模块）
         val totalCapacityWh = snapshot.totalEnergyWh
@@ -1754,9 +1757,9 @@ class PowerUsageFragment : Fragment() {
             BatteryEnergyCalculator.ROW_GLOBAL, totalCapacityWh, overview
         )
 
-        binding.tvMetricScreenOnSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(onSessionRate)
-        binding.tvMetricScreenOffSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(offSessionRate)
-        binding.tvMetricGlobalSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(globalSessionRate)
+        binding.tvMetricScreenOnSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(onSessionRate))
+        binding.tvMetricScreenOffSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(offSessionRate))
+        binding.tvMetricGlobalSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(globalSessionRate))
 
         adapter.updateOverviewStats(
             overviewStats = overview,
@@ -1832,7 +1835,7 @@ class PowerUsageFragment : Fragment() {
 
         // 2. 填充整合版大卡片：环形进度条与中心大字
         chargingView.circleProgressLevel.setProgress(currentPoint.batteryLevel)
-        chargingView.tvChargingCurrentPercent.text = "${currentPoint.batteryLevel}%"
+        chargingView.tvChargingCurrentPercent.setUnitText("${currentPoint.batteryLevel}%")
 
         // 4. 充电状态标题与屏幕常亮灯泡控制
         chargingView.tvChargingStateTitle.text = if (summary.isCharging) {
@@ -1852,7 +1855,7 @@ class PowerUsageFragment : Fragment() {
         } else {
             String.format(Locale.getDefault(), "+%.2fW", pWatts)
         }
-        chargingView.tvMetricBatteryPower.text = batteryPowerText
+        chargingView.tvMetricBatteryPower.setUnitText(batteryPowerText)
 
         // USB 输入功率：严格遵循方案 B，仅呈现底层真实硬件传感器物理采样，严禁任何人工经验折算（如除以 0.88f）
         val usbRealWatts = com.battery.analysis.util.SysfsBatterySampler.getUsbInputPowerWatts()
@@ -1863,19 +1866,19 @@ class PowerUsageFragment : Fragment() {
         } else {
             "0.0W"
         }
-        chargingView.tvMetricUsbPower.text = usbPowerText
+        chargingView.tvMetricUsbPower.setUnitText(usbPowerText)
 
         // 行 2（温度上方）：平均充电功率与峰值功率
-        chargingView.tvMetricAvgPower.text = String.format(Locale.getDefault(), "%.2fW", summary.avgPowerWatts)
-        chargingView.tvMetricMaxPower.text = String.format(Locale.getDefault(), "%.2fW", summary.maxPowerWatts)
+        chargingView.tvMetricAvgPower.setUnitText(String.format(Locale.getDefault(), "%.2fW", summary.avgPowerWatts))
+        chargingView.tvMetricMaxPower.setUnitText(String.format(Locale.getDefault(), "%.2fW", summary.maxPowerWatts))
 
         // 行 3：当前温度与充电期间最高温度
-        chargingView.tvMetricTemp.text = String.format(Locale.getDefault(), "%.1f℃", currentPoint.temperature)
-        chargingView.tvMetricMaxTemp.text = String.format(Locale.getDefault(), "%.1f℃", summary.maxTemperature)
+        chargingView.tvMetricTemp.setUnitText(String.format(Locale.getDefault(), "%.1f℃", currentPoint.temperature))
+        chargingView.tvMetricMaxTemp.setUnitText(String.format(Locale.getDefault(), "%.1f℃", summary.maxTemperature))
 
         // 行 4（温度下方）：充电瞬时电流与电池电压
-        chargingView.tvMetricCurrent.text = String.format(Locale.getDefault(), "%.0fmA", currentPoint.currentMa)
-        chargingView.tvMetricVoltage.text = String.format(Locale.getDefault(), "%.3fv", currentPoint.voltageVolts)
+        chargingView.tvMetricCurrent.setUnitText(String.format(Locale.getDefault(), "%.0fmA", currentPoint.currentMa))
+        chargingView.tvMetricVoltage.setUnitText(String.format(Locale.getDefault(), "%.3fv", currentPoint.voltageVolts))
 
         // 行 5：电池容量与标称等效能量
         val capacityMah = NormalApiProvider.getDesignCapacity(requireContext())
@@ -1883,9 +1886,9 @@ class PowerUsageFragment : Fragment() {
             val nominalVoltage = com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
             val nominalWh = (capacityMah * nominalVoltage) / 1000f
             if (currentDisplayUnit == PowerDisplayUnit.MAH) {
-                chargingView.tvMetricCapacityEnergy.text = "${capacityMah.toInt()}mAh (≈${String.format(Locale.getDefault(), "%.1f", nominalWh)}Wh)"
+                chargingView.tvMetricCapacityEnergy.setUnitText("${capacityMah.toInt()}mAh (≈${String.format(Locale.getDefault(), "%.1f", nominalWh)}Wh)")
             } else {
-                chargingView.tvMetricCapacityEnergy.text = "${String.format(Locale.getDefault(), "%.1f", nominalWh)}Wh (≈${capacityMah.toInt()}mAh)"
+                chargingView.tvMetricCapacityEnergy.setUnitText("${String.format(Locale.getDefault(), "%.1f", nominalWh)}Wh (≈${capacityMah.toInt()}mAh)")
             }
         } else {
             chargingView.tvMetricCapacityEnergy.text = "--"
@@ -1902,13 +1905,13 @@ class PowerUsageFragment : Fragment() {
 
         // 第一行：亮屏数据（时间格式 00:00，百分比与能量）
         chargingView.tvChargingScreenOnDuration.text = formatDurationColon(screenOnDurationMs)
-        chargingView.tvChargingScreenOnLevelGain.text = "+$screenOnLevelGain%"
-        chargingView.tvChargingScreenOnEnergyGain.text = BatteryEnergyCalculator.formatChargingGainEnergy(screenOnEnergyWh, currentDisplayUnit)
+        chargingView.tvChargingScreenOnLevelGain.setUnitText("+$screenOnLevelGain%")
+        chargingView.tvChargingScreenOnEnergyGain.setUnitText(BatteryEnergyCalculator.formatChargingGainEnergy(screenOnEnergyWh, currentDisplayUnit))
 
         // 第二行：息屏数据（时间格式 00:00，百分比与能量，与亮屏行严格列对齐）
         chargingView.tvChargingScreenOffDuration.text = formatDurationColon(summary.screenOffDurationMs)
-        chargingView.tvChargingScreenOffLevelGain.text = "+${summary.screenOffLevelGain}%"
-        chargingView.tvChargingScreenOffEnergyGain.text = BatteryEnergyCalculator.formatChargingGainEnergy(summary.screenOffEnergyWh, currentDisplayUnit)
+        chargingView.tvChargingScreenOffLevelGain.setUnitText("+${summary.screenOffLevelGain}%")
+        chargingView.tvChargingScreenOffEnergyGain.setUnitText(BatteryEnergyCalculator.formatChargingGainEnergy(summary.screenOffEnergyWh, currentDisplayUnit))
     }
 
     private var lastQueryAppEventsTime = 0L
@@ -2039,7 +2042,7 @@ class PowerUsageFragment : Fragment() {
         val gain = (summary.currentLevel - summary.startLevel).coerceAtLeast(0)
         val gainSign = if (gain >= 0) "+$gain%" else "$gain%"
         val pointCount = points.size
-        tvSummary.text = "🔋 电量 ${summary.startLevel}% → ${summary.currentLevel}% ($gainSign)   •   📊 $pointCount 个采样点"
+        tvSummary.setUnitText("🔋 电量 ${summary.startLevel}% → ${summary.currentLevel}% ($gainSign)   •   📊 $pointCount 个采样点")
 
         val dialog = AlertDialog.Builder(requireContext())
             .setView(dialogView)
@@ -2241,24 +2244,24 @@ class PowerUsageFragment : Fragment() {
 
         // 第一行：亮屏数据（图标已由 XML 设置）
         val onEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(onEnergy, currentDisplayUnit)
-        binding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
-        binding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(onEnergyText, onEnergyRatioStr)
-        binding.tvMetricScreenOnPower.text = onPowerStr
-        binding.tvMetricScreenOnSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(onSessionRate)
+        binding.tvMetricScreenOnTime.setUnitText(formatValueWithSmallPercent(onDurationStr, onDurationRatioStr))
+        binding.tvMetricScreenOnEnergy.setUnitText(formatValueWithSmallPercent(onEnergyText, onEnergyRatioStr))
+        binding.tvMetricScreenOnPower.setUnitText(onPowerStr)
+        binding.tvMetricScreenOnSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(onSessionRate))
 
         // 第二行：息屏数据
         val offEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(offEnergy, currentDisplayUnit)
-        binding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
-        binding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(offEnergyText, offEnergyRatioStr)
-        binding.tvMetricScreenOffPower.text = offPowerStr
-        binding.tvMetricScreenOffSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(offSessionRate)
+        binding.tvMetricScreenOffTime.setUnitText(formatValueWithSmallPercent(offDurationStr, offDurationRatioStr))
+        binding.tvMetricScreenOffEnergy.setUnitText(formatValueWithSmallPercent(offEnergyText, offEnergyRatioStr))
+        binding.tvMetricScreenOffPower.setUnitText(offPowerStr)
+        binding.tvMetricScreenOffSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(offSessionRate))
 
         // 第三行：全局数据
         val totalEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(totalEnergy, currentDisplayUnit)
-        binding.tvMetricGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
-        binding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(totalEnergyText, globalEnergyRatioStr)
-        binding.tvMetricGlobalPower.text = avgPowerStr
-        binding.tvMetricGlobalSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(globalSessionRate)
+        binding.tvMetricGlobalTime.setUnitText(formatValueWithSmallPercent(totalDurationStr, "100%"))
+        binding.tvMetricGlobalEnergy.setUnitText(formatValueWithSmallPercent(totalEnergyText, globalEnergyRatioStr))
+        binding.tvMetricGlobalPower.setUnitText(avgPowerStr)
+        binding.tvMetricGlobalSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(globalSessionRate))
 
         // 2.1 刷新列表内放电速度概览卡片（包含全局放电速度、亮屏放电速度、息屏放电速度三个主要模块）
         val currentLevel = snapshot.levelPercent.toFloat()
@@ -2327,23 +2330,14 @@ class PowerUsageFragment : Fragment() {
 
     /**
      * 将包含数值和括号百分比的文本（如 "13m44s(45.1%)" 或 "0.406Wh(45.1%)"）转换为富文本，
-     * 将括号及内部百分比部分的字号缩小两号（由 12sp 缩至 10sp），突出主数值可读性。
+     * 将括号及内部百分比部分的字号缩小至 8sp，百分比符号 '%' 进一步缩小至 6sp，突出主数值可读性并杜绝百分号过大。
      *
      * @param mainText 前置主要数值文本（如 "13m44s" 或 "0.406Wh"）
      * @param percentText 括号内的百分比文本（如 "45.1%" 或 "100%"）
      * @return 格式化后的富文本对象 [CharSequence]
      */
     private fun formatValueWithSmallPercent(mainText: String, percentText: String): CharSequence {
-        val fullText = "$mainText($percentText)"
-        val startIndex = mainText.length
-        val spannable = SpannableString(fullText)
-        spannable.setSpan(
-            AbsoluteSizeSpan(8, true),
-            startIndex,
-            fullText.length,
-            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
-        return spannable
+        return UnitSpanFormatter.formatValueWithSmallPercent(mainText, percentText)
     }
 
     /**
@@ -2445,24 +2439,24 @@ class PowerUsageFragment : Fragment() {
 
         // 第一行：亮屏数据
         val onEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(subStats.screenOnEnergyWh, currentDisplayUnit)
-        binding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
-        binding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(onEnergyText, onEnergyRatioStr)
-        binding.tvMetricScreenOnPower.text = onPowerStr
-        binding.tvMetricScreenOnSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(subStats.screenOnDischargeRate)
+        binding.tvMetricScreenOnTime.setUnitText(formatValueWithSmallPercent(onDurationStr, onDurationRatioStr))
+        binding.tvMetricScreenOnEnergy.setUnitText(formatValueWithSmallPercent(onEnergyText, onEnergyRatioStr))
+        binding.tvMetricScreenOnPower.setUnitText(onPowerStr)
+        binding.tvMetricScreenOnSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(subStats.screenOnDischargeRate))
 
         // 第二行：息屏数据
         val offEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(subStats.screenOffEnergyWh, currentDisplayUnit)
-        binding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
-        binding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(offEnergyText, offEnergyRatioStr)
-        binding.tvMetricScreenOffPower.text = offPowerStr
-        binding.tvMetricScreenOffSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(subStats.screenOffDischargeRate)
+        binding.tvMetricScreenOffTime.setUnitText(formatValueWithSmallPercent(offDurationStr, offDurationRatioStr))
+        binding.tvMetricScreenOffEnergy.setUnitText(formatValueWithSmallPercent(offEnergyText, offEnergyRatioStr))
+        binding.tvMetricScreenOffPower.setUnitText(offPowerStr)
+        binding.tvMetricScreenOffSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(subStats.screenOffDischargeRate))
 
         // 第三行：全局数据
         val totalEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(subStats.totalEnergyWh, currentDisplayUnit)
-        binding.tvMetricGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
-        binding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(totalEnergyText, globalEnergyRatioStr)
-        binding.tvMetricGlobalPower.text = avgPowerStr
-        binding.tvMetricGlobalSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(subStats.globalDischargeRate)
+        binding.tvMetricGlobalTime.setUnitText(formatValueWithSmallPercent(totalDurationStr, "100%"))
+        binding.tvMetricGlobalEnergy.setUnitText(formatValueWithSmallPercent(totalEnergyText, globalEnergyRatioStr))
+        binding.tvMetricGlobalPower.setUnitText(avgPowerStr)
+        binding.tvMetricGlobalSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(subStats.globalDischargeRate))
 
         // 动态指示当前查看阶段的时间点，在主标题右侧以 12sp 规格呈现
         val timeStr = threadLocalCursorTimeFormatter.get()?.format(Date(subStats.targetTimestamp)) ?: ""
@@ -2565,22 +2559,22 @@ class PowerUsageFragment : Fragment() {
         )
 
         val onEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(onEnergy, currentDisplayUnit)
-        binding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
-        binding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(onEnergyText, onEnergyRatioStr)
-        binding.tvMetricScreenOnPower.text = onPowerStr
-        binding.tvMetricScreenOnSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(onSessionRate)
+        binding.tvMetricScreenOnTime.setUnitText(formatValueWithSmallPercent(onDurationStr, onDurationRatioStr))
+        binding.tvMetricScreenOnEnergy.setUnitText(formatValueWithSmallPercent(onEnergyText, onEnergyRatioStr))
+        binding.tvMetricScreenOnPower.setUnitText(onPowerStr)
+        binding.tvMetricScreenOnSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(onSessionRate))
 
         val offEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(offEnergy, currentDisplayUnit)
-        binding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
-        binding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(offEnergyText, offEnergyRatioStr)
-        binding.tvMetricScreenOffPower.text = offPowerStr
-        binding.tvMetricScreenOffSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(offSessionRate)
+        binding.tvMetricScreenOffTime.setUnitText(formatValueWithSmallPercent(offDurationStr, offDurationRatioStr))
+        binding.tvMetricScreenOffEnergy.setUnitText(formatValueWithSmallPercent(offEnergyText, offEnergyRatioStr))
+        binding.tvMetricScreenOffPower.setUnitText(offPowerStr)
+        binding.tvMetricScreenOffSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(offSessionRate))
 
         val totalEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(totalEnergy, currentDisplayUnit)
-        binding.tvMetricGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
-        binding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(totalEnergyText, globalEnergyRatioStr)
-        binding.tvMetricGlobalPower.text = avgPowerStr
-        binding.tvMetricGlobalSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(globalSessionRate)
+        binding.tvMetricGlobalTime.setUnitText(formatValueWithSmallPercent(totalDurationStr, "100%"))
+        binding.tvMetricGlobalEnergy.setUnitText(formatValueWithSmallPercent(totalEnergyText, globalEnergyRatioStr))
+        binding.tvMetricGlobalPower.setUnitText(avgPowerStr)
+        binding.tvMetricGlobalSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(globalSessionRate))
 
         binding.tvPowerTitle.text = getString(R.string.power_stats_title)
         binding.tvPowerCursorTime.text = ""
@@ -2749,7 +2743,7 @@ class PowerUsageFragment : Fragment() {
                 tvDesc.text = "删除后该条放电快照记录将从本地永久移除，无法找回。"
                 tvCat.text = if (record.isShizukuRealData) "Shizuku" else "系统模式"
                 tvTime.text = record.recordTime
-                tvSummary.text = "🔋 终止电量 ${record.levelPercent}%   •   ⏱️ 持续 ${record.totalDurationText}"
+                tvSummary.setUnitText("🔋 终止电量 ${record.levelPercent}%   •   ⏱️ 持续 ${record.totalDurationText}")
 
                 val delDialog = AlertDialog.Builder(requireContext())
                     .setView(deleteView)
@@ -2884,7 +2878,7 @@ class PowerUsageFragment : Fragment() {
                 val effEnd = record.getEffectiveEndLevel()
                 val effGain = record.getEffectiveLevelGain()
                 val sign = if (effGain >= 0) "+${effGain}%" else "${effGain}%"
-                tvSummary.text = "⚡ $sign (${record.startLevel}% → ${effEnd}%)   •   ⏱️ ${record.getFormattedDuration()}"
+                tvSummary.setUnitText("⚡ $sign (${record.startLevel}% → ${effEnd}%)   •   ⏱️ ${record.getFormattedDuration()}")
 
                 val delDialog = AlertDialog.Builder(requireContext())
                     .setView(deleteView)
@@ -3201,7 +3195,7 @@ class PowerUsageFragment : Fragment() {
         val currentLevel = lastRenderedPackage?.batterySnapshot?.levelPercent
             ?: powerManager.getCurrentBatteryStatus().levelPercent
         val pointCount = lastRenderedPackage?.trendPoints?.size ?: 0
-        tvSummary.text = "🔋 ${getString(R.string.dialog_power_reset_current_level)} $currentLevel%   •   📊 $pointCount 个采样点"
+        tvSummary.setUnitText("🔋 ${getString(R.string.dialog_power_reset_current_level)} $currentLevel%   •   📊 $pointCount 个采样点")
 
         val dialog = AlertDialog.Builder(requireContext())
             .setView(dialogView)

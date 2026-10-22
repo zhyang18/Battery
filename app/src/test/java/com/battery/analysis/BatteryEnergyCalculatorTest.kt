@@ -362,7 +362,7 @@ class BatteryEnergyCalculatorTest {
             sessionDurationMs = 3600_000L * 2 // 02h00m
         )
 
-        assertTrue("标题包含亮屏放电速度", message.contains("【亮屏放电速度】"))
+        assertTrue("标题包含亮屏续航预测", message.contains("【亮屏续航预测】"))
         assertTrue("包含当前会话放电速度", message.contains("• 当前会话放电速度：6.5%/h (亮屏 02h00m00s)"))
         assertTrue("包含近7天放电速度与实际时长", message.contains("• 近7天放电速度：6.1%/h (亮屏 02d05h)"))
         assertTrue("包含满电亮屏续航且精确到秒", message.contains("• 满电亮屏续航：16h24m00s"))
@@ -389,7 +389,7 @@ class BatteryEnergyCalculatorTest {
             remainingDurationMs = (2 * 86400 + 3 * 3600 + 40 * 60 + 15) * 1000L // 02d 03h 40m 15s
         )
 
-        assertTrue("标题包含息屏放电速度", message.contains("【息屏放电速度】"))
+        assertTrue("标题包含息屏续航预测", message.contains("【息屏续航预测】"))
         assertTrue("当前会话暂无数据展示--", message.contains("• 当前会话放电速度：--"))
         assertTrue("包含近7天放电速度与实际时长", message.contains("• 近7天放电速度：1.0%/h (息屏 04d01h)"))
         assertTrue("包含满电待机时长且精确到秒", message.contains("• 满电待机时长：04d01h00m00s"))
@@ -416,7 +416,7 @@ class BatteryEnergyCalculatorTest {
             sessionDurationMs = 3600_000L * 5
         )
 
-        assertTrue("标题包含全局放电速度", message.contains("【全局放电速度】"))
+        assertTrue("标题包含全局续航预测", message.contains("【全局续航预测】"))
         assertTrue("包含当前会话放电速度", message.contains("• 当前会话放电速度：4.2%/h (放电 05h00m00s)"))
         assertTrue("包含近7天放电速度与实际时长", message.contains("• 近7天放电速度：2.8%/h (放电 06d07h)"))
         assertTrue("包含预测基准放电速度", message.contains("• 预测基准放电速度：6.3%/h"))

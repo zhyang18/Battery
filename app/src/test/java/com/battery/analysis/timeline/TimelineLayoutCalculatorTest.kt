@@ -97,7 +97,7 @@ class TimelineLayoutCalculatorTest {
             slotSizePx = 30f,
             slotGapPx = 0f,
             rowGapPx = 0f,
-            leftMarginPx = 14f
+            leftMarginPx = 8f
         )
 
         assertTrue("在覆盖全程时槽位列表不为空", items.isNotEmpty())

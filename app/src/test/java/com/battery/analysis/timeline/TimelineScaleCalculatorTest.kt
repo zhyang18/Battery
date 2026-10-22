@@ -12,13 +12,13 @@ import org.junit.Test
 class TimelineScaleCalculatorTest {
 
     /**
-     * 验证图表左右对称边距（如各 14dp）下，起始与结束时间戳与内容边界像素完全对称对齐。
+     * 验证图表左右对称边距（如各 8dp）下，起始与结束时间戳与内容边界像素完全对称对齐。
      */
     @Test
     fun testBoundaryAlignment_NoDeadzone() {
         val startTs = 1_000_000L
         val endTs = 2_000_000L // 跨度 1000 秒
-        val contentLeft = 35f   // 对应 14dp (2.5 密度)
+        val contentLeft = 20f   // 对应 8dp (2.5 密度)
         val contentWidth = 900f // 有效绘图宽度
 
         // 1. 起始点时间戳应当精确投影到 contentLeft
@@ -42,7 +42,7 @@ class TimelineScaleCalculatorTest {
     fun testMicroMovementResponsiveness_StrictlyMonotonic() {
         val startTs = 1_000_000L
         val endTs = 4_300_000L // 3300 秒（约 55 分钟）
-        val contentLeft = 35f   // 14dp
+        val contentLeft = 20f   // 8dp
         val contentWidth = 900f
 
         var lastTs = startTs
@@ -67,9 +67,9 @@ class TimelineScaleCalculatorTest {
         val startTs = 1_700_000_000_000L
         val endTs = startTs + 55 * 60 * 1000L // 55 分钟后 (14:51:24)
         val density = 2.75f
-        val contentLeft = 14f * density // 38.5px
+        val contentLeft = 8f * density // 22px
         val totalWidth = 1080f
-        val contentRight = totalWidth - 14f * density // 1041.5px
+        val contentRight = totalWidth - 8f * density // 1058px
         val contentWidth = contentRight - contentLeft
 
         // 目标时间 13:59:18（相差 2分54秒，即 174 秒）

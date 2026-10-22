@@ -10,6 +10,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.battery.analysis.R
 import com.battery.analysis.databinding.ItemHistoryRecordBinding
 import com.battery.analysis.model.HistoryRecord
+import com.battery.analysis.util.setUnitText
 import java.util.Locale
 
 /**
@@ -100,10 +101,10 @@ class HistoryAdapter(
                 val statusStr = record.status?.let { " ($it)" } ?: ""
                 "$levelStr$statusStr"
             }
-            binding.tvHistoryCapacity.text = capacityDisplay
+            binding.tvHistoryCapacity.setUnitText(capacityDisplay)
 
             // 3. 电池健康度
-            binding.tvHistoryHealth.text = record.batteryHealth?.let { String.format(Locale.getDefault(), "%.2f%%", it) } ?: "--"
+            binding.tvHistoryHealth.setUnitText(record.batteryHealth?.let { String.format(Locale.getDefault(), "%.2f%%", it) } ?: "--")
 
             // 4. 循环次数
             binding.tvHistoryCycle.text = record.cycleCount?.let {

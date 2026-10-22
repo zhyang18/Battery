@@ -7,6 +7,7 @@ import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.battery.analysis.databinding.ItemChargingHistoryRecordBinding
 import com.battery.analysis.model.ChargingHistoryRecord
+import com.battery.analysis.util.setUnitText
 import java.util.Locale
 
 /**
@@ -174,14 +175,14 @@ class ChargingHistoryAdapter(
             binding.tvHistoryTime.text = record.getFormattedTimeRange()
 
             // 2. 右上：平均充电功率数值（如 "18.50 W"）
-            binding.tvHistoryPowerValue.text = String.format(
+            binding.tvHistoryPowerValue.setUnitText(String.format(
                 Locale.getDefault(),
                 "%.2f W",
                 record.avgPowerWatts
-            )
+            ))
 
             // 3. 左下：充电时长与电量增量区间（如 "25m · 20%~85%(+65%)"）
-            binding.tvHistorySubInfo.text = record.getFormattedDurationAndGain()
+            binding.tvHistorySubInfo.setUnitText(record.getFormattedDurationAndGain())
 
             // 4. 右下：功率说明标签（"平均充电功率"）
             binding.tvHistoryPowerLabel.text = record.getDisplayPowerLabel()

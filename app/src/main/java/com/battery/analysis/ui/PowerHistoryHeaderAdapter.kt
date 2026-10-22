@@ -1,14 +1,13 @@
 package com.battery.analysis.ui
 
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.style.AbsoluteSizeSpan
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.battery.analysis.R
 import com.battery.analysis.databinding.ItemPowerHistoryHeaderBinding
 import com.battery.analysis.model.PowerHistorySummary
+import com.battery.analysis.util.UnitSpanFormatter
+import com.battery.analysis.util.setUnitText
 import java.util.Locale
 
 /**
@@ -71,19 +70,19 @@ class PowerHistoryHeaderAdapter(
         val b = holder.binding
 
         // 1. 亮屏维度（时长、功耗、速度）
-        b.tvSummaryScreenOnDuration.text = summary.getFormattedScreenOnDuration()
-        b.tvSummaryScreenOnPower.text = summary.getFormattedScreenOnPower()
-        b.tvSummaryScreenOnSpeed.text = formatDischargeRateSpannable(summary.screenOnDischargeRate)
+        b.tvSummaryScreenOnDuration.setUnitText(summary.getFormattedScreenOnDuration())
+        b.tvSummaryScreenOnPower.setUnitText(summary.getFormattedScreenOnPower())
+        b.tvSummaryScreenOnSpeed.setUnitText(formatDischargeRateSpannable(summary.screenOnDischargeRate))
 
         // 3. 息屏维度（时长、功耗、速度）
-        b.tvSummaryScreenOffDuration.text = summary.getFormattedScreenOffDuration()
-        b.tvSummaryScreenOffPower.text = summary.getFormattedScreenOffPower()
-        b.tvSummaryScreenOffSpeed.text = formatDischargeRateSpannable(summary.screenOffDischargeRate)
+        b.tvSummaryScreenOffDuration.setUnitText(summary.getFormattedScreenOffDuration())
+        b.tvSummaryScreenOffPower.setUnitText(summary.getFormattedScreenOffPower())
+        b.tvSummaryScreenOffSpeed.setUnitText(formatDischargeRateSpannable(summary.screenOffDischargeRate))
 
         // 4. 总计维度（时长、功耗、速度）
-        b.tvSummaryTotalDuration.text = summary.getFormattedTotalDuration()
-        b.tvSummaryTotalPower.text = summary.getFormattedAvgPower()
-        b.tvSummaryTotalSpeed.text = formatDischargeRateSpannable(summary.globalDischargeRate)
+        b.tvSummaryTotalDuration.setUnitText(summary.getFormattedTotalDuration())
+        b.tvSummaryTotalPower.setUnitText(summary.getFormattedAvgPower())
+        b.tvSummaryTotalSpeed.setUnitText(formatDischargeRateSpannable(summary.globalDischargeRate))
 
         // 5. 点击弹出详细统计明细弹窗
         b.cardPowerHistorySummary.setOnClickListener {
@@ -99,7 +98,7 @@ class PowerHistoryHeaderAdapter(
     override fun getItemCount(): Int = 1
 
     /**
-     * 将放电速度百分比速率格式化为图文混排富文本（数值部分突出，单位 "%/h" 微缩至 11sp）。
+     * 将放电速度百分比速率格式化为图文混排富文本（单位 "%/h" 比前面的数值缩小 2 号显示）。
      *
      * @param rate 每小时放电百分比速率（单位：%/h），若为空或非正数返回 "--"
      * @return 图文混排的 [CharSequence]
@@ -108,16 +107,7 @@ class PowerHistoryHeaderAdapter(
         if (rate == null || rate <= 0f) {
             return "--"
         }
-        val numStr = String.format(Locale.getDefault(), "%.1f", rate)
-        val unitStr = "%/h"
-        val fullText = "$numStr$unitStr"
-        val spannable = SpannableString(fullText)
-        spannable.setSpan(
-            AbsoluteSizeSpan(11, true),
-            numStr.length,
-            fullText.length,
-            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
-        return spannable
+        val text = String.format(Locale.getDefault(), "%.1f%%/h", rate)
+        return UnitSpanFormatter.format(text)
     }
 }

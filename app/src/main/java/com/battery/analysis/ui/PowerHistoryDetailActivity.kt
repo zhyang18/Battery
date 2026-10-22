@@ -630,33 +630,54 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             "--"
         }
 
-        // 第一行：亮屏数据（前置亮色太阳图标，时长占比 / 能量占比 / 功耗）
+        val overview = cachedOverviewStats ?: PowerOverviewStats(
+            avgPowerWatts = record.avgPowerWatts,
+            screenOnPowerWatts = record.screenOnPowerWatts,
+            screenOffPowerWatts = record.screenOffPowerWatts,
+            screenOnDurationMs = onDurationMs,
+            screenOffDurationMs = offDurationMs,
+            totalDurationMs = totalDurationMs
+        )
+        val (onSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
+            BatteryEnergyCalculator.ROW_SCREEN_ON, totalCapacityWh, overview
+        )
+        val (offSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
+            BatteryEnergyCalculator.ROW_SCREEN_OFF, totalCapacityWh, overview
+        )
+        val (globalSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
+            BatteryEnergyCalculator.ROW_GLOBAL, totalCapacityWh, overview
+        )
+
+        // 第一行：亮屏数据（前置亮色太阳图标，时长占比 / 能量占比 / 功耗+放电速度）
         val onEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(onEnergy, currentDisplayUnit)
         hBinding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
         hBinding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(onEnergyText, onEnergyRatioStr)
         hBinding.tvMetricScreenOnPower.text = onPowerStr
+        hBinding.tvMetricScreenOnSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(onSessionRate)
 
-        // 第二行：息屏数据（前置暗色太阳图标，时长占比 / 能量占比 / 功耗）
+        // 第二行：息屏数据（前置暗色太阳图标，时长占比 / 能量占比 / 功耗+放电速度）
         val offEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(offEnergy, currentDisplayUnit)
         hBinding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
         hBinding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(offEnergyText, offEnergyRatioStr)
         hBinding.tvMetricScreenOffPower.text = offPowerStr
+        hBinding.tvMetricScreenOffSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(offSessionRate)
 
-        // 第三行：全局数据（前置半亮半暗太阳图标，时长占比 / 能量占比 / 功耗）
+        // 第三行：全局数据（前置半亮半暗太阳图标，时长占比 / 能量占比 / 功耗+放电速度）
         val totalEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(totalEnergy, currentDisplayUnit)
         hBinding.tvMetricGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
         hBinding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(totalEnergyText, globalEnergyRatioStr)
         hBinding.tvMetricGlobalPower.text = avgPowerStr
+        hBinding.tvMetricGlobalSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(globalSessionRate)
 
         // 指标卡片三行点击气泡提示（亮屏 / 息屏 / 全局）
         hBinding.layoutMetricScreenOnRow.setOnClickListener {
-            showBubbleTooltip(hBinding.layoutMetricScreenOnRow, "亮屏：时间、平均功耗、能量")
+            showBubbleTooltip(hBinding.layoutMetricScreenOnRow, "亮屏：时间、平均功耗、放电速度、能量")
         }
         hBinding.layoutMetricScreenOffRow.setOnClickListener {
-            showBubbleTooltip(hBinding.layoutMetricScreenOffRow, "息屏：时间、平均功耗、能量")
+            showBubbleTooltip(hBinding.layoutMetricScreenOffRow, "息屏：时间、平均功耗、放电速度、能量")
         }
         hBinding.layoutMetricGlobalRow.setOnClickListener {
-            showBubbleTooltip(hBinding.layoutMetricGlobalRow, "全局：时间、平均功耗、能量")
+            showBubbleTooltip(hBinding.layoutMetricGlobalRow, "全局：时间、平均功耗、放电速度、能量")
         }
 
         // 核心功耗指标卡片能量数值点击弹出等效电量（mAh）详细说明气泡弹框
@@ -769,23 +790,26 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             "--"
         }
 
-        // 第一行：亮屏数据（时长占比 / 能量占比 / 功耗）
+        // 第一行：亮屏数据（时长占比 / 能量占比 / 功耗+放电速度）
         val onEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(subStats.screenOnEnergyWh, currentDisplayUnit)
         hBinding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
         hBinding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(onEnergyText, onEnergyRatioStr)
         hBinding.tvMetricScreenOnPower.text = onPowerStr
+        hBinding.tvMetricScreenOnSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(subStats.screenOnDischargeRate)
 
-        // 第二行：息屏数据（时长占比 / 能量占比 / 功耗）
+        // 第二行：息屏数据（时长占比 / 能量占比 / 功耗+放电速度）
         val offEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(subStats.screenOffEnergyWh, currentDisplayUnit)
         hBinding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
         hBinding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(offEnergyText, offEnergyRatioStr)
         hBinding.tvMetricScreenOffPower.text = offPowerStr
+        hBinding.tvMetricScreenOffSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(subStats.screenOffDischargeRate)
 
-        // 第三行：全局数据（时长占比 / 能量占比 / 功耗）
+        // 第三行：全局数据（时长占比 / 能量占比 / 功耗+放电速度）
         val totalEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(subStats.totalEnergyWh, currentDisplayUnit)
         hBinding.tvMetricGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
         hBinding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(totalEnergyText, globalEnergyRatioStr)
         hBinding.tvMetricGlobalPower.text = avgPowerStr
+        hBinding.tvMetricGlobalSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(subStats.globalDischargeRate)
 
         // 动态指示当前查看阶段的时间点，在耗电详情标题后方单行展示
         val timeStr = threadLocalCursorTimeFormatter.get()?.format(Date(subStats.targetTimestamp)) ?: ""

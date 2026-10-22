@@ -157,6 +157,8 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     private var cachedRemainingEnergyWh: Float? = null
     // 当前放电会话最近细粒度趋势点集缓存
     private var cachedTrendPoints: List<PowerDischargePoint>? = null
+    /** 最近一次经合法刷新（手动下拉或后台超2分钟自动刷新）计算得出的三维度剩余续航结果缓存，杜绝非刷新周期或列表滚动时重复重算跳动 */
+    private var cachedTripleRuntimeResult: com.battery.analysis.domain.estimator.TripleRuntimeResult? = null
 
     // 弱保持当前活跃的卡片 ViewHolder 引用以提供平滑桥接
     var dischargeSpeedHolder: DischargeSpeedViewHolder? = null
@@ -535,11 +537,15 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     /**
      * 绑定放电速度核心概览三卡片（呈现亮屏、息屏、全局放电速度三个独立卡片，包含实时放电速率、7天统计放电速度与满电使用时长）。
+     * 遵循下拉刷新机制严格对齐原则：默认消费已缓存的 [cachedTripleRuntimeResult]；
+     * 仅当强制要求重算 [forceRecalculate] 或首次尚无缓存时，才执行物理级剩余续航模型测算并刷新缓存。
      *
      * @param holder 放电速度概览卡片 ViewHolder
+     * @param forceRecalculate 是否强制重新计算剩余续航时间（在全量下拉刷新触发时传入 true）
      */
-    private fun bindDischargeSpeed(holder: DischargeSpeedViewHolder) {
-        PowerDischargeMetricsViewBinder.bindDischargeSpeed(
+    private fun bindDischargeSpeed(holder: DischargeSpeedViewHolder, forceRecalculate: Boolean = false) {
+        val precalculated = if (forceRecalculate) null else cachedTripleRuntimeResult
+        val result = PowerDischargeMetricsViewBinder.bindDischargeSpeed(
             binding = holder.binding,
             overview = cachedOverviewStats,
             totalCapacityWh = cachedTotalEnergyWh,
@@ -548,10 +554,12 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             remainingEnergyWh = cachedRemainingEnergyWh,
             tempCelsius = cachedTemperature.takeIf { it != 0f },
             currentTrendPoints = cachedTrendPoints,
+            precalculatedRuntimeResult = precalculated,
             onCardClick = { anchorView, rowType ->
                 onMetricModuleClickedListener?.invoke(anchorView, rowType)
             }
         )
+        cachedTripleRuntimeResult = result
     }
 
     /**
@@ -1333,6 +1341,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      * @param remainingEnergyWh 当前电池剩余能量（Wh，可选）
      * @param tempCelsius 当前电池温度（单位：℃，可选）
      * @param trendPoints 当前周期的细粒度趋势采样点集合（可选）
+     * @param forceRecalculateRuntime 是否同步强制重算并刷新剩余续航预测结果缓存（在全量下拉刷新触发时传入 true）
      */
     fun updateOverviewStats(
         overviewStats: PowerOverviewStats?,
@@ -1341,7 +1350,8 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         batteryLevelPercent: Float? = null,
         remainingEnergyWh: Float? = null,
         tempCelsius: Float? = null,
-        trendPoints: List<PowerDischargePoint>? = null
+        trendPoints: List<PowerDischargePoint>? = null,
+        forceRecalculateRuntime: Boolean = false
     ) {
         cachedOverviewStats = overviewStats
         if (totalCapacityWh != null && totalCapacityWh > 0f) {
@@ -1362,7 +1372,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         if (trendPoints != null) {
             cachedTrendPoints = trendPoints
         }
-        dischargeSpeedHolder?.let { bindDischargeSpeed(it) }
+        dischargeSpeedHolder?.let { bindDischargeSpeed(it, forceRecalculate = forceRecalculateRuntime) }
         sleepAwakeHolder?.let { bindSleepAwakeMetrics(it) }
     }
 
@@ -1370,10 +1380,11 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      * 更新过去 7 天核心放电统计指标与充满电可用时长，并定向刷新放电速度卡片。
      *
      * @param stats 7 天核心放电统计实体 [SevenDaysDischargeStats]，可为 null
+     * @param forceRecalculateRuntime 是否同步强制重算剩余续航预测结果缓存（全量下拉刷新完成时为 true）
      */
-    fun updateSevenDaysStats(stats: SevenDaysDischargeStats?) {
+    fun updateSevenDaysStats(stats: SevenDaysDischargeStats?, forceRecalculateRuntime: Boolean = false) {
         cachedSevenDaysStats = stats
-        dischargeSpeedHolder?.let { bindDischargeSpeed(it) }
+        dischargeSpeedHolder?.let { bindDischargeSpeed(it, forceRecalculate = forceRecalculateRuntime) }
     }
 
     /**
@@ -1382,6 +1393,23 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      * @return 缓存的 [SevenDaysDischargeStats] 实例，若尚未统计或数据为空则返回 null
      */
     fun getCachedSevenDaysStats(): SevenDaysDischargeStats? = cachedSevenDaysStats
+
+    /**
+     * 获取当前适配器内缓存的三维度剩余续航预测结果实体。
+     *
+     * @return 缓存的 [com.battery.analysis.domain.estimator.TripleRuntimeResult] 实例，若尚未估算或数据为空则返回 null
+     */
+    fun getCachedTripleRuntimeResult(): com.battery.analysis.domain.estimator.TripleRuntimeResult? = cachedTripleRuntimeResult
+
+    /**
+     * 显式更新并持久同步三维度剩余续航预测结果实体缓存，并安全刷新可见卡片。
+     *
+     * @param result 最新的 [com.battery.analysis.domain.estimator.TripleRuntimeResult] 实体，或传 null 进行清除
+     */
+    fun updateTripleRuntimeResult(result: com.battery.analysis.domain.estimator.TripleRuntimeResult?) {
+        cachedTripleRuntimeResult = result
+        dischargeSpeedHolder?.let { bindDischargeSpeed(it, forceRecalculate = false) }
+    }
 
     /**
      * 获取充电卡片中的内部控件绑定实例，供充电实时数据更新。

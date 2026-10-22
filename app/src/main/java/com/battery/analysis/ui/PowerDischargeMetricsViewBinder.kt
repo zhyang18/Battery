@@ -55,7 +55,9 @@ object PowerDischargeMetricsViewBinder {
      * @param remainingEnergyWh 当前电池剩余能量（单位：Wh），若不可用传入 null
      * @param tempCelsius 电池当前工作温度（单位：℃，可选），用于高精度修正实际物理化学可用能量 K_T
      * @param currentTrendPoints 当前周期的细粒度趋势采样点集合（可选，用于激活 Fast 尺度实时跟踪与工况突变敏捷响应）
+     * @param precalculatedRuntimeResult 外部预先估算并缓存的三维度剩余续航结果实体（可选，非空时直接复用，杜绝重复计算）
      * @param onCardClick 卡片点击事件监听回调，参数依次为被点击卡片视图与行分类标识（[BatteryEnergyCalculator.ROW_SCREEN_ON] 等）
+     * @return 实际用于渲染绑定的三维度剩余续航结果实体 [com.battery.analysis.domain.estimator.TripleRuntimeResult]
      */
     fun bindDischargeSpeed(
         binding: ItemPowerDischargeSpeedBinding,
@@ -66,8 +68,9 @@ object PowerDischargeMetricsViewBinder {
         remainingEnergyWh: Float? = null,
         tempCelsius: Float? = null,
         currentTrendPoints: List<PowerDischargePoint>? = null,
+        precalculatedRuntimeResult: com.battery.analysis.domain.estimator.TripleRuntimeResult? = null,
         onCardClick: ((anchorView: View, rowType: Int) -> Unit)? = null
-    ) {
+    ): com.battery.analysis.domain.estimator.TripleRuntimeResult {
         with(binding) {
             val (onSessionRate, _) = calculateSessionDischargeRate(BatteryEnergyCalculator.ROW_SCREEN_ON, totalCapacityWh, overview)
             val (offSessionRate, _) = calculateSessionDischargeRate(BatteryEnergyCalculator.ROW_SCREEN_OFF, totalCapacityWh, overview)
@@ -78,8 +81,8 @@ object PowerDischargeMetricsViewBinder {
             tvScreenOffSpeed.text = formatDischargeRateSpannable(offSessionRate)
             tvGlobalSpeed.text = formatDischargeRateSpannable(globalSessionRate)
 
-            // --- 2. 第二行：剩余续航时间（基于自适应多时间尺度与物理能量模型计算，同步融合温度物理修正与细粒度点集） ---
-            val tripleResult = BatteryEnergyCalculator.estimateTripleRuntimes(
+            // --- 2. 第二行：剩余续航时间（优先消费外部传入的预计算缓存结果；若无则降级现场估算，保障严格跟随下拉刷新机制） ---
+            val tripleResult = precalculatedRuntimeResult ?: BatteryEnergyCalculator.estimateTripleRuntimes(
                 overview = overview,
                 sevenDaysStats = sevenDaysStats,
                 batteryLevelPercent = batteryLevelPercent,
@@ -105,6 +108,7 @@ object PowerDischargeMetricsViewBinder {
                     onCardClick(cardGlobalSpeed, BatteryEnergyCalculator.ROW_GLOBAL)
                 }
             }
+            return tripleResult
         }
     }
 

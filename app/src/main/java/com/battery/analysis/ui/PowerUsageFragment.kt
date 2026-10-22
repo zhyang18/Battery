@@ -1281,9 +1281,9 @@ class PowerUsageFragment : Fragment() {
      */
     private fun showMetricRowDetailBubble(anchorView: View, rowType: Int) {
         val message = when (rowType) {
-            ROW_SCREEN_ON -> "亮屏：时间、平均功耗、能量"
-            ROW_SCREEN_OFF -> "息屏：时间、平均功耗、能量"
-            ROW_GLOBAL -> "全局：时间、平均功耗、能量"
+            ROW_SCREEN_ON -> "亮屏：时间、平均功耗、放电速度、能量"
+            ROW_SCREEN_OFF -> "息屏：时间、平均功耗、放电速度、能量"
+            ROW_GLOBAL -> "全局：时间、平均功耗、放电速度、能量"
             else -> return
         }
         showBubbleTooltip(anchorView, message)
@@ -1445,7 +1445,7 @@ class PowerUsageFragment : Fragment() {
 
         val batteryPercent = pkg?.batterySnapshot?.levelPercent?.toFloat()
         val remainingEnergyWh = pkg?.batterySnapshot?.energyWh
-        val tripleResult = BatteryEnergyCalculator.estimateTripleRuntimes(
+        val tripleResult = adapter.getCachedTripleRuntimeResult() ?: BatteryEnergyCalculator.estimateTripleRuntimes(
             overview = overview,
             sevenDaysStats = sevenDays,
             batteryLevelPercent = batteryPercent,
@@ -1743,16 +1743,32 @@ class PowerUsageFragment : Fragment() {
             ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
                 BatteryEnergyCalculator.calculateTotalEnergyWh(it)
             }
+
+        val (onSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
+            BatteryEnergyCalculator.ROW_SCREEN_ON, totalCapacityWh, overview
+        )
+        val (offSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
+            BatteryEnergyCalculator.ROW_SCREEN_OFF, totalCapacityWh, overview
+        )
+        val (globalSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
+            BatteryEnergyCalculator.ROW_GLOBAL, totalCapacityWh, overview
+        )
+
+        binding.tvMetricScreenOnSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(onSessionRate)
+        binding.tvMetricScreenOffSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(offSessionRate)
+        binding.tvMetricGlobalSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(globalSessionRate)
+
         adapter.updateOverviewStats(
             overviewStats = overview,
             totalCapacityWh = totalCapacityWh,
             batteryLevelPercent = snapshot.levelPercent.toFloat(),
             remainingEnergyWh = snapshot.energyWh,
             tempCelsius = snapshot.temperature,
-            trendPoints = fullPackage.trendPoints
+            trendPoints = fullPackage.trendPoints,
+            forceRecalculateRuntime = false
         )
 
-        // 异步更新过去 7 天加权放电统计速度与充满电使用时间
+        // 异步更新过去 7 天加权放电统计速度与充满电使用时间（增量更新不重算剩余续航）
         val appContext = requireContext().applicationContext
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
             val stats = com.battery.analysis.util.SevenDaysDischargeCalculator.calculateSevenDaysStats(
@@ -1764,7 +1780,7 @@ class PowerUsageFragment : Fragment() {
             )
             withContext(Dispatchers.Main) {
                 if (isAdded && _binding != null) {
-                    adapter.updateSevenDaysStats(stats)
+                    adapter.updateSevenDaysStats(stats, forceRecalculateRuntime = false)
                 }
             }
         }
@@ -2213,55 +2229,86 @@ class PowerUsageFragment : Fragment() {
             "--"
         }
 
+        val (onSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
+            BatteryEnergyCalculator.ROW_SCREEN_ON, totalCapacityWh, overview
+        )
+        val (offSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
+            BatteryEnergyCalculator.ROW_SCREEN_OFF, totalCapacityWh, overview
+        )
+        val (globalSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
+            BatteryEnergyCalculator.ROW_GLOBAL, totalCapacityWh, overview
+        )
+
         // 第一行：亮屏数据（图标已由 XML 设置）
         val onEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(onEnergy, currentDisplayUnit)
         binding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
         binding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(onEnergyText, onEnergyRatioStr)
         binding.tvMetricScreenOnPower.text = onPowerStr
+        binding.tvMetricScreenOnSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(onSessionRate)
 
         // 第二行：息屏数据
         val offEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(offEnergy, currentDisplayUnit)
         binding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
         binding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(offEnergyText, offEnergyRatioStr)
         binding.tvMetricScreenOffPower.text = offPowerStr
+        binding.tvMetricScreenOffSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(offSessionRate)
 
         // 第三行：全局数据
         val totalEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(totalEnergy, currentDisplayUnit)
         binding.tvMetricGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
         binding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(totalEnergyText, globalEnergyRatioStr)
         binding.tvMetricGlobalPower.text = avgPowerStr
+        binding.tvMetricGlobalSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(globalSessionRate)
 
         // 2.1 刷新列表内放电速度概览卡片（包含全局放电速度、亮屏放电速度、息屏放电速度三个主要模块）
         val currentLevel = snapshot.levelPercent.toFloat()
         val currentEnergy = snapshot.energyWh
         val currentTemp = snapshot.temperature
+        val isFullDischargeRefresh = markAsRefreshed && !isViewingSnapshot
         adapter.updateOverviewStats(
             overviewStats = overview,
             totalCapacityWh = totalCapacityWh,
             batteryLevelPercent = currentLevel,
             remainingEnergyWh = currentEnergy,
             tempCelsius = currentTemp,
-            trendPoints = fullPackage.trendPoints
+            trendPoints = fullPackage.trendPoints,
+            forceRecalculateRuntime = isFullDischargeRefresh
         )
 
-        // 异步更新过去 7 天加权放电统计速度与充满电使用时间
-        val baseTs = if (isViewingSnapshot && currentLoadedSnapshotRecord != null) {
-            currentLoadedSnapshotRecord?.id ?: System.currentTimeMillis()
-        } else {
-            System.currentTimeMillis()
-        }
-        val fullDataAppContext = requireContext().applicationContext
-        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-            val stats = com.battery.analysis.util.SevenDaysDischargeCalculator.calculateSevenDaysStats(
-                context = fullDataAppContext,
-                currentOverview = if (isViewingSnapshot) null else overview,
-                totalCapacityWh = totalCapacityWh,
-                baseTimestamp = baseTs,
-                currentTrendPoints = if (isViewingSnapshot) null else lastRenderedPackage?.trendPoints
-            )
-            withContext(Dispatchers.Main) {
-                if (isAdded && _binding != null) {
-                    adapter.updateSevenDaysStats(stats)
+        // 异步更新过去 7 天加权放电统计速度与充满电使用时间（仅在全量有效刷新时启动异步计算，防抖期内/缓存恢复严格保持已有缓存，杜绝重复计算与续航跳动）
+        if (isFullDischargeRefresh) {
+            val baseTs = System.currentTimeMillis()
+            val fullDataAppContext = requireContext().applicationContext
+            viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                val stats = com.battery.analysis.util.SevenDaysDischargeCalculator.calculateSevenDaysStats(
+                    context = fullDataAppContext,
+                    currentOverview = overview,
+                    totalCapacityWh = totalCapacityWh,
+                    baseTimestamp = baseTs,
+                    currentTrendPoints = lastRenderedPackage?.trendPoints
+                )
+                withContext(Dispatchers.Main) {
+                    if (isAdded && _binding != null) {
+                        adapter.updateSevenDaysStats(stats, forceRecalculateRuntime = true)
+                    }
+                }
+            }
+        } else if (isViewingSnapshot && currentLoadedSnapshotRecord != null) {
+            // 查看历史快照时，仅按快照静态历史点异步检索一次
+            val baseTs = currentLoadedSnapshotRecord?.id ?: System.currentTimeMillis()
+            val fullDataAppContext = requireContext().applicationContext
+            viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                val stats = com.battery.analysis.util.SevenDaysDischargeCalculator.calculateSevenDaysStats(
+                    context = fullDataAppContext,
+                    currentOverview = null,
+                    totalCapacityWh = totalCapacityWh,
+                    baseTimestamp = baseTs,
+                    currentTrendPoints = null
+                )
+                withContext(Dispatchers.Main) {
+                    if (isAdded && _binding != null) {
+                        adapter.updateSevenDaysStats(stats, forceRecalculateRuntime = false)
+                    }
                 }
             }
         }
@@ -2401,18 +2448,21 @@ class PowerUsageFragment : Fragment() {
         binding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
         binding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(onEnergyText, onEnergyRatioStr)
         binding.tvMetricScreenOnPower.text = onPowerStr
+        binding.tvMetricScreenOnSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(subStats.screenOnDischargeRate)
 
         // 第二行：息屏数据
         val offEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(subStats.screenOffEnergyWh, currentDisplayUnit)
         binding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
         binding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(offEnergyText, offEnergyRatioStr)
         binding.tvMetricScreenOffPower.text = offPowerStr
+        binding.tvMetricScreenOffSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(subStats.screenOffDischargeRate)
 
         // 第三行：全局数据
         val totalEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(subStats.totalEnergyWh, currentDisplayUnit)
         binding.tvMetricGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
         binding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(totalEnergyText, globalEnergyRatioStr)
         binding.tvMetricGlobalPower.text = avgPowerStr
+        binding.tvMetricGlobalSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(subStats.globalDischargeRate)
 
         // 动态指示当前查看阶段的时间点，在主标题右侧以 12sp 规格呈现
         val timeStr = threadLocalCursorTimeFormatter.get()?.format(Date(subStats.targetTimestamp)) ?: ""
@@ -2504,20 +2554,33 @@ class PowerUsageFragment : Fragment() {
             "--"
         }
 
+        val (onSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
+            BatteryEnergyCalculator.ROW_SCREEN_ON, totalCapacityWh, overview
+        )
+        val (offSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
+            BatteryEnergyCalculator.ROW_SCREEN_OFF, totalCapacityWh, overview
+        )
+        val (globalSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
+            BatteryEnergyCalculator.ROW_GLOBAL, totalCapacityWh, overview
+        )
+
         val onEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(onEnergy, currentDisplayUnit)
         binding.tvMetricScreenOnTime.text = formatValueWithSmallPercent(onDurationStr, onDurationRatioStr)
         binding.tvMetricScreenOnEnergy.text = formatValueWithSmallPercent(onEnergyText, onEnergyRatioStr)
         binding.tvMetricScreenOnPower.text = onPowerStr
+        binding.tvMetricScreenOnSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(onSessionRate)
 
         val offEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(offEnergy, currentDisplayUnit)
         binding.tvMetricScreenOffTime.text = formatValueWithSmallPercent(offDurationStr, offDurationRatioStr)
         binding.tvMetricScreenOffEnergy.text = formatValueWithSmallPercent(offEnergyText, offEnergyRatioStr)
         binding.tvMetricScreenOffPower.text = offPowerStr
+        binding.tvMetricScreenOffSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(offSessionRate)
 
         val totalEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(totalEnergy, currentDisplayUnit)
         binding.tvMetricGlobalTime.text = formatValueWithSmallPercent(totalDurationStr, "100%")
         binding.tvMetricGlobalEnergy.text = formatValueWithSmallPercent(totalEnergyText, globalEnergyRatioStr)
         binding.tvMetricGlobalPower.text = avgPowerStr
+        binding.tvMetricGlobalSpeed.text = PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(globalSessionRate)
 
         binding.tvPowerTitle.text = getString(R.string.power_stats_title)
         binding.tvPowerCursorTime.text = ""

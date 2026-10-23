@@ -552,7 +552,7 @@
                 android:id="@+id/metric_selector_view"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginHorizontal="16dp"
+                android:layout_marginHorizontal="0dp"
                 android:layout_marginTop="6dp" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>

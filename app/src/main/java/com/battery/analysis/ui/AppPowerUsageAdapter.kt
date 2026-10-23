@@ -112,7 +112,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             overviewHolder?.binding?.batteryTimelineView?.setDisplayUnit(newUnit)
             chargingHolder?.binding?.layoutChargingContent?.chargingChartView?.setDisplayUnit(newUnit)
             sleepAwakeHolder?.let { bindSleepAwakeMetrics(it) }
-            dischargeSpeedHolder?.let { bindDischargeSpeed(it) }
+            dischargeSpeedHolder?.let { bindDischargeSpeed(it, forceRecalculate = false, animateProgress = false) }
             safeNotifyDataSetChanged()
         }
     }
@@ -426,7 +426,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             is PowerUsageItem.DischargeSpeedMetrics -> {
                 val speedHolder = holder as DischargeSpeedViewHolder
                 dischargeSpeedHolder = speedHolder
-                bindDischargeSpeed(speedHolder)
+                bindDischargeSpeed(speedHolder, forceRecalculate = false, animateProgress = false)
             }
             is PowerUsageItem.SleepAwakeMetrics -> {
                 val sleepHolder = holder as SleepAwakeViewHolder
@@ -543,8 +543,13 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      *
      * @param holder 放电速度概览卡片 ViewHolder
      * @param forceRecalculate 是否强制重新计算剩余续航时间（在全量下拉刷新触发时传入 true）
+     * @param animateProgress 是否启用进度条平滑动画（仅在主动数据刷新就绪时为 true，列表滚动复用时为 false）
      */
-    private fun bindDischargeSpeed(holder: DischargeSpeedViewHolder, forceRecalculate: Boolean = false) {
+    private fun bindDischargeSpeed(
+        holder: DischargeSpeedViewHolder,
+        forceRecalculate: Boolean = false,
+        animateProgress: Boolean = false
+    ) {
         val precalculated = if (forceRecalculate) null else cachedTripleRuntimeResult
         val result = PowerDischargeMetricsViewBinder.bindDischargeSpeed(
             binding = holder.binding,
@@ -556,6 +561,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             tempCelsius = cachedTemperature.takeIf { it != 0f },
             currentTrendPoints = cachedTrendPoints,
             precalculatedRuntimeResult = precalculated,
+            animateProgress = animateProgress,
             onCardClick = { anchorView, rowType ->
                 onMetricModuleClickedListener?.invoke(anchorView, rowType)
             }
@@ -1373,7 +1379,8 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         if (trendPoints != null) {
             cachedTrendPoints = trendPoints
         }
-        dischargeSpeedHolder?.let { bindDischargeSpeed(it, forceRecalculate = forceRecalculateRuntime) }
+        val shouldAnimate = !forceRecalculateRuntime && cachedSevenDaysStats != null
+        dischargeSpeedHolder?.let { bindDischargeSpeed(it, forceRecalculate = forceRecalculateRuntime, animateProgress = shouldAnimate) }
         sleepAwakeHolder?.let { bindSleepAwakeMetrics(it) }
     }
 
@@ -1385,7 +1392,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      */
     fun updateSevenDaysStats(stats: SevenDaysDischargeStats?, forceRecalculateRuntime: Boolean = false) {
         cachedSevenDaysStats = stats
-        dischargeSpeedHolder?.let { bindDischargeSpeed(it, forceRecalculate = forceRecalculateRuntime) }
+        dischargeSpeedHolder?.let { bindDischargeSpeed(it, forceRecalculate = forceRecalculateRuntime, animateProgress = true) }
     }
 
     /**
@@ -1409,7 +1416,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      */
     fun updateTripleRuntimeResult(result: com.battery.analysis.domain.estimator.TripleRuntimeResult?) {
         cachedTripleRuntimeResult = result
-        dischargeSpeedHolder?.let { bindDischargeSpeed(it, forceRecalculate = false) }
+        dischargeSpeedHolder?.let { bindDischargeSpeed(it, forceRecalculate = false, animateProgress = true) }
     }
 
     /**
@@ -1491,7 +1498,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
      * 当游标释放或探查结束时，平滑还原放电速度概览卡片与息屏睡眠卡片的全周期常规统计数据。
      */
     fun restoreOverviewAndSleepStats() {
-        dischargeSpeedHolder?.let { bindDischargeSpeed(it) }
+        dischargeSpeedHolder?.let { bindDischargeSpeed(it, forceRecalculate = false, animateProgress = false) }
         sleepAwakeHolder?.let { bindSleepAwakeMetrics(it) }
     }
 }

@@ -26,11 +26,13 @@ class RuntimeEstimatorTest {
     @org.junit.Before
     fun setUp() {
         RollingDischargeBuffer.resetForTesting()
+        com.battery.analysis.domain.estimator.EnduranceRuntimeSmoother.getInstance().reset()
     }
 
     @org.junit.After
     fun tearDown() {
         RollingDischargeBuffer.resetForTesting()
+        com.battery.analysis.domain.estimator.EnduranceRuntimeSmoother.getInstance().reset()
     }
 
     /**
@@ -698,6 +700,9 @@ class RuntimeEstimatorTest {
             currentTrendPoints = null
         )
 
+        // 重置平滑器时序记忆，隔离测试两组独立输入下的直接推算结果
+        com.battery.analysis.domain.estimator.EnduranceRuntimeSmoother.getInstance().reset()
+
         // 2. 带细粒度采样点：应灵敏响应近期的 5.0W 高负载
         val trendResult = estimator.estimateTripleRuntimes(
             overview = overview,
@@ -1003,6 +1008,121 @@ class RuntimeEstimatorTest {
         assertTrue("底噪 0.33W 算出的功率应严格高于底噪 0.10W", p033 > p010)
 
         testDir.deleteRecursively()
+    }
+
+    /**
+     * 测试 estimateTripleRuntimes 一站式入口在连续刷新时，
+     * 亮屏、息屏待机与全局综合三维度均受时序平滑器保护，挂钟时间自然扣除且工况安全包络动态合抱。
+     */
+    @Test
+    fun testEstimateTripleRuntimes_allThreeDimensionsSmoothed_andEnvelopeSafe() {
+        com.battery.analysis.domain.estimator.EnduranceRuntimeSmoother.getInstance().reset()
+
+        val profile = com.battery.analysis.domain.estimator.model.RuntimeProfile(
+            windowStartMs = 1700000000000L,
+            windowEndMs = 1700604800000L,
+            windowDays = 7,
+            effectiveDischargeMs = 7 * 86400 * 1000L,
+            screenOnMs = (7 * 86400 * 1000L * 0.20).toLong(),
+            screenOffMs = (7 * 86400 * 1000L * 0.80).toLong(),
+            screenOnRatio = 0.20,
+            screenOffRatio = 0.80,
+            lightMs = 10000L, normalMs = 10000L, heavyMs = 10000L,
+            lightRatio = 0.3, normalRatio = 0.4, heavyRatio = 0.3,
+            lightPowerW = 2.0, normalPowerW = 5.0, heavyPowerW = 8.0,
+            typicalScreenOnPowerW = 5.0,
+            offLowPowerW = 0.3, offHighPowerW = 1.0,
+            typicalScreenOffPowerW = 0.5
+        )
+        val v2Result = com.battery.analysis.domain.estimator.model.FullChargeRuntimeResult(
+            fullRuntimeMs = 40 * 3600_000L,
+            screenOnFullRuntimeMs = 10 * 3600_000L,
+            screenOffFullRuntimeMs = 100 * 3600_000L,
+            fullEnergyWh = 25.0,
+            predictedPowerWatts = 1.25,
+            predictedScreenOnPowerWatts = 5.0,
+            predictedScreenOffPowerWatts = 0.5,
+            modelVersion = com.battery.analysis.domain.estimator.model.RuntimeModelVersion.FULL_RUNTIME_V2_2,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            energySource = com.battery.analysis.domain.estimator.model.EnergySource.FCC_TIMES_NOMINAL_VOLTAGE,
+            effectiveHistoryMs = 7 * 86400 * 1000L,
+            usedRegimeModel = true,
+            dataSufficiency = com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.SUFFICIENT,
+            profile = profile
+        )
+        val sevenDays = com.battery.analysis.model.SevenDaysDischargeStats(
+            screenOnDurationMs = 3600_000L * 10,
+            screenOffDurationMs = 3600_000L * 40,
+            globalDurationMs = 3600_000L * 50,
+            screenOnDischargeRatePercentPerHour = 10.0f,
+            screenOffDischargeRatePercentPerHour = 1.0f,
+            globalDischargeRatePercentPerHour = 2.5f,
+            v2Result = v2Result
+        )
+
+        // 第一次调用（建立三维度基线）
+        val res1 = estimator.estimateTripleRuntimes(
+            overview = null,
+            sevenDaysStats = sevenDays,
+            batteryLevelPercent = 80.0f,
+            remainingEnergyWh = 20.0f,
+            totalCapacityWh = 25.0f
+        )
+
+        val on1 = res1.screenOnEstimate.remainingMs
+        val off1 = res1.screenOffEstimate.remainingMs
+        val global1 = res1.globalEstimate.remainingMs
+
+        assertNotNull(on1)
+        assertNotNull(off1)
+        assertNotNull(global1)
+
+        // 等待 50 毫秒挂钟时间流逝
+        Thread.sleep(50)
+
+        // 第二次调用：模拟瞬态能量微小抖动或模型目标暴涨（如 energy 从 20Wh 虚增至 25Wh）
+        val res2 = estimator.estimateTripleRuntimes(
+            overview = null,
+            sevenDaysStats = sevenDays,
+            batteryLevelPercent = 80.0f,
+            remainingEnergyWh = 25.0f, // 瞬时原始模型目标大幅变大
+            totalCapacityWh = 25.0f
+        )
+
+        val on2 = res2.screenOnEstimate.remainingMs
+        val off2 = res2.screenOffEstimate.remainingMs
+        val global2 = res2.globalEstimate.remainingMs
+
+        assertNotNull(on2)
+        assertNotNull(off2)
+        assertNotNull(global2)
+
+        // 核心断言 1：短时防抖死区内，三维度剩余续航绝不暴涨，均严格小于等于初次结果
+        assertTrue("亮屏续航短时刷新严格单调递减", on2!! <= on1!!)
+        assertTrue("息屏待机续航短时刷新严格单调递减", off2!! <= off1!!)
+        assertTrue("全局综合续航短时刷新严格单调递减", global2!! <= global1!!)
+
+        // 核心断言 2：三维度各自的安全工况包络 (minRemainingMs ~ maxRemainingMs) 必须严格包裹平滑结果，杜绝倒挂
+        val onMin = res2.screenOnEstimate.minRemainingMs
+        val onMax = res2.screenOnEstimate.maxRemainingMs
+        assertNotNull(onMin)
+        assertNotNull(onMax)
+        assertTrue("亮屏包络下限包裹", onMin!! <= on2)
+        assertTrue("亮屏包络上限包裹", onMax!! >= on2)
+
+        val offMin = res2.screenOffEstimate.minRemainingMs
+        val offMax = res2.screenOffEstimate.maxRemainingMs
+        assertNotNull(offMin)
+        assertNotNull(offMax)
+        assertTrue("息屏包络下限包裹", offMin!! <= off2)
+        assertTrue("息屏包络上限包裹", offMax!! >= off2)
+
+        val gMin = res2.globalEstimate.minRemainingMs
+        val gMax = res2.globalEstimate.maxRemainingMs
+        assertNotNull(gMin)
+        assertNotNull(gMax)
+        assertTrue("全局包络下限包裹", gMin!! <= global2)
+        assertTrue("全局包络上限包裹", gMax!! >= global2)
     }
 }
 

@@ -143,6 +143,19 @@ class PowerEstimator(
         private set
 
     /**
+     * 获取工况跃迁检测器当前是否处于持续突变激活状态。
+     */
+    val isRegimeChanging: Boolean
+        get() = stateDetector.isRegimeChanging
+
+    /**
+     * 获取工况突变退出后的连续平滑衰减过渡比例（1.0 连续衰减至 0.0）。
+     */
+    val recoveryDecayRatio: Double
+        get() = stateDetector.recoveryDecayRatio
+
+
+    /**
      * 重置估计器所有内部状态与缓存数据。
      *
      * @param initialLongPowerWatts 可选的初始 7 天长期基准功耗（单位：W）
@@ -609,12 +622,14 @@ class PowerEstimator(
                 }
             }
         } else {
-            // 稳态下若 Fast 与 Medium 均存在且差异很小（稳定运行），温和降低 Long 依赖
+            // 稳态下若 Fast 与 Medium 均存在且差异较小（稳定运行），连续平滑降低 Long 依赖（消除硬编码阶跃跳变）
             if (hasFast && hasMedium && hasLong) {
                 val f = fastPowerWatts ?: 0.0
                 val m = mediumPowerWatts ?: 0.0
-                if (f > 0.0 && m > 0.0 && abs(f - m) / m < 0.15 && baseWl > 0.0) {
-                    val shift = baseWl * 0.15
+                if (f > 0.0 && m > 0.0 && baseWl > 0.0) {
+                    val relDiff = abs(f - m) / m
+                    val factor = ((0.20 - relDiff) / 0.20).coerceIn(0.0, 1.0)
+                    val shift = baseWl * 0.15 * factor
                     Triple(baseWf, baseWm + shift, baseWl - shift)
                 } else {
                     Triple(baseWf, baseWm, baseWl)

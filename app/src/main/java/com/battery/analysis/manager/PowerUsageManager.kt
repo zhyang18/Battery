@@ -6192,6 +6192,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             // 充电状态下彻底清空放电采样点与温度点，严禁插入插电瞬间的虚假放电点
             clearDischargeRealtimeSamples()
             clearDischargeTempPoints()
+            // 充电物理隔离：接入外部电源时立即彻底清空所有维度剩余续航时序平滑记忆，杜绝跨周期污染
+            com.battery.analysis.domain.estimator.EnduranceRuntimeSmoother.getInstance().reset()
         } else {
             resetDischargeTempPoints(now, curStatus.temperature)
             val initHwSample = SysfsBatterySampler.sampleHardwareDischarge(context, curStatus.voltageVolts, curStatus.temperature)

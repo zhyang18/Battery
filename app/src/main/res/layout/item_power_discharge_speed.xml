@@ -113,7 +113,7 @@
                     tools:text="15h40m" />
             </LinearLayout>
 
-            <!-- 第三行：剩余续航与满电续航进度占比指示条 (高度 5dp) -->
+            <!-- 第三行：剩余续航与满电续航进度占比指示条 (高度 3dp) -->
             <com.google.android.material.progressindicator.LinearProgressIndicator
                 android:id="@+id/progress_screen_on_remaining"
                 android:layout_width="match_parent"
@@ -123,8 +123,8 @@
                 app:indicatorColor="@color/power_remaining_progress_indicator"
                 app:indicatorInset="0dp"
                 app:trackColor="#20888888"
-                app:trackCornerRadius="2.5dp"
-                app:trackThickness="5dp"
+                app:trackCornerRadius="1.5dp"
+                app:trackThickness="3dp"
                 tools:progress="510" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
@@ -232,7 +232,7 @@
                     tools:text="03d09h" />
             </LinearLayout>
 
-            <!-- 第三行：剩余续航与满电续航进度占比指示条 (高度 5dp) -->
+            <!-- 第三行：剩余续航与满电续航进度占比指示条 (高度 3dp) -->
             <com.google.android.material.progressindicator.LinearProgressIndicator
                 android:id="@+id/progress_screen_off_remaining"
                 android:layout_width="match_parent"
@@ -242,8 +242,8 @@
                 app:indicatorColor="@color/power_remaining_progress_indicator"
                 app:indicatorInset="0dp"
                 app:trackColor="#20888888"
-                app:trackCornerRadius="2.5dp"
-                app:trackThickness="5dp"
+                app:trackCornerRadius="1.5dp"
+                app:trackThickness="3dp"
                 tools:progress="650" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
@@ -350,7 +350,7 @@
                     tools:text="01d04h" />
             </LinearLayout>
 
-            <!-- 第三行：剩余续航与满电续航进度占比指示条 (高度 5dp) -->
+            <!-- 第三行：剩余续航与满电续航进度占比指示条 (高度 3dp) -->
             <com.google.android.material.progressindicator.LinearProgressIndicator
                 android:id="@+id/progress_global_remaining"
                 android:layout_width="match_parent"
@@ -360,8 +360,8 @@
                 app:indicatorColor="@color/power_remaining_progress_indicator"
                 app:indicatorInset="0dp"
                 app:trackColor="#20888888"
-                app:trackCornerRadius="2.5dp"
-                app:trackThickness="5dp"
+                app:trackCornerRadius="1.5dp"
+                app:trackThickness="3dp"
                 tools:progress="450" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>

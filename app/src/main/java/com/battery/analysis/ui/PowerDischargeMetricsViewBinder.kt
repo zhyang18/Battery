@@ -80,6 +80,7 @@ object PowerDischargeMetricsViewBinder {
      * @param tempCelsius 电池当前工作温度（单位：℃，可选），用于高精度修正实际物理化学可用能量 K_T
      * @param currentTrendPoints 当前周期的细粒度趋势采样点集合（可选，用于激活 Fast 尺度实时跟踪与工况突变敏捷响应）
      * @param precalculatedRuntimeResult 外部预先估算并缓存的三维度剩余续航结果实体（可选，非空时直接复用，杜绝重复计算）
+     * @param animateProgress 是否对剩余续航进度条启用平滑缓慢过渡动画（仅在主动数据刷新时为 true，列表滚动复用时为 false）
      * @param onCardClick 卡片点击事件监听回调，参数依次为被点击卡片视图与行分类标识（[BatteryEnergyCalculator.ROW_SCREEN_ON] 等）
      * @return 实际用于渲染绑定的三维度剩余续航结果实体 [com.battery.analysis.domain.estimator.TripleRuntimeResult]
      */
@@ -93,6 +94,7 @@ object PowerDischargeMetricsViewBinder {
         tempCelsius: Float? = null,
         currentTrendPoints: List<PowerDischargePoint>? = null,
         precalculatedRuntimeResult: com.battery.analysis.domain.estimator.TripleRuntimeResult? = null,
+        animateProgress: Boolean = false,
         onCardClick: ((anchorView: View, rowType: Int) -> Unit)? = null
     ): com.battery.analysis.domain.estimator.TripleRuntimeResult {
         with(binding) {
@@ -132,10 +134,10 @@ object PowerDischargeMetricsViewBinder {
             tvScreenOffRemainingLabel.setUnitText(formatRemainingDurationOnly(fullOffMs))
             tvGlobalRemainingLabel.setUnitText(formatRemainingDurationOnly(fullGlobalMs))
 
-            // --- 3. 第三行：剩余续航与满电续航进度占比指示条 (高度 5dp) ---
-            updateRuntimeProgressBar(progressScreenOnRemaining, remOnMs, fullOnMs)
-            updateRuntimeProgressBar(progressScreenOffRemaining, remOffMs, fullOffMs)
-            updateRuntimeProgressBar(progressGlobalRemaining, remGlobalMs, fullGlobalMs)
+            // --- 3. 第三行：剩余续航与满电续航进度占比指示条 (高度 3dp) ---
+            updateRuntimeProgressBar(progressScreenOnRemaining, remOnMs, fullOnMs, animateProgress)
+            updateRuntimeProgressBar(progressScreenOffRemaining, remOffMs, fullOffMs, animateProgress)
+            updateRuntimeProgressBar(progressGlobalRemaining, remGlobalMs, fullGlobalMs, animateProgress)
 
             // 卡片点击事件监听
             if (onCardClick != null) {
@@ -1017,19 +1019,41 @@ object PowerDischargeMetricsViewBinder {
 
     /**
      * 计算剩余续航与升级模型满电续航的进度占比并更新线性进度指示条。
-     * 进度指示条采用平滑无动画模式更新，杜绝在列表滚动或下拉刷新时引起闪烁。
+     * 仅在主动刷新数据（animate = true）且目标进度发生真实变化时，启动平滑缓慢增长或减少的物理过渡动画；
+     * 当处于列表上下滑动或常规视图复用场景时（animate = false），静默直接设置目标进度，严禁从 0 重新加载或播放入场动效；
+     * 当剩余可用时长有效但升级模型满电时长尚未完成计算（如全量下拉刷新异步计算中）时，保持当前进度不变，彻底杜绝中间态归零闪烁。
      *
      * @param progressBar 目标线性进度指示条组件 [LinearProgressIndicator]
      * @param remainingMs 剩余可用物理时长（单位：毫秒，若无数据传入 null）
      * @param fullMs 升级模型满电预测可用物理时长（单位：毫秒，若无数据传入 null）
+     * @param animate 是否启用平滑缓慢过渡动画，默认为 false（仅在全量数据刷新就绪时传 true）
      */
     fun updateRuntimeProgressBar(
         progressBar: LinearProgressIndicator,
         remainingMs: Long?,
-        fullMs: Long?
+        fullMs: Long?,
+        animate: Boolean = false
     ) {
-        val progress = calculateRuntimeProgress(remainingMs, fullMs)
-        progressBar.setProgressCompat(progress, false)
+        // 若剩余可用时长有效但满电时长尚未就绪（如后台异步计算 7 天统计中），保持当前进度不变，杜绝中途归零闪烁
+        if (remainingMs != null && remainingMs > 0L && (fullMs == null || fullMs <= 0L) && progressBar.progress > 0) {
+            return
+        }
+
+        val targetProgress = calculateRuntimeProgress(remainingMs, fullMs)
+        val currentProgress = progressBar.progress
+
+        // 若目标进度与当前进度一致，无需任何更新操作，避免重复重绘
+        if (currentProgress == targetProgress) {
+            return
+        }
+
+        if (animate && progressBar.isAttachedToWindow) {
+            // 仅在明确刷新数据且视图已挂载时，启动平滑缓慢增长或减少的物理过渡动画
+            progressBar.setProgressCompat(targetProgress, true)
+        } else {
+            // 列表滚动复用或未启用动画时，静默快速更新到目标值，严禁重置为 0 或重新播放动画
+            progressBar.setProgressCompat(targetProgress, false)
+        }
     }
 
     /**

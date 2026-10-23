@@ -133,10 +133,10 @@ class RemainingRuntimeEstimatorTest {
         val (wFastSteady, wMedSteady, wLongSteady) = estimator.calculateAdaptiveWeights()
         assertEquals(1.0, wFastSteady + wMedSteady + wLongSteady, 0.0001)
 
-        // 模拟连续 2 次重载采样触发工况跃迁
+        // 模拟连续 2 次重载采样并持续做功超过 60 秒门限触发工况跃迁
         val now = System.currentTimeMillis()
         estimator.update(PowerSample(now, 3.8f, null, 4.5f, 80f, ScreenPowerState.SCREEN_ON))
-        estimator.update(PowerSample(now + 10_000L, 3.8f, null, 4.5f, 79f, ScreenPowerState.SCREEN_ON))
+        estimator.update(PowerSample(now + 65_000L, 3.8f, null, 4.5f, 79f, ScreenPowerState.SCREEN_ON))
 
         val (wFastJump, wMedJump, wLongJump) = estimator.calculateAdaptiveWeights()
         assertEquals("权重归一化和恒等于 1.0", 1.0, wFastJump + wMedJump + wLongJump, 0.0001)

@@ -235,9 +235,12 @@ class RuntimeEstimator(
         val hours = usableEnergyWh / predictedPower
         val remainingMs = (hours * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
 
-        // 亮屏工况预期范围：优先采用大样本历史实测的轻重载功率画像；缺失画像时基于当前预测放电功率推算动态置信区间包络
-        val pHeavyOn = heavyPowerW?.takeIf { it > predictedPower } ?: (predictedPower * 1.60)
-        val pLightOn = lightPowerW?.takeIf { it < predictedPower && it > 0.0 } ?: (predictedPower * 0.70)
+        // 亮屏工况预期范围：优先采用大样本历史实测与即时 Fast 实测结合的轻重载功率画像；缺失画像时基于当前预测放电功率推算动态置信区间包络
+        val actualFastOn = onPowerEstimator.getFastPower()?.takeIf { it > 0.0 }
+        val effectiveHeavyW = kotlin.math.max(heavyPowerW ?: 0.0, actualFastOn ?: 0.0).takeIf { it > 0.0 }
+        val effectiveLightW = kotlin.math.min(lightPowerW ?: 999.0, actualFastOn ?: 999.0).takeIf { it in 0.05..50.0 }
+        val pHeavyOn = effectiveHeavyW?.takeIf { it > predictedPower } ?: (predictedPower * 1.60)
+        val pLightOn = effectiveLightW?.takeIf { it < predictedPower && it > 0.0 } ?: (predictedPower * 0.70)
         val minOnMs = ((usableEnergyWh / pHeavyOn) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
         val maxOnMs = ((usableEnergyWh / pLightOn) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(minOnMs)
         val safeMinOnMs = if (remainingMs > 0L) kotlin.math.min(minOnMs, remainingMs) else minOnMs
@@ -794,10 +797,128 @@ class RuntimeEstimator(
             energyConfidence = energyConfidence
         )
 
+        // 6. 对亮屏、息屏与全局三维度剩余续航接入时序连续平滑器（EnduranceRuntimeSmoother）
+        // 刚性扣除挂钟流逝时间，结合动态能耗流速倍率（Dynamic Drain Rate Scaling）与工况突变标志实施非对称自适应阻尼平滑，
+        // 确保重载工况加速消耗时间、轻载工况减速节省时间，杜绝同一分钟内刷新跳变与短时 5 分钟游戏拉崩整天大盘
+        val nowTs = System.currentTimeMillis()
+        val smoother = EnduranceRuntimeSmoother.getInstance()
+
+        // 亮屏基准功率与动态流速倍率计算：
+        // 若具备近 7 天长期大样本习惯 longOnPower，以此作为锚定基准，并以即时实际做功功率评估加速/减速流速（如游戏 3x、看书 0.6x），
+        // 彻底终结 5 分钟短时游戏将整天 8 小时大盘腰斩至 3 小时的短视外推缺陷；若无长期习惯则平滑遵循当前多时间尺度融合结果
+        val baseOnPower = longOnPower?.takeIf { it > 0.0 } ?: onEstimate.predictedPowerWatts?.takeIf { it > 0.0 }
+        val actualOnPower = onEstimator.getFastPower()?.takeIf { it > 0.0 } ?: onEstimate.predictedPowerWatts?.takeIf { it > 0.0 } ?: baseOnPower
+        val onDrainRate = if (baseOnPower != null && actualOnPower != null && baseOnPower > 0.0) {
+            (actualOnPower / baseOnPower).coerceIn(0.2, 5.0)
+        } else {
+            1.0
+        }
+        val rawBaseOnMs = if (longOnPower != null && longOnPower > 0.0 && usableEnergy != null && usableEnergy > 0.0) {
+            ((usableEnergy / longOnPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
+        } else {
+            onEstimate.remainingMs
+        }
+
+        val smoothedOnMs = smoother.smoothRemainingRuntime(
+            dimension = EnduranceRuntimeSmoother.DIMENSION_SCREEN_ON,
+            rawTargetRemainingMs = rawBaseOnMs,
+            currentTimestampMs = nowTs,
+            isRegimeChanging = onEstimator.isRegimeChanging,
+            recoveryDecayRatio = onEstimator.recoveryDecayRatio,
+            batteryLevelPercent = batteryLevelPercent,
+            drainRateMultiplier = onDrainRate
+        )
+
+        // 息屏待机基准功率与动态流速倍率计算
+        val baseOffPower = longOffPower?.takeIf { it > 0.0 } ?: offEstimate.predictedPowerWatts?.takeIf { it > 0.0 }
+        val actualOffPower = offEstimator.getFastPower()?.takeIf { it > 0.0 } ?: offEstimate.predictedPowerWatts?.takeIf { it > 0.0 } ?: baseOffPower
+        val offDrainRate = if (baseOffPower != null && actualOffPower != null && baseOffPower > 0.0) {
+            (actualOffPower / baseOffPower).coerceIn(0.2, 5.0)
+        } else {
+            1.0
+        }
+        val rawBaseOffMs = if (longOffPower != null && longOffPower > 0.0 && usableEnergy != null && usableEnergy > 0.0) {
+            ((usableEnergy / longOffPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
+        } else {
+            offEstimate.remainingMs
+        }
+
+        val smoothedOffMs = smoother.smoothRemainingRuntime(
+            dimension = EnduranceRuntimeSmoother.DIMENSION_SCREEN_OFF,
+            rawTargetRemainingMs = rawBaseOffMs,
+            currentTimestampMs = nowTs,
+            isRegimeChanging = offEstimator.isRegimeChanging,
+            recoveryDecayRatio = offEstimator.recoveryDecayRatio,
+            batteryLevelPercent = batteryLevelPercent,
+            drainRateMultiplier = offDrainRate
+        )
+
+        // 全局综合基准功率与动态流速倍率计算
+        val isGlobalChanging = onEstimator.isRegimeChanging || globalFallbackEstimator.isRegimeChanging
+        val maxGlobalDecay = kotlin.math.max(onEstimator.recoveryDecayRatio, globalFallbackEstimator.recoveryDecayRatio)
+        val baseGlobalPower = longGlobalPower?.takeIf { it > 0.0 } ?: globalEstimate.predictedPowerWatts?.takeIf { it > 0.0 }
+        val actualGlobalPower = globalFallbackEstimator.getFastPower()?.takeIf { it > 0.0 } ?: globalEstimate.predictedPowerWatts?.takeIf { it > 0.0 } ?: baseGlobalPower
+        val globalDrainRate = if (baseGlobalPower != null && actualGlobalPower != null && baseGlobalPower > 0.0) {
+            (actualGlobalPower / baseGlobalPower).coerceIn(0.2, 5.0)
+        } else {
+            1.0
+        }
+        val rawBaseGlobalMs = if (baseGlobalPower != null && baseGlobalPower > 0.0 && usableEnergy != null && usableEnergy > 0.0) {
+            ((usableEnergy / baseGlobalPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
+        } else {
+            globalEstimate.remainingMs
+        }
+
+        val smoothedGlobalMs = smoother.smoothRemainingRuntime(
+            dimension = EnduranceRuntimeSmoother.DIMENSION_GLOBAL,
+            rawTargetRemainingMs = rawBaseGlobalMs,
+            currentTimestampMs = nowTs,
+            isRegimeChanging = isGlobalChanging,
+            recoveryDecayRatio = maxGlobalDecay,
+            batteryLevelPercent = batteryLevelPercent,
+            drainRateMultiplier = globalDrainRate
+        )
+
+        val finalOnEstimate = if (smoothedOnMs != null && smoothedOnMs != onEstimate.remainingMs) {
+            val safeMin = onEstimate.minRemainingMs?.let { kotlin.math.min(it, smoothedOnMs) } ?: smoothedOnMs
+            val safeMax = onEstimate.maxRemainingMs?.let { kotlin.math.max(it, smoothedOnMs) } ?: smoothedOnMs
+            onEstimate.copy(
+                remainingMs = smoothedOnMs,
+                minRemainingMs = safeMin,
+                maxRemainingMs = safeMax
+            )
+        } else {
+            onEstimate
+        }
+
+        val finalOffEstimate = if (smoothedOffMs != null && smoothedOffMs != offEstimate.remainingMs) {
+            val safeMin = offEstimate.minRemainingMs?.let { kotlin.math.min(it, smoothedOffMs) } ?: smoothedOffMs
+            val safeMax = offEstimate.maxRemainingMs?.let { kotlin.math.max(it, smoothedOffMs) } ?: smoothedOffMs
+            offEstimate.copy(
+                remainingMs = smoothedOffMs,
+                minRemainingMs = safeMin,
+                maxRemainingMs = safeMax
+            )
+        } else {
+            offEstimate
+        }
+
+        val finalGlobalEstimate = if (smoothedGlobalMs != null && smoothedGlobalMs != globalEstimate.remainingMs) {
+            val safeMin = globalEstimate.minRemainingMs?.let { kotlin.math.min(it, smoothedGlobalMs) } ?: smoothedGlobalMs
+            val safeMax = globalEstimate.maxRemainingMs?.let { kotlin.math.max(it, smoothedGlobalMs) } ?: smoothedGlobalMs
+            globalEstimate.copy(
+                remainingMs = smoothedGlobalMs,
+                minRemainingMs = safeMin,
+                maxRemainingMs = safeMax
+            )
+        } else {
+            globalEstimate
+        }
+
         return TripleRuntimeResult(
-            screenOnEstimate = onEstimate,
-            screenOffEstimate = offEstimate,
-            globalEstimate = globalEstimate,
+            screenOnEstimate = finalOnEstimate,
+            screenOffEstimate = finalOffEstimate,
+            globalEstimate = finalGlobalEstimate,
             modelVersion = RemainingModelVersion.REMAINING_RUNTIME_V2_2
         )
     }

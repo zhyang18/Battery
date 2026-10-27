@@ -484,6 +484,8 @@ class BatteryTimelineView @JvmOverloads constructor(
     private var cursorX = 0f
     private var touchDownX = 0f
     private var touchDownY = 0f
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
     private var isTouchMoved = false
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
     private val longPressTimeout = ViewConfiguration.getLongPressTimeout().toLong().coerceAtLeast(400L)
@@ -521,6 +523,9 @@ class BatteryTimelineView @JvmOverloads constructor(
         isParentScrolling = scrolling
         if (scrolling) {
             cancelLongPressTimer()
+            isScaling = false
+            isPanning = false
+            lastScaleFocusX = Float.NaN
             if (isCursorActive) {
                 isCursorActive = false
                 onCursorInspectListener?.onCursorDismiss()
@@ -535,15 +540,71 @@ class BatteryTimelineView @JvmOverloads constructor(
         }
     }
 
+    // 双指缩放与单指平移手势交互态标记与焦点追踪
+    private var isScaling = false
+    private var isPanning = false
+    private var lastScaleFocusX = Float.NaN
+
+    /** 标记图表当前是否正处于高频手势交互（缩放或平移）过程中，用于轻量化渲染降级。 */
+    private val isInteractingFastPath: Boolean
+        get() = isScaling || isPanning
+
     // 双指缩放手势检测器
     private val scaleGestureDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-        override fun onScale(detector: ScaleGestureDetector): Boolean {
-            val scaleFactor = detector.scaleFactor
-            val focusX = detector.focusX
-            applyZoom(scaleFactor, focusX)
+        /**
+         * 缩放手势启动回调。
+         *
+         * @param detector 缩放手势检测器 [ScaleGestureDetector]
+         * @return 确认消费并启动缩放手势流程，返回 true
+         */
+        override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+            isScaling = true
+            lastScaleFocusX = detector.focusX
+            cancelLongPressTimer()
+            if (isCursorActive) {
+                isCursorActive = false
+                onCursorInspectListener?.onCursorDismiss()
+                invalidate()
+            }
+            parent?.requestDisallowInterceptTouchEvent(true)
             return true
         }
-    })
+
+        /**
+         * 缩放手势中持续回调。
+         *
+         * @param detector 缩放手势检测器 [ScaleGestureDetector]
+         * @return 消费缩放手势增量，返回 true
+         */
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            val scaleFactor = detector.scaleFactor
+            if (scaleFactor.isNaN() || scaleFactor <= 0.001f || scaleFactor.isInfinite()) {
+                return false
+            }
+            val focusX = detector.focusX
+            val dx = if (lastScaleFocusX.isNaN()) 0f else (focusX - lastScaleFocusX)
+            lastScaleFocusX = focusX
+            applyZoom(scaleFactor, focusX, dx)
+            return true
+        }
+
+        /**
+         * 缩放手势结束回调。
+         *
+         * @param detector 缩放手势检测器 [ScaleGestureDetector]
+         */
+        override fun onScaleEnd(detector: ScaleGestureDetector) {
+            isScaling = false
+            lastScaleFocusX = Float.NaN
+            // 缩放手势结束：执行一次高精度的完整排版与防重叠标注重绘
+            invalidateCurveCache()
+            recalculateLayout(canRequestLayout = false)
+            invalidate()
+        }
+    }).apply {
+        // 显式禁用单指双击滑动缩放（QuickScale），确保图表仅严格响应纯正的双指捏合手势，彻底避免单指误触
+        isQuickScaleEnabled = false
+    }
 
     /**
      * 当前电量呈现单位（[PowerDisplayUnit.WH] 或 [PowerDisplayUnit.MAH]）。
@@ -796,7 +857,7 @@ class BatteryTimelineView @JvmOverloads constructor(
         )
         cachedSlotItems.addAll(laidOut)
         val currentMaxRow = cachedSlotItems.maxOfOrNull { it.rowIndex } ?: -1
-        if (canRequestLayout && currentMaxRow != previousMaxRow) {
+        if (canRequestLayout && !isInteractingFastPath && currentMaxRow != previousMaxRow) {
             requestLayout()
         }
     }
@@ -825,6 +886,9 @@ class BatteryTimelineView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         cancelLongPressTimer()
+        isScaling = false
+        isPanning = false
+        lastScaleFocusX = Float.NaN
         if (isCursorActive) {
             isCursorActive = false
             onCursorInspectListener?.onCursorDismiss()
@@ -1231,25 +1295,46 @@ class BatteryTimelineView @JvmOverloads constructor(
         val sharedOccupiedRects = mutableListOf<RectF>()
         val metrics = timelineState.selectedMetrics
         applyMetricLabelTheme(isNightMode)
+        val shouldLayoutMarkers = !isInteractingFastPath
         if (metrics.contains(TimelineMetric.BATTERY)) {
             buildBatteryCurveCache(cachedBatteryCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, rawSamples)
-            layoutSmartMarkers(cachedBatteryCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
+            if (shouldLayoutMarkers) {
+                layoutSmartMarkers(cachedBatteryCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
+            } else {
+                cachedBatteryCurve.laidOutMarkers.clear()
+            }
         }
         if (metrics.contains(TimelineMetric.ENERGY)) {
             buildEnergyCurveCache(cachedEnergyCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, rawSamples)
-            layoutSmartMarkers(cachedEnergyCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
+            if (shouldLayoutMarkers) {
+                layoutSmartMarkers(cachedEnergyCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
+            } else {
+                cachedEnergyCurve.laidOutMarkers.clear()
+            }
         }
         if (metrics.contains(TimelineMetric.POWER)) {
             buildPowerCurveCache(cachedPowerCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, cachedMaxScaleW, rawSamples)
-            layoutSmartMarkers(cachedPowerCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
+            if (shouldLayoutMarkers) {
+                layoutSmartMarkers(cachedPowerCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
+            } else {
+                cachedPowerCurve.laidOutMarkers.clear()
+            }
         }
         if (metrics.contains(TimelineMetric.TEMPERATURE)) {
             buildTemperatureCurveCache(cachedTempCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, rawSamples)
-            layoutSmartMarkers(cachedTempCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
+            if (shouldLayoutMarkers) {
+                layoutSmartMarkers(cachedTempCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
+            } else {
+                cachedTempCurve.laidOutMarkers.clear()
+            }
         }
         if (metrics.contains(TimelineMetric.VOLTAGE)) {
             buildVoltageCurveCache(cachedVoltCurve, contentLeft, contentWidth, topPadding, availableH, visibleStart, visibleEnd, rawSamples)
-            layoutSmartMarkers(cachedVoltCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
+            if (shouldLayoutMarkers) {
+                layoutSmartMarkers(cachedVoltCurve, metricLabelPaint, contentLeft, contentRight, topPadding, bottomBound, sharedOccupiedRects)
+            } else {
+                cachedVoltCurve.laidOutMarkers.clear()
+            }
         }
 
         cachedMergedScreenEvents = TimelineEventMerger.mergeScreenEvents(timelineState.screenEvents)
@@ -2637,46 +2722,91 @@ class BatteryTimelineView @JvmOverloads constructor(
     /**
      * 触摸与手势事件分发处理。
      * 严格遵循“图表中的触摸事件只有在长按时触发”的交互规范：
-     * 1. 父级列表正在滚动时，图表直接忽略所有触摸事件；
-     * 2. 多指缩放手势优先识别，并在多指按下时立即取消长按检测；
-     * 3. 单指触摸按下时启动长按倒计时，此时不拦截父容器，保障列表垂直滚动的最高优先级；
-     * 4. 在未长按状态下，手指发生任何移动（dx > touchSlop || dy > touchSlop）立即取消长按定时器并完全放行给列表滚动，绝对不触发图表触摸事件；
-     * 5. 只有在手指保持按住静止达到长按门限后，才激活垂直游标并锁定父容器，跟随手指横向拖动探查数据；
-     * 6. 手指抬起或手势取消时重置长按状态并释放父容器拦截。
+     * 1. 无数据或父级列表正在滚动时，图表直接忽略所有触摸事件；
+     * 2. 原始触摸事件无条件完整交付给 [ScaleGestureDetector]，确保多指手势状态机连续完整；
+     * 3. 一旦检测到多指（pointerCount > 1）或处于缩放/平移进行中，立即强制锁定父容器（requestDisallowInterceptTouchEvent(true)），杜绝事件被父级列表抢夺；
+     * 4. 监听 ACTION_POINTER_UP 处理多指到单指的平滑过渡，重新校准剩余手指锚点与缩放焦点，杜绝跳变抽搐；
+     * 5. 单指触摸按下时启动长按倒计时，垂直滑动占优时放行给外部列表滚动；
+     * 6. 若图表已被放大呈现局部视窗，支持单指横向拖拽平移时间轴；
+     * 7. 长按达到门限激活垂直游标并跟随手指；手指抬起或取消时复位状态并恢复全量高精排版。
      *
      * @param event 触摸事件 [MotionEvent]
      * @return 是否消费触摸事件
      */
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        // 无数据时直接忽略所有手势
+        if (timelineState.batterySamples.isEmpty()) {
+            return super.onTouchEvent(event)
+        }
+
         // 父级列表正在上下滑动过程中，图表严禁响应手势，杜绝抢夺事件与重绘
         if (isParentScrolling) {
             cancelLongPressTimer()
             return false
         }
 
-        // 双指缩放手势优先处理：检测到多指时立即取消长按检测
-        if (event.pointerCount > 1) {
+        // 1. 将完整的触摸事件先传递给双指缩放手势检测器
+        val scaleHandled = scaleGestureDetector.onTouchEvent(event)
+
+        // 2. 多指状态或缩放中：强制锁定父容器，取消长按并关闭游标
+        if (event.pointerCount > 1 || scaleGestureDetector.isInProgress || isScaling) {
             cancelLongPressTimer()
             if (isCursorActive) {
                 isCursorActive = false
                 onCursorInspectListener?.onCursorDismiss()
                 invalidate()
             }
-            return scaleGestureDetector.onTouchEvent(event)
+            parent?.requestDisallowInterceptTouchEvent(true)
         }
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 touchDownX = event.x
                 touchDownY = event.y
+                lastTouchX = event.x
+                lastTouchY = event.y
                 isTouchMoved = false
+                isPanning = false
                 cancelLongPressTimer()
                 postDelayed(longPressRunnable, longPressTimeout)
                 return true
             }
 
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                cancelLongPressTimer()
+                lastScaleFocusX = Float.NaN
+                parent?.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
+
+            MotionEvent.ACTION_POINTER_UP -> {
+                // 多指抬起其中一根时，重新校准剩余手指的基准点与缩放焦点，杜绝跳变抽搐
+                lastScaleFocusX = Float.NaN
+                val upIndex = event.actionIndex
+                // 遍历查找当前仍留在屏幕上的任意有效触点，平滑对齐基准锚点
+                for (i in 0 until event.pointerCount) {
+                    if (i != upIndex) {
+                        val rx = event.getX(i)
+                        val ry = event.getY(i)
+                        touchDownX = rx
+                        touchDownY = ry
+                        lastTouchX = rx
+                        lastTouchY = ry
+                        break
+                    }
+                }
+                parent?.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
+
             MotionEvent.ACTION_MOVE -> {
+                // 若处于双指缩放进行中，事件已被 scaleGestureDetector 消费
+                if (scaleGestureDetector.isInProgress || isScaling) {
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
+
                 // 若游标已长按激活，跟随手指横向移动更新游标与读数看板
                 if (isCursorActive) {
                     parent?.requestDisallowInterceptTouchEvent(true)
@@ -2686,20 +2816,48 @@ class BatteryTimelineView @JvmOverloads constructor(
                     return true
                 }
 
-                // 未长按状态下：若已被判定为已移动，直接放行
+                // 若已处于单指拖拽平移模式：持续平滑拖动时间波形
+                if (isPanning) {
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    val dx = event.x - lastTouchX
+                    lastTouchX = event.x
+                    applyScroll(dx)
+                    return true
+                }
+
+                // 未长按状态下：若已被判定为已移动给外部列表，直接放行
                 if (isTouchMoved) {
                     return false
                 }
 
-                // 检测位移：只要手指发生任何有效移动或显现垂直滑动意图，立即彻底取消长按判定并完全放行给列表滚动
                 val totalDx = abs(event.x - touchDownX)
                 val totalDy = abs(event.y - touchDownY)
-                val isVerticalDominant = totalDy > touchSlop * 0.4f && totalDy > totalDx
-                if (isVerticalDominant || totalDx > touchSlop || totalDy > touchSlop) {
+
+                // 垂直分量明显占优且位移超过 touchSlop 时，放行给外部列表垂直滚动
+                val isVerticalDominant = totalDy > touchSlop && totalDy > totalDx * 1.2f
+                if (isVerticalDominant) {
                     isTouchMoved = true
                     cancelLongPressTimer()
                     parent?.requestDisallowInterceptTouchEvent(false)
                     return false
+                }
+
+                // 水平或综合位移超过 touchSlop
+                if (totalDx > touchSlop || totalDy > touchSlop) {
+                    cancelLongPressTimer()
+                    // 若图表当前已被放大且呈现局部视窗，支持单指横向拖拽平移时间轴
+                    if (timelineState.zoomScale > 1.05f && totalDx > totalDy * 1.2f) {
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                        isPanning = true
+                        val dx = event.x - lastTouchX
+                        lastTouchX = event.x
+                        applyScroll(dx)
+                        return true
+                    } else {
+                        isTouchMoved = true
+                        parent?.requestDisallowInterceptTouchEvent(false)
+                        return false
+                    }
                 }
 
                 // 位移仍在 touchSlop 以内，维持等待长按状态，继续接收后续事件
@@ -2708,6 +2866,17 @@ class BatteryTimelineView @JvmOverloads constructor(
 
             MotionEvent.ACTION_UP -> {
                 cancelLongPressTimer()
+                val wasInteracting = isScaling || isPanning
+                isScaling = false
+                isPanning = false
+                lastScaleFocusX = Float.NaN
+
+                if (wasInteracting) {
+                    invalidateCurveCache()
+                    recalculateLayout(canRequestLayout = false)
+                    invalidate()
+                }
+
                 if (isCursorActive) {
                     isCursorActive = false
                     onCursorInspectListener?.onCursorDismiss()
@@ -2716,14 +2885,29 @@ class BatteryTimelineView @JvmOverloads constructor(
                     return true
                 }
                 parent?.requestDisallowInterceptTouchEvent(false)
-                // 原地轻微点击且未长按、未移动时，判定为单指单击（如点击能量指标或应用徽章）
-                if (!isTouchMoved && abs(event.x - touchDownX) <= touchSlop && abs(event.y - touchDownY) <= touchSlop) {
+
+                // 核心防误触保护：只要此前进行过缩放或平移手势交互，绝对禁止触发单击选择
+                if (!wasInteracting && !isTouchMoved && abs(event.x - touchDownX) <= touchSlop && abs(event.y - touchDownY) <= touchSlop) {
+                    isTouchMoved = false
                     return handleSingleTap(event.x, event.y)
                 }
+                isTouchMoved = false
             }
 
             MotionEvent.ACTION_CANCEL -> {
                 cancelLongPressTimer()
+                val wasInteracting = isScaling || isPanning
+                isScaling = false
+                isPanning = false
+                lastScaleFocusX = Float.NaN
+                isTouchMoved = false
+
+                if (wasInteracting) {
+                    invalidateCurveCache()
+                    recalculateLayout(canRequestLayout = false)
+                    invalidate()
+                }
+
                 if (isCursorActive) {
                     isCursorActive = false
                     onCursorInspectListener?.onCursorDismiss()
@@ -2734,18 +2918,24 @@ class BatteryTimelineView @JvmOverloads constructor(
             }
         }
 
-        return isCursorActive || super.onTouchEvent(event)
+        return scaleHandled || isCursorActive || super.onTouchEvent(event)
     }
 
     /**
-     * 应用双指时间缩放算法。
+     * 应用双指时间缩放与协同平移算法。
      *
      * @param factor 缩放比例因子
      * @param focusX 缩放中心焦点 X 坐标
+     * @param dx 双指中心点在 X 轴上的位移增量像素（用于协同平移，默认为 0f）
      */
-    private fun applyZoom(factor: Float, focusX: Float) {
+    private fun applyZoom(factor: Float, focusX: Float, dx: Float = 0f) {
         val w = width.toFloat()
         if (w <= 0f) return
+        if (factor.isNaN() || factor <= 0.001f || factor.isInfinite()) return
+
+        val contentLeft = dp16
+        val contentRight = w - dp16
+        val contentWidth = max(1f, contentRight - contentLeft)
 
         val currentStart = timelineState.visibleStartTimestamp
         val currentEnd = timelineState.visibleEndTimestamp
@@ -2755,15 +2945,21 @@ class BatteryTimelineView @JvmOverloads constructor(
         val totalEnd = timelineState.endTimestamp
         val totalSpan = (totalEnd - totalStart).coerceAtLeast(1000L)
 
-        // 缩放范围限制：最小显示 30 秒，最大显示全部数据
-        val minSpan = 30_000L
+        // 缩放范围限制：最小显示 30 秒（若数据总时长不足 30 秒以总时长为下限），最大显示全部数据
+        val minSpan = min(30_000L, totalSpan)
         val maxSpan = totalSpan
 
         val newSpan = (currentSpan / factor).toLong().coerceIn(minSpan, maxSpan)
-        val focusRatio = (focusX / w).coerceIn(0f, 1f)
+        val focusRatio = ((focusX - contentLeft) / contentWidth).coerceIn(0f, 1f)
 
         val focusTime = currentStart + (currentSpan * focusRatio).toLong()
         var newStart = focusTime - (newSpan * focusRatio).toLong()
+
+        // 结合双指移动的中心点偏移 dx 进行平移补偿
+        if (abs(dx) > 0.1f) {
+            val dt = (-dx / contentWidth * newSpan).toLong()
+            newStart += dt
+        }
         var newEnd = newStart + newSpan
 
         if (newStart < totalStart) {
@@ -2775,14 +2971,16 @@ class BatteryTimelineView @JvmOverloads constructor(
             newStart = max(totalStart, newEnd - newSpan)
         }
 
-        val newZoom = (totalSpan.toFloat() / newSpan.toFloat()).coerceIn(1.0f, 32.0f)
+        val actualSpan = (newEnd - newStart).coerceAtLeast(1L)
+        val newZoom = (totalSpan.toFloat() / actualSpan.toFloat()).coerceIn(1.0f, 32.0f)
         timelineState = timelineState.copy(
             visibleStartTimestamp = newStart,
             visibleEndTimestamp = newEnd,
             zoomScale = newZoom
         )
         invalidateCurveCache()
-        recalculateLayout()
+        // 关键性能优化：缩放进行中绝对禁止向 View 树发起 requestLayout()
+        recalculateLayout(canRequestLayout = false)
         invalidate()
     }
 
@@ -2795,24 +2993,32 @@ class BatteryTimelineView @JvmOverloads constructor(
         val w = width.toFloat()
         if (w <= 0f) return
 
+        val contentLeft = dp16
+        val contentRight = w - dp16
+        val contentWidth = max(1f, contentRight - contentLeft)
+
         val currentStart = timelineState.visibleStartTimestamp
         val currentEnd = timelineState.visibleEndTimestamp
         val currentSpan = currentEnd - currentStart
 
         val totalStart = timelineState.startTimestamp
         val totalEnd = timelineState.endTimestamp
+        val totalSpan = (totalEnd - totalStart).coerceAtLeast(1000L)
 
-        val dt = (-dx / w * currentSpan).toLong()
+        // 若当前可见跨度已覆盖或超过全集跨度，无需平移
+        if (currentSpan >= totalSpan) return
+
+        val dt = (-dx / contentWidth * currentSpan).toLong()
         var newStart = currentStart + dt
         var newEnd = currentEnd + dt
 
         if (newStart < totalStart) {
             newStart = totalStart
-            newEnd = newStart + currentSpan
+            newEnd = min(totalEnd, newStart + currentSpan)
         }
         if (newEnd > totalEnd) {
             newEnd = totalEnd
-            newStart = newEnd - currentSpan
+            newStart = max(totalStart, newEnd - currentSpan)
         }
 
         timelineState = timelineState.copy(
@@ -2820,7 +3026,8 @@ class BatteryTimelineView @JvmOverloads constructor(
             visibleEndTimestamp = newEnd
         )
         invalidateCurveCache()
-        recalculateLayout()
+        // 关键性能优化：平移滑动中绝对禁止向 View 树发起 requestLayout()
+        recalculateLayout(canRequestLayout = false)
         invalidate()
     }
 

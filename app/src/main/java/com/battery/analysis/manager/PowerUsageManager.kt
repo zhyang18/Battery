@@ -1996,6 +1996,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 appInfoCache.clear()
             }
             cachedPowerPackage = null
+        cachedSevenDaysStats = null
         }
     }
 
@@ -4499,6 +4500,10 @@ class PowerUsageManager private constructor(private val context: Context) {
     @Volatile
     private var cachedPowerPackage: FullPowerDataPackage? = null
 
+    /** 内存级最近一次 7 天加权放电统计大样本缓存，供界面刷新与平滑器秒级对齐复用 */
+    @Volatile
+    private var cachedSevenDaysStats: com.battery.analysis.model.SevenDaysDischargeStats? = null
+
     /** 本地轻量快照缓存文件对象 */
     private val cacheFile: File
         get() = File(context.cacheDir, "power_package_cache.json")
@@ -4568,8 +4573,25 @@ class PowerUsageManager private constructor(private val context: Context) {
     /**
      * 清理当前已缓存的完整耗电数据包（包含内存与磁盘文件）。
      */
+    /**
+     * 获取内存中缓存的最近一次 7 天加权放电统计大样本实体。
+     *
+     * @return 缓存的 [com.battery.analysis.model.SevenDaysDischargeStats] 实例，若无缓存返回 null
+     */
+    fun getCachedSevenDaysStats(): com.battery.analysis.model.SevenDaysDischargeStats? = cachedSevenDaysStats
+
+    /**
+     * 设置并更新内存中缓存的最近一次 7 天加权放电统计大样本实体。
+     *
+     * @param stats 最新的 [com.battery.analysis.model.SevenDaysDischargeStats] 实例，可为空
+     */
+    fun setCachedSevenDaysStats(stats: com.battery.analysis.model.SevenDaysDischargeStats?) {
+        cachedSevenDaysStats = stats
+    }
+
     fun clearCachedPowerPackage() {
         cachedPowerPackage = null
+        cachedSevenDaysStats = null
         try {
             val file = cacheFile
             if (file.exists()) {
@@ -5696,26 +5718,60 @@ class PowerUsageManager private constructor(private val context: Context) {
         val isInteractive = (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isInteractive == true
         synchronized(this) {
             val cachedResult = cachedUsageIntervalsResult
-            if (cachedResult != null &&
-                (now - cachedUsageIntervalsTime) < 5_000L &&
-                kotlin.math.abs(startTime - cachedUsageIntervalsStart) <= 3_000L &&
-                kotlin.math.abs(endTime - cachedUsageIntervalsEnd) <= 3_000L
-            ) {
-                if (isInteractive && endTime > cachedUsageIntervalsEnd) {
-                    val adjustedScreens = adjustScreenIntervalsForInteractiveScreen(
-                        screens = cachedResult.second,
-                        startTime = startTime,
-                        cachedEnd = cachedUsageIntervalsEnd,
-                        newEndTime = endTime
-                    )
-                    val adjustedApps = adjustAppIntervalsForInteractiveScreen(
-                        apps = cachedResult.first,
-                        cachedEnd = cachedUsageIntervalsEnd,
-                        newEndTime = endTime
-                    )
-                    return Pair(adjustedApps, adjustedScreens)
+            if (cachedResult != null && (now - cachedUsageIntervalsTime) < 10_000L) {
+                // 情况 1：起止时间几乎完全相同（3秒内微小漂移）
+                if (kotlin.math.abs(startTime - cachedUsageIntervalsStart) <= 3_000L &&
+                    kotlin.math.abs(endTime - cachedUsageIntervalsEnd) <= 3_000L
+                ) {
+                    if (isInteractive && endTime > cachedUsageIntervalsEnd) {
+                        val adjustedScreens = adjustScreenIntervalsForInteractiveScreen(
+                            screens = cachedResult.second,
+                            startTime = startTime,
+                            cachedEnd = cachedUsageIntervalsEnd,
+                            newEndTime = endTime
+                        )
+                        val adjustedApps = adjustAppIntervalsForInteractiveScreen(
+                            apps = cachedResult.first,
+                            cachedEnd = cachedUsageIntervalsEnd,
+                            newEndTime = endTime
+                        )
+                        return Pair(adjustedApps, adjustedScreens)
+                    }
+                    return cachedResult
                 }
-                return cachedResult
+                // 情况 2：当前缓存时间窗口已完全覆盖目标请求窗口（如 loadPowerData 全周期覆盖 buildTimelineState 子区间）
+                if (cachedUsageIntervalsStart <= (startTime + 5_000L) && cachedUsageIntervalsEnd >= (endTime - 5_000L)) {
+                    val filteredApps = cachedResult.first.mapNotNull { app ->
+                        val actStart = maxOf(app.startTs, startTime)
+                        val actEnd = minOf(app.endTs, endTime)
+                        if (actEnd > actStart) {
+                            AppActivityInterval(app.packageName, actStart, actEnd)
+                        } else null
+                    }
+                    val filteredScreens = cachedResult.second.mapNotNull { screen ->
+                        val sStart = maxOf(screen.startTs, startTime)
+                        val sEnd = minOf(screen.endTs, endTime)
+                        if (sEnd > sStart) {
+                            ScreenInteractiveInterval(sStart, sEnd)
+                        } else null
+                    }
+                    // 若当前处于亮屏且时间向前推进，无缝延展亮屏活跃区间至当前最新时刻，保持时间轴连续平滑
+                    if (isInteractive && endTime > cachedUsageIntervalsEnd) {
+                        val adjustedScreens = adjustScreenIntervalsForInteractiveScreen(
+                            screens = filteredScreens,
+                            startTime = startTime,
+                            cachedEnd = cachedUsageIntervalsEnd,
+                            newEndTime = endTime
+                        )
+                        val adjustedApps = adjustAppIntervalsForInteractiveScreen(
+                            apps = filteredApps,
+                            cachedEnd = cachedUsageIntervalsEnd,
+                            newEndTime = endTime
+                        )
+                        return Pair(adjustedApps, adjustedScreens)
+                    }
+                    return Pair(filteredApps, filteredScreens)
+                }
             }
         }
 

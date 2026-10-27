@@ -123,6 +123,12 @@ class PowerUsageFragment : Fragment() {
     /** 当前时间轴前缀和预计算索引缓存，支撑 120Hz 游标探查二分查询 */
     private var currentPrefixData: com.battery.analysis.timeline.util.TimelinePrefixData? = null
 
+    /** 最近一次 7 天放电统计计算的时间戳（毫秒），用于下拉刷新防抖，避免重复扫描 SQLite */
+    private var lastSevenDaysCalculateTime: Long = 0L
+
+    /** 最近一次计算缓存的 7 天放电统计对象 */
+    private var lastSevenDaysStatsCache: com.battery.analysis.model.SevenDaysDischargeStats? = null
+
 
     /** 当前执行中的数据异步加载协程任务，用于保证单任务并发安全 */
     private var loadDataJob: kotlinx.coroutines.Job? = null
@@ -1584,6 +1590,8 @@ class PowerUsageFragment : Fragment() {
      */
     private fun onDevicePowerConnected() {
         if (_binding == null) return
+        lastSevenDaysStatsCache = null
+        lastSevenDaysCalculateTime = 0L
         val currentLevel = powerManager.getCurrentBatteryStatus().levelPercent
         val (_, type) = chargingManager.checkCurrentSystemChargingState()
 
@@ -1604,6 +1612,8 @@ class PowerUsageFragment : Fragment() {
      */
     private fun onDevicePowerDisconnected() {
         if (_binding == null) return
+        lastSevenDaysStatsCache = null
+        lastSevenDaysCalculateTime = 0L
         applySmartChargingMode(isCharging = false, showToast = true)
         loadData()
     }
@@ -2268,6 +2278,11 @@ class PowerUsageFragment : Fragment() {
         val currentEnergy = snapshot.energyWh
         val currentTemp = snapshot.temperature
         val isFullDischargeRefresh = markAsRefreshed && !isViewingSnapshot
+        val currentCachedSevenDays = adapter.getCachedSevenDaysStats()
+            ?: lastSevenDaysStatsCache
+            ?: powerManager.getCachedSevenDaysStats()
+        val hasSevenDaysStats = currentCachedSevenDays != null
+        val shouldForceRecalculateNow = isFullDischargeRefresh && hasSevenDaysStats
         adapter.updateOverviewStats(
             overviewStats = overview,
             totalCapacityWh = totalCapacityWh,
@@ -2275,24 +2290,34 @@ class PowerUsageFragment : Fragment() {
             remainingEnergyWh = currentEnergy,
             tempCelsius = currentTemp,
             trendPoints = fullPackage.trendPoints,
-            forceRecalculateRuntime = isFullDischargeRefresh
+            sevenDaysStats = currentCachedSevenDays,
+            forceRecalculateRuntime = shouldForceRecalculateNow
         )
 
         // 异步更新过去 7 天加权放电统计速度与充满电使用时间（仅在全量有效刷新时启动异步计算，防抖期内/缓存恢复严格保持已有缓存，杜绝重复计算与续航跳动）
         if (isFullDischargeRefresh) {
             val baseTs = System.currentTimeMillis()
             val fullDataAppContext = requireContext().applicationContext
-            viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-                val stats = com.battery.analysis.util.SevenDaysDischargeCalculator.calculateSevenDaysStats(
-                    context = fullDataAppContext,
-                    currentOverview = overview,
-                    totalCapacityWh = totalCapacityWh,
-                    baseTimestamp = baseTs,
-                    currentTrendPoints = lastRenderedPackage?.trendPoints
-                )
-                withContext(Dispatchers.Main) {
-                    if (isAdded && _binding != null) {
-                        adapter.updateSevenDaysStats(stats, forceRecalculateRuntime = true)
+            // 20 秒内高频连续刷新时复用上次已计算好的 7 天加权统计，避免重复扫描 SQLite 历史数据库造成 CPU 功耗尖峰
+            val cachedStats = lastSevenDaysStatsCache
+            if (cachedStats != null && (baseTs - lastSevenDaysCalculateTime) in 0..20_000L) {
+                adapter.updateSevenDaysStats(cachedStats, forceRecalculateRuntime = false)
+            } else {
+                viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
+                    val stats = com.battery.analysis.util.SevenDaysDischargeCalculator.calculateSevenDaysStats(
+                        context = fullDataAppContext,
+                        currentOverview = overview,
+                        totalCapacityWh = totalCapacityWh,
+                        baseTimestamp = baseTs,
+                        currentTrendPoints = lastRenderedPackage?.trendPoints
+                    )
+                    lastSevenDaysCalculateTime = baseTs
+                    lastSevenDaysStatsCache = stats
+                    powerManager.setCachedSevenDaysStats(stats)
+                    withContext(Dispatchers.Main) {
+                        if (isAdded && _binding != null) {
+                            adapter.updateSevenDaysStats(stats, forceRecalculateRuntime = true)
+                        }
                     }
                 }
             }

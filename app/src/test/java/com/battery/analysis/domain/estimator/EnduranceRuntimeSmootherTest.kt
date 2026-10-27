@@ -467,4 +467,43 @@ class EnduranceRuntimeSmootherTest {
         // 核心断言：看书 30 分钟表显仅扣减 18 分钟，极耐用且单调下降
         assertEquals("看书30分钟按0.6倍流速平缓消耗18分钟", expectedMs, resultAfterReading)
     }
+
+    /**
+     * 测试 App 升级覆盖安装或冷启动时，算法数据源从无长期历史升级为具备 7 天权威大样本时的瞬时重新对齐行为。
+     * 场景：初次估算因 7 天大样本尚未计算完成而退化为 09h48m（35,280,000ms），
+     * 几十毫秒后权威大样本注入（真实物理目标 06h38m = 23,880,000ms），
+     * 平滑器必须识别权威升级，豁免 2~3 分钟防抖死区，立即瞬间重基准对齐至 06h38m。
+     */
+    @Test
+    fun testAuthoritativeBaselineUpgrade_instantRebaseline_noDeadbandDelay() {
+        val baseTs = 1700000000_000L
+        val unauthoritativeJumpMs = (9 * 3600 + 48 * 60) * 1000L // 09h48m 退化初态
+
+        // 1. 冷启动第 0 毫秒，无 7 天大样本（hasAuthoritativeLongTerm = false）
+        val resInitial = smoother.smoothRemainingRuntime(
+            dimension = EnduranceRuntimeSmoother.DIMENSION_SCREEN_ON,
+            rawTargetRemainingMs = unauthoritativeJumpMs,
+            currentTimestampMs = baseTs,
+            batteryLevelPercent = 48.0f,
+            hasAuthoritativeLongTerm = false
+        )
+        assertNotNull(resInitial)
+        assertEquals("首次无大样本时记录初态", unauthoritativeJumpMs, resInitial)
+
+        // 2. 50 毫秒后，后台协程计算完毕，注入权威 7 天大样本（目标 06h38m，hasAuthoritativeLongTerm = true）
+        val authoritativeTargetMs = (6 * 3600 + 38 * 60) * 1000L // 06h38m 真实大样本目标
+        val fiftyMsLater = baseTs + 50L
+
+        val resUpgraded = smoother.smoothRemainingRuntime(
+            dimension = EnduranceRuntimeSmoother.DIMENSION_SCREEN_ON,
+            rawTargetRemainingMs = authoritativeTargetMs,
+            currentTimestampMs = fiftyMsLater,
+            batteryLevelPercent = 48.0f,
+            hasAuthoritativeLongTerm = true
+        )
+        assertNotNull(resUpgraded)
+
+        // 核心断言：平滑器绝不被 < 120s 的防抖死区死锁在 09h48m，而是瞬间平滑切换至真实的权威大样本目标 06h38m！
+        assertEquals("权威 7 天大样本注入时必须瞬间重新对齐基准，杜绝死区死锁", authoritativeTargetMs, resUpgraded)
+    }
 }

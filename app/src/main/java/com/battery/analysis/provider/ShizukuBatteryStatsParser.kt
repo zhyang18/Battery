@@ -149,26 +149,32 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         // 1. 通过全局缓存与异步预热机制极速加载全系统所有应用的 UID 到包名映射表
         val uidPkgMap = loadUidPackageMap()
 
-        // 2. 下拉刷新仅拉取 dumpsys batterystats --charged，不再全量扫描昂贵的 checkin 硬件明细
-        val rawInitial = executeShizukuCommand("dumpsys batterystats --charged")
-
-        // 3. 校验并按需兜底拉取完整账本
-        var rawOutput = rawInitial
-        if (rawOutput.isBlank() || !rawOutput.contains("Estimated power use")) {
-            rawOutput = executeShizukuCommand("dumpsys batterystats")
-        }
-
-        // 若当前输出中未包含 Battery History 段落，主动补充拉取时序历史
-        if (!rawOutput.contains("Battery History", ignoreCase = true)) {
-            val historyOutput = executeShizukuCommand("dumpsys batterystats --history")
-            if (historyOutput.isNotBlank() && historyOutput.contains("Battery History", ignoreCase = true)) {
-                rawOutput = historyOutput + "\n" + rawOutput
+        val now = System.currentTimeMillis()
+        // 2. 检查会话级短时缓存（2.5 秒内高频连击防抖，避免瞬间重复拉起耗电命令）
+        val cachedText = rawBatterystatsCache
+        val rawOutput = if (cachedText != null && (now - rawBatterystatsCacheTime) in 0..2500L && cachedText.isNotBlank()) {
+            cachedText
+        } else {
+            // 3. 优先执行 dumpsys batterystats --charged；若其已完整包含耗电与历史段落则直接采纳；
+            // 若缺失段落，单次执行完整的 dumpsys batterystats，严格杜绝多重连续 fallback 轰炸 CPU
+            val initial = executeShizukuCommand("dumpsys batterystats --charged")
+            var output = if (initial.isNotBlank() && initial.contains("Estimated power use") && initial.contains("Battery History", ignoreCase = true)) {
+                initial
             } else {
-                val fullOutput = executeShizukuCommand("dumpsys batterystats")
-                if (fullOutput.isNotBlank() && fullOutput.contains("Battery History", ignoreCase = true)) {
-                    rawOutput = fullOutput + "\n" + rawOutput
+                executeShizukuCommand("dumpsys batterystats")
+            }
+            // 4. 若全量输出中仍未包含 Battery History（部分机型系统裁剪默认输出），定向补充单次轻量 --history
+            if (output.isNotBlank() && !output.contains("Battery History", ignoreCase = true)) {
+                val hist = executeShizukuCommand("dumpsys batterystats --history")
+                if (hist.isNotBlank() && hist.contains("Battery History", ignoreCase = true)) {
+                    output = hist + "\n" + output
                 }
             }
+            if (output.isNotBlank()) {
+                rawBatterystatsCache = output
+                rawBatterystatsCacheTime = now
+            }
+            output
         }
 
         if (rawOutput.isBlank()) {
@@ -258,7 +264,6 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         val historyPoints = mutableListOf<Pair<Long, Int>>()
         val historyTempList = mutableListOf<Float>()
         val historyTempPoints = mutableListOf<Pair<Long, Float>>()
-        val lines = rawText.split('\n')
         var inPowerUseSection = false
         var inBatteryHistorySection = false
         var inDischargeStepSection = false
@@ -270,7 +275,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         var lastPluggedTs: Long? = null
         var maxDischargeStepLevel = 0
 
-        for (line in lines) {
+        for (line in rawText.lineSequence()) {
             val trimmed = line.trim()
 
             // 监听 Discharge step durations 段落
@@ -1803,6 +1808,9 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      * 通过 Shizuku 提权执行 dumpsys batterystats --reset 重置系统底层的放电统计账本。
      */
     fun resetBatteryStats() {
+        rawBatterystatsCache = null
+        rawBatterystatsCacheTime = 0L
+        unresolvedUidSet.clear()
         executeShizukuShellCommand("dumpsys batterystats --reset")
     }
 
@@ -1814,19 +1822,11 @@ class ShizukuBatteryStatsParser(private val context: Context) {
      */
     private fun resolvePackageNameForUid(uid: Int): String? {
         if (uid <= 0) return null
-        return try {
-            val out = executeShizukuCommand("cmd package list packages -U | grep 'uid:$uid'")
-            if (out.isNotBlank()) {
-                val match = Regex("package:([^\\s]+)\\s+uid:$uid").find(out)
-                val found = match?.groupValues?.getOrNull(1)
-                if (!found.isNullOrEmpty()) {
-                    cachedUidPkgMap[uid] = found
-                    found
-                } else null
-            } else null
-        } catch (_: Exception) {
-            null
-        }
+        if (unresolvedUidSet.contains(uid)) return null
+        val cached = cachedUidPkgMap[uid]
+        if (!cached.isNullOrEmpty()) return cached
+        unresolvedUidSet.add(uid)
+        return null
     }
 
     companion object {
@@ -1835,6 +1835,17 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
         @Volatile
         private var hasInitMethod = false
+
+        /** 最近一次缓存的标准 dumpsys batterystats 文本 */
+        @Volatile
+        private var rawBatterystatsCache: String? = null
+
+        /** 最近一次 dumpsys batterystats 缓存时间戳（毫秒） */
+        @Volatile
+        private var rawBatterystatsCacheTime: Long = 0L
+
+        /** 未解析 UID 负缓存表（记录已确认为未知/已卸载的 UID，避免循环执行 Shell 查询） */
+        private val unresolvedUidSet = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
         /** 全局 UID 到包名映射内存缓存，消除下拉刷新重复执行 pm list packages -U */
         private val cachedUidPkgMap = java.util.concurrent.ConcurrentHashMap<Int, String>()

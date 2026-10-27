@@ -72,11 +72,13 @@ class EnduranceRuntimeSmoother {
      * @property lastSmoothedRemainingMs 上次输出的平滑后剩余续航毫秒数
      * @property lastTimestampMs 上次计算时的系统物理挂钟时间戳（毫秒）
      * @property lastBatteryLevel 上次记录的电池剩余百分比
+     * @property hasAuthoritativeLongTerm 上次基准是否由完整权威的 7 天历史大样本驱动
      */
     private data class DimensionState(
         val lastSmoothedRemainingMs: Long,
         val lastTimestampMs: Long,
-        val lastBatteryLevel: Float?
+        val lastBatteryLevel: Float?,
+        val hasAuthoritativeLongTerm: Boolean = false
     )
 
     /** 独立维度的时序平滑状态缓存字典 */
@@ -115,6 +117,7 @@ class EnduranceRuntimeSmoother {
      * @param recoveryDecayRatio 当前是否处于退出突变后的连续衰减过渡期（来自 [PowerStateDetector]）
      * @param batteryLevelPercent 当前电池剩余电量百分比（0.0 ~ 100.0，可选，用于感知外源物理充能注入）
      * @param drainRateMultiplier 动态能耗流速倍率（即时做功功率 / 基准稳态功率，默认 1.0）
+     * @param hasAuthoritativeLongTerm 本次预测是否基于完整权威的 7 天历史大样本习惯支撑
      * @return 经过动态流速递减与工况阻尼平滑后的最终剩余续航毫秒数，数据不可用时如实返回 null
      */
     @Synchronized
@@ -125,7 +128,8 @@ class EnduranceRuntimeSmoother {
         isRegimeChanging: Boolean = false,
         recoveryDecayRatio: Double = 0.0,
         batteryLevelPercent: Float? = null,
-        drainRateMultiplier: Double = 1.0
+        drainRateMultiplier: Double = 1.0,
+        hasAuthoritativeLongTerm: Boolean = false
     ): Long? {
         // 原始推算值无效时，如实返回 null
         if (rawTargetRemainingMs == null || rawTargetRemainingMs <= 0L) {
@@ -139,7 +143,8 @@ class EnduranceRuntimeSmoother {
             dimensionStates[dimension] = DimensionState(
                 lastSmoothedRemainingMs = rawTargetRemainingMs,
                 lastTimestampMs = currentTimestampMs,
-                lastBatteryLevel = batteryLevelPercent
+                lastBatteryLevel = batteryLevelPercent,
+                hasAuthoritativeLongTerm = hasAuthoritativeLongTerm
             )
             return rawTargetRemainingMs
         }
@@ -154,7 +159,23 @@ class EnduranceRuntimeSmoother {
             dimensionStates[dimension] = DimensionState(
                 lastSmoothedRemainingMs = rawTargetRemainingMs,
                 lastTimestampMs = currentTimestampMs,
-                lastBatteryLevel = batteryLevelPercent
+                lastBatteryLevel = batteryLevelPercent,
+                hasAuthoritativeLongTerm = hasAuthoritativeLongTerm || prevState.hasAuthoritativeLongTerm
+            )
+            return rawTargetRemainingMs
+        }
+
+        // 核心控制工程准则：检测算法模型权威基线升级（Authoritative Baseline Upgrade）
+        // 若上次平滑基准是在缺失 7 天历史大样本（无长期习惯）的退化状态下确立的（如冷启动首次粗暴推算），
+        // 而本次计算迎来了权威 7 天大样本（具备长期习惯支撑），此跃迁属于测量模型精度的质变升级，绝非瞬态噪声，
+        // 必须立即平滑重新确立基准（Re-baseline），彻底豁免防抖死区与阻尼延迟，防止错误退化值被死锁 2~3 分钟。
+        val isAuthoritativeUpgrade = !prevState.hasAuthoritativeLongTerm && hasAuthoritativeLongTerm
+        if (isAuthoritativeUpgrade) {
+            dimensionStates[dimension] = DimensionState(
+                lastSmoothedRemainingMs = rawTargetRemainingMs,
+                lastTimestampMs = currentTimestampMs,
+                lastBatteryLevel = batteryLevelPercent,
+                hasAuthoritativeLongTerm = true
             )
             return rawTargetRemainingMs
         }
@@ -166,7 +187,8 @@ class EnduranceRuntimeSmoother {
             dimensionStates[dimension] = DimensionState(
                 lastSmoothedRemainingMs = rawTargetRemainingMs,
                 lastTimestampMs = currentTimestampMs,
-                lastBatteryLevel = batteryLevelPercent
+                lastBatteryLevel = batteryLevelPercent,
+                hasAuthoritativeLongTerm = hasAuthoritativeLongTerm || prevState.hasAuthoritativeLongTerm
             )
             return rawTargetRemainingMs
         }
@@ -238,7 +260,8 @@ class EnduranceRuntimeSmoother {
         dimensionStates[dimension] = DimensionState(
             lastSmoothedRemainingMs = smoothedMs,
             lastTimestampMs = currentTimestampMs,
-            lastBatteryLevel = batteryLevelPercent
+            lastBatteryLevel = batteryLevelPercent,
+            hasAuthoritativeLongTerm = hasAuthoritativeLongTerm || prevState.hasAuthoritativeLongTerm
         )
 
         return smoothedMs

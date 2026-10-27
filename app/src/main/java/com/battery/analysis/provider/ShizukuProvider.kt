@@ -282,44 +282,46 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
-        // 2. 深度扫描 battery/bms 驱动文件节点
-        val directNodesCmd = """
-            for node in /sys/class/power_supply/battery /sys/class/power_supply/bms /sys/class/qcom-battery /sys/class/power_supply/battery_gauge; do
-                if [ -d "${'$'}node" ]; then
-                    for f in current_now batt_current battery_current current_avg power_now batt_power voltage_now batt_vol; do
-                        if [ -f "${'$'}node/${'$'}f" ]; then
-                            echo "${'$'}f=$(cat ${'$'}node/${'$'}f 2>/dev/null)"
-                        fi
-                    done
-                fi
-            done
-        """.trimIndent()
-        val directRes = executeCommand(directNodesCmd)
-        for (line in directRes.split('\n')) {
-            val trimLine = line.trim()
-            if (trimLine.startsWith("current_now=") || trimLine.startsWith("batt_current=") || trimLine.startsWith("battery_current=") || trimLine.startsWith("current_avg=")) {
-                val raw = trimLine.substringAfter("=").toLongOrNull()
-                if (raw != null) {
-                    val normCur = normalizeCurrent(raw)
-                    if (normCur != null && (currentNow == null || currentNow == 0f)) {
-                        currentNow = normCur
+        // 2. 深度扫描 battery/bms 驱动文件节点（仅当 uevent 未能提供关键瞬时电参时作为兜底扫描）
+        if (currentNow == null || voltage == null || powerWatts == null) {
+            val directNodesCmd = """
+                for node in /sys/class/power_supply/battery /sys/class/power_supply/bms /sys/class/qcom-battery /sys/class/power_supply/battery_gauge; do
+                    if [ -d "${'$'}node" ]; then
+                        for f in current_now batt_current battery_current current_avg power_now batt_power voltage_now batt_vol; do
+                            if [ -f "${'$'}node/${'$'}f" ]; then
+                                echo "${'$'}f=$(cat ${'$'}node/${'$'}f 2>/dev/null)"
+                            fi
+                        done
+                    fi
+                done
+            """.trimIndent()
+            val directRes = executeCommand(directNodesCmd)
+            for (line in directRes.lineSequence()) {
+                val trimLine = line.trim()
+                if (trimLine.startsWith("current_now=") || trimLine.startsWith("batt_current=") || trimLine.startsWith("battery_current=") || trimLine.startsWith("current_avg=")) {
+                    val raw = trimLine.substringAfter("=").toLongOrNull()
+                    if (raw != null) {
+                        val normCur = normalizeCurrent(raw)
+                        if (normCur != null && (currentNow == null || currentNow == 0f)) {
+                            currentNow = normCur
+                        }
                     }
                 }
-            }
-            if (trimLine.startsWith("voltage_now=") || trimLine.startsWith("batt_vol=")) {
-                val raw = trimLine.substringAfter("=").toLongOrNull()
-                if (raw != null) {
-                    val normVolt = normalizeVoltage(raw)
-                    if (normVolt != null && voltage == null) {
-                        voltage = normVolt
+                if (trimLine.startsWith("voltage_now=") || trimLine.startsWith("batt_vol=")) {
+                    val raw = trimLine.substringAfter("=").toLongOrNull()
+                    if (raw != null) {
+                        val normVolt = normalizeVoltage(raw)
+                        if (normVolt != null && voltage == null) {
+                            voltage = normVolt
+                        }
                     }
                 }
-            }
-            if (trimLine.startsWith("power_now=") || trimLine.startsWith("batt_power=")) {
-                val raw = trimLine.substringAfter("=").toLongOrNull()
-                if (raw != null && raw > 0) {
-                    val w = if (raw >= 10000) raw / 1000000f else raw / 1000f
-                    if (powerWatts == null) powerWatts = w
+                if (trimLine.startsWith("power_now=") || trimLine.startsWith("batt_power=")) {
+                    val raw = trimLine.substringAfter("=").toLongOrNull()
+                    if (raw != null && raw > 0) {
+                        val w = if (raw >= 10000) raw / 1000000f else raw / 1000f
+                        if (powerWatts == null) powerWatts = w
+                    }
                 }
             }
         }
@@ -425,19 +427,42 @@ class ShizukuProvider : BatteryDataProvider {
             cycleCount = matchCycle.groupValues[1].toIntOrNull()
         }
 
-        // 2. 获取 dumpsys batterystats 信息
-        val statsOutput = executeCommand("dumpsys batterystats")
-        val matchCapacity = REGEX_CAPACITY.find(statsOutput)
-        if (matchCapacity != null) {
-            designCapacity = matchCapacity.groupValues[1].toFloatOrNull()
-        }
-
-        val matchLearned = REGEX_LEARNED.find(statsOutput)
-        if (matchLearned != null) {
-            val raw = matchLearned.groupValues[1].toLongOrNull()
-            if (raw != null && raw > 0) {
-                fullChargeCapacity = if (raw < 100000) raw.toFloat() else raw / 1000f
+        // 2. 获取 dumpsys batterystats 中的设计容量与已学习容量
+        // 仅在首次启动或缓存过期（30 分钟）且当前尚未成功获取容量时，才按需执行全量 dumpsys batterystats，
+        // 杜绝下拉刷新高频执行耗时数百毫秒、输出几十万行的重量级命令引发 7~8W 瞬时功耗
+        val now = System.currentTimeMillis()
+        if (cachedStaticDesignCapacity != null && cachedStaticFullChargeCapacity != null) {
+            designCapacity = cachedStaticDesignCapacity
+            fullChargeCapacity = cachedStaticFullChargeCapacity
+        } else if (now - lastBatterystatsQueryTime > 1800_000L || cachedStaticDesignCapacity == null) {
+            lastBatterystatsQueryTime = now
+            val statsOutput = executeCommand("dumpsys batterystats")
+            val matchCapacity = REGEX_CAPACITY.find(statsOutput)
+            if (matchCapacity != null) {
+                designCapacity = matchCapacity.groupValues[1].toFloatOrNull()
+                if (designCapacity != null && designCapacity > 0f) {
+                    cachedStaticDesignCapacity = designCapacity
+                }
+            } else if (cachedStaticDesignCapacity != null) {
+                designCapacity = cachedStaticDesignCapacity
             }
+
+            val matchLearned = REGEX_LEARNED.find(statsOutput)
+            if (matchLearned != null) {
+                val raw = matchLearned.groupValues[1].toLongOrNull()
+                if (raw != null && raw > 0) {
+                    val learned = if (raw < 100000) raw.toFloat() else raw / 1000f
+                    fullChargeCapacity = learned
+                    if (learned > 0f) {
+                        cachedStaticFullChargeCapacity = learned
+                    }
+                }
+            } else if (cachedStaticFullChargeCapacity != null) {
+                fullChargeCapacity = cachedStaticFullChargeCapacity
+            }
+        } else {
+            designCapacity = cachedStaticDesignCapacity
+            fullChargeCapacity = cachedStaticFullChargeCapacity
         }
 
         // 3. 从系统电池粘性广播中提取循环次数（优先使用轻量广播 Intent 字段，避免 dumpsys activity broadcasts 遍历全系统巨量广播导致数百毫秒卡顿）
@@ -495,8 +520,23 @@ class ShizukuProvider : BatteryDataProvider {
         var currentCapacity: Float? = null
         var cycleCount: Int? = null
 
+        val now = System.currentTimeMillis()
+        if (cachedVendorDesignCapacity != null && (now - lastVendorQueryTime) < 30_000L) {
+            // 30 秒内复用静态物理属性，同时极速单行探测实时 charge_now，杜绝遍历全量 getprop 几千行文本
+            val instantChargeNow = executeCommand("getprop vendor.battery.charge_now").trim().toLongOrNull()
+            val curCap = if (instantChargeNow != null && instantChargeNow > 0) {
+                if (instantChargeNow < 100000) instantChargeNow.toFloat() else instantChargeNow / 1000f
+            } else null
+            return BatteryInfo(
+                designCapacity = cachedVendorDesignCapacity,
+                fullChargeCapacity = cachedVendorFullChargeCapacity,
+                currentCapacity = curCap,
+                cycleCount = cachedVendorCycleCount
+            )
+        }
+        lastVendorQueryTime = now
         val propsRes = executeCommand("getprop")
-        for (line in propsRes.split('\n')) {
+        for (line in propsRes.lineSequence()) {
             val trimLine = line.trim()
             if (trimLine.contains("[") && trimLine.contains("]")) {
                 val key = trimLine.substringBefore("]:").replace("[", "").trim()
@@ -544,6 +584,9 @@ class ShizukuProvider : BatteryDataProvider {
             }
         }
 
+        if (designCapacity != null) cachedVendorDesignCapacity = designCapacity
+        if (fullChargeCapacity != null) cachedVendorFullChargeCapacity = fullChargeCapacity
+        if (cycleCount != null) cachedVendorCycleCount = cycleCount
         return BatteryInfo(
             designCapacity = designCapacity,
             fullChargeCapacity = fullChargeCapacity,
@@ -619,8 +662,36 @@ class ShizukuProvider : BatteryDataProvider {
         @Volatile
         private var hasInitMethod: Boolean = false
 
-        /** 并发执行底层电池信息读取命令的线程池 */
-        private val asyncExecutor = java.util.concurrent.Executors.newCachedThreadPool()
+        /** 静态缓存的电池设计容量（出厂物理固定常量，消除重复全量 dumpsys batterystats） */
+        @Volatile
+        private var cachedStaticDesignCapacity: Float? = null
+
+        /** 静态缓存的电池已学习全充容量（内核缓慢更新，无需每次刷新重复 dump） */
+        @Volatile
+        private var cachedStaticFullChargeCapacity: Float? = null
+
+        /** 最近一次从 dumpsys batterystats 查询容量的时间戳（毫秒） */
+        @Volatile
+        private var lastBatterystatsQueryTime: Long = 0L
+
+        /** 静态缓存的 Vendor 设计容量 */
+        @Volatile
+        private var cachedVendorDesignCapacity: Float? = null
+
+        /** 静态缓存的 Vendor 全充容量 */
+        @Volatile
+        private var cachedVendorFullChargeCapacity: Float? = null
+
+        /** 静态缓存的 Vendor 循环次数 */
+        @Volatile
+        private var cachedVendorCycleCount: Int? = null
+
+        /** 最近一次从 getprop 查询的时间戳（毫秒） */
+        @Volatile
+        private var lastVendorQueryTime: Long = 0L
+
+        /** 并发执行底层电池信息读取命令的定长线程池，避免无界线程池拉升全部 CPU 核心导致 7~8W 瞬时功耗 */
+        private val asyncExecutor = java.util.concurrent.Executors.newFixedThreadPool(3)
 
         private val REGEX_CHARGE_COUNTER = Regex("(?m)^\\s*Charge counter:\\s*(\\d+)")
         private val REGEX_LEVEL = Regex("(?m)^\\s*level:\\s*(\\d+)")

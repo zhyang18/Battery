@@ -819,6 +819,7 @@ class RuntimeEstimator(
             onEstimate.remainingMs
         }
 
+        val hasAuthoritativeLongOn = longOnPower != null && longOnPower > 0.0
         val smoothedOnMs = smoother.smoothRemainingRuntime(
             dimension = EnduranceRuntimeSmoother.DIMENSION_SCREEN_ON,
             rawTargetRemainingMs = rawBaseOnMs,
@@ -826,7 +827,8 @@ class RuntimeEstimator(
             isRegimeChanging = onEstimator.isRegimeChanging,
             recoveryDecayRatio = onEstimator.recoveryDecayRatio,
             batteryLevelPercent = batteryLevelPercent,
-            drainRateMultiplier = onDrainRate
+            drainRateMultiplier = onDrainRate,
+            hasAuthoritativeLongTerm = hasAuthoritativeLongOn
         )
 
         // 息屏待机基准功率与动态流速倍率计算
@@ -843,6 +845,7 @@ class RuntimeEstimator(
             offEstimate.remainingMs
         }
 
+        val hasAuthoritativeLongOff = longOffPower != null && longOffPower > 0.0
         val smoothedOffMs = smoother.smoothRemainingRuntime(
             dimension = EnduranceRuntimeSmoother.DIMENSION_SCREEN_OFF,
             rawTargetRemainingMs = rawBaseOffMs,
@@ -850,7 +853,8 @@ class RuntimeEstimator(
             isRegimeChanging = offEstimator.isRegimeChanging,
             recoveryDecayRatio = offEstimator.recoveryDecayRatio,
             batteryLevelPercent = batteryLevelPercent,
-            drainRateMultiplier = offDrainRate
+            drainRateMultiplier = offDrainRate,
+            hasAuthoritativeLongTerm = hasAuthoritativeLongOff
         )
 
         // 全局综合基准功率与动态流速倍率计算
@@ -869,6 +873,7 @@ class RuntimeEstimator(
             globalEstimate.remainingMs
         }
 
+        val hasAuthoritativeLongGlobal = longGlobalPower != null && longGlobalPower > 0.0
         val smoothedGlobalMs = smoother.smoothRemainingRuntime(
             dimension = EnduranceRuntimeSmoother.DIMENSION_GLOBAL,
             rawTargetRemainingMs = rawBaseGlobalMs,
@@ -876,7 +881,8 @@ class RuntimeEstimator(
             isRegimeChanging = isGlobalChanging,
             recoveryDecayRatio = maxGlobalDecay,
             batteryLevelPercent = batteryLevelPercent,
-            drainRateMultiplier = globalDrainRate
+            drainRateMultiplier = globalDrainRate,
+            hasAuthoritativeLongTerm = hasAuthoritativeLongGlobal
         )
 
         val finalOnEstimate = if (smoothedOnMs != null && smoothedOnMs != onEstimate.remainingMs) {

@@ -809,9 +809,14 @@ class PowerUsageManager private constructor(private val context: Context) {
 
                 if (pendingDeltaMs >= 5_000L) {
                     val deltaHours = pendingDeltaMs / 3600_000f
+                    val maxCompensationWatts = maxOf(
+                        MAX_STANDBY_COMPENSATION_WATTS,
+                        quiescentStandbyWatts ?: 0f,
+                        (baseWatts * 1.05f).coerceAtMost(0.45f)
+                    )
                     val effectiveStandbyWatts = when {
-                        baseWatts in 0.015f..MAX_STANDBY_COMPENSATION_WATTS -> baseWatts
-                        quiescentStandbyWatts != null && quiescentStandbyWatts in 0.015f..MAX_STANDBY_COMPENSATION_WATTS -> quiescentStandbyWatts
+                        baseWatts in 0.015f..maxCompensationWatts -> baseWatts
+                        quiescentStandbyWatts != null && quiescentStandbyWatts in 0.015f..maxCompensationWatts -> quiescentStandbyWatts
                         else -> ShizukuBatteryStatsParser.DEFAULT_STANDBY_BASE_WATTS
                     }
                     if (effectiveStandbyWatts > 0f) {
@@ -845,38 +850,94 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         /**
          * 息屏唤醒活跃能耗与深度休眠挂起能耗的物理分解结果数据类。
+         * 严格遵循唤醒统计冻结、深睡多阶指标分离与模型推算明确标记原则。
          *
-         * @property awakeEnergyWh 息屏唤醒活跃期间的能量消耗（瓦时 Wh）
-         * @property deepSleepEnergyWh 深度休眠挂起期间的能量消耗（瓦时 Wh）
+         * @property awakeEnergyWh 息屏唤醒活跃期间的能量消耗（瓦时 Wh，由唤醒时序有效采样或底层硬件独立核算）
+         * @property deepSleepEnergyWh 深度休眠挂起期间的能量消耗（瓦时 Wh，由可信连续观测积分或固定窗口基线推算得出）
          * @property awakeWatts 息屏唤醒期间的平均功耗（瓦特 W）
-         * @property deepSleepWatts 深度休眠期间的平均功耗（瓦特 W）
+         * @property deepSleepWatts 深度休眠期间的平均功耗（瓦特 W，观测均值或基线推算）
          * @property isDecomposedAvailable 是否具备真实底层依据并成功完成物理细分分解
+         * @property observedSleepMeanWatts 连续观测区间内的实测平均功耗（瓦特 W，覆盖不足时为 null，绝不伪造）
+         * @property isDeepSleepInferred 深睡能量是否为模型推算值（true: 覆盖不足使用基线外推; false: 全量连续实测积分）
+         * @property crossValidationResidualWh 库仑计硬件差分与合成总能耗的交叉验证残差（单位：瓦时 Wh，仅供诊断）
          */
         data class ScreenOffDecomposedEnergy(
             val awakeEnergyWh: Float,
             val deepSleepEnergyWh: Float,
             val awakeWatts: Float,
             val deepSleepWatts: Float,
-            val isDecomposedAvailable: Boolean = true
+            val isDecomposedAvailable: Boolean = true,
+            val observedSleepMeanWatts: Float? = null,
+            val isDeepSleepInferred: Boolean = false,
+            val crossValidationResidualWh: Float? = null
         )
+
+        /**
+         * 从放电时序采样点序列中提取稳定的深度休眠物理采样点。
+         * 自动识别亮屏转灭屏的时序边界，剔除关屏初期前 180 秒（3 分钟）内脏数据落盘与网络连接切断的过渡态震荡样本，
+         * 优先保留进入稳定挂起阶段的高纯度物理采样点。
+         *
+         * @param samples 原始放电瞬态采样点序列
+         * @return 过滤过渡震荡后的稳定息屏物理采样点列表
+         */
+        internal fun filterStableQuiescentSamples(samples: List<PowerDischargePoint>): List<PowerDischargePoint> {
+            val sortedSamples = samples.sortedBy { it.timestamp }
+            val validOffSamples = sortedSamples.filter { !it.isScreenOn && it.powerWatts > 0f }
+            if (validOffSamples.size < 3) return validOffSamples
+
+            val screenOffMoments = mutableListOf<Long>()
+            for (i in 0 until sortedSamples.size - 1) {
+                val curr = sortedSamples[i]
+                val next = sortedSamples[i + 1]
+                if (curr.isScreenOn && !next.isScreenOn) {
+                    screenOffMoments.add(next.timestamp)
+                }
+            }
+
+            if (screenOffMoments.isEmpty()) {
+                val firstOff = validOffSamples.firstOrNull()
+                if (firstOff != null) {
+                    screenOffMoments.add(firstOff.timestamp)
+                }
+            }
+
+            val stableSamples = validOffSamples.filter { pt ->
+                screenOffMoments.none { offTs ->
+                    pt.timestamp in offTs..(offTs + 180_000L)
+                }
+            }
+
+            return if (stableSamples.size >= 3) stableSamples else validOffSamples
+        }
 
         /**
          * 从时序放电物理采样点序列中提取纯净静态待机底噪功率（Quiescent Standby Watts）。
          * 排除活跃唤醒尖峰（如后台网络通信、数据同步），提取真实的硬件物理待机功耗基线（P10 分位数）。
-         * 允许合理的待机底噪门限范围（<= MAX_QUIESCENT_STANDBY_WATTS，默认 0.25W），防止弱信号待机底噪被误弃，同时杜绝将关屏过渡尖峰与高负荷后台唤醒采样误当休眠底噪。
+         * 允许合理的待机底噪门限范围（<= maxStandbyWatts），防止弱信号待机底噪被误弃，同时杜绝将关屏过渡尖峰与高负荷后台唤醒采样误当休眠底噪。
          *
          * @param samples 时序瞬时放电物理采样点列表
+         * @param maxStandbyWatts 允许采纳的待机静态底噪物理上限门限（瓦特 W，默认 [MAX_QUIESCENT_STANDBY_WATTS] 为 0.25W）
          * @return 提取得到的纯净静态待机底噪功率（瓦特 W），若无有效息屏采样点或全为高功耗活跃样本则返回 null
          */
-        internal fun extractQuiescentStandbyWatts(samples: List<PowerDischargePoint>): Float? {
-            val validOffSamples = samples.filter { !it.isScreenOn && it.powerWatts > 0f }
+        internal fun extractQuiescentStandbyWatts(
+            samples: List<PowerDischargePoint>,
+            maxStandbyWatts: Float = MAX_QUIESCENT_STANDBY_WATTS
+        ): Float? {
+            val stableSamples = filterStableQuiescentSamples(samples)
+            val validOffSamples = if (stableSamples.isNotEmpty()) stableSamples else samples.filter { !it.isScreenOn && it.powerWatts > 0f }
             if (validOffSamples.isEmpty()) return null
 
             // 优先通过 StandbyBaselineEstimator 进行时间窗口聚合与多窗口支持度校验
-            val baselineEstimate = com.battery.analysis.domain.estimator.StandbyBaselineEstimator.estimate(samples)
-            if (baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P10) {
-                val watts = baselineEstimate.baselinePowerWatts.toFloat()
-                if (watts in 0.015f..MAX_QUIESCENT_STANDBY_WATTS) {
+            val dynamicConfig = com.battery.analysis.domain.estimator.model.StandbyBaselineConfig(
+                suspiciousPollutionThresholdWatts = maxStandbyWatts.toDouble()
+            )
+            val baselineEstimate = com.battery.analysis.domain.estimator.StandbyBaselineEstimator.estimate(
+                samples = validOffSamples,
+                config = dynamicConfig
+            )
+            if (baselineEstimate.confidence != com.battery.analysis.domain.estimator.model.StandbyConfidenceLevel.LOW) {
+                val watts = (baselineEstimate.sleepMeanWatts ?: baselineEstimate.baselinePowerWatts).toFloat()
+                if (watts in 0.015f..maxStandbyWatts) {
                     return watts
                 }
             }
@@ -885,16 +946,16 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val sortedPowers = validOffSamples.map { it.powerWatts }.sorted()
                 val p10Index = (sortedPowers.size * 0.10).toInt().coerceIn(0, sortedPowers.size - 1)
                 val candidateWatts = sortedPowers[p10Index]
-                if (candidateWatts in 0.015f..MAX_QUIESCENT_STANDBY_WATTS) {
+                if (candidateWatts in 0.015f..maxStandbyWatts) {
                     candidateWatts
                 } else if (candidateWatts < 0.015f) {
-                    sortedPowers.firstOrNull { it in 0.015f..MAX_QUIESCENT_STANDBY_WATTS } ?: (if (candidateWatts > 0f) candidateWatts else null)
+                    sortedPowers.firstOrNull { it in 0.015f..maxStandbyWatts } ?: (if (candidateWatts > 0f) candidateWatts else null)
                 } else {
                     val minPower = sortedPowers.first()
-                    if (minPower <= MAX_QUIESCENT_STANDBY_WATTS) minPower else null
+                    if (minPower <= maxStandbyWatts) minPower else null
                 }
             } else {
-                val validPowers = validOffSamples.map { it.powerWatts }.filter { it <= MAX_QUIESCENT_STANDBY_WATTS }
+                val validPowers = validOffSamples.map { it.powerWatts }.filter { it <= maxStandbyWatts }
                 validPowers.minOrNull()
             }
         }
@@ -921,14 +982,16 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
 
         /**
-         * 真实物理守恒分解息屏唤醒能耗与深度睡眠能耗。
-         * 第一优先级：优先采信放电时序瞬时物理采样点（dischargeRealtimeSamples）序列提取的真实待机底噪与实测唤醒功耗，
-         * 直接读取硬件库仑计电流电压，彻底摆脱系统底层 power_profile.xml 静态理论配置模型的估算失真；
-         * 第二优先级：当缺乏充分实测物理采样点时，回退采信系统内核根据芯片寄存器与电源配置模型统计的原生待机放电量（Idle / Device standby）；
-         * 第三优先级：无有效实测样本且内核数据缺失或严重失真时，忠实标记为不可分解（isDecomposedAvailable = false），绝不伪造虚假保底数据；
-         * 全流程受到放电全周期累积单调性基准护盾与小分母残差自适应平衡机制保护，彻底杜绝小唤醒时长下残差暴增放大爆表（如 5.65W）与历史深睡能耗倒流缩水。
+         * 息屏唤醒与深度休眠细分能耗科学核算。
          *
-         * @param offEnergyWh 息屏总能耗（瓦时 Wh）
+         * 严格遵循四大实施原则：
+         * 1. 唤醒统计完全冻结：保留现有已验证的采样、积分与能耗计算，在具备唤醒实测样本时严格锚定实测活跃功耗，
+         *    任何深睡样本的变化均不会反向污染唤醒统计；
+         * 2. 深睡基线 P50 候选：固定长度窗口中位数作为典型基线候选，不凭稀疏离散数据伪造窗口；
+         * 3. 深睡积分连续累加：梯形积分仅累计可信、连续观测区间（<= 30秒），拒绝跨大断层插值，覆盖不足时如实置空实测均值；
+         * 4. 外推结果明确标记：观测均值与整段深睡能量估计采用不同字段，使用基线外推时显式标注 isDeepSleepInferred = true，绝不冒充实测。
+         *
+         * @param offEnergyWh 息屏总能耗（瓦时 Wh，主要作为外部宏观参考与交叉验证）
          * @param screenOffMs 息屏总时长（毫秒 ms）
          * @param deepSleepMs 深度休眠时长（毫秒 ms，来自系统硬件时钟差分）
          * @param awakeMs 息屏唤醒时长（毫秒 ms，来自系统硬件时钟差分）
@@ -936,12 +999,12 @@ class PowerUsageManager private constructor(private val context: Context) {
          * @param rawAwakeDrainMah 系统底层 dumpsys 上报的独立唤醒电量（毫安时 mAh，若有）
          * @param samples 瞬时物理采样点列表（若有）
          * @param nominalVoltageVolts 电池标称电压（伏特 V）
-         * @param allCycleSamples 放电全周期物理采样点列表（用于最近采样窗口缺乏纯净待机点时提取该硬件周期的物理底噪）
+         * @param allCycleSamples 放电全周期物理采样点列表（用于提取硬件周期的稳态底噪）
          * @param confirmedDeepSleepEnergyWh 当前放电周期已确认的深度睡眠能量下限（瓦时 Wh）
          * @param confirmedDeepSleepDurationMs 当前放电周期已确认深睡能量对应的深睡时长（毫秒 ms）
          * @param confirmedAwakeEnergyWh 当前放电周期已确认的唤醒能量下限（瓦时 Wh）
          * @param confirmedAwakeDurationMs 当前放电周期已确认唤醒能量对应的唤醒时长（毫秒 ms）
-         * @return 包含分解后的唤醒能耗、深度休眠能耗与各自平均功耗的结果对象 [ScreenOffDecomposedEnergy]
+         * @return 包含细分后的唤醒能耗、深度休眠能耗、观测均值与模型推算标识的结果对象 [ScreenOffDecomposedEnergy]
          */
         fun calculateScreenOffAwakeAndDeepSleepEnergy(
             offEnergyWh: Float,
@@ -978,9 +1041,6 @@ class PowerUsageManager private constructor(private val context: Context) {
             val offHours = screenOffMs.toDouble() / 3600000.0
             val offAvgWatts = if (offHours > 0.0) (offEnergyWh.toDouble() / offHours).toFloat() else 0f
 
-            // 物理第一性原理：在息屏工况下，CPU 深度休眠挂起态（Deep Sleep）功耗必严格低于或等于总平均待机功耗，
-            // 且唤醒活跃态（Awake）功耗必严格高于休眠态（P_awake >= P_sleep）。
-            // 故深睡能量上限受时间守恒与功耗梯度物理约束，必须为唤醒活跃态保留合理的物理能耗空间
             val maxSleepRatio = if (deepSleepHours > 0.0 && awakeHours > 0.0) {
                 (deepSleepHours / (deepSleepHours + awakeHours * 1.15)).coerceIn(0.0, 0.999)
             } else {
@@ -993,22 +1053,38 @@ class PowerUsageManager private constructor(private val context: Context) {
 
             var deepSleepEnergyWh: Float
             var awakeEnergyWh: Float
+            var observedSleepMeanWatts: Float? = null
+            var isDeepSleepInferred: Boolean
             val isDecomposedAvailable: Boolean
 
-            // 1. 第一优先级：优先采信硬件时序瞬时物理采样点（dischargeRealtimeSamples）序列提取的真实待机底噪与实测唤醒功率
-            // 真实物理采样点直接读取硬件库仑计电流电压，保真度远高于系统底层 power_profile.xml 静态理论模型
-            val baselineSleepWatts: Float? = extractQuiescentStandbyWatts(samples)
-                ?: if (allCycleSamples.isNotEmpty()) extractQuiescentStandbyWatts(allCycleSamples) else null
+            // 1. 尝试提取真实物理静止底噪与唤醒活跃功耗
+            val dynamicMaxStandbyWatts = maxOf(MAX_QUIESCENT_STANDBY_WATTS, (offAvgWatts * 0.95f).coerceAtMost(0.45f))
+            val baselineSleepWatts: Float? = extractQuiescentStandbyWatts(samples, dynamicMaxStandbyWatts)
+                ?: if (allCycleSamples.isNotEmpty()) extractQuiescentStandbyWatts(allCycleSamples, dynamicMaxStandbyWatts) else null
+
+            // 获取 StandbyBaselineEstimator 的估计结果（用于梯形时间积分与覆盖率判断）
+            val baselineEstimate = if (samples.isNotEmpty()) {
+                com.battery.analysis.domain.estimator.StandbyBaselineEstimator.estimate(
+                    samples = samples,
+                    config = com.battery.analysis.domain.estimator.model.StandbyBaselineConfig(
+                        suspiciousPollutionThresholdWatts = dynamicMaxStandbyWatts.toDouble()
+                    )
+                )
+            } else null
+
+            if (baselineEstimate?.sleepMeanWatts != null) {
+                observedSleepMeanWatts = baselineEstimate.sleepMeanWatts.toFloat()
+            }
 
             if (baselineSleepWatts != null && baselineSleepWatts > 0f) {
-                // 策略 1（硬件实测采样点驱动）：基于实测待机底噪与实测唤醒功耗进行物理守恒分解
-                val calculatedSleepEnergy = (baselineSleepWatts * deepSleepHours).toFloat()
+                // 策略 1（硬件实测采样点驱动）：基于实测待机底噪与实测唤醒功耗进行科学分解
+                val effectiveSleepWatts = observedSleepMeanWatts ?: baselineSleepWatts
+                val calculatedSleepEnergy = (effectiveSleepWatts * deepSleepHours).toFloat()
                 val candidateSleepWh = minOf(calculatedSleepEnergy, maxAllowedSleepWh).coerceIn(0f, offEnergyWh)
                 val candidateAwakeWh = (offEnergyWh - candidateSleepWh).coerceAtLeast(0.0001f)
                 val candidateAwakeWatts = if (awakeHours > 0.0) (candidateAwakeWh / awakeHours).toFloat() else 0f
 
-                // 防范极短唤醒时长下的小分母除数剧烈放大（如实测唤醒仅十来分钟，残差导致功耗反常爆表至数瓦）：
-                // 优先从息屏样本中提取实测活跃功耗（extractActiveStandbyWatts），严格锚定实测功耗特征
+                // 规则 1：唤醒统计完全冻结（保留现有已验证的采样防小分母与活跃锚定机制）
                 val activeObservedWatts = extractActiveStandbyWatts(samples, baselineSleepWatts)
                     ?: if (allCycleSamples.isNotEmpty()) extractActiveStandbyWatts(allCycleSamples, baselineSleepWatts) else null
 
@@ -1021,10 +1097,15 @@ class PowerUsageManager private constructor(private val context: Context) {
                     deepSleepEnergyWh = candidateSleepWh
                     awakeEnergyWh = candidateAwakeWh
                 }
+
+                if (observedSleepMeanWatts != null) {
+                    isDeepSleepInferred = false
+                } else {
+                    isDeepSleepInferred = true // 采用固定窗口 P50 基线推算
+                }
                 isDecomposedAvailable = true
             } else {
-                // 2. 第二优先级（回退系统原生统计）：
-                // 当缺乏充分实测采样点（如息屏全挂起未采样或采样点不足）时，回退采信系统内核原生统计（Device standby / Idle）
+                // 策略 2（回退系统原生统计）
                 val impliedSleepWattsFromKernel = if (deepSleepHours > 0.0 && rawSleepDrainMah > 0f) {
                     (rawSleepDrainMah * nominalVoltageVolts / 1000f) / deepSleepHours
                 } else {
@@ -1047,10 +1128,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                         val candidateAwakeWh = (offEnergyWh - candidateSleepWh).coerceAtLeast(0.0001f)
                         val candidateAwakeWatts = if (awakeHours > 0.0) (candidateAwakeWh / awakeHours).toFloat() else 0f
 
-                        // 防范小分母剧烈放大：当唤醒时长极短且残差反推唤醒功耗超过合理物理上限时进行物理守恒平衡
+                        val activeObservedWatts = extractActiveStandbyWatts(samples, impliedSleepWattsFromKernel.toFloat())
+                            ?: if (allCycleSamples.isNotEmpty()) extractActiveStandbyWatts(allCycleSamples, impliedSleepWattsFromKernel.toFloat()) else null
+
                         if (candidateAwakeWatts > 2.0f * offAvgWatts && candidateAwakeWatts > 1.2f) {
-                            val activeObservedWatts = extractActiveStandbyWatts(samples, impliedSleepWattsFromKernel.toFloat())
-                                ?: if (allCycleSamples.isNotEmpty()) extractActiveStandbyWatts(allCycleSamples, impliedSleepWattsFromKernel.toFloat()) else null
                             val safeAwakeWatts = activeObservedWatts
                                 ?: maxOf(offAvgWatts * 1.6f, (candidateSleepWh / deepSleepHours.toFloat()) * 1.5f)
                             val adjustedAwakeWh = (safeAwakeWatts * awakeHours).toFloat().coerceIn(0.0001f, offEnergyWh)
@@ -1061,28 +1142,26 @@ class PowerUsageManager private constructor(private val context: Context) {
                             awakeEnergyWh = candidateAwakeWh
                         }
                     }
+                    isDeepSleepInferred = false
                     isDecomposedAvailable = true
                 } else {
-                    // 3. 第三优先级：缺失物理采样点与底层待机统计数据时，忠实反映未获取状态，绝不捏造经验保底比率
                     deepSleepEnergyWh = 0f
                     awakeEnergyWh = 0f
+                    isDeepSleepInferred = false
                     isDecomposedAvailable = false
                 }
             }
 
-            // 3. 放电全周期累积单调性护盾：
-            // 若当前放电周期已确认过有效的深睡与唤醒能耗基准，历史能耗坚守物理单调性，绝不允许刷新时逆向缩水
+            // 放电全周期累积单调性护盾：坚守历史已确认能耗单调性
             if (isDecomposedAvailable) {
                 if (confirmedDeepSleepEnergyWh > 0f && deepSleepMs >= (confirmedDeepSleepDurationMs - 10_000L).coerceAtLeast(0L)) {
                     if (deepSleepEnergyWh < confirmedDeepSleepEnergyWh) {
                         deepSleepEnergyWh = minOf(confirmedDeepSleepEnergyWh, offEnergyWh)
-                        awakeEnergyWh = (offEnergyWh - deepSleepEnergyWh).coerceAtLeast(0.0001f)
                     }
                 }
                 if (confirmedAwakeEnergyWh > 0f && awakeMs >= (confirmedAwakeDurationMs - 10_000L).coerceAtLeast(0L)) {
                     if (awakeEnergyWh < confirmedAwakeEnergyWh) {
                         awakeEnergyWh = minOf(confirmedAwakeEnergyWh, offEnergyWh)
-                        deepSleepEnergyWh = (offEnergyWh - awakeEnergyWh).coerceAtLeast(0f)
                     }
                 }
             }
@@ -1090,12 +1169,19 @@ class PowerUsageManager private constructor(private val context: Context) {
             val calcSleepWatts = if (deepSleepHours > 0.0 && isDecomposedAvailable) (deepSleepEnergyWh.toDouble() / deepSleepHours).toFloat() else 0f
             val calcAwakeWatts = if (awakeHours > 0.0 && isDecomposedAvailable) (awakeEnergyWh.toDouble() / awakeHours).toFloat() else 0f
 
+            // 外部交叉验证残差
+            val totalSynthesizedWh = awakeEnergyWh + deepSleepEnergyWh
+            val crossValidationResidualWh = offEnergyWh - totalSynthesizedWh
+
             return ScreenOffDecomposedEnergy(
                 awakeEnergyWh = awakeEnergyWh,
                 deepSleepEnergyWh = deepSleepEnergyWh,
                 awakeWatts = calcAwakeWatts,
                 deepSleepWatts = calcSleepWatts,
-                isDecomposedAvailable = isDecomposedAvailable
+                isDecomposedAvailable = isDecomposedAvailable,
+                observedSleepMeanWatts = observedSleepMeanWatts,
+                isDeepSleepInferred = isDeepSleepInferred,
+                crossValidationResidualWh = crossValidationResidualWh
             )
         }
 
@@ -1175,7 +1261,8 @@ class PowerUsageManager private constructor(private val context: Context) {
 
                 // 若息屏期间采样点功率处于活跃放电水平（> MAX_STANDBY_COMPENSATION_WATTS，0.35W）且不存在显著的挂起断层：
                 // 物理上证明 CPU 始终保持活跃运行（如后台音频、持有唤醒锁等），未真正进入挂起休眠
-                if (avgWatts > MAX_STANDBY_COMPENSATION_WATTS && totalSuspendMs <= 0L) {
+                val effectiveMaxStandby = maxOf(MAX_STANDBY_COMPENSATION_WATTS, (avgWatts * 0.95f).coerceAtMost(0.45f))
+                if (avgWatts > effectiveMaxStandby && totalSuspendMs <= 0L) {
                     return Pair(screenOffMs, 0L)
                 }
 
@@ -1307,6 +1394,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
 
             // 5. 若存在连续物理采样点，结合采样断层（CPU 挂起）、瞬时功率（<= 0.25W 待机底噪）与硬件时钟权重精细标记
+            val subAvgWatts = subSamples.map { it.powerWatts }.filter { it > 0f }.average().toFloat()
+            val effectiveSleepThresholdWatts = maxOf(MAX_STANDBY_COMPENSATION_WATTS, (subAvgWatts * 0.95f).coerceAtMost(0.45f))
             val result = mutableListOf<ScreenEvent>()
             var cursor = offStartTs
             val sleepThresholdMs = 20_000L
@@ -1321,7 +1410,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                     // 若功耗极低（<= MAX_STANDBY_COMPENSATION_WATTS，0.35W 待机底噪）且已渡过灭屏初期的过渡期，判定为深度睡眠；
                     // 否则若处于活跃功耗（> MAX_STANDBY_COMPENSATION_WATTS）或灭屏初期，判定为唤醒活跃
                     val elapsedFromStart = cursor - offStartTs
-                    val isSleep = (pt.powerWatts in 0.0001f..MAX_STANDBY_COMPENSATION_WATTS && elapsedFromStart >= targetAwakeMs) ||
+                    val isSleep = (pt.powerWatts in 0.0001f..effectiveSleepThresholdWatts && elapsedFromStart >= targetAwakeMs) ||
                             (pt.powerWatts in 0.0001f..0.15f)
                     result.add(ScreenEvent(cursor, pt.timestamp, isScreenOn = false, isDeepSleep = isSleep))
                 }
@@ -3918,8 +4007,16 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
                 val sampleOffEnergyWh = dischargeStats?.screenOffDisplayEnergyWh ?: 0f
 
-                val quiescentWatts = extractQuiescentStandbyWatts(recentSamples)
-                    ?: if (getDischargeRealtimeSamples().isNotEmpty()) extractQuiescentStandbyWatts(getDischargeRealtimeSamples()) else null
+                val approxOffAvgWatts = if (screenOffHours > 0f && kernelOffEnergyWh > 0f) {
+                    kernelOffEnergyWh / screenOffHours
+                } else if (dischargeStats != null && dischargeStats.screenOffPowerWatts > 0f) {
+                    dischargeStats.screenOffPowerWatts
+                } else {
+                    0f
+                }
+                val dynamicStandbyThreshold = maxOf(MAX_QUIESCENT_STANDBY_WATTS, (approxOffAvgWatts * 0.95f).coerceAtMost(0.45f))
+                val quiescentWatts = extractQuiescentStandbyWatts(recentSamples, dynamicStandbyThreshold)
+                    ?: if (getDischargeRealtimeSamples().isNotEmpty()) extractQuiescentStandbyWatts(getDischargeRealtimeSamples(), dynamicStandbyThreshold) else null
 
                 val offIntegrated = calculateScreenOffEnergyWithDeltaCompensation(
                     screenOffMs = screenOffMs,
@@ -3974,10 +4071,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                     screenOffWatts = dualStats.screenOffWatts
                     avgWatts = dualStats.avgWatts
 
-                    if (dualStats.offEnergyWh > 0f && (screenOffMs > confirmedScreenOffDurationMs || confirmedScreenOffDurationMs == 0L)) {
-                        confirmedScreenOffEnergyWh = maxOf(confirmedScreenOffEnergyWh, dualStats.offEnergyWh)
-                        confirmedScreenOffDurationMs = maxOf(confirmedScreenOffDurationMs, screenOffMs)
-                    }
+                    // confirmedScreenOffEnergyWh 统一在后置自底向上物理合成与分解校验完成后更新，防止未校验的 dumpsys 残差提早污染单调性基准
                 } else if (physicalTotalEnergyWh > 0f) {
                     // 2. 无硬件连续采样点时，忠实采用系统底层库仑计/掉电量计算的真实物理能耗：
                     if (screenOffHours <= 0f || screenOffMs < 30000L) {
@@ -4008,10 +4102,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                     screenOnWatts = if (screenOnHours > 0f) onEnergyWh / screenOnHours else avgWatts
                     screenOffWatts = if (screenOffHours > 0f) offEnergyWh / screenOffHours else 0f
 
-                    if (offEnergyWh > 0f && (screenOffMs > confirmedScreenOffDurationMs || confirmedScreenOffDurationMs == 0L)) {
-                        confirmedScreenOffEnergyWh = maxOf(confirmedScreenOffEnergyWh, offEnergyWh)
-                        confirmedScreenOffDurationMs = maxOf(confirmedScreenOffDurationMs, screenOffMs)
-                    }
+                    // confirmedScreenOffEnergyWh 统一在后置自底向上物理合成与分解校验完成后更新，防止未校验的 dumpsys 残差提早污染单调性基准
                 } else {
                     // 3. 既无硬件采样点且系统无任何掉电量（如刚拔掉充电器数秒内）：真实数值均为 0
                     realTotalEnergyWh = 0f
@@ -4123,8 +4214,66 @@ class PowerUsageManager private constructor(private val context: Context) {
                     samples = recentSamples.ifEmpty { getDischargeRealtimeSamples() }
                 )
 
+                // 自底向上物理微积分前置验证与守恒闭环：
+                // 若实测采样点具备纯净硬件底噪与活跃特征，计算自底向上物理合成能量：
+                // E_natural = P_quiescent * T_sleep + P_active * T_awake
+                val deepSleepHours = deepSleepMs / 3600_000f
+                val awakeHours = awakeMs / 3600_000f
+                val effectiveBaselineWatts = quiescentWatts
+                    ?: extractQuiescentStandbyWatts(recentSamples, dynamicStandbyThreshold)
+                    ?: if (getDischargeRealtimeSamples().isNotEmpty()) extractQuiescentStandbyWatts(getDischargeRealtimeSamples(), dynamicStandbyThreshold) else null
+
+                val effectiveActiveWatts = extractActiveStandbyWatts(recentSamples, effectiveBaselineWatts)
+                    ?: if (getDischargeRealtimeSamples().isNotEmpty()) extractActiveStandbyWatts(getDischargeRealtimeSamples(), effectiveBaselineWatts) else null
+
+                val kernelAwakeWatts = if (stats.screenOffAwakeDrainMah > 0f && awakeHours > 0f && nominalVoltageVolts > 0f) {
+                    (stats.screenOffAwakeDrainMah * nominalVoltageVolts / 1000f) / awakeHours
+                } else {
+                    null
+                }
+                val physicalActiveWatts = effectiveActiveWatts
+                    ?: if (kernelAwakeWatts != null && kernelAwakeWatts in 0.05f..2.5f) kernelAwakeWatts else null
+
+                val naturalSleepEnergyWh = if (effectiveBaselineWatts != null && deepSleepHours > 0f) effectiveBaselineWatts * deepSleepHours else 0f
+                val naturalAwakeEnergyWh = if (physicalActiveWatts != null && awakeHours > 0f) {
+                    physicalActiveWatts * awakeHours
+                } else if (awakeHours > 0f && offEnergyWh > naturalSleepEnergyWh) {
+                    minOf(offEnergyWh - naturalSleepEnergyWh, (effectiveBaselineWatts ?: 0.15f) * 1.5f * awakeHours)
+                } else {
+                    0f
+                }
+                val naturalOffEnergyWh = naturalSleepEnergyWh + naturalAwakeEnergyWh
+
+                // 当外部传入的 offEnergyWh 显著受 dumpsys 未重置或过度外推污染（超出物理合成和 15% 以上）时，前置采信自底向上物理合成能量
+                val effectiveOffEnergyWh = if (effectiveBaselineWatts != null && naturalOffEnergyWh > 0f && (offEnergyWh <= 0f || offEnergyWh > naturalOffEnergyWh * 1.15f)) {
+                    naturalOffEnergyWh
+                } else {
+                    offEnergyWh
+                }
+
+                // 历史单调性基准自愈：若历史已固化的深睡/唤醒/息屏基准存在脏数据残留超标（如旧版本残差泄漏），自动净化回物理合成真值
+                val cleanConfirmedDeepSleepEnergyWh = if (effectiveBaselineWatts != null && naturalSleepEnergyWh > 0f && confirmedDeepSleepEnergyWh > naturalSleepEnergyWh * 1.15f) {
+                    naturalSleepEnergyWh
+                } else {
+                    confirmedDeepSleepEnergyWh
+                }
+                val cleanConfirmedAwakeEnergyWh = if (physicalActiveWatts != null && naturalAwakeEnergyWh > 0f && confirmedAwakeEnergyWh > naturalAwakeEnergyWh * 1.15f) {
+                    naturalAwakeEnergyWh
+                } else {
+                    confirmedAwakeEnergyWh
+                }
+                if (cleanConfirmedDeepSleepEnergyWh < confirmedDeepSleepEnergyWh) {
+                    confirmedDeepSleepEnergyWh = cleanConfirmedDeepSleepEnergyWh
+                }
+                if (cleanConfirmedAwakeEnergyWh < confirmedAwakeEnergyWh) {
+                    confirmedAwakeEnergyWh = cleanConfirmedAwakeEnergyWh
+                }
+                if (effectiveBaselineWatts != null && naturalOffEnergyWh > 0f && confirmedScreenOffEnergyWh > naturalOffEnergyWh * 1.15f) {
+                    confirmedScreenOffEnergyWh = naturalOffEnergyWh
+                }
+
                 val decomposedOff = calculateScreenOffAwakeAndDeepSleepEnergy(
-                    offEnergyWh = offEnergyWh,
+                    offEnergyWh = effectiveOffEnergyWh,
                     screenOffMs = screenOffMs,
                     deepSleepMs = deepSleepMs,
                     awakeMs = awakeMs,
@@ -4133,9 +4282,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                     samples = recentSamples,
                     nominalVoltageVolts = nominalVoltageVolts,
                     allCycleSamples = getDischargeRealtimeSamples(),
-                    confirmedDeepSleepEnergyWh = confirmedDeepSleepEnergyWh,
+                    confirmedDeepSleepEnergyWh = cleanConfirmedDeepSleepEnergyWh,
                     confirmedDeepSleepDurationMs = confirmedDeepSleepDurationMs,
-                    confirmedAwakeEnergyWh = confirmedAwakeEnergyWh,
+                    confirmedAwakeEnergyWh = cleanConfirmedAwakeEnergyWh,
                     confirmedAwakeDurationMs = confirmedAwakeDurationMs
                 )
                 val awakeEnergyWh = decomposedOff.awakeEnergyWh
@@ -4160,15 +4309,28 @@ class PowerUsageManager private constructor(private val context: Context) {
                     lastKernelAwakeDrainMah = maxOf(lastKernelAwakeDrainMah, stats.screenOffAwakeDrainMah)
                 }
 
+                val finalOffEnergyWh = if (decomposedOff.isDecomposedAvailable && (deepSleepEnergyWh > 0f || awakeEnergyWh > 0f)) {
+                    deepSleepEnergyWh + awakeEnergyWh
+                } else {
+                    effectiveOffEnergyWh
+                }
+                if (finalOffEnergyWh > 0f && (screenOffMs >= confirmedScreenOffDurationMs || confirmedScreenOffDurationMs == 0L || confirmedScreenOffEnergyWh > finalOffEnergyWh * 1.15f)) {
+                    confirmedScreenOffEnergyWh = finalOffEnergyWh
+                    confirmedScreenOffDurationMs = maxOf(confirmedScreenOffDurationMs, screenOffMs)
+                }
+                val finalScreenOffWatts = if (screenOffHours > 0f && finalOffEnergyWh > 0f) finalOffEnergyWh / screenOffHours else screenOffWatts
+                val finalRealTotalEnergyWh = onEnergyWh + finalOffEnergyWh
+                val finalAvgWatts = if (dischargeHours > 0f && finalRealTotalEnergyWh > 0f) finalRealTotalEnergyWh / dischargeHours else avgWatts
+
                 val targetCapacityMah = if (stats.capacityMah > 0f) stats.capacityMah else effectiveCapacity
-                val nominalTotalWh = if (targetCapacityMah > 0f && nominalVoltageVolts > 0f) (targetCapacityMah * nominalVoltageVolts / 1000f) else realTotalEnergyWh
-                val screenOffPercent = if (nominalTotalWh > 0f && offEnergyWh > 0f) (offEnergyWh / nominalTotalWh) * 100f else 0f
+                val nominalTotalWh = if (targetCapacityMah > 0f && nominalVoltageVolts > 0f) (targetCapacityMah * nominalVoltageVolts / 1000f) else finalRealTotalEnergyWh
+                val screenOffPercent = if (nominalTotalWh > 0f && finalOffEnergyWh > 0f) (finalOffEnergyWh / nominalTotalWh) * 100f else 0f
                 val screenOnPercent = if (nominalTotalWh > 0f && onEnergyWh > 0f) (onEnergyWh / nominalTotalWh) * 100f else 0f
                 val isDecomposedAvailable = decomposedOff.isDecomposedAvailable
                 val awakePercent = if (isDecomposedAvailable && nominalTotalWh > 0f && awakeEnergyWh > 0f) (awakeEnergyWh / nominalTotalWh) * 100f else 0f
                 val deepSleepPercent = if (isDecomposedAvailable && nominalTotalWh > 0f && deepSleepEnergyWh > 0f) (deepSleepEnergyWh / nominalTotalWh) * 100f else 0f
 
-                val screenOffDrainMah = if (nominalVoltageVolts > 0f) (offEnergyWh * 1000f) / nominalVoltageVolts else 0f
+                val screenOffDrainMah = if (nominalVoltageVolts > 0f) (finalOffEnergyWh * 1000f) / nominalVoltageVolts else 0f
                 val screenOnDrainMah = if (nominalVoltageVolts > 0f) (onEnergyWh * 1000f) / nominalVoltageVolts else 0f
                 val awakeDrainMah = if (isDecomposedAvailable && nominalVoltageVolts > 0f) (awakeEnergyWh * 1000f) / nominalVoltageVolts else 0f
                 val deepSleepDrainMah = if (isDecomposedAvailable && nominalVoltageVolts > 0f) (deepSleepEnergyWh * 1000f) / nominalVoltageVolts else 0f
@@ -4182,9 +4344,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val deepSleepDurStr = formatCompactDuration(deepSleepMs)
 
                 val overview = PowerOverviewStats(
-                    avgPowerWatts = avgWatts,
+                    avgPowerWatts = finalAvgWatts,
                     screenOnPowerWatts = screenOnWatts,
-                    screenOffPowerWatts = screenOffWatts,
+                    screenOffPowerWatts = finalScreenOffWatts,
                     backgroundPowerWatts = bgWatts,
                     screenOnDurationText = screenOnStr,
                     screenOffDurationText = screenOffDurStr,
@@ -4195,8 +4357,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                     remainingScreenOffText = remScreenOffStr,
                     remainingBackgroundText = remBackgroundStr,
                     screenOnEnergyWh = onEnergyWh,
-                    totalEnergyWh = realTotalEnergyWh,
-                    screenOffEnergyWh = offEnergyWh,
+                    totalEnergyWh = finalRealTotalEnergyWh,
+                    screenOffEnergyWh = finalOffEnergyWh,
                     backgroundEnergyWh = allBgEnergyWh,
                     usedDurationText = durationStr,
                     remainingLifeText = remCompositeStr,
@@ -6324,8 +6486,14 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
         val sampleOffEnergyWh = dischargeStats?.screenOffDisplayEnergyWh ?: 0f
 
-        val quiescentWatts = extractQuiescentStandbyWatts(recentSamples)
-            ?: if (getDischargeRealtimeSamples().isNotEmpty()) extractQuiescentStandbyWatts(getDischargeRealtimeSamples()) else null
+        val approxOffAvgWatts = if (screenOffHours > 0f && lastKernelOffEnergyWh > 0f) {
+            lastKernelOffEnergyWh / screenOffHours
+        } else {
+            dischargeStats?.screenOffPowerWatts ?: 0f
+        }
+        val dynamicStandbyThreshold = maxOf(MAX_QUIESCENT_STANDBY_WATTS, (approxOffAvgWatts * 0.95f).coerceAtMost(0.45f))
+        val quiescentWatts = extractQuiescentStandbyWatts(recentSamples, dynamicStandbyThreshold)
+            ?: if (getDischargeRealtimeSamples().isNotEmpty()) extractQuiescentStandbyWatts(getDischargeRealtimeSamples(), dynamicStandbyThreshold) else null
 
         val effectiveBaselineDurationMs = if (lastKernelOffEnergyWh > 0f && lastKernelOffDurationMs > 0L) {
             lastKernelOffDurationMs
@@ -6391,10 +6559,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             screenOffPower = dualStats.screenOffWatts
             avgPower = dualStats.avgWatts
 
-            if (dualStats.offEnergyWh > 0f && (screenOffMs > confirmedScreenOffDurationMs || confirmedScreenOffDurationMs == 0L)) {
-                confirmedScreenOffEnergyWh = maxOf(confirmedScreenOffEnergyWh, dualStats.offEnergyWh)
-                confirmedScreenOffDurationMs = maxOf(confirmedScreenOffDurationMs, screenOffMs)
-            }
+            // confirmedScreenOffEnergyWh 统一在后置自底向上物理合成与分解校验完成后更新，防止未校验的 dumpsys 残差提早污染单调性基准
         } else if (physicalTotalEnergyWh > 0f) {
             // 2. 无硬件连续采样点时，忠实采用系统底层库仑计/掉电量计算的真实物理能耗：
             if (screenOffHours <= 0f || screenOffMs < 30000L) {
@@ -6425,10 +6590,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             screenOnPower = if (screenOnHours > 0f) onEnergyWh / screenOnHours else avgPower
             screenOffPower = if (screenOffHours > 0f) offEnergyWh / screenOffHours else 0f
 
-            if (offEnergyWh > 0f && (screenOffMs > confirmedScreenOffDurationMs || confirmedScreenOffDurationMs == 0L)) {
-                confirmedScreenOffEnergyWh = maxOf(confirmedScreenOffEnergyWh, offEnergyWh)
-                confirmedScreenOffDurationMs = maxOf(confirmedScreenOffDurationMs, screenOffMs)
-            }
+            // confirmedScreenOffEnergyWh 统一在后置自底向上物理合成与分解校验完成后更新，防止未校验的 dumpsys 残差提早污染单调性基准
         } else {
             // 3. 既无硬件采样点且系统无任何掉电量（如刚拔掉充电器数秒内）：真实数值均为 0
             realTotalEnergyWh = 0f
@@ -6460,8 +6622,61 @@ class PowerUsageManager private constructor(private val context: Context) {
             samples = recentSamples.ifEmpty { getDischargeRealtimeSamples() }
         )
 
+        val deepSleepHours = deepSleepMs / 3600_000f
+        val awakeHours = awakeMs / 3600_000f
+        val effectiveBaselineWatts = quiescentWatts
+            ?: extractQuiescentStandbyWatts(recentSamples, dynamicStandbyThreshold)
+            ?: if (getDischargeRealtimeSamples().isNotEmpty()) extractQuiescentStandbyWatts(getDischargeRealtimeSamples(), dynamicStandbyThreshold) else null
+
+        val effectiveActiveWatts = extractActiveStandbyWatts(recentSamples, effectiveBaselineWatts)
+            ?: if (getDischargeRealtimeSamples().isNotEmpty()) extractActiveStandbyWatts(getDischargeRealtimeSamples(), effectiveBaselineWatts) else null
+
+        val kernelAwakeWatts = if (lastKernelAwakeDrainMah > 0f && awakeHours > 0f && nominalVoltageVolts > 0f) {
+            (lastKernelAwakeDrainMah * nominalVoltageVolts / 1000f) / awakeHours
+        } else {
+            null
+        }
+        val physicalActiveWatts = effectiveActiveWatts
+            ?: if (kernelAwakeWatts != null && kernelAwakeWatts in 0.05f..2.5f) kernelAwakeWatts else null
+
+        val naturalSleepEnergyWh = if (effectiveBaselineWatts != null && deepSleepHours > 0f) effectiveBaselineWatts * deepSleepHours else 0f
+        val naturalAwakeEnergyWh = if (physicalActiveWatts != null && awakeHours > 0f) {
+            physicalActiveWatts * awakeHours
+        } else if (awakeHours > 0f && offEnergyWh > naturalSleepEnergyWh) {
+            minOf(offEnergyWh - naturalSleepEnergyWh, (effectiveBaselineWatts ?: 0.15f) * 1.5f * awakeHours)
+        } else {
+            0f
+        }
+        val naturalOffEnergyWh = naturalSleepEnergyWh + naturalAwakeEnergyWh
+
+        val effectiveOffEnergyWh = if (effectiveBaselineWatts != null && naturalOffEnergyWh > 0f && (offEnergyWh <= 0f || offEnergyWh > naturalOffEnergyWh * 1.15f)) {
+            naturalOffEnergyWh
+        } else {
+            offEnergyWh
+        }
+
+        val cleanConfirmedDeepSleepEnergyWh = if (effectiveBaselineWatts != null && naturalSleepEnergyWh > 0f && confirmedDeepSleepEnergyWh > naturalSleepEnergyWh * 1.15f) {
+            naturalSleepEnergyWh
+        } else {
+            confirmedDeepSleepEnergyWh
+        }
+        val cleanConfirmedAwakeEnergyWh = if (physicalActiveWatts != null && naturalAwakeEnergyWh > 0f && confirmedAwakeEnergyWh > naturalAwakeEnergyWh * 1.15f) {
+            naturalAwakeEnergyWh
+        } else {
+            confirmedAwakeEnergyWh
+        }
+        if (cleanConfirmedDeepSleepEnergyWh < confirmedDeepSleepEnergyWh) {
+            confirmedDeepSleepEnergyWh = cleanConfirmedDeepSleepEnergyWh
+        }
+        if (cleanConfirmedAwakeEnergyWh < confirmedAwakeEnergyWh) {
+            confirmedAwakeEnergyWh = cleanConfirmedAwakeEnergyWh
+        }
+        if (effectiveBaselineWatts != null && naturalOffEnergyWh > 0f && confirmedScreenOffEnergyWh > naturalOffEnergyWh * 1.15f) {
+            confirmedScreenOffEnergyWh = naturalOffEnergyWh
+        }
+
         val decomposedOff = calculateScreenOffAwakeAndDeepSleepEnergy(
-            offEnergyWh = offEnergyWh,
+            offEnergyWh = effectiveOffEnergyWh,
             screenOffMs = screenOffMs,
             deepSleepMs = deepSleepMs,
             awakeMs = awakeMs,
@@ -6470,9 +6685,9 @@ class PowerUsageManager private constructor(private val context: Context) {
             samples = recentSamples,
             nominalVoltageVolts = nominalVoltageVolts,
             allCycleSamples = getDischargeRealtimeSamples(),
-            confirmedDeepSleepEnergyWh = confirmedDeepSleepEnergyWh,
+            confirmedDeepSleepEnergyWh = cleanConfirmedDeepSleepEnergyWh,
             confirmedDeepSleepDurationMs = confirmedDeepSleepDurationMs,
-            confirmedAwakeEnergyWh = confirmedAwakeEnergyWh,
+            confirmedAwakeEnergyWh = cleanConfirmedAwakeEnergyWh,
             confirmedAwakeDurationMs = confirmedAwakeDurationMs
         )
         val awakeEnergyWh = decomposedOff.awakeEnergyWh
@@ -6491,14 +6706,27 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
         }
 
-        val nominalTotalWh = if (effectiveCapacity > 0f && nominalVoltageVolts > 0f) (effectiveCapacity * nominalVoltageVolts / 1000f) else realTotalEnergyWh
-        val screenOffPercent = if (nominalTotalWh > 0f && offEnergyWh > 0f) (offEnergyWh / nominalTotalWh) * 100f else 0f
+        val finalOffEnergyWh = if (decomposedOff.isDecomposedAvailable && (deepSleepEnergyWh > 0f || awakeEnergyWh > 0f)) {
+            deepSleepEnergyWh + awakeEnergyWh
+        } else {
+            effectiveOffEnergyWh
+        }
+        if (finalOffEnergyWh > 0f && (screenOffMs >= confirmedScreenOffDurationMs || confirmedScreenOffDurationMs == 0L || confirmedScreenOffEnergyWh > finalOffEnergyWh * 1.15f)) {
+            confirmedScreenOffEnergyWh = finalOffEnergyWh
+            confirmedScreenOffDurationMs = maxOf(confirmedScreenOffDurationMs, screenOffMs)
+        }
+        val finalScreenOffWatts = if (screenOffHours > 0f && finalOffEnergyWh > 0f) finalOffEnergyWh / screenOffHours else screenOffPower
+        val finalRealTotalEnergyWh = onEnergyWh + finalOffEnergyWh
+        val finalAvgWatts = if (dischargeHours > 0f && finalRealTotalEnergyWh > 0f) finalRealTotalEnergyWh / dischargeHours else avgPower
+
+        val nominalTotalWh = if (effectiveCapacity > 0f && nominalVoltageVolts > 0f) (effectiveCapacity * nominalVoltageVolts / 1000f) else finalRealTotalEnergyWh
+        val screenOffPercent = if (nominalTotalWh > 0f && finalOffEnergyWh > 0f) (finalOffEnergyWh / nominalTotalWh) * 100f else 0f
         val screenOnPercent = if (nominalTotalWh > 0f && onEnergyWh > 0f) (onEnergyWh / nominalTotalWh) * 100f else 0f
         val isDecomposedAvailable = decomposedOff.isDecomposedAvailable
         val awakePercent = if (isDecomposedAvailable && nominalTotalWh > 0f && awakeEnergyWh > 0f) (awakeEnergyWh / nominalTotalWh) * 100f else 0f
         val deepSleepPercent = if (isDecomposedAvailable && nominalTotalWh > 0f && deepSleepEnergyWh > 0f) (deepSleepEnergyWh / nominalTotalWh) * 100f else 0f
 
-        val screenOffDrainMah = if (nominalVoltageVolts > 0f) (offEnergyWh * 1000f) / nominalVoltageVolts else 0f
+        val screenOffDrainMah = if (nominalVoltageVolts > 0f) (finalOffEnergyWh * 1000f) / nominalVoltageVolts else 0f
         val screenOnDrainMah = if (nominalVoltageVolts > 0f && onEnergyWh > 0f) (onEnergyWh * 1000f) / nominalVoltageVolts else 0f
         val awakeDrainMah = if (isDecomposedAvailable && nominalVoltageVolts > 0f) (awakeEnergyWh * 1000f) / nominalVoltageVolts else 0f
         val deepSleepDrainMah = if (isDecomposedAvailable && nominalVoltageVolts > 0f) (deepSleepEnergyWh * 1000f) / nominalVoltageVolts else 0f
@@ -6511,9 +6739,9 @@ class PowerUsageManager private constructor(private val context: Context) {
         val deepSleepDurStr = formatCompactDuration(deepSleepMs)
 
         return PowerOverviewStats(
-            avgPowerWatts = avgPower,
+            avgPowerWatts = finalAvgWatts,
             screenOnPowerWatts = screenOnPower,
-            screenOffPowerWatts = screenOffPower,
+            screenOffPowerWatts = finalScreenOffWatts,
             backgroundPowerWatts = bgWatts,
             screenOnDurationText = screenOnStr,
             screenOffDurationText = screenOffDurStr,
@@ -6524,8 +6752,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             remainingScreenOffText = remOffStr,
             remainingBackgroundText = remBgStr,
             screenOnEnergyWh = onEnergyWh,
-            totalEnergyWh = realTotalEnergyWh,
-            screenOffEnergyWh = offEnergyWh,
+            totalEnergyWh = finalRealTotalEnergyWh,
+            screenOffEnergyWh = finalOffEnergyWh,
             backgroundEnergyWh = allBgEnergyWh,
             usedDurationText = "$screenOnStr / $totalStr",
             remainingLifeText = remCompStr,

@@ -4,9 +4,12 @@ import com.battery.analysis.domain.estimator.StandbyBaselineEstimator
 import com.battery.analysis.domain.estimator.model.StandbyBaselineConfig
 import com.battery.analysis.domain.estimator.model.StandbyBaselineSource
 import com.battery.analysis.domain.estimator.model.StandbyConfidenceLevel
+import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.PowerDischargePoint
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -67,7 +70,7 @@ class StandbyBaselineEstimatorTest {
             config = config
         )
 
-        assertEquals("必须采信实测窗口 P10", StandbyBaselineSource.MEASURED_WINDOW_P10, result.source)
+        assertEquals("必须采信实测窗口 P50 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P50, result.source)
         assertEquals("原始极小值必须忠实记录为 0.005W 供诊断", 0.005, result.rawMinWatts ?: 0.0, 0.001)
         // 关键断言：最终基线必须落在 0.12W 附近，绝对不能被 0.005W 绑架！
         assertTrue(
@@ -75,9 +78,10 @@ class StandbyBaselineEstimatorTest {
             result.baselinePowerWatts >= 0.10
         )
         assertTrue(
-            "基线功率(${result.baselinePowerWatts})必须接近窗口 P10(0.12W~0.14W)",
+            "基线功率(${result.baselinePowerWatts})必须接近窗口 P50(0.12W~0.14W)",
             result.baselinePowerWatts in 0.11..0.15
         )
+        assertEquals(0.12, result.floorWatts ?: 0.0, 0.02)
     }
 
     /**
@@ -108,10 +112,11 @@ class StandbyBaselineEstimatorTest {
             config = config
         )
 
-        assertEquals("必须采信实测窗口 P10", StandbyBaselineSource.MEASURED_WINDOW_P10, result.source)
+        assertEquals("必须采信实测窗口 P50 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P50, result.source)
         // 关键断言：经过时间窗口聚合，高频唤醒仅占 2 个窗口，稳态深睡占 6 个窗口，
-        // 故窗口级 P10 成功锚定在 0.10W，未被 120 个高频唤醒点吞噬！
+        // 故窗口级 P50 成功锚定在 0.10W，未被 120 个高频唤醒点吞噬！
         assertEquals(0.10, result.baselinePowerWatts, 0.02)
+        assertEquals(0.10, result.floorWatts ?: 0.0, 0.02)
     }
 
     /**
@@ -193,10 +198,11 @@ class StandbyBaselineEstimatorTest {
             config = StandbyBaselineConfig(baseWindowDurationMs = 60_000L)
         )
 
-        assertEquals("中等置信度依然忠实采信实测", StandbyBaselineSource.MEASURED_WINDOW_P10, result.source)
+        assertEquals("中等置信度依然忠实采信实测 P50 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P50, result.source)
         assertEquals(StandbyConfidenceLevel.MEDIUM, result.confidence)
         // 关键断言：结果必须是真实的实测值，不包含 (1-alpha)*0.15 的任何人工保底合成掺水
-        assertEquals(0.12, result.baselinePowerWatts, 0.01)
+        assertEquals(0.14, result.baselinePowerWatts, 0.01)
+        assertEquals(0.12, result.floorWatts ?: 0.0, 0.01)
     }
 
     /**
@@ -262,5 +268,125 @@ class StandbyBaselineEstimatorTest {
             stats.screenOffPowerWatts.toDouble(),
             0.01
         )
+    }
+
+    /**
+     * 规则 1 回归测试：深睡样本无论如何变化（0.03W、0.08W、0.20W 等），
+     * 唤醒功率与唤醒能耗严格保持 100% 冻结不变，彻底根绝残差互甩。
+     */
+    @Test
+    fun testAwakeStatsStrictlyFrozenRegardlessOfDeepSleepSampleVariation() {
+        val screenOffMs = 3 * 3600_000L // 3 小时
+        val awakeMs = 1800_000L // 30 分钟 (0.5h)
+        val deepSleepMs = screenOffMs - awakeMs // 2.5 小时
+
+        // 场景 A：深睡期间功耗读数为 0.05W
+        val samplesA = listOf(
+            createPoint(1000L, 0.05f),
+            createPoint(2000L, 0.05f),
+            createPoint(3000L, 0.05f),
+            createPoint(4000L, 1.20f), // 唤醒活跃采样
+            createPoint(5000L, 1.20f)  // 唤醒活跃采样
+        )
+
+        val resultA = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = 0.725f, // 0.05W * 2.5h + 1.20W * 0.5h = 0.725Wh
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            samples = samplesA
+        )
+
+        // 场景 B：深睡期间功耗读数上升至 0.18W，深睡样本发生剧烈变化
+        val samplesB = listOf(
+            createPoint(1000L, 0.18f),
+            createPoint(2000L, 0.18f),
+            createPoint(3000L, 0.18f),
+            createPoint(4000L, 1.20f), // 唤醒活跃采样（保持恒定 1.20W）
+            createPoint(5000L, 1.20f)  // 唤醒活跃采样（保持恒定 1.20W）
+        )
+
+        val resultB = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = 1.050f, // 0.18W * 2.5h + 1.20W * 0.5h = 1.050Wh
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            samples = samplesB
+        )
+
+        // 核心回归断言：深睡样本变动后，唤醒功率与唤醒能耗必须 100% 完全冻结一致！
+        assertEquals("唤醒功率必须完全冻结等于实测活跃功耗(1.20W)", 1.20f, resultA.awakeWatts, 0.01f)
+        assertEquals("唤醒功率必须完全冻结等于实测活跃功耗(1.20W)", 1.20f, resultB.awakeWatts, 0.01f)
+        assertEquals("两次计算的唤醒能耗必须严格恒等", resultA.awakeEnergyWh, resultB.awakeEnergyWh, 0.0001f)
+    }
+
+    /**
+     * 规则 2 测试：稀疏偶发采样点不足以构成固定窗口时，不伪造窗口，安全回退先验。
+     */
+    @Test
+    fun testSparseSamplesDoNotForgeWindows() {
+        val samples = listOf(
+            createPoint(1000L, 0.08f),
+            createPoint(70_000L, 0.09f) // 仅有两个点，且跨越了不同 60 秒窗口，每个窗口仅有 1 个点
+        )
+
+        val result = StandbyBaselineEstimator.estimate(
+            samples = samples,
+            config = StandbyBaselineConfig(minSamplesPerWindow = 2)
+        )
+
+        // 窗口点数不足 2 个，不能伪造窗口
+        assertEquals("有效窗口数应为 0", 0, result.validWindowCount)
+        assertEquals("置信度必须为 LOW", StandbyConfidenceLevel.LOW, result.confidence)
+        assertEquals("来源回退默认先验", StandbyBaselineSource.DEFAULT_STANDBY_PRIOR, result.source)
+    }
+
+    /**
+     * 规则 3 & 4 测试：大断层禁止插值，覆盖不足时观测均值为 null，整段深睡能量标记为模型推算。
+     */
+    @Test
+    fun testLargeGapRejectsInterpolationAndMarksInferred() {
+        val startTs = 10000000L
+        val samples = mutableListOf<PowerDischargePoint>()
+
+        // 窗口 1: 包含连续点 (间隔 2 秒)
+        samples.add(createPoint(startTs, 0.10f))
+        samples.add(createPoint(startTs + 2000L, 0.10f))
+        samples.add(createPoint(startTs + 4000L, 0.10f))
+
+        // 跨越 20 分钟大断层 (1,200,000ms > 30,000ms)，严禁连线插值
+        val gapEndTs = startTs + 1_200_000L
+        samples.add(createPoint(gapEndTs, 0.12f))
+        samples.add(createPoint(gapEndTs + 2000L, 0.12f))
+        samples.add(createPoint(gapEndTs + 4000L, 0.12f))
+
+        val result = StandbyBaselineEstimator.estimate(
+            samples = samples,
+            config = StandbyBaselineConfig(
+                baseWindowDurationMs = 60_000L,
+                minSamplesPerWindow = 2,
+                maxInterpolationGapMs = 30_000L,
+                minCoverageRatioForMean = 0.70
+            )
+        )
+
+        // 连续采样时间仅 4s + 4s = 8s，覆盖率远远低于 70%
+        assertTrue("覆盖率极低", result.sleepCoverageRatio < 0.10)
+        assertNull("覆盖不足时观测均值必须如实置空为 null，绝不冒充实测", result.sleepMeanWatts)
+        assertFalse("观测均值未生效", result.isMeanObserved)
+        // 典型基线由固定窗口 P50 给出 (0.10W 与 0.12W 的中位数 = 0.11W)
+        assertEquals(0.11, result.baselinePowerWatts, 0.01)
+
+        // 进一步验证分解结果标记 isDeepSleepInferred = true
+        val decomposed = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = 0.3f,
+            screenOffMs = 1_208_000L,
+            deepSleepMs = 1_100_000L,
+            awakeMs = 108_000L,
+            samples = samples
+        )
+
+        assertTrue("整段深睡能量由基线外推时，必须显式标注 isDeepSleepInferred = true", decomposed.isDeepSleepInferred)
+        assertNull("观测实测均值字段必须为 null", decomposed.observedSleepMeanWatts)
     }
 }

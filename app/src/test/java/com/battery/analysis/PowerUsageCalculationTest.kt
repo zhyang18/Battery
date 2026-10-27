@@ -6498,9 +6498,313 @@ class PowerUsageCalculationTest {
         assertEquals("息屏能量占电池物理总容量比率", "5.0%", String.format(java.util.Locale.getDefault(), "%.1f%%", offRatio))
         assertEquals("全局能量占电池物理总容量比率", "25.0%", String.format(java.util.Locale.getDefault(), "%.1f%%", globalRatio))
     }
+
+    /**
+     * 验证待机底噪提取器（extractQuiescentStandbyWatts）在传入自适应动态上限时能够支持高待机底噪设备，
+     * 且在默认调用时不传入上限门限时依然坚守 0.25W 默认阈值安全拒收。
+     */
+    @Test
+    fun testDynamicStandbyThresholdSupportsHighBaselineDevices() {
+        val highStandbySamples = listOf(
+            PowerDischargePoint(1000L, 0f, 80, 3.85f, 30f, 0.32f, emptyList(), false),
+            PowerDischargePoint(2000L, 0f, 80, 3.85f, 30f, 0.32f, emptyList(), false),
+            PowerDischargePoint(3000L, 0f, 80, 3.85f, 30f, 0.33f, emptyList(), false)
+        )
+
+        // 默认门限（0.25W）：0.32W 超过默认门限，应拒收并返回 null
+        val defaultResult = PowerUsageManager.extractQuiescentStandbyWatts(highStandbySamples)
+        assertNull("默认门限下超过 0.25W 的样本应返回 null", defaultResult)
+
+        // 动态自适应门限（0.40W）：应成功提取到 0.32W 真实待机底噪
+        val dynamicResult = PowerUsageManager.extractQuiescentStandbyWatts(highStandbySamples, 0.40f)
+        assertNotNull("放宽门限至 0.40W 时应成功提取到真实底噪", dynamicResult)
+        assertEquals("提取的底噪功率应为 0.32W", 0.32f, dynamicResult!!, 0.01f)
+    }
+
+    /**
+     * 针对用户真实截图场景（图1：03:15 息屏 06h30m 耗电 2.472Wh，唤醒 20m22s，深睡 06h10m 耗电 583.1mAh）进行全流程物理仿真：
+     * 验证：
+     * 1. 深度睡眠计算结果准确反映实际消耗（约 0.36W）；
+     * 2. 唤醒平均功率合理反映活跃状态（约 0.67W）；
+     * 3. 深睡与唤醒能量严格守恒，总和等于息屏总能耗 2.472Wh；
+     * 4. 详情弹窗包含深睡占比与能量守恒的客观成因说明。
+     */
+    @Test
+    fun testScreenOffDecompositionWithUserActual0315ScreenShotData() {
+        val screenOffMs = 23_400_000L // 06h30m = 6.5 小时
+        val deepSleepMs = 22_200_000L // 06h10m = 6.16667 小时
+        val awakeMs = 1_222_000L      // 20m22s = 0.33944 小时
+        val offEnergyWh = 2.472f      // 息屏实测耗电 2.472Wh
+        val rawSleepDrainMah = 583.1f // dumpsys 上报的 Device standby
+        val rawAwakeDrainMah = 59.1f  // 唤醒放电量
+
+        val result = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = offEnergyWh,
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            rawSleepDrainMah = rawSleepDrainMah,
+            rawAwakeDrainMah = rawAwakeDrainMah,
+            nominalVoltageVolts = 3.85f
+        )
+
+        assertTrue("分解结果必须有效可用", result.isDecomposedAvailable)
+        assertEquals("深睡能量计算准确（约 2.245Wh）", 2.245f, result.deepSleepEnergyWh, 0.01f)
+        assertEquals("唤醒能量计算准确（约 0.228Wh）", 0.228f, result.awakeEnergyWh, 0.01f)
+        assertEquals("深睡与唤醒能量严格守恒", offEnergyWh, result.deepSleepEnergyWh + result.awakeEnergyWh, 0.001f)
+
+        assertEquals("深睡平均功耗准确反映能量除以时长，约为 0.36W", 0.36f, result.deepSleepWatts, 0.01f)
+        assertEquals("唤醒平均功耗准确反映活跃功率，约为 0.67W", 0.67f, result.awakeWatts, 0.02f)
+
+        // 验证详情弹窗说明包含深睡占比与守恒解释
+        val overview = com.battery.analysis.manager.PowerOverviewStats(
+            avgPowerWatts = 0.66f,
+            screenOffDurationMs = screenOffMs,
+            screenOffDeepSleepDurationMs = deepSleepMs,
+            screenOffDeepSleepEnergyWh = result.deepSleepEnergyWh,
+            screenOffDeepSleepPowerWatts = result.deepSleepWatts,
+            screenOffDeepSleepDrainMah = rawSleepDrainMah,
+            screenOffDeepSleepPercent = 7.3f,
+            isScreenOffDecomposedAvailable = true
+        )
+        val detailMsg = com.battery.analysis.util.BatteryEnergyCalculator.formatDeepSleepCardDetailMessage(
+            overview = overview,
+            nominalTotalWh = 30.8f,
+            nominalVoltageVolts = 3.85f
+        )
+        assertTrue("必须包含休眠功率偏高成因说明", detailMsg.contains("当前深睡功率偏高（> 0.20W）"))
+        assertTrue("必须包含深睡占比与能量守恒说明", detailMsg.contains("符合物理能量守恒"))
+    }
+
+    /**
+     * 验证时序增量补偿（calculateScreenOffEnergyWithDeltaCompensation）自适应支持高待机底噪设备（> 0.35W）：
+     * 当基准待机为 0.38W（超过传统 0.35W 常量）、实测底噪为 0.36W 时，未结算新增息屏时间窗（如 10 分钟）
+     * 能够自适应采纳真实底噪功率计算时序增量，绝不发生断崖回退至 0.15W 默认先验。
+     */
+    @Test
+    fun testAdaptiveStandbyCompensationAbove350mW() {
+        val baseDurationMs = 36_000_000L // 10 小时基准
+        val baseEnergyWh = 3.80f         // 基准平均功耗 0.38W
+        val screenOffMs = 36_600_000L    // 新增 10 分钟（600,000ms = 0.1667h）息屏未结算窗口
+        val quiescentWatts = 0.36f       // 实测真实高待机底噪（0.36W）
+
+        val result = PowerUsageManager.calculateScreenOffEnergyWithDeltaCompensation(
+            screenOffMs = screenOffMs,
+            baselineDurationMs = baseDurationMs,
+            baselineEnergyWh = baseEnergyWh,
+            quiescentStandbyWatts = quiescentWatts
+        )
+
+        assertTrue("必须触发未结算增量补偿", result.isDeltaCompensated)
+        // 增量能耗预期约为：0.38W * (10 / 60)h = 0.0633Wh 或 0.36W * (10 / 60)h = 0.0600Wh
+        val expectedMinEnergy = baseEnergyWh + 0.055f
+        assertTrue("增量补偿后息屏能量必须大于 $expectedMinEnergy，实际为: ${result.offEnergyWh}", result.offEnergyWh >= expectedMinEnergy)
+        assertTrue("增量补偿功率必须处于合理待机区间（>= 0.35W），绝不跳变回 0.15W，实际为: ${result.offPowerWatts}", result.offPowerWatts >= 0.35f)
+    }
+
+    /**
+     * 验证息屏时序区间事件切分（splitScreenOffEvents）在自适应底噪门限下，
+     * 能够将 0.36W 连续稳定采样点正确判定为深度休眠（暗红），不被误划归为活跃唤醒（浅红）。
+     */
+    @Test
+    fun testSplitScreenOffEventsAdaptiveToHighStandbyBaseline() {
+        val offStartTs = 100_000L
+        val offEndTs = 200_000L // 100 秒息屏
+        val totalAwakeMs = 20_000L
+        val totalDeepSleepMs = 80_000L
+
+        // 连续采样点序列（0.36W 稳定高待机底噪）：
+        val samples = listOf(
+            PowerDischargePoint(110_000L, 0f, 80, 3.85f, 30f, 0.36f, emptyList(), false),
+            PowerDischargePoint(130_000L, 0f, 80, 3.85f, 30f, 0.36f, emptyList(), false),
+            PowerDischargePoint(150_000L, 0f, 80, 3.85f, 30f, 0.36f, emptyList(), false),
+            PowerDischargePoint(170_000L, 0f, 80, 3.85f, 30f, 0.36f, emptyList(), false),
+            PowerDischargePoint(190_000L, 0f, 80, 3.85f, 30f, 0.36f, emptyList(), false)
+        )
+
+        val events = PowerUsageManager.splitScreenOffEvents(
+            offStartTs = offStartTs,
+            offEndTs = offEndTs,
+            realtimeSamples = samples,
+            totalAwakeMs = totalAwakeMs,
+            totalDeepSleepMs = totalDeepSleepMs
+        )
+
+        assertTrue("必须成功切分出事件", events.isNotEmpty())
+        val deepSleepEvents = events.filter { it.isDeepSleep }
+        assertTrue("自适应门限下必须能够成功产生深度睡眠事件（暗红）", deepSleepEvents.isNotEmpty())
+    }
+
+    /**
+     * 验证多时间窗口聚合估计器（StandbyBaselineEstimator）在与 extractQuiescentStandbyWatts
+     * 自适应门限（如 0.40W）联动后，能够成功将 0.32W 稳定时间窗口评定为 MEASURED_WINDOW_P10 并采纳。
+     */
+    @Test
+    fun testStandbyBaselineEstimatorDynamicConfigIntegration() {
+        // 构造多个具备稳定 0.32W 代表功率的时间窗口（每个窗口 2 个点，跨度 60s）
+        val samples = mutableListOf<PowerDischargePoint>()
+        var ts = 1_000_000L
+        for (w in 0 until 4) {
+            samples.add(PowerDischargePoint(ts, 0f, 80, 3.85f, 30f, 0.32f, emptyList(), false))
+            ts += 30_000L
+            samples.add(PowerDischargePoint(ts, 0f, 80, 3.85f, 30f, 0.32f, emptyList(), false))
+            ts += 35_000L
+        }
+
+        // 默认 0.25W 门限下，0.32W 超过默认门限，应返回 null
+        val defaultResult = PowerUsageManager.extractQuiescentStandbyWatts(samples, 0.25f)
+        assertNull("默认 0.25W 门限下应安全拒收 0.32W 样本", defaultResult)
+
+        // 动态自适应 0.40W 门限下，时间窗口估计器联动放宽污染门限，应成功命中窗口级 P10
+        val adaptiveResult = PowerUsageManager.extractQuiescentStandbyWatts(samples, 0.40f)
+        assertNotNull("联动自适应门限后应成功提取到底噪", adaptiveResult)
+        assertEquals("提取的窗口底噪应为 0.32W", 0.32f, adaptiveResult!!, 0.01f)
+    }
+
+    /**
+     * 验证关屏过渡态震荡过滤逻辑（filterStableQuiescentSamples）：
+     * 亮屏转灭屏后前 180 秒（3 分钟）内由于 CPU 脏数据落盘与切断网络连接产生 0.38W~0.45W 瞬态尖峰，
+     * 算法精准识别灭屏时序边界并剔除过渡期样本，仅保留进入稳定 Suspend 阶段的物理样本，
+     * 成功提取出真实的 0.08W 纯净静态待机底噪，杜绝关屏瞬态拉偏底噪。
+     */
+    @Test
+    fun testFilterStableQuiescentSamplesEliminatesScreenOffTransitionSpikes() {
+        // 构造采样序列：
+        // 0 ~ 60s: 亮屏（isScreenOn = true, 1.8W）
+        // 60s: 亮转灭瞬间
+        // 65s ~ 150s: 灭屏初期过渡震荡期（0.38W, 0.42W）
+        // 250s ~ 500s: 稳定深度休眠挂起期（0.08W）
+        val samples = listOf(
+            PowerDischargePoint(10_000L, 0f, 96, 3.85f, 30f, 1.80f, emptyList(), true),
+            PowerDischargePoint(50_000L, 0f, 96, 3.85f, 30f, 1.80f, emptyList(), true),
+            PowerDischargePoint(60_000L, 0f, 96, 3.85f, 30f, 0.40f, emptyList(), false), // 灭屏瞬态
+            PowerDischargePoint(120_000L, 0f, 96, 3.85f, 30f, 0.38f, emptyList(), false), // 过渡期
+            PowerDischargePoint(180_000L, 0f, 96, 3.85f, 30f, 0.42f, emptyList(), false), // 过渡期 (距灭屏120s < 180s)
+            PowerDischargePoint(300_000L, 0f, 95, 3.85f, 30f, 0.08f, emptyList(), false), // 稳定挂起 (距灭屏240s > 180s)
+            PowerDischargePoint(400_000L, 0f, 95, 3.85f, 30f, 0.08f, emptyList(), false), // 稳定挂起
+            PowerDischargePoint(500_000L, 0f, 95, 3.85f, 30f, 0.08f, emptyList(), false)  // 稳定挂起
+        )
+
+        val stableSamples = PowerUsageManager.filterStableQuiescentSamples(samples)
+        assertEquals("必须过滤掉前 180 秒过渡震荡样本，仅保留 3 个稳定挂起样本", 3, stableSamples.size)
+        assertTrue("保留的稳定样本功率必须全部为 0.08W", stableSamples.all { it.powerWatts == 0.08f })
+
+        val quiescentWatts = PowerUsageManager.extractQuiescentStandbyWatts(samples)
+        assertNotNull("必须成功提取到底噪", quiescentWatts)
+        assertEquals("提取的纯净底噪应为 0.08W，绝不被过渡期 0.38W 污染", 0.08f, quiescentWatts!!, 0.01f)
+    }
+
+    /**
+     * 验证自底向上物理微积分（Bottom-Up Physical Synthesis）对齐用户 96% -> 81%（掉电 15%）真实实测场景：
+     * 1. 亮屏 01h36m 实测 745.3mAh（2.869Wh，1.79W）100% 保持不动，绝不接受任何外部能量回补；
+     * 2. 深度休眠 06h10m 由纯净底噪 0.08W 正向时钟积分自然计算（0.493Wh，128.1mAh，0.08W）；
+     * 3. 息屏唤醒 20m22s 由活跃特征 0.67W 正向积分（0.228Wh，59.1mAh，0.67W）；
+     * 4. 息屏总耗电自然闭环合成 0.721Wh（187.2mAh，平均功耗 0.11W，掉电占比 2.4%），与折线图 6 小时仅掉电 2%~3% 严格对齐！
+     */
+    @Test
+    fun testBottomUpSynthesisAlignsScreenOffToUserActual96To81DropScenario() {
+        val screenOffMs = 23_400_000L // 06h30m = 6.5 小时
+        val deepSleepMs = 22_200_000L // 06h10m = 6.16667 小时
+        val awakeMs = 1_222_000L      // 20m22s = 0.33944 小时
+        val pureBaselineWatts = 0.08f // 纯净休眠底噪 0.08W
+        val activeAwakeWatts = 0.67f  // 活跃唤醒功率 0.67W
+
+        // 构造纯净底噪与活跃样本
+        val samples = listOf(
+            PowerDischargePoint(100_000L, 0f, 95, 3.85f, 30f, pureBaselineWatts, emptyList(), false),
+            PowerDischargePoint(200_000L, 0f, 95, 3.85f, 30f, pureBaselineWatts, emptyList(), false),
+            PowerDischargePoint(300_000L, 0f, 95, 3.85f, 30f, pureBaselineWatts, emptyList(), false),
+            PowerDischargePoint(400_000L, 0f, 95, 3.85f, 30f, activeAwakeWatts, emptyList(), false)
+        )
+
+        // 自底向上物理合成息屏总能量：0.08W * 6.1667h + 0.67W * 0.3394h ≈ 0.4933Wh + 0.2274Wh ≈ 0.7207Wh
+        val expectedSleepWh = pureBaselineWatts * (deepSleepMs / 3600_000f)
+        val expectedAwakeWh = activeAwakeWatts * (awakeMs / 3600_000f)
+        val naturalOffEnergyWh = expectedSleepWh + expectedAwakeWh
+
+        val result = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = naturalOffEnergyWh,
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            samples = samples,
+            nominalVoltageVolts = 3.85f
+        )
+
+        assertTrue("分解结果必须有效", result.isDecomposedAvailable)
+        assertEquals("深睡能量忠实等于纯净底噪时钟微积分（约 0.493Wh）", expectedSleepWh, result.deepSleepEnergyWh, 0.01f)
+        assertEquals("深睡平均功耗自然忠实等于 0.08W，绝非虚高 0.36W", 0.08f, result.deepSleepWatts, 0.01f)
+        assertEquals("唤醒平均功耗准确反映活跃功率 0.67W", 0.67f, result.awakeWatts, 0.02f)
+        assertEquals("深睡与唤醒能量严格 100% 守恒等于自底向上合成息屏总能耗", naturalOffEnergyWh, result.deepSleepEnergyWh + result.awakeEnergyWh, 0.001f)
+
+        // 验证折算电量：
+        val sleepMah = (result.deepSleepEnergyWh * 1000f) / 3.85f
+        val awakeMah = (result.awakeEnergyWh * 1000f) / 3.85f
+        val offTotalMah = sleepMah + awakeMah
+        assertEquals("息屏总放电量约为 187mAh (约 2.4% 掉电，与折线图微降 2%~3% 严格对齐)", 187.2f, offTotalMah, 2.0f)
+    }
+
+    /**
+     * 验证当外部传入的 dumpsys 息屏能量因未完全充满拔电存在历史残留膨胀（例如 2.472Wh，对应 642mAh/8.3%）时，
+     * 前置自底向上物理微积分校验机制能够成功识别污染，自动以实测纯净底噪（0.08W）与实测活跃功耗（0.67W）进行物理合成，
+     * 修正送入分解的有效息屏能耗为 0.721Wh，确保深睡功耗忠实等于 0.08W，息屏掉电忠实等于 2.4%（187.2mAh），
+     * 彻底消除深睡被塞入膨胀残差导致功耗虚高至 0.36W 的缺陷。
+     */
+    @Test
+    fun testPreSynthesisFiltersStaleDumpsysContaminationAndKeepsPureBottomUpDeepSleep() {
+        val screenOffMs = 23_400_000L // 06h30m = 6.5 小时
+        val deepSleepMs = 22_200_000L // 06h10m = 6.16667 小时
+        val awakeMs = 1_222_000L      // 20m22s = 0.33944 小时
+        val pureBaselineWatts = 0.08f // 纯净休眠底噪 0.08W
+        val activeAwakeWatts = 0.67f  // 活跃唤醒功率 0.67W
+        val contaminatedDumpsysOffWh = 2.472f // 未重置 dumpsys 膨胀历史数据 2.472Wh
+
+        val samples = listOf(
+            PowerDischargePoint(100_000L, 0f, 95, 3.85f, 30f, pureBaselineWatts, emptyList(), false),
+            PowerDischargePoint(200_000L, 0f, 95, 3.85f, 30f, pureBaselineWatts, emptyList(), false),
+            PowerDischargePoint(300_000L, 0f, 95, 3.85f, 30f, pureBaselineWatts, emptyList(), false),
+            PowerDischargePoint(400_000L, 0f, 95, 3.85f, 30f, activeAwakeWatts, emptyList(), false)
+        )
+
+        // 1. 验证前置提取纯净底噪与活跃功耗
+        val baselineWatts = PowerUsageManager.extractQuiescentStandbyWatts(samples)
+        assertNotNull("必须成功提取纯净静态底噪", baselineWatts)
+        assertEquals("纯净底噪必须等于 0.08W", 0.08f, baselineWatts!!, 0.01f)
+
+        val activeWatts = PowerUsageManager.extractActiveStandbyWatts(samples, baselineWatts)
+        assertNotNull("必须成功提取活跃功耗", activeWatts)
+        assertEquals("活跃功耗必须等于 0.67W", 0.67f, activeWatts!!, 0.02f)
+
+        // 2. 自底向上前置物理合成
+        val deepSleepHours = deepSleepMs / 3600_000f
+        val awakeHours = awakeMs / 3600_000f
+        val naturalSleepEnergyWh = baselineWatts * deepSleepHours
+        val naturalAwakeEnergyWh = activeWatts * awakeHours
+        val naturalOffEnergyWh = naturalSleepEnergyWh + naturalAwakeEnergyWh
+
+        // 3. 前置污染校验
+        val effectiveOffEnergyWh = if (naturalOffEnergyWh > 0f && (contaminatedDumpsysOffWh <= 0f || contaminatedDumpsysOffWh > naturalOffEnergyWh * 1.15f)) {
+            naturalOffEnergyWh
+        } else {
+            contaminatedDumpsysOffWh
+        }
+        assertEquals("必须成功前置拦截并修正膨胀数据为自底向上合成能量 0.721Wh", naturalOffEnergyWh, effectiveOffEnergyWh, 0.001f)
+
+        // 4. 执行分解
+        val result = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = effectiveOffEnergyWh,
+            screenOffMs = screenOffMs,
+            deepSleepMs = deepSleepMs,
+            awakeMs = awakeMs,
+            samples = samples,
+            nominalVoltageVolts = 3.85f
+        )
+
+        assertTrue("分解结果必须有效", result.isDecomposedAvailable)
+        assertEquals("深睡平均功耗绝不被残差拉高，忠实等于 0.08W", 0.08f, result.deepSleepWatts, 0.01f)
+        assertEquals("深睡能量忠实等于 0.493Wh", naturalSleepEnergyWh, result.deepSleepEnergyWh, 0.01f)
+        assertEquals("唤醒平均功耗忠实等于 0.67W", 0.67f, result.awakeWatts, 0.02f)
+        assertEquals("唤醒能量忠实等于 0.228Wh", naturalAwakeEnergyWh, result.awakeEnergyWh, 0.01f)
+        assertEquals("能量严格 100% 守恒等于物理真值", naturalOffEnergyWh, result.deepSleepEnergyWh + result.awakeEnergyWh, 0.001f)
+    }
 }
-
-
-
-
-

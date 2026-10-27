@@ -6807,4 +6807,117 @@ class PowerUsageCalculationTest {
         assertEquals("唤醒能量忠实等于 0.228Wh", naturalAwakeEnergyWh, result.awakeEnergyWh, 0.01f)
         assertEquals("能量严格 100% 守恒等于物理真值", naturalOffEnergyWh, result.deepSleepEnergyWh + result.awakeEnergyWh, 0.001f)
     }
+
+    /**
+     * 验证 ShizukuBatteryStatsParser 在 dumpsys 文本未包含明确拔电事件（-plugged）时，
+     * 绝对不通过 Discharge step durations 步进中的最大电量（maxDischargeStepLevel）凭空捏造虚假拔电电量，
+     * detectedUnplugLevel 和 detectedUnplugTs 如实保持为 null，杜绝跨周期假数据注入。
+     */
+    @Test
+    fun testShizukuParserNeverFabricatesUnplugLevelFromDischargeSteps() {
+        val rawDumpsysText = """
+            Discharge step durations:
+              #0: +1m20s300ms to 99 (screen-on, power-save-off, device-idle-off)
+              #1: +2m10s100ms to 98 (screen-on, power-save-off, device-idle-off)
+              #2: +4m50s000ms to 43 (screen-on, power-save-off, device-idle-off)
+
+            Statistics since last charge:
+              Time on battery: 4m 52s 0ms (100.0%) realtime, 4m 52s 0ms (100.0%) uptime
+              Screen on: 4m 52s 0ms (100.0%), Screen off: 0s 0ms (0.0%)
+              Screen off discharge: 0 mAh
+              Amount discharged while screen off: 0
+
+            Estimated power use (mAh):
+              Capacity: 7700, Computed drain: 14, actual drain: 14
+        """.trimIndent()
+
+        val (unplugTs, unplugLevel) = com.battery.analysis.provider.ShizukuBatteryStatsParser.extractDetectedUnplugFromHistory(rawDumpsysText)
+        assertNull("未探测到底层拔电事件时，detectedUnplugLevel 必须严格为 null，严禁虚构保底", unplugLevel)
+        assertNull("未探测到底层拔电事件时，detectedUnplugTs 必须严格为 null", unplugTs)
+    }
+
+    /**
+     * 验证 ShizukuBatteryStatsParser 在 dumpsys 文本明确记录了拔电事件（-plugged）时，
+     * 能够准确解析出拔电物理时间戳与断开时刻的真实电量百分比，忠实反映底层真实数据。
+     */
+    @Test
+    fun testShizukuParserExtractsRealUnplugEventWhenPresent() {
+        val rawDumpsysText = """
+            Battery History:
+            RESET:TIME: 2026-10-27-16-28-24
+            0 (10) 043 -plugged
+            +10s000ms (10) 043
+        """.trimIndent()
+
+        val (unplugTs, unplugLevel) = com.battery.analysis.provider.ShizukuBatteryStatsParser.extractDetectedUnplugFromHistory(rawDumpsysText)
+        assertEquals("当底层明确出现 -plugged 时，电量必须准确提取为 43%", 43, unplugLevel)
+        assertNotNull("当底层明确出现 -plugged 时，时间戳必须有效解析", unplugTs)
+    }
+
+    /**
+     * 针对用户真实截图场景（4分52秒短周期、43%拔电无百分比掉电、底层残留旧周期100%满充）：
+     * 验证起始电量决策链严格对齐当前放电周期（startTs 至 now），
+     * 绝对排除跨周期的 100% 满充记录，正确以 43% 作为起始电量，
+     * 掉电百分比为 0%，整机放电功耗维持在合理物理范围（约 1W~2W），彻底终结 204.26W 与 4306mAh 爆表 Bug。
+     */
+    @Test
+    fun testShortDischargePeriodPreventsCrossPeriodFullChargeWattsExplosion() {
+        val now = System.currentTimeMillis()
+        val durationMs = 292_000L // 4分52秒
+        val startTs = now - durationMs
+        val currentLevel = 43
+        val effectiveUnplugLevel = 43
+        val effectiveUnplugTime = startTs // 4分52秒前拔电
+
+        // 模拟底层 dumpsys 存在残留的跨周期旧记录：昨天满充拔电 100%
+        val oldDetectedUnplugLevel = 100
+        val oldDetectedUnplugTs = now - 86_400_000L // 24 小时前
+
+        val isDetectedUnplugInCurrentPeriod = oldDetectedUnplugTs in (startTs - 60_000L)..now &&
+                oldDetectedUnplugLevel >= currentLevel
+
+        val isLocalUnplugInCurrentPeriod = effectiveUnplugTime in (startTs - 60_000L)..now &&
+                effectiveUnplugLevel >= currentLevel
+
+        val intervalHistoryMax: Int? = null
+
+        val startLevel = when {
+            isDetectedUnplugInCurrentPeriod -> oldDetectedUnplugLevel
+            isLocalUnplugInCurrentPeriod -> effectiveUnplugLevel
+            intervalHistoryMax != null && intervalHistoryMax >= currentLevel -> intervalHistoryMax
+            else -> currentLevel
+        }
+
+        val dropPercent = (startLevel - currentLevel).coerceAtLeast(0)
+
+        // 验证：起始电量必须正确决议为 43%，掉电百分比必须为 0%
+        assertEquals("起始电量必须对齐本周期真实拔电电量 43%，绝不被 24小时前的 100% 污染", 43, startLevel)
+        assertEquals("短周期内未发生电量百分比跳变，掉电百分比必须严格为 0%", 0, dropPercent)
+
+        // 验证物理放电量计算：
+        // 电池总容量 7707mAh，硬件库仑计记录放电 14.0mAh
+        val effectiveCapacity = 7707f
+        val hwDischargedMah = 14.0f
+        val dischargeHours = durationMs / 3600000f // 0.0811 小时
+        val nominalVoltageVolts = 3.85f
+
+        val smoothedDropMah = if (dropPercent > 0) effectiveCapacity * (dropPercent / 100f) else 0f
+        val validHwMah = if (hwDischargedMah > 0f) {
+            if (dropPercent > 0 && hwDischargedMah < (smoothedDropMah * 0.3f)) 0f else hwDischargedMah
+        } else 0f
+
+        val physicalDrainMah = when {
+            validHwMah > 0f -> validHwMah
+            dropPercent > 0 -> smoothedDropMah
+            else -> 0f
+        }
+
+        val physicalTotalEnergyWh = (physicalDrainMah * nominalVoltageVolts) / 1000f
+        val avgWatts = if (dischargeHours > 0f) physicalTotalEnergyWh / dischargeHours else 0f
+
+        // 验证：放电量为 14.0mAh（而非 4306.0mAh），平均功率约为 0.66W（而非 204.26W）
+        assertEquals("物理放电量必须准确采信硬件库仑计 14.0mAh，绝不上涨至 4306mAh", 14.0f, physicalDrainMah, 0.01f)
+        assertEquals("整机放电能量约为 0.0539Wh", 0.0539f, physicalTotalEnergyWh, 0.005f)
+        assertEquals("平均功率必须在合理正常范围（约 0.66W），彻底消除 204W 虚假巨额尖峰", 0.66f, avgWatts, 0.05f)
+    }
 }

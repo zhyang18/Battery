@@ -3838,8 +3838,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                 var effectiveUnplugTime = unplugTime
                 if (stats.detectedUnplugLevel != null && stats.detectedUnplugLevel >= batterySnapshot.levelPercent) {
                     val detectedTs = stats.detectedUnplugTs
-                    val shouldAdoptDetected = (effectiveUnplugTime <= 0L) ||
-                            (detectedTs != null && detectedTs > effectiveUnplugTime && detectedTs <= now)
+                    val shouldAdoptDetected = detectedTs != null && detectedTs > 0L && detectedTs <= now &&
+                            (effectiveUnplugTime <= 0L || detectedTs > effectiveUnplugTime)
                     if (shouldAdoptDetected) {
                         effectiveUnplugLevel = stats.detectedUnplugLevel
                         if (detectedTs != null && detectedTs > 0L) {
@@ -3890,15 +3890,24 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val screenOnHours = screenOnMs / 3600000f
                 val screenOffHours = screenOffMs / 3600000f
 
-                // 起始电量：优先取探测到的真实拔电电量，其次取有效拔电记录，仅在本次放电时间区间内回溯历史电量，最后以当前电量保底
+                // 起始电量：严格对齐本次放电周期的真实时间窗口（startTs 至 now），杜绝跨周期历史数据污染当前短周期
+                val isDetectedUnplugInCurrentPeriod = stats.detectedUnplugTs != null &&
+                        stats.detectedUnplugTs in (startTs - 60_000L)..now &&
+                        stats.detectedUnplugLevel != null &&
+                        stats.detectedUnplugLevel >= batterySnapshot.levelPercent
+
+                val isLocalUnplugInCurrentPeriod = effectiveUnplugTime in (startTs - 60_000L)..now &&
+                        effectiveUnplugLevel >= batterySnapshot.levelPercent
+
                 val intervalHistoryMax = stats.historyLevelPoints
-                    .filter { it.first >= startTs }
+                    .filter { it.first in (startTs - 30_000L)..now }
                     .maxOfOrNull { it.second }
+
                 val startLevel = when {
-                    stats.detectedUnplugLevel != null && stats.detectedUnplugLevel >= batterySnapshot.levelPercent -> {
-                        stats.detectedUnplugLevel
+                    isDetectedUnplugInCurrentPeriod -> {
+                        stats.detectedUnplugLevel!!
                     }
-                    effectiveUnplugTime > 0L && effectiveUnplugLevel >= batterySnapshot.levelPercent -> {
+                    isLocalUnplugInCurrentPeriod -> {
                         effectiveUnplugLevel
                     }
                     intervalHistoryMax != null && intervalHistoryMax >= batterySnapshot.levelPercent -> {
@@ -6471,7 +6480,8 @@ class PowerUsageManager private constructor(private val context: Context) {
         val totalStr = formatDuration(totalMs)
 
         val effectiveCapacity = getEffectiveDeviceCapacityMah()
-        val unplugLevel = getLastUnplugLevel().coerceIn(0, 100)
+        val isUnplugSession = unplugTime > 0L && (now - unplugTime) < 24 * 3600000L
+        val unplugLevel = if (isUnplugSession) getLastUnplugLevel().coerceIn(0, 100) else currentLevel
         val startLevel = if (unplugLevel >= currentLevel) unplugLevel else currentLevel
         val dropPercent = (startLevel - currentLevel).coerceAtLeast(0)
         val dischargeHours = totalMs / 3600000f

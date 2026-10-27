@@ -273,7 +273,6 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         var detectedUnplugTs: Long? = null
         var detectedUnplugLevel: Int? = null
         var lastPluggedTs: Long? = null
-        var maxDischargeStepLevel = 0
 
         for (line in rawText.lineSequence()) {
             val trimmed = line.trim()
@@ -287,13 +286,7 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 if (line.isNotEmpty() && !line.startsWith(" ") && !line.startsWith("\t")) {
                     inDischargeStepSection = false
                 } else {
-                    val stepMatcher = REGEX_DISCHARGE_STEP.matcher(trimmed)
-                    if (stepMatcher.find()) {
-                        val toLvl = stepMatcher.group(2)?.toIntOrNull() ?: 0
-                        if (toLvl > maxDischargeStepLevel) {
-                            maxDischargeStepLevel = toLvl
-                        }
-                    }
+                    // 仅监听放电步进段落结构，绝不采集历史高电量用于未断电周期保底
                 }
             }
 
@@ -703,12 +696,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         }.toMutableList()
 
         // 7. 校验最近一次拔电起点与消除长段充满待机平线
+        // 遵循物理客观真值原则：若未探测到真实断开充电事件，拔电时间戳与电量如实为 null，绝不伪造保底
         var finalUnplugTs = detectedUnplugTs
         var finalUnplugLevel = detectedUnplugLevel
 
-        if (finalUnplugLevel == null && maxDischargeStepLevel > 0) {
-            finalUnplugLevel = (maxDischargeStepLevel + 1).coerceAtMost(100)
-        }
 
         var filteredHistoryPoints = historyPoints
         val targetUnplugTs = finalUnplugTs
@@ -2295,6 +2286,101 @@ class ShizukuBatteryStatsParser(private val context: Context) {
             }
 
             return totalMs
+        }
+
+        /**
+         * 从 dumpsys batterystats 的 Battery History 文本中解析最近一次真实断电（拔电）时刻与电量。
+         * 遵循客观真实数据原则，若未探测到底层断电事件（-plugged）则如实返回 null，严禁利用步进最大值虚构保底。
+         *
+         * @param rawText dumpsys batterystats 原始文本
+         * @param unplugTime 外部传入的断电时间戳基准（毫秒，默认 0L）
+         * @return 包含拔电时间戳（毫秒）与拔电电量百分比的配对实体 [Pair]，若未探测到则字段对应为 null
+         */
+        fun extractDetectedUnplugFromHistory(rawText: String, unplugTime: Long = 0L): Pair<Long?, Int?> {
+            var currentHistoryTs = if (unplugTime > 0L) unplugTime else 0L
+            var detectedUnplugTs: Long? = null
+            var detectedUnplugLevel: Int? = null
+            var inBatteryHistorySection = false
+
+            for (line in rawText.lineSequence()) {
+                val trimmed = line.trim()
+                val resetMatcher = REGEX_RESET_TIME.matcher(trimmed)
+                if (resetMatcher.find()) {
+                    try {
+                        val cal = java.util.Calendar.getInstance()
+                        cal.set(
+                            resetMatcher.group(1)!!.toInt(),
+                            resetMatcher.group(2)!!.toInt() - 1,
+                            resetMatcher.group(3)!!.toInt(),
+                            resetMatcher.group(4)!!.toInt(),
+                            resetMatcher.group(5)!!.toInt(),
+                            resetMatcher.group(6)!!.toInt()
+                        )
+                        currentHistoryTs = cal.timeInMillis
+                    } catch (_: Exception) {}
+                }
+
+                if (trimmed.startsWith("Battery History", ignoreCase = true)) {
+                    inBatteryHistorySection = true
+                    continue
+                }
+
+                if (inBatteryHistorySection) {
+                    if (line.isNotEmpty() && !line.startsWith(" ") && !line.startsWith("\t")) {
+                        if (trimmed.startsWith("Statistics since", ignoreCase = true) ||
+                            trimmed.startsWith("Estimated power use", ignoreCase = true) ||
+                            trimmed.startsWith("Per-app", ignoreCase = true)) {
+                            inBatteryHistorySection = false
+                        }
+                    }
+                    if (inBatteryHistorySection) {
+                        var deltaMs = 0L
+                        val hMatcher = REGEX_BATTERY_HISTORY_LINE.matcher(trimmed)
+                        if (hMatcher.find()) {
+                            val deltaStr = hMatcher.group(1) ?: ""
+                            if (deltaStr.isNotEmpty() && deltaStr != "0") {
+                                deltaMs = parseDurationStringToMs(deltaStr)
+                            }
+                            val level = hMatcher.group(2)?.toIntOrNull()
+                            if (level != null && level in 1..100) {
+                                currentHistoryTs += deltaMs
+                                deltaMs = 0L
+                                val isUnplug = trimmed.contains("-plugged", ignoreCase = true)
+                                if (isUnplug) {
+                                    detectedUnplugTs = currentHistoryTs
+                                    detectedUnplugLevel = level
+                                }
+                            }
+                        } else {
+                            val deltaMatcher = REGEX_HISTORY_TIME_DELTA.matcher(trimmed)
+                            if (deltaMatcher.find()) {
+                                val deltaStr = deltaMatcher.group(1) ?: ""
+                                if (deltaStr.isNotEmpty() && deltaStr != "0" && (deltaStr.startsWith("+") || deltaStr.startsWith("-") || deltaStr.contains("ms") || deltaStr.contains("s") || deltaStr.contains("m") || deltaStr.contains("h"))) {
+                                    deltaMs = parseDurationStringToMs(deltaStr)
+                                }
+                            }
+                            val levelMatcher = REGEX_HISTORY_LEVEL.matcher(trimmed)
+                            if (levelMatcher.find()) {
+                                val level = levelMatcher.group(1)?.toIntOrNull()
+                                if (level != null && level in 1..100) {
+                                    currentHistoryTs += deltaMs
+                                    deltaMs = 0L
+                                    val isUnplug = trimmed.contains("-plugged", ignoreCase = true)
+                                    if (isUnplug) {
+                                        detectedUnplugTs = currentHistoryTs
+                                        detectedUnplugLevel = level
+                                    }
+                                }
+                            }
+                        }
+                        if (deltaMs > 0L) {
+                            currentHistoryTs += deltaMs
+                        }
+                    }
+                }
+            }
+
+            return Pair(detectedUnplugTs, detectedUnplugLevel)
         }
     }
 }

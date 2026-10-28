@@ -214,6 +214,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
                         samplePointsJson = pointsJson
                     )
                     ChargingHistoryDbHelper.getInstance(context).insertRecord(record)
+                    BatteryCapacityManager.getInstance(context).onChargingSessionArchived(record)
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
@@ -295,6 +296,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
                         samplePointsJson = pointsJson
                     )
                     ChargingHistoryDbHelper.getInstance(context).insertRecord(record)
+                    BatteryCapacityManager.getInstance(context).onChargingSessionArchived(record)
                     hasPersistedCurrentSession = true
                     lastPersistedStartTimestamp = currentSummary.startTimestamp
                 } catch (e: Exception) {
@@ -387,6 +389,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
                         samplePointsJson = pointsJson
                     )
                     ChargingHistoryDbHelper.getInstance(context).insertRecord(record)
+                    BatteryCapacityManager.getInstance(context).onChargingSessionArchived(record)
                     hasPersistedCurrentSession = true
                     lastPersistedStartTimestamp = currentSummary.startTimestamp
                 } catch (e: Exception) {
@@ -990,6 +993,7 @@ class ChargingStatsManager private constructor(private val context: Context) {
                     samplePointsJson = pointsJson
                 )
                 ChargingHistoryDbHelper.getInstance(context).insertRecord(record)
+                BatteryCapacityManager.getInstance(context).onChargingSessionArchived(record)
                 hasPersistedCurrentSession = true
                 lastPersistedStartTimestamp = currentSummary.startTimestamp
             } catch (e: Exception) {

@@ -6,10 +6,12 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.battery.analysis.R
 import com.battery.analysis.databinding.ItemAppPowerUsageBinding
+import com.battery.analysis.databinding.ItemPowerCapacityOverviewBinding
 import com.battery.analysis.databinding.ItemPowerChargingContentBinding
 import com.battery.analysis.databinding.ItemPowerDischargeSpeedBinding
 import com.battery.analysis.databinding.ItemPowerFirstTimeSetupBinding
@@ -22,6 +24,9 @@ import com.battery.analysis.databinding.LayoutChargingStatsBinding
 import com.battery.analysis.manager.PowerOverviewStats
 import com.battery.analysis.manager.PowerUsageManager
 import com.battery.analysis.model.AppPowerUsageItem
+import com.battery.analysis.model.CapacityEstimateResult
+import com.battery.analysis.model.CapacitySourceTier
+import com.battery.analysis.model.MaturityLevel
 import com.battery.analysis.model.PowerDischargePoint
 import com.battery.analysis.model.PowerDisplayUnit
 import com.battery.analysis.model.PowerUsageItem
@@ -38,6 +43,11 @@ import android.text.style.AbsoluteSizeSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import androidx.core.text.HtmlCompat
+import androidx.interpolator.view.animation.FastOutSlowInInterpolator
+import androidx.transition.ChangeBounds
+import androidx.transition.Fade
+import androidx.transition.TransitionManager
+import androidx.transition.TransitionSet
 import com.battery.analysis.util.BatteryEnergyCalculator
 import java.util.Locale
 
@@ -70,6 +80,8 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         const val TYPE_DISCHARGE_SPEED = 8
         /** 视图类型：唤醒与深度睡眠耗电指标双卡片 */
         const val TYPE_SLEEP_AWAKE_METRICS = 9
+        /** 视图类型：电池容量储备与自学习核心看板卡片（位于放电速度卡片正上方） */
+        const val TYPE_CAPACITY_OVERVIEW = 10
 
         /** 睡眠卡片点击分类标识：息屏卡片 */
         const val CARD_SCREEN_OFF = 1
@@ -208,8 +220,43 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             overviewHolder?.binding?.batteryTimelineView?.setOnCursorInspectListener(value)
         }
 
+    /**
+     * 点击进入全景科学诊断 BottomSheet 的回调监听器。
+     */
+    var onOpenCapacityDiagnosisListener: (() -> Unit)? = null
+
+    // 当前最新的容量与自学习结果
+    private var capacityEstimateResult: CapacityEstimateResult? = null
+
+    // 容量核心卡片是否处于展开态（默认读取 SharedPreferences 偏好）
+    private var isCapacityCardExpanded: Boolean? = null
+
+    // 容量核心卡片展开/收缩交互防抖时间戳（单位：毫秒）
+    private var lastCapacityToggleTime: Long = 0L
+
+    private var capacityHolder: CapacityOverviewViewHolder? = null
+
+    /**
+     * 更新最新的电池容量与自学习状态结果，并安全刷新对应卡片。
+     *
+     * @param result 最新的容量估计结果实体 [CapacityEstimateResult]
+     */
+    fun updateCapacityEstimate(result: CapacityEstimateResult?) {
+        capacityEstimateResult = result
+        capacityHolder?.let { bindCapacityOverview(it) }
+    }
+
 
     // ==================== ViewHolder 定义 ====================
+
+    /**
+     * 电池容量储备与自学习核心卡片 ViewHolder。
+     * 支持单行折叠与双轨展开过渡，并在本地持久化用户的展开偏好。
+     *
+     * @param binding 电池容量卡片视图绑定对象
+     */
+    inner class CapacityOverviewViewHolder(val binding: ItemPowerCapacityOverviewBinding) :
+        RecyclerView.ViewHolder(binding.root)
 
     /**
      * 首次进入模式引导卡片 ViewHolder。
@@ -312,6 +359,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             is PowerUsageItem.FirstTimeSetup -> TYPE_FIRST_TIME_SETUP
             is PowerUsageItem.SnapshotBanner -> TYPE_SNAPSHOT_BANNER
             is PowerUsageItem.ShizukuGuide -> TYPE_SHIZUKU_GUIDE
+            is PowerUsageItem.CapacityOverview -> TYPE_CAPACITY_OVERVIEW
             is PowerUsageItem.DischargeSpeedMetrics -> TYPE_DISCHARGE_SPEED
             is PowerUsageItem.SleepAwakeMetrics -> TYPE_SLEEP_AWAKE_METRICS
             is PowerUsageItem.UsageOverview -> TYPE_USAGE_OVERVIEW
@@ -343,6 +391,10 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             TYPE_SHIZUKU_GUIDE -> {
                 val binding = ItemPowerShizukuGuideBinding.inflate(inflater, parent, false)
                 ShizukuGuideViewHolder(binding)
+            }
+            TYPE_CAPACITY_OVERVIEW -> {
+                val binding = ItemPowerCapacityOverviewBinding.inflate(inflater, parent, false)
+                CapacityOverviewViewHolder(binding).also { capacityHolder = it }
             }
             TYPE_DISCHARGE_SPEED -> {
                 val binding = ItemPowerDischargeSpeedBinding.inflate(inflater, parent, false)
@@ -422,6 +474,11 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             }
             is PowerUsageItem.ShizukuGuide -> {
                 bindShizukuGuide(holder as ShizukuGuideViewHolder, item)
+            }
+            is PowerUsageItem.CapacityOverview -> {
+                val capHolder = holder as CapacityOverviewViewHolder
+                capacityHolder = capHolder
+                bindCapacityOverview(capHolder)
             }
             is PowerUsageItem.DischargeSpeedMetrics -> {
                 val speedHolder = holder as DischargeSpeedViewHolder
@@ -533,6 +590,215 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         holder.binding.btnShizukuAction.text = item.actionText
         holder.binding.btnShizukuAction.setOnClickListener {
             onShizukuActionClickedListener?.invoke()
+        }
+    }
+
+    /**
+     * 绑定电池容量储备与自学习核心卡片视图（方案 A：可折叠双轨仪表盘风格）。
+     * 支持单行极简速览与双轨详情展开过渡，自动从本地配置还原用户的折叠偏好。
+     * 严格遵循物理数据实测原则，无数据时呈现待校准与未就绪状态。
+     *
+     * @param holder 容量核心看板 ViewHolder [CapacityOverviewViewHolder]
+     */
+    private fun bindCapacityOverview(holder: CapacityOverviewViewHolder) {
+        val binding = holder.binding
+        val context = binding.root.context
+
+        // 1. 初始化或恢复展开状态偏好（默认折叠为单行极简模式）
+        if (isCapacityCardExpanded == null) {
+            val sp = context.getSharedPreferences("capacity_prefs", Context.MODE_PRIVATE)
+            isCapacityCardExpanded = sp.getBoolean("pref_capacity_card_expanded", false)
+        }
+        val isExpanded = isCapacityCardExpanded ?: false
+        updateCapacityCardExpandState(holder, isExpanded, animate = false)
+
+        // 2. 绑定点击切换展开/折叠交互事件（同时支持点击速览栏与卡片主体空白区，具备 300ms 防抖保护）
+        val toggleListener = View.OnClickListener {
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastCapacityToggleTime < 300L) {
+                return@OnClickListener
+            }
+            lastCapacityToggleTime = now
+
+            val nextState = !(isCapacityCardExpanded ?: false)
+            isCapacityCardExpanded = nextState
+            val sp = context.getSharedPreferences("capacity_prefs", Context.MODE_PRIVATE)
+            sp.edit().putBoolean("pref_capacity_card_expanded", nextState).apply()
+            updateCapacityCardExpandState(holder, nextState, animate = true)
+        }
+        binding.layoutCollapsedHeader.setOnClickListener(toggleListener)
+        binding.root.setOnClickListener(toggleListener)
+
+        // 3. 绑定全景科学诊断 BottomSheet 弹窗入口
+        binding.btnOpenDiagnosis.setOnClickListener {
+            onOpenCapacityDiagnosisListener?.invoke()
+        }
+
+        // 4. 数据绑定：严格遵循无假数据原则
+        val result = capacityEstimateResult
+        val prefix = "预估满电容量："
+        val learningColor = Color.parseColor("#f59e0b") // 醒目的琥珀橙色，用于明确区分自学习中状态
+
+        if (result == null) {
+            // 未就绪/正在初始化状态
+            val fullText = "${prefix}学习中"
+            val spannable = SpannableString(fullText).apply {
+                setSpan(
+                    ForegroundColorSpan(learningColor),
+                    prefix.length,
+                    fullText.length,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
+            binding.tvCollapsedCharge.text = spannable
+            binding.tvCollapsedEnergy.visibility = View.GONE
+            binding.tvCollapsedBadge.text = "初始化中"
+            binding.tvCollapsedBadge.setTextColor(Color.parseColor("#64748b"))
+            setRoundedBadgeBackground(binding.tvCollapsedBadge, Color.parseColor("#64748b"), 6f)
+
+            binding.tvValRemainingCharge.setUnitText("-- mAh")
+            binding.tvSubRemainingCharge.text = "等待充电数据"
+            binding.tvValRemainingEnergy.setUnitText("-- Wh")
+            binding.tvSubRemainingEnergy.text = "标称工作平台"
+            binding.tvValFccBaseline.setUnitText("-- mAh")
+            binding.tvValFccBadge.text = "未就绪"
+            binding.tvValFccBadge.setTextColor(Color.parseColor("#64748b"))
+            setRoundedBadgeBackground(binding.tvValFccBadge, Color.parseColor("#64748b"), 5f)
+            return
+        }
+
+        // 首行速览数据渲染：按“预估满电容量：满电容量 | 满电能量（学习中则加颜色区分）”标准定制，且单位比数值小 2 号
+        val isLearning = (result.maturityLevel == MaturityLevel.PENDING)
+        if (isLearning) {
+            val fullText = "${prefix}学习中"
+            val spannable = SpannableString(fullText).apply {
+                setSpan(
+                    ForegroundColorSpan(learningColor),
+                    prefix.length,
+                    fullText.length,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                )
+            }
+            binding.tvCollapsedCharge.text = spannable
+        } else {
+            val capacityText = "$prefix${result.getFormattedFcc()} | ${result.getFormattedFullEnergy()}"
+            binding.tvCollapsedCharge.setUnitText(capacityText)
+        }
+        binding.tvCollapsedEnergy.visibility = View.GONE
+
+        // 状态徽章与颜色渲染（设计容量缺失时智能自适应以 FCC 为基准）
+        val (badgeText, badgeColor) = when (result.maturityLevel) {
+            MaturityLevel.STABLE_TRACKING,
+            MaturityLevel.CONVERGED -> {
+                val label = if (result.sohPercent != null) "SOH ${result.getFormattedSoh()}" else "FCC ${result.getFormattedFcc()}"
+                "$label · 收敛" to Color.parseColor("#10b981")
+            }
+            MaturityLevel.INITIAL_OBSERVATION -> {
+                val label = if (result.sohPercent != null) "SOH ${result.getFormattedSoh()}" else "FCC ${result.getFormattedFcc()}"
+                "$label · 观察" to Color.parseColor("#f59e0b")
+            }
+            MaturityLevel.PENDING -> {
+                "自学习中(${result.validSessionCount}/5)" to Color.parseColor("#64748b")
+            }
+        }
+        binding.tvCollapsedBadge.text = badgeText
+        binding.tvCollapsedBadge.setTextColor(badgeColor)
+        setRoundedBadgeBackground(binding.tvCollapsedBadge, badgeColor, 6f)
+
+        // 展开区双轨数据渲染：单位统一比数值小 2 号
+        binding.tvValRemainingCharge.setUnitText(result.getFormattedRemainingCharge())
+        binding.tvSubRemainingCharge.text = if (result.currentSoc != null) {
+            "物理电荷 · ${result.currentSoc}%"
+        } else {
+            "物理电荷"
+        }
+
+        binding.tvValRemainingEnergy.setUnitText(result.getFormattedRemainingEnergy())
+        binding.tvSubRemainingEnergy.text = "标称电压物理能量"
+
+        // 满充基准与诊断标识
+        binding.tvValFccBaseline.setUnitText(result.getFormattedFcc())
+        binding.tvValFccBadge.text = when (result.maturityLevel) {
+            MaturityLevel.STABLE_TRACKING,
+            MaturityLevel.CONVERGED -> "🛡️ 收敛"
+            MaturityLevel.INITIAL_OBSERVATION -> "⏳ 观察"
+            MaturityLevel.PENDING -> "🌱 自学习中"
+        }
+        binding.tvValFccBadge.setTextColor(badgeColor)
+        setRoundedBadgeBackground(binding.tvValFccBadge, badgeColor, 5f)
+    }
+
+    /**
+     * 为文本徽章动态配置带圆角的半透明胶囊背景。
+     * 解决原生调用 [View.setBackgroundColor] 会冲掉 XML 定义的圆角、退化为直角矩形的问题。
+     *
+     * @param view 目标徽章文本视图
+     * @param textColor 徽章前景主题色
+     * @param cornerRadiusDp 圆角半径（单位：dp，默认为 6dp）
+     */
+    private fun setRoundedBadgeBackground(view: TextView, textColor: Int, cornerRadiusDp: Float = 6f) {
+        val density = view.resources.displayMetrics.density
+        val alphaColor = Color.argb(32, Color.red(textColor), Color.green(textColor), Color.blue(textColor))
+        val drawable = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+            setColor(alphaColor)
+            setCornerRadius(cornerRadiusDp * density)
+        }
+        view.background = drawable
+    }
+
+    /**
+     * 更新容量卡片的折叠/展开外观状态。
+     * 具备与列表下方卡片（如放电速度卡片等）严丝合缝的同轨联动动画：
+     * 1. 将场景根节点锚定至父级 [RecyclerView]，通过 [ChangeBounds] 同步驱动当前卡片尺寸收缩与下方所有卡片平滑上浮/下沉；
+     * 2. 采用 [TransitionSet.ORDERING_TOGETHER] 并发编排，彻底消除分步执行导致的迟滞与下部卡片突变脱节；
+     * 3. 针对展开内容采用独立渐变控制，收缩时快速隐退（120ms）防止截断破绽，展开时优雅淡入（240ms）；
+     * 4. 同步执行指示箭头 0 度与 180 度平滑属性旋转。
+     *
+     * @param holder 容量核心看板 ViewHolder [CapacityOverviewViewHolder]
+     * @param isExpanded 当前目标展开状态，true 为双轨展开态，false 为单行速览态
+     * @param animate 是否执行平滑过渡动画
+     */
+    private fun updateCapacityCardExpandState(
+        holder: CapacityOverviewViewHolder,
+        isExpanded: Boolean,
+        animate: Boolean
+    ) {
+        val binding = holder.binding
+        if (animate) {
+            // 将过渡动画的根节点锚定至包裹所有卡片的父级 RecyclerView（若异常则兜底至 binding.root）
+            // 确保当前卡片的高度变换与下方放电速度三卡片等兄弟视图的位置位移同轨同步渲染
+            val sceneRoot = (holder.itemView.parent as? ViewGroup) ?: (binding.root as ViewGroup)
+            val interpolator = FastOutSlowInInterpolator()
+
+            val transitionSet = TransitionSet().apply {
+                ordering = TransitionSet.ORDERING_TOGETHER
+                // 1. 物理位置与尺寸变换：本卡片收缩与下方所有卡片平移严格以 280ms 同步缓动
+                addTransition(ChangeBounds().apply {
+                    duration = 280L
+                    this.interpolator = interpolator
+                })
+                // 2. 仅对展开区域执行淡隐淡出，严禁影响下方其他卡片导致半透明闪烁
+                // 收缩时 120ms 快速淡出，避免卡片收拢时内部文本被下边框截断挤压；展开时 240ms 优雅淡入
+                addTransition(Fade().apply {
+                    duration = if (isExpanded) 240L else 120L
+                    this.interpolator = interpolator
+                    addTarget(binding.layoutExpandedContent)
+                })
+            }
+            TransitionManager.beginDelayedTransition(sceneRoot, transitionSet)
+        }
+
+        binding.layoutExpandedContent.visibility = if (isExpanded) View.VISIBLE else View.GONE
+        val targetRotation = if (isExpanded) 180f else 0f
+        if (animate) {
+            binding.ivExpandArrow.animate()
+                .rotation(targetRotation)
+                .setDuration(280L)
+                .setInterpolator(FastOutSlowInInterpolator())
+                .start()
+        } else {
+            binding.ivExpandArrow.rotation = targetRotation
         }
     }
 
@@ -1108,6 +1374,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         if (showShizukuGuide) {
             items.add(PowerUsageItem.ShizukuGuide(shizukuGuideTitle, shizukuGuideDesc, shizukuGuideActionText))
         }
+        items.add(PowerUsageItem.CapacityOverview)
         items.add(PowerUsageItem.DischargeSpeedMetrics)
         items.add(PowerUsageItem.SleepAwakeMetrics)
         items.add(PowerUsageItem.UsageOverview)

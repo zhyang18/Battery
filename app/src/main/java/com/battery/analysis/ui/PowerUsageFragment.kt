@@ -25,7 +25,10 @@ import android.text.style.AbsoluteSizeSpan
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.battery.analysis.manager.BatteryCapacityManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.battery.analysis.MainActivity
 import com.battery.analysis.R
@@ -395,6 +398,17 @@ class PowerUsageFragment : Fragment() {
                 onDevicePowerDisconnected()
             }
         }
+
+        // 观察电池容量与物理自学习状态流，动态刷新容量卡片
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                BatteryCapacityManager.getInstance(requireContext()).capacityState.collect { estimateResult ->
+                    adapter.updateCapacityEstimate(estimateResult)
+                }
+            }
+        }
+        // 触发一次异步容量估算刷新
+        BatteryCapacityManager.getInstance(requireContext()).refreshEstimateAsync()
     }
 
     /**
@@ -700,6 +714,7 @@ class PowerUsageFragment : Fragment() {
         lastAppBarVerticalOffset = 0
         // 清空 RecyclerView Adapter 持有的应用列表，避免 Adapter 阻止列表数据被 GC 回收
         adapter.submitList(emptyList())
+        adapter.onOpenCapacityDiagnosisListener = null
         _binding = null
     }
 
@@ -856,6 +871,11 @@ class PowerUsageFragment : Fragment() {
         }
         adapter.onRestoreRealtimeClickedListener = {
             restoreLivePowerData()
+        }
+
+        adapter.onOpenCapacityDiagnosisListener = {
+            val dialog = CapacityDiagnosisBottomSheetDialog()
+            dialog.show(childFragmentManager, "CapacityDiagnosisBottomSheetDialog")
         }
         adapter.onCursorInspectListener = object : com.battery.analysis.timeline.presentation.BatteryTimelineView.OnCursorInspectListener {
             override fun onCursorMove(
@@ -1635,6 +1655,10 @@ class PowerUsageFragment : Fragment() {
         } else {
             (activity as? MainActivity)?.updateBottomNavPowerTab(isCharging)
         }
+        // 电池状态或电量变动时，静默刷新当前容量估算显示
+        context?.let { ctx ->
+            BatteryCapacityManager.getInstance(ctx).refreshEstimateAsync()
+        }
     }
 
     /**
@@ -2083,6 +2107,8 @@ class PowerUsageFragment : Fragment() {
         binding.swipeRefreshLayout.isRefreshing = true
         updateShizukuBannerState()
         checkNormalPermissionBanner()
+        // 同步触发最新电池容量与电荷状态重新核算
+        BatteryCapacityManager.getInstance(requireContext()).refreshEstimateAsync()
 
         val statsPrefs = requireContext().getSharedPreferences(PREFS_POWER_STATS, Context.MODE_PRIVATE)
         val isBgStatsEnabled = statsPrefs.getBoolean(PREF_KEY_ENABLE_BACKGROUND_STATS, false)

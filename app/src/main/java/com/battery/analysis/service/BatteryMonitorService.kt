@@ -170,6 +170,10 @@ class BatteryMonitorService : Service() {
             when (action) {
                 Intent.ACTION_POWER_CONNECTED -> {
                     cachedIsCharging = true
+                    lastScreenOffRealtime = 0L
+                    lastScreenOffUptime = 0L
+                    lastScreenOffChargeCounterUah = 0
+                    lastScreenOffVoltageVolts = 0f
                     clearPersistedScreenOffBaseline(appContext)
                     if (com.battery.analysis.manager.FloatingWindowManager.isFloatingEnabled(appContext)) {
                         com.battery.analysis.manager.FloatingWindowManager.updateData(
@@ -183,6 +187,26 @@ class BatteryMonitorService : Service() {
                 }
                 Intent.ACTION_POWER_DISCONNECTED -> {
                     cachedIsCharging = false
+                    if (!cachedIsInteractive) {
+                        lastScreenOffRealtime = SystemClock.elapsedRealtime()
+                        lastScreenOffUptime = SystemClock.uptimeMillis()
+                        val bm = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                        lastScreenOffChargeCounterUah = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER) ?: 0
+                        lastScreenOffVoltageVolts = cachedVoltageVolts
+                        persistScreenOffBaseline(
+                            appContext,
+                            lastScreenOffRealtime,
+                            lastScreenOffUptime,
+                            lastScreenOffChargeCounterUah,
+                            lastScreenOffVoltageVolts
+                        )
+                    } else {
+                        lastScreenOffRealtime = 0L
+                        lastScreenOffUptime = 0L
+                        lastScreenOffChargeCounterUah = 0
+                        lastScreenOffVoltageVolts = 0f
+                        clearPersistedScreenOffBaseline(appContext)
+                    }
                     if (com.battery.analysis.manager.FloatingWindowManager.isFloatingEnabled(appContext)) {
                         com.battery.analysis.manager.FloatingWindowManager.updateData(
                             appContext,
@@ -209,7 +233,13 @@ class BatteryMonitorService : Service() {
                         var offHwMah = 0f
                         var offHwWh = 0f
                         if (lastScreenOffChargeCounterUah > 0 && screenOnCounterUah > 0 && lastScreenOffChargeCounterUah >= screenOnCounterUah) {
-                            val rawMah = (lastScreenOffChargeCounterUah - screenOnCounterUah) / 1000f
+                            val effCap = PowerUsageManager.getInstance(appContext).getEffectiveDeviceCapacityMah().toDouble()
+                            val rawMah = calculateScreenOffDischargeMah(
+                                offCounter = lastScreenOffChargeCounterUah,
+                                onCounter = screenOnCounterUah,
+                                effectiveCapacity = effCap,
+                                batteryPercent = cachedLevelPercent
+                            )
                             val avgVolt = if (lastScreenOffVoltageVolts > 0f && screenOnVolt > 0f) {
                                 (lastScreenOffVoltageVolts + screenOnVolt) / 2f
                             } else if (screenOnVolt > 0f) {
@@ -1715,6 +1745,47 @@ class BatteryMonitorService : Service() {
          *
          * @param context 应用程序上下文
          */
+        /**
+         * 计算息屏单段硬件电荷计数器差分电量（单位：毫安时 mAh）。
+         * 自适应归一化标准 uAh 设备与国产 ROM 直报 mAh 设备，杜绝千倍缩水或放大缺陷。
+         *
+         * @param offCounter 熄屏瞬间记录的原始电荷计数器读数
+         * @param onCounter 亮屏瞬间记录的原始电荷计数器读数
+         * @param effectiveCapacity 设备已知基准容量（单位：mAh，无则传 null）
+         * @param batteryPercent 当前电池电量百分比（1..100，无则传 null）
+         * @return 归一化后的单段息屏放电量（单位：毫安时 mAh）
+         */
+        fun calculateScreenOffDischargeMah(
+            offCounter: Int,
+            onCounter: Int,
+            effectiveCapacity: Double?,
+            batteryPercent: Int?
+        ): Float {
+            if (offCounter <= 0 || onCounter <= 0 || offCounter < onCounter) return 0f
+            val cap = if (effectiveCapacity != null && effectiveCapacity > 0.0) effectiveCapacity else null
+            val pct = if (batteryPercent != null && batteryPercent in 1..100) batteryPercent.toDouble() else null
+            val offNorm = com.battery.analysis.domain.estimator.BatteryUnitNormalizer.normalizeChargeCounterToMah(
+                rawCounter = offCounter.toLong(),
+                effectiveCapacityMah = cap,
+                batteryPercent = pct
+            )
+            val onNorm = com.battery.analysis.domain.estimator.BatteryUnitNormalizer.normalizeChargeCounterToMah(
+                rawCounter = onCounter.toLong(),
+                effectiveCapacityMah = cap,
+                batteryPercent = pct
+            )
+            return if (offNorm != null && onNorm != null && offNorm >= onNorm) {
+                (offNorm - onNorm).toFloat()
+            } else {
+                val rawDiff = (offCounter - onCounter).toFloat()
+                if (rawDiff <= 15000f && offCounter <= 25000) {
+                    rawDiff
+                } else {
+                    rawDiff / 1000f
+                }
+            }
+        }
+
         fun cancelHeartbeatAlarm(context: Context) {
             try {
                 val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return

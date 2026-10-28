@@ -34,6 +34,12 @@ sealed class PowerUsageItem {
     ) : PowerUsageItem()
 
     /**
+     * 电池剩余容量、满充基准与自学习核心看板条目。
+     * 位于放电速度三卡片正上方。
+     */
+    data object CapacityOverview : PowerUsageItem()
+
+    /**
      * 放电速度核心概览卡片条目（包含全局放电速度、亮屏放电速度与息屏放电速度三个主要模块）。
      */
     data object DischargeSpeedMetrics : PowerUsageItem()

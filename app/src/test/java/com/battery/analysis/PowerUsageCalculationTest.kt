@@ -6920,4 +6920,138 @@ class PowerUsageCalculationTest {
         assertEquals("整机放电能量约为 0.0539Wh", 0.0539f, physicalTotalEnergyWh, 0.005f)
         assertEquals("平均功率必须在合理正常范围（约 0.66W），彻底消除 204W 虚假巨额尖峰", 0.66f, avgWatts, 0.05f)
     }
+
+    /**
+     * 验证 BatteryMonitorService.calculateScreenOffDischargeMah 对标准 uAh 与国产定制 ROM 直报 mAh 设备的自适应能力。
+     * 杜绝直报设备因硬编码除以 1000 导致放电量缩水 1000 倍（例如 150mAh 变成 0.15mAh）的严重缺陷。
+     */
+    @Test
+    fun testCalculateScreenOffDischargeMahAdaptsBothUahAndMah() {
+        val effectiveCap = 5000.0
+        val currentPercent = 80
+
+        // 场景 A：标准 Android 设备（单位为 uAh）
+        val offUah = 4_000_000
+        val onUah = 3_850_000
+        val mahFromUah = com.battery.analysis.service.BatteryMonitorService.calculateScreenOffDischargeMah(
+            offCounter = offUah,
+            onCounter = onUah,
+            effectiveCapacity = effectiveCap,
+            batteryPercent = currentPercent
+        )
+        assertEquals("标准 uAh 设备必须正确换算为 150.0mAh", 150.0f, mahFromUah, 0.1f)
+
+        // 场景 B：国产定制 ROM 设备（底层驱动直接上报 mAh）
+        val offMah = 4_000
+        val onMah = 3_850
+        val mahFromMah = com.battery.analysis.service.BatteryMonitorService.calculateScreenOffDischargeMah(
+            offCounter = offMah,
+            onCounter = onMah,
+            effectiveCapacity = effectiveCap,
+            batteryPercent = currentPercent
+        )
+        assertEquals("直报 mAh 设备必须准确识别为 150.0mAh，绝不能缩水 1000 倍为 0.15mAh", 150.0f, mahFromMah, 0.1f)
+
+        // 场景 C：无基准容量参考时，依靠当前电量百分比自适应识别直报 mAh
+        val mahWithoutCap = com.battery.analysis.service.BatteryMonitorService.calculateScreenOffDischargeMah(
+            offCounter = offMah,
+            onCounter = onMah,
+            effectiveCapacity = null,
+            batteryPercent = currentPercent
+        )
+        assertEquals("无容量参考时直报 mAh 设备必须依靠电量百分比正确识别并结算为 150.0mAh", 150.0f, mahWithoutCap, 0.1f)
+    }
+
+    /**
+     * 验证深睡典型基准功耗采纳稳健 P50 中位数，绝不再被单点偶然极小底噪（0.07W）穿透支配整夜长断层。
+     */
+    @Test
+    fun testScreenOffSleepWattsNotDominatedByFloorMinPower() {
+        val samples = listOf(
+            PowerDischargePoint(timestamp = 1000L, elapsedHours = 0.1f, batteryLevel = 80, powerWatts = 0.07f, isScreenOn = false),
+            PowerDischargePoint(timestamp = 2000L, elapsedHours = 0.2f, batteryLevel = 80, powerWatts = 0.15f, isScreenOn = false),
+            PowerDischargePoint(timestamp = 3000L, elapsedHours = 0.3f, batteryLevel = 80, powerWatts = 0.16f, isScreenOn = false),
+            PowerDischargePoint(timestamp = 4000L, elapsedHours = 0.4f, batteryLevel = 80, powerWatts = 0.18f, isScreenOn = false)
+        )
+
+        val stats = PowerUsageManager.computeDischargePowerStats(samples)
+        assertNotNull("放电统计结果不得为 null", stats)
+        assertTrue(
+            "息屏平均功耗必须高于 0.12W，忠实反映 P50 典型深睡基线",
+            stats!!.screenOffPowerWatts >= 0.12f
+        )
+    }
+
+
+    /**
+     * 验证当采样序列具备多个固定时间窗口支持时，深睡推算优先采信实测稳健 P50 基线，
+     * 绝不再被样本中的单点极限底噪（0.05W）拉低深睡推算能耗。
+     */
+    @Test
+    fun testScreenOffDecompositionPrioritizesMeasuredWindowP50OverFloorNoise() {
+        val windowDurationMs = 15 * 60 * 1000L // 15 分钟窗口
+        val samples = mutableListOf<PowerDischargePoint>()
+        // 构造 3 个有效时间窗口，每个窗口内包含稳态 0.15W 样本，并在其中混入单点 0.05W 极限噪底
+        for (w in 0..2) {
+            val baseTs = 1000L + w * windowDurationMs
+            val ptPower = if (w == 0) 0.05f else 0.15f
+            samples.add(PowerDischargePoint(timestamp = baseTs, elapsedHours = 0f, batteryLevel = 80, powerWatts = ptPower, isScreenOn = false))
+            samples.add(PowerDischargePoint(timestamp = baseTs + 60_000L, elapsedHours = 0f, batteryLevel = 80, powerWatts = 0.15f, isScreenOn = false))
+            samples.add(PowerDischargePoint(timestamp = baseTs + 120_000L, elapsedHours = 0f, batteryLevel = 80, powerWatts = 0.16f, isScreenOn = false))
+        }
+
+        val result = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = 0.22f,
+            screenOffMs = 45 * 60 * 1000L, // 45 分钟 (0.75h)
+            deepSleepMs = 40 * 60 * 1000L, // 40 分钟 (0.667h)
+            awakeMs = 5 * 60 * 1000L, // 5 分钟 (0.083h)
+            samples = samples
+        )
+
+        assertTrue("深睡功耗必须采信稳健 P50 基线(>= 0.12W)，绝不被 0.05W 极限噪底拉低", result.deepSleepWatts >= 0.12f)
+        assertTrue("深睡推算应被标记为推算基线驱动", result.isDeepSleepInferred)
+    }
+
+
+    /**
+     * 验证深睡基线 P50 提取严格建立在剔除关屏初期前 180 秒（3 分钟）过渡震荡态的高纯度稳态样本基础之上。
+     * 模拟关屏前 180 秒内伴随 2.0W 刷盘与断网震荡点、随后进入 0.15W 稳定休眠的场景；
+     * 断言送入估计器提取出的 P50 基线严格对齐稳态 0.15W，绝不受 180 秒内 2.0W 震荡态的任何污染。
+     */
+    @Test
+    fun testScreenOffP50BaselineExcludesScreenOffTransitionVibration() {
+        val startTs = 1000L
+        val samples = mutableListOf<PowerDischargePoint>()
+        // 1. 亮屏转灭屏时序边界
+        samples.add(PowerDischargePoint(timestamp = startTs, elapsedHours = 0f, batteryLevel = 80, powerWatts = 2.5f, isScreenOn = true))
+        samples.add(PowerDischargePoint(timestamp = startTs + 1000L, elapsedHours = 0f, batteryLevel = 80, powerWatts = 2.0f, isScreenOn = false)) // 灭屏时刻 T_off
+
+        // 2. 灭屏前 180 秒（3 分钟）内的高功耗刷盘与断网震荡样本 (1.8W ~ 2.2W)
+        samples.add(PowerDischargePoint(timestamp = startTs + 30_000L, elapsedHours = 0f, batteryLevel = 80, powerWatts = 2.2f, isScreenOn = false))
+        samples.add(PowerDischargePoint(timestamp = startTs + 60_000L, elapsedHours = 0f, batteryLevel = 80, powerWatts = 2.0f, isScreenOn = false))
+        samples.add(PowerDischargePoint(timestamp = startTs + 120_000L, elapsedHours = 0f, batteryLevel = 80, powerWatts = 1.8f, isScreenOn = false))
+
+        // 3. 180 秒之后的稳定休眠态：构造跨越 3 个 15 分钟窗口的稳定纯净样本 (0.14W ~ 0.16W)
+        val windowDurationMs = 15 * 60 * 1000L
+        for (w in 0..2) {
+            val baseTs = startTs + 190_000L + w * windowDurationMs
+            samples.add(PowerDischargePoint(timestamp = baseTs, elapsedHours = 0f, batteryLevel = 80, powerWatts = 0.14f, isScreenOn = false))
+            samples.add(PowerDischargePoint(timestamp = baseTs + 60_000L, elapsedHours = 0f, batteryLevel = 80, powerWatts = 0.15f, isScreenOn = false))
+            samples.add(PowerDischargePoint(timestamp = baseTs + 120_000L, elapsedHours = 0f, batteryLevel = 80, powerWatts = 0.16f, isScreenOn = false))
+        }
+
+        val result = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
+            offEnergyWh = 0.22f,
+            screenOffMs = 50 * 60 * 1000L,
+            deepSleepMs = 45 * 60 * 1000L,
+            awakeMs = 5 * 60 * 1000L,
+            samples = samples
+        )
+
+        // 核心验证：
+        // 若未剔除 180 秒过渡震荡，前 180 秒的 2.0W 将严重拉高首个窗口中位数；
+        // 成功剔除 180 秒过渡震荡后，深睡功耗精准收敛在稳态基准（<= 0.18W，且 >= 0.12W），绝不受 2.0W 污染！
+        assertTrue("深睡功耗必须处于真实稳态区间(<= 0.18W)，彻底消除 180 秒过渡震荡污染", result.deepSleepWatts <= 0.18f)
+        assertTrue("深睡功耗必须处于合理稳态基线(>= 0.12W)", result.deepSleepWatts >= 0.12f)
+    }
 }

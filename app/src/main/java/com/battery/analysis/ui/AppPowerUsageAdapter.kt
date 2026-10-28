@@ -636,7 +636,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
         // 4. 数据绑定：严格遵循无假数据原则
         val result = capacityEstimateResult
-        val prefix = "预估满电容量："
+        val prefix = "预估满电容量: "
         val learningColor = Color.parseColor("#f59e0b") // 醒目的琥珀橙色，用于明确区分自学习中状态
 
         if (result == null) {
@@ -686,16 +686,16 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         }
         binding.tvCollapsedEnergy.visibility = View.GONE
 
-        // 状态徽章与颜色渲染（设计容量缺失时智能自适应以 FCC 为基准）
+        // 状态徽章与颜色渲染（设计容量缺失时智能自适应以 FCC 为基准；首行极简单行呈现，去除冗余“· 观察”后缀）
         val (badgeText, badgeColor) = when (result.maturityLevel) {
             MaturityLevel.STABLE_TRACKING,
             MaturityLevel.CONVERGED -> {
                 val label = if (result.sohPercent != null) "SOH ${result.getFormattedSoh()}" else "FCC ${result.getFormattedFcc()}"
-                "$label · 收敛" to Color.parseColor("#10b981")
+                label to Color.parseColor("#10b981")
             }
             MaturityLevel.INITIAL_OBSERVATION -> {
                 val label = if (result.sohPercent != null) "SOH ${result.getFormattedSoh()}" else "FCC ${result.getFormattedFcc()}"
-                "$label · 观察" to Color.parseColor("#f59e0b")
+                label to Color.parseColor("#f59e0b")
             }
             MaturityLevel.PENDING -> {
                 "自学习中(${result.validSessionCount}/5)" to Color.parseColor("#64748b")

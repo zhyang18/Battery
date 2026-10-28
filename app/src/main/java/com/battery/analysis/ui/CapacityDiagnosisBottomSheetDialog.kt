@@ -1,5 +1,6 @@
 package com.battery.analysis.ui
 
+import android.app.AlertDialog
 import android.graphics.Color
 import android.os.Bundle
 import android.view.KeyEvent
@@ -8,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import com.battery.analysis.R
 import com.battery.analysis.manager.BatteryCapacityManager
 import com.battery.analysis.model.CapacityEstimateResult
@@ -133,6 +135,19 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
             dismissWithSlideDownAnimation()
         }
 
+        // 绑定自学习会话明细列表点击入口
+        view.findViewById<View>(R.id.layout_diag_session_counts)?.setOnClickListener {
+            val listDialog = CapacitySessionListBottomSheetDialog()
+            listDialog.show(parentFragmentManager, "CapacitySessionListBottomSheetDialog")
+        }
+
+        // 绑定有效数据电量跨度门限设置项点击事件
+        val thresholdClickListener = View.OnClickListener {
+            showThresholdPickerDialog(view)
+        }
+        view.findViewById<View>(R.id.layout_diag_threshold_setting)?.setOnClickListener(thresholdClickListener)
+        view.findViewById<View>(R.id.tv_diag_threshold_selector)?.setOnClickListener(thresholdClickListener)
+
         // 获取并动态观察最新的容量状态结果流，自动刷新诊断视图
         val context = view.context ?: return
         viewLifecycleOwner.lifecycleScope.launch {
@@ -142,6 +157,48 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
                 }
             }
         }
+    }
+
+    private val thresholdOptions = listOf(10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100)
+    private val thresholdLabels = arrayOf(
+        "> 10% (极速建模 · 容纳浅充)",
+        "> 15% (日常均衡)",
+        "> 20% (推荐 · 精度平衡)",
+        "> 25%",
+        "> 30% (高精度 · 减少离散)",
+        "> 40%",
+        "> 50% (半程以上 · 高置信度)",
+        "> 60%",
+        "> 70%",
+        "> 80% (深度充放 · 极高精度)",
+        "> 90%",
+        "100% (完整充放)"
+    )
+
+    /**
+     * 弹出有效数据电量跨度单选对话框。
+     * 确定后即时保存门限并触发重新计算模型，当前弹窗通过 StateFlow 瞬间刷新呈现最新结果。
+     */
+    private fun showThresholdPickerDialog(rootView: View) {
+        val ctx = context ?: return
+        val manager = BatteryCapacityManager.getInstance(ctx)
+        val currentVal = manager.getEffectiveSocSpanThreshold()
+        val defaultIndex = thresholdOptions.indexOf(currentVal).takeIf { it >= 0 } ?: 1
+        var selectedIndex = defaultIndex
+
+        AlertDialog.Builder(ctx)
+            .setTitle("设置自学习有效数据百分比")
+            .setSingleChoiceItems(thresholdLabels, defaultIndex) { _, which ->
+                selectedIndex = which
+            }
+            .setNegativeButton("取消", null)
+            .setPositiveButton("确定") { _, _ ->
+                val newThreshold = thresholdOptions[selectedIndex]
+                manager.setEffectiveSocSpanThreshold(newThreshold)
+                rootView.findViewById<TextView>(R.id.tv_diag_threshold_selector)?.text = "> ${newThreshold}% ▾"
+                Toast.makeText(ctx, "已设为单次跨度 > ${newThreshold}%，已即时重新计算模型", Toast.LENGTH_SHORT).show()
+            }
+            .show()
     }
 
     /**
@@ -165,6 +222,10 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
         val tvDispersion = root.findViewById<TextView>(R.id.tv_diag_dispersion)
         val tvConfidenceInterval = root.findViewById<TextView>(R.id.tv_diag_confidence_interval)
         val tvConflictD = root.findViewById<TextView>(R.id.tv_diag_conflict_d)
+
+        val threshold = BatteryCapacityManager.getInstance(root.context).getEffectiveSocSpanThreshold()
+        val tvThresholdSelector = root.findViewById<TextView>(R.id.tv_diag_threshold_selector)
+        tvThresholdSelector?.text = "> ${threshold}% ▾"
 
         if (result == null) {
             tvRemainingCharge?.text = "-- mAh"

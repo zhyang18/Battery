@@ -203,4 +203,21 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
             emptyList()
         }
     }
+
+    /**
+     * 删除指定的单条容量候选样本。
+     *
+     * @param id 候选样本 ID
+     * @return 删除是否成功
+     */
+    fun deleteCandidate(id: Long): Boolean {
+        return try {
+            val db = writableDatabase
+            val rows = db.delete(TABLE_NAME, "$COL_ID = ?", arrayOf(id.toString()))
+            rows > 0
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
 }

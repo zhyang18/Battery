@@ -40,12 +40,15 @@
 
                 <TextView
                     android:id="@+id/tv_collapsed_charge"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:singleLine="true"
                     android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:textStyle="bold"
-                    tools:text="预估满电容量：学习中" />
+                    tools:text="预估满电容量: 学习中" />
 
                 <TextView
                     android:id="@+id/tv_collapsed_energy"
@@ -60,8 +63,8 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:gravity="center"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="4.5dp"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="3dp"
                 android:textColor="#10b981"
                 android:textSize="10.5sp"
                 android:textStyle="bold"
@@ -72,7 +75,7 @@
                 android:id="@+id/iv_expand_arrow"
                 android:layout_width="16dp"
                 android:layout_height="16dp"
-                android:layout_marginStart="4dp"
+                android:layout_marginStart="2dp"
                 android:src="@drawable/ic_arrow_drop_down"
                 app:tint="?android:attr/textColorSecondary" />
         </LinearLayout>

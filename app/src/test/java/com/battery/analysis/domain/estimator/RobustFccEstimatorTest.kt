@@ -137,4 +137,55 @@ class RobustFccEstimatorTest {
         assertEquals(MaturityLevel.PENDING, result.maturityLevel)
         assertEquals(0, result.validCandidateCount)
     }
+
+    /**
+     * 测试自学习有效数据百分比门限动态筛选效果：
+     * 构造 12%, 18%, 25%, 60% 等不同跨度充放电样本，
+     * 验证门限分别在 15%、20%、50% 时过滤出的样本数与会话分类计数准确。
+     */
+    @Test
+    fun testSocSpanThresholdFiltering() {
+        val candidates = listOf(
+            createCandidate(1L, CandidateSessionType.CHARGE, 20, 32, 600.0, 5000.0), // span = 12%
+            createCandidate(2L, CandidateSessionType.CHARGE, 30, 48, 900.0, 5000.0), // span = 18%
+            createCandidate(3L, CandidateSessionType.DISCHARGE, 80, 55, 1250.0, 5000.0), // span = 25%
+            createCandidate(4L, CandidateSessionType.CHARGE, 20, 80, 3000.0, 5000.0), // span = 60%
+            createCandidate(5L, CandidateSessionType.DISCHARGE, 90, 20, 3500.0, 5000.0) // span = 70%
+        )
+
+        // 门限 > 10%：所有 5 个样本均纳入
+        val list10 = candidates.filter { it.socSpanPercent >= 10 }
+        val res10 = RobustFccEstimator.estimateFusedFcc(list10)
+        assertEquals(5, res10.validCandidateCount)
+        assertEquals(3, res10.chargeCandidateCount)
+        assertEquals(2, res10.dischargeCandidateCount)
+
+        // 门限 > 15%：排除 12% 样本，剩余 4 个
+        val list15 = candidates.filter { it.socSpanPercent >= 15 }
+        val res15 = RobustFccEstimator.estimateFusedFcc(list15)
+        assertEquals(4, res15.validCandidateCount)
+        assertEquals(2, res15.chargeCandidateCount)
+        assertEquals(2, res15.dischargeCandidateCount)
+
+        // 门限 > 20%：排除 12% 与 18% 样本，剩余 3 个
+        val list20 = candidates.filter { it.socSpanPercent >= 20 }
+        val res20 = RobustFccEstimator.estimateFusedFcc(list20)
+        assertEquals(3, res20.validCandidateCount)
+        assertEquals(1, res20.chargeCandidateCount)
+        assertEquals(2, res20.dischargeCandidateCount)
+
+        // 门限 > 50%：仅保留 60% 与 70% 深度充放样本，剩余 2 个
+        val list50 = candidates.filter { it.socSpanPercent >= 50 }
+        val res50 = RobustFccEstimator.estimateFusedFcc(list50)
+        assertEquals(2, res50.validCandidateCount)
+        assertEquals(1, res50.chargeCandidateCount)
+        assertEquals(1, res50.dischargeCandidateCount)
+
+        // 门限 100%：无样本达标，模型安全回退至 PENDING
+        val list100 = candidates.filter { it.socSpanPercent >= 100 }
+        val res100 = RobustFccEstimator.estimateFusedFcc(list100)
+        assertEquals(0, res100.validCandidateCount)
+        assertEquals(MaturityLevel.PENDING, res100.maturityLevel)
+        assertNull(res100.estimatedFccMah)
+    }
 }

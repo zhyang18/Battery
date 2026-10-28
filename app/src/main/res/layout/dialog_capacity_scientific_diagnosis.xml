@@ -314,9 +314,14 @@
             </LinearLayout>
 
             <LinearLayout
+                android:id="@+id/layout_diag_session_counts"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <TextView
@@ -334,7 +339,74 @@
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="11sp"
                     tools:text="充电 5 次 ｜ 放电 3 次" />
+
+                <ImageView
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:layout_marginStart="4dp"
+                    android:src="@drawable/ic_chevron_right"
+                    app:tint="?android:attr/textColorSecondary" />
             </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginVertical="7dp"
+                android:background="#14888888" />
+
+            <!-- 有效数据百分比门限设置项 -->
+            <LinearLayout
+                android:id="@+id/layout_diag_threshold_setting"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="有效数据门限"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="11.5sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:text="单次充放电跨度需达标方参与模型计算"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="10sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tv_diag_threshold_selector"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_diag_pill_badge"
+                    android:gravity="center"
+                    android:paddingHorizontal="10dp"
+                    android:paddingVertical="4dp"
+                    android:textColor="#10b981"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    tools:text="> 15% ▾" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginVertical="7dp"
+                android:background="#14888888" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -539,7 +611,7 @@
             android:layout_height="46dp"
             android:layout_marginTop="18dp"
             android:backgroundTint="#10b981"
-            android:text="我知道了"
+            android:text="确定"
             android:textColor="#ffffff"
             android:textSize="14sp"
             app:cornerRadius="12dp" />

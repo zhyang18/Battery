@@ -2950,6 +2950,13 @@ class PowerUsageManager private constructor(private val context: Context) {
     fun onPowerConnected(timestamp: Long = System.currentTimeMillis()): PowerUsageRecord? {
         // 1. 归档上一个放电周期的耗电账本快照（若满足非充电真实放电条件则完结归档）
         val record = archiveDischargeSession(timestamp)
+        if (record != null) {
+            try {
+                BatteryCapacityManager.getInstance(context).onDischargeSessionArchived(record)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
 
         // 2. 彻底物理清理数据库中所有可能残留的放电中草稿（接入外部电源时必然已结束放电，严禁保存为耗电历史）
         try {

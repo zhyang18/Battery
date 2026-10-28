@@ -7,6 +7,7 @@ import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.lifecycle.lifecycleScope
@@ -55,14 +56,26 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
         val dialog = dialog as? BottomSheetDialog ?: return
         val bottomSheet = dialog.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet) ?: return
 
+        // 1. 彻底清除二级弹窗自身的半透明遮罩（Dim），避免取消或关闭列表时主界面遮罩闪烁或变黑
+        dialog.window?.let { window ->
+            window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            window.setDimAmount(0f)
+        }
+
+        // 2. 清除系统底层容器的默认不透明直角背景
         bottomSheet.background = null
         bottomSheet.setBackgroundColor(Color.TRANSPARENT)
 
+        // 3. 始终统一固定弹窗高度为屏幕高度的 80%，避免切换充放电 Tab 时高度自适应变短抖动
         val screenHeight = resources.displayMetrics.heightPixels
-        val maxHeight = (screenHeight * 0.80).toInt()
+        val targetHeight = (screenHeight * 0.80).toInt()
+        val layoutParams = bottomSheet.layoutParams
+        layoutParams.height = targetHeight
+        bottomSheet.layoutParams = layoutParams
+
         val behavior = BottomSheetBehavior.from(bottomSheet)
-        behavior.maxHeight = maxHeight
-        behavior.peekHeight = maxHeight
+        behavior.maxHeight = targetHeight
+        behavior.peekHeight = targetHeight
         behavior.state = BottomSheetBehavior.STATE_EXPANDED
         behavior.skipCollapsed = true
         behavior.isHideable = true
@@ -230,7 +243,25 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
 
         private var items: List<CapacityCandidate> = emptyList()
         private var threshold: Int = 15
-        private val timeFormatter = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+        private val dateFormat = SimpleDateFormat("MM-dd", Locale.getDefault())
+        private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+
+        private fun formatTimeRange(startTimestamp: Long, endTimestamp: Long): String {
+            if (startTimestamp <= 0L && endTimestamp <= 0L) return "--"
+            if (startTimestamp <= 0L) return timeFormat.format(Date(endTimestamp))
+            if (endTimestamp <= 0L) return timeFormat.format(Date(startTimestamp))
+
+            val startDate = dateFormat.format(Date(startTimestamp))
+            val endDate = dateFormat.format(Date(endTimestamp))
+            val startTime = timeFormat.format(Date(startTimestamp))
+            val endTime = timeFormat.format(Date(endTimestamp))
+
+            return if (startDate == endDate) {
+                "$startDate $startTime ~ $endTime"
+            } else {
+                "$startDate $startTime ~ $endDate $endTime"
+            }
+        }
 
         fun submitList(list: List<CapacityCandidate>, currentThreshold: Int) {
             items = list
@@ -257,10 +288,8 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
                 holder.tvTypeBadge.setTextColor(Color.parseColor("#38bdf8"))
             }
 
-            // 2. 时间
-            val startStr = if (item.startTimestamp > 0L) timeFormatter.format(Date(item.startTimestamp)) else "--"
-            val endStr = if (item.endTimestamp > 0L) timeFormatter.format(Date(item.endTimestamp)) else "--"
-            holder.tvTime.text = "$startStr ~ $endStr"
+            // 2. 时间（同天省略重复日期，精简且不折行）
+            holder.tvTime.text = formatTimeRange(item.startTimestamp, item.endTimestamp)
 
             // 3. 状态标签与排除说明
             val meetsThreshold = item.socSpanPercent >= threshold

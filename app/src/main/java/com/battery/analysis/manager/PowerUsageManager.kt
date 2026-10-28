@@ -988,7 +988,7 @@ class PowerUsageManager private constructor(private val context: Context) {
          * 严格遵循四大实施原则：
          * 1. 唤醒统计完全冻结：保留现有已验证的采样、积分与能耗计算，在具备唤醒实测样本时严格锚定实测活跃功耗，
          *    任何深睡样本的变化均不会反向污染唤醒统计；
-         * 2. 深睡基线 P30 候选：固定长度窗口第 30 百分位数作为典型基线候选，不凭稀疏离散数据伪造窗口；
+         * 2. 深睡基线 P20 候选：固定长度窗口第 20 百分位数作为典型基线候选，不凭稀疏离散数据伪造窗口；
          * 3. 深睡积分连续累加：梯形积分仅累计可信、连续观测区间（<= 30秒），拒绝跨大断层插值，覆盖不足时如实置空实测均值；
          * 4. 外推结果明确标记：观测均值与整段深睡能量估计采用不同字段，使用基线外推时显式标注 isDeepSleepInferred = true，绝不冒充实测。
          *
@@ -1080,10 +1080,11 @@ class PowerUsageManager private constructor(private val context: Context) {
 
             if (baselineSleepWatts != null && baselineSleepWatts > 0f) {
                 // 策略 1（硬件实测采样点驱动）：基于实测待机底噪与实测唤醒功耗进行科学分解
-                // 优先顺序：连续时间加权均值 -> 固定时间窗口稳健 P30 基线 (置信度不为 LOW 时) -> 稳态待机底噪
+                // 优先顺序：连续时间加权均值 -> 固定时间窗口稳健 P20 基线 (置信度不为 LOW 时) -> 稳态待机底噪
                 val measuredWindowBaseline = if (baselineEstimate != null &&
                     baselineEstimate.confidence != com.battery.analysis.domain.estimator.model.StandbyConfidenceLevel.LOW &&
-                    (baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P30 ||
+                    (baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P20 ||
+                     baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P30 ||
                      baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P50)
                 ) {
                     baselineEstimate.baselinePowerWatts.toFloat()
@@ -1113,7 +1114,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 if (observedSleepMeanWatts != null) {
                     isDeepSleepInferred = false
                 } else {
-                    isDeepSleepInferred = true // 采用固定窗口 P30 基线推算
+                    isDeepSleepInferred = true // 采用固定窗口 P20 基线推算
                 }
                 isDecomposedAvailable = true
             } else {

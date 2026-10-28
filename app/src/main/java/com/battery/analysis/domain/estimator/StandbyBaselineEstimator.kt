@@ -13,15 +13,14 @@ import java.util.Locale
  * 核心设计目标与物理原则：
  * 1. 三阶指标体系显式分离：
  *    - P_floor (P10)：有效深睡固定窗口功耗分布的低分位参考值，用于低功耗水平诊断，不代表硬件理论下限；
- *    - P_base (P30)：固定长度窗口代表功率的第 30 百分位数，代表系统在深睡挂起期的典型静态基线候选；
+ *    - P_base (P20)：固定长度窗口代表功率的第 20 百分位数，代表系统在深睡挂起期的典型静态基线候选；
  *    - P_sleep_mean：状态明确且连续采样覆盖率达标区间内的梯形时间积分观测均值，覆盖不足时如实返回 null。
  * 2. 状态筛选与质量筛选分离：
  *    - 质量筛选仅剔除物理无效、溢出或传感器故障读数；
  *    - 状态筛选依据系统息屏状态过滤，全额保留真实基带寻呼脉冲与周期性活动，绝不使用经验门限粗暴切除真实高耗电。
  * 3. 严格限制大断层插值：
  *    - 连续两点采样间隔超过最大允许插值门限（默认 30 秒）时，归入 UNKNOWN_GAP（疑似挂起或数据缺失），严禁跨断层首尾直接连线插值虚构能耗。
- * 4. 彻底消除单点极小值覆盖漏洞：
- *    - 彻底废除 rawMinWatts 篡权覆盖基线的逻辑，典型基线由窗口级 P30 决定。
+ *    - 彻底废除 rawMinWatts 篡权覆盖基线的逻辑，典型基线由窗口级 P20 决定。
  * 5. 坚守零假数据原则：
  *    - 覆盖不足时如实返回 null 并采用基线推算，绝不伪造全量时间积分实测均值。
  */
@@ -127,11 +126,12 @@ object StandbyBaselineEstimator {
             )
         }
 
-        // 4. 计算固定窗口级代表功率稳健统计量（P5, P10, P30, P50, MAD）
+        // 4. 计算固定窗口级代表功率稳健统计量（P5, P10, P20, P30, P50, MAD）
         val windowPowers = windows.map { it.representativePowerWatts }.sorted()
         val p5Watts = calculatePercentile(windowPowers, config.diagnosticLowerQuantile)
         val p10Watts = calculatePercentile(windowPowers, config.floorQuantile)
-        val p30Watts = calculatePercentile(windowPowers, config.baselineQuantile)
+        val p20Watts = calculatePercentile(windowPowers, config.baselineQuantile)
+        val p30Watts = calculatePercentile(windowPowers, 0.30)
         val p50Watts = calculatePercentile(windowPowers, 0.50)
         val madWatts = calculateMad(windowPowers, p50Watts)
 
@@ -155,6 +155,7 @@ object StandbyBaselineEstimator {
                 isMeanObserved = false,
                 p5Watts = p5Watts,
                 p10Watts = p10Watts,
+                p20Watts = p20Watts,
                 p30Watts = p30Watts,
                 p50Watts = p50Watts,
                 madWatts = madWatts,
@@ -164,8 +165,8 @@ object StandbyBaselineEstimator {
         }
 
         // 6. 三阶指标确定（彻底废除 rawMinWatts 篡权覆盖基线的逻辑）
-        // 典型静态待机基线候选值采用固定窗口 P30（第 30 百分位数）
-        val candidateBaselineWatts = p30Watts
+        // 典型静态待机基线候选值采用固定窗口 P20（第 20 百分位数）
+        val candidateBaselineWatts = p20Watts
 
         // 7. 时间积分观测均值与覆盖率门禁（70% 覆盖率与 15 分钟覆盖时长）
         val isCoverageSufficient = coverageRatio >= config.minCoverageRatioForMean && coveredDurationMs >= 15 * 60 * 1000L
@@ -190,11 +191,11 @@ object StandbyBaselineEstimator {
 
         val baselineSource = when {
             isObservedMean -> StandbyBaselineSource.MEASURED_TRAPEZOIDAL_INTEGRAL
-            else -> StandbyBaselineSource.MEASURED_WINDOW_P30
+            else -> StandbyBaselineSource.MEASURED_WINDOW_P20
         }
 
         val reason = if (!isObservedMean) {
-            "连续采样覆盖率不足(${String.format(Locale.US, "%.1f", coverageRatio * 100)}% < ${String.format(Locale.US, "%.0f", config.minCoverageRatioForMean * 100)}%)，如实置空观测均值并采用固定窗口P30分位数作为典型待机基线"
+            "连续采样覆盖率不足(${String.format(Locale.US, "%.1f", coverageRatio * 100)}% < ${String.format(Locale.US, "%.0f", config.minCoverageRatioForMean * 100)}%)，如实置空观测均值并采用固定窗口P20分位数作为典型待机基线"
         } else {
             null
         }
@@ -211,6 +212,7 @@ object StandbyBaselineEstimator {
             isMeanObserved = isObservedMean,
             p5Watts = p5Watts,
             p10Watts = p10Watts,
+            p20Watts = p20Watts,
             p30Watts = p30Watts,
             p50Watts = p50Watts,
             madWatts = madWatts,

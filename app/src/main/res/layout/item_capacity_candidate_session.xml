@@ -31,6 +31,7 @@
                 android:background="@drawable/bg_diag_pill_badge"
                 android:paddingHorizontal="6dp"
                 android:paddingVertical="2dp"
+                android:singleLine="true"
                 android:textColor="#10b981"
                 android:textSize="10.5sp"
                 android:textStyle="bold"
@@ -41,7 +42,10 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
+                android:layout_marginEnd="6dp"
                 android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="11sp"
                 tools:text="10-28 14:20 ~ 15:05" />
@@ -53,6 +57,7 @@
                 android:background="@drawable/bg_diag_pill_badge"
                 android:paddingHorizontal="6dp"
                 android:paddingVertical="2dp"
+                android:singleLine="true"
                 android:textColor="#10b981"
                 android:textSize="10sp"
                 android:textStyle="bold"
@@ -82,12 +87,13 @@
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
+                android:layout_weight="1.35"
                 android:orientation="vertical">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:singleLine="true"
                     android:text="电量变化"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="10.5sp" />
@@ -97,8 +103,10 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
+                    android:ellipsize="end"
+                    android:singleLine="true"
                     android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="14sp"
+                    android:textSize="13.5sp"
                     android:textStyle="bold"
                     tools:text="25% → 85% (跨度 60%)" />
             </LinearLayout>
@@ -106,12 +114,13 @@
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
+                android:layout_weight="0.95"
                 android:orientation="vertical">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:singleLine="true"
                     android:text="推算满电容量 (FCC)"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="10.5sp" />
@@ -121,6 +130,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
+                    android:singleLine="true"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="14sp"
                     android:textStyle="bold"
@@ -146,6 +156,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:singleLine="true"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="10.5sp"
                 tools:text="净电量: 4,030 mAh" />
@@ -154,6 +165,7 @@
                 android:id="@+id/tv_item_session_duration"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
+                android:singleLine="true"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="10.5sp"
                 tools:text="时长: 45m" />
@@ -163,6 +175,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="10dp"
+                android:singleLine="true"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="10.5sp"
                 tools:text="均温: 32.5℃" />

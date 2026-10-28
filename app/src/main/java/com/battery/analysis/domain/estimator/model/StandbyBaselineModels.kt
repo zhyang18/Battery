@@ -20,11 +20,15 @@ enum class StandbyStateClassification {
  * 遵循系统零假数据原则，严格标注待机基线是来源于真实实测窗口统计，还是在数据缺失时回退的客观先验。
  */
 enum class StandbyBaselineSource {
-    /** 来源于有效深睡固定长度窗口第 30 百分位数 (P30) 典型基线 */
+    /** 来源于有效深睡固定长度窗口第 20 百分位数 (P20) 典型基线 */
+    MEASURED_WINDOW_P20,
+
+    /** 来源于有效深睡固定长度窗口第 30 百分位数 (P30) 典型基线（保留兼容） */
+    @Deprecated("已升级为 P20 算法，推荐使用 MEASURED_WINDOW_P20")
     MEASURED_WINDOW_P30,
 
     /** 来源于有效深睡固定长度窗口中位数 (P50) 典型基线（保留兼容） */
-    @Deprecated("已升级为 P30 算法，推荐使用 MEASURED_WINDOW_P30")
+    @Deprecated("已升级为 P20 算法，推荐使用 MEASURED_WINDOW_P20")
     MEASURED_WINDOW_P50,
 
     /** 来源于高/中置信实测时间窗口第 10 百分位数 (P10，诊断参考) */
@@ -69,7 +73,7 @@ enum class StandbyConfidenceLevel {
  * 息屏待机基线与深睡功耗多阶综合估计结果数据类。
  * 遵循严格的数据独立性与物理语义分离原则，严禁残差互甩或将估计值伪造为实测。
  *
- * @property baselinePowerWatts 从经过有效状态筛选的固定长度窗口代表功率计算的 P30 分位数（单位：瓦特 W，典型深睡静态基线候选）
+ * @property baselinePowerWatts 从经过有效状态筛选的固定长度窗口代表功率计算的 P20 分位数（单位：瓦特 W，典型深睡静态基线候选）
  * @property source 待机基线功率来源 [StandbyBaselineSource]
  * @property confidence 估计结果置信度等级 [StandbyConfidenceLevel]
  * @property validWindowCount 参与有效统计的时间窗口总数
@@ -80,7 +84,8 @@ enum class StandbyConfidenceLevel {
  * @property isMeanObserved 均值是否为真实时间积分观测值（true: 梯形微积分直接观测; false: 覆盖不足/无实测均值）
  * @property p5Watts 窗口级代表功率第 5 百分位数（单位：W，用于诊断低端离散度与下界，可为 null）
  * @property p10Watts 窗口级代表功率第 10 百分位数（单位：W，诊断用低分位参考，可为 null）
- * @property p30Watts 窗口级代表功率第 30 百分位数（单位：W，典型窗口功耗基准，可为 null）
+ * @property p20Watts 窗口级代表功率第 20 百分位数（单位：W，典型窗口功耗基准，可为 null）
+ * @property p30Watts 窗口级代表功率第 30 百分位数（单位：W，诊断用低位功耗基准，可为 null）
  * @property p50Watts 窗口级代表功率中位数（单位：W，诊断用窗口中位功耗，可为 null）
  * @property madWatts 窗口级代表功率绝对中位差 MAD（单位：W，衡量窗口间稳健离散度，可为 null）
  * @property rawMinWatts 原始采样点中的物理极小值（单位：W，仅用于硬件底噪与异常诊断，严禁直接支配基线）
@@ -98,6 +103,7 @@ data class StandbyBaselineEstimate(
     val isMeanObserved: Boolean = false,
     val p5Watts: Double? = null,
     val p10Watts: Double? = null,
+    val p20Watts: Double? = null,
     val p30Watts: Double? = null,
     val p50Watts: Double? = null,
     val madWatts: Double? = null,
@@ -110,7 +116,7 @@ data class StandbyBaselineEstimate(
  *
  * @property defaultPriorWatts 缺少可靠实测样本时的初始默认待机先验功率（单位：W，默认 0.15W）
  * @property suspiciousPollutionThresholdWatts 疑似活跃任务污染判定门限（单位：W，默认 0.20W，高于此门限触发污染风险诊断）
- * @property baselineQuantile 用于作为待机基线的主分位点（默认 0.30 即 P30 分位数）
+ * @property baselineQuantile 用于作为待机基线的主分位点（默认 0.20 即 P20 分位数）
  * @property floorQuantile 用于诊断低功耗下界的分位点（默认 0.10 即 P10）
  * @property diagnosticLowerQuantile 用于诊断极低端离散度的下界分位点（默认 0.05 即 P5）
  * @property baseWindowDurationMs 基础固定长度时间聚合窗口长度（单位：毫秒，默认 60,000ms 即 1 分钟）
@@ -124,7 +130,7 @@ data class StandbyBaselineEstimate(
 data class StandbyBaselineConfig(
     val defaultPriorWatts: Double = 0.15,
     val suspiciousPollutionThresholdWatts: Double = 0.20,
-    val baselineQuantile: Double = 0.30,
+    val baselineQuantile: Double = 0.20,
     val floorQuantile: Double = 0.10,
     val diagnosticLowerQuantile: Double = 0.05,
     val baseWindowDurationMs: Long = 60_000L,

@@ -83,7 +83,7 @@ data class CapacityEstimateResult(
      */
     fun getFormattedRemainingCharge(): String {
         return remainingChargeMah?.let {
-            String.format(java.util.Locale.getDefault(), "%,.0f mAh", it)
+            String.format(java.util.Locale.getDefault(), "%.0f mAh", it)
         } ?: "-- mAh"
     }
 
@@ -105,7 +105,7 @@ data class CapacityEstimateResult(
      */
     fun getFormattedFcc(): String {
         return fullChargeCapacityMah?.let {
-            String.format(java.util.Locale.getDefault(), "%,.0f mAh", it)
+            String.format(java.util.Locale.getDefault(), "%.0f mAh", it)
         } ?: "-- mAh"
     }
 

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/layout_threshold_item_root"
+    android:layout_width="match_parent"
+    android:layout_height="46dp"
+    android:layout_marginHorizontal="2dp"
+    android:layout_marginVertical="3dp"
+    android:background="@drawable/bg_threshold_opt_normal"
+    android:clickable="true"
+    android:focusable="true"
+    android:foreground="?attr/selectableItemBackground"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingHorizontal="14dp">
+
+    <!-- 门限百分比标签 -->
+    <TextView
+        android:id="@+id/tv_threshold_value"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="?android:attr/textColorPrimary"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        tools:text="> 20%" />
+
+    <!-- 门限推荐或描述提示 -->
+    <TextView
+        android:id="@+id/tv_threshold_desc"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="11sp"
+        tools:text="推荐 · 精度与收敛平衡" />
+
+    <!-- 选中对勾状态图标 -->
+    <ImageView
+        android:id="@+id/iv_threshold_check"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:src="@drawable/ic_check"
+        android:visibility="gone"
+        app:tint="#10b981"
+        tools:visibility="visible" />
+</LinearLayout>

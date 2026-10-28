@@ -70,7 +70,7 @@ class StandbyBaselineEstimatorTest {
             config = config
         )
 
-        assertEquals("必须采信实测窗口 P50 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P50, result.source)
+        assertEquals("必须采信实测窗口 P30 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P30, result.source)
         assertEquals("原始极小值必须忠实记录为 0.005W 供诊断", 0.005, result.rawMinWatts ?: 0.0, 0.001)
         // 关键断言：最终基线必须落在 0.12W 附近，绝对不能被 0.005W 绑架！
         assertTrue(
@@ -78,7 +78,7 @@ class StandbyBaselineEstimatorTest {
             result.baselinePowerWatts >= 0.10
         )
         assertTrue(
-            "基线功率(${result.baselinePowerWatts})必须接近窗口 P50(0.12W~0.14W)",
+            "基线功率(${result.baselinePowerWatts})必须接近窗口 P30(0.12W~0.14W)",
             result.baselinePowerWatts in 0.11..0.15
         )
         assertEquals(0.12, result.floorWatts ?: 0.0, 0.02)
@@ -112,7 +112,7 @@ class StandbyBaselineEstimatorTest {
             config = config
         )
 
-        assertEquals("必须采信实测窗口 P50 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P50, result.source)
+        assertEquals("必须采信实测窗口 P30 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P30, result.source)
         // 关键断言：经过时间窗口聚合，高频唤醒仅占 2 个窗口，稳态深睡占 6 个窗口，
         // 故窗口级 P50 成功锚定在 0.10W，未被 120 个高频唤醒点吞噬！
         assertEquals(0.10, result.baselinePowerWatts, 0.02)
@@ -198,10 +198,10 @@ class StandbyBaselineEstimatorTest {
             config = StandbyBaselineConfig(baseWindowDurationMs = 60_000L)
         )
 
-        assertEquals("中等置信度依然忠实采信实测 P50 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P50, result.source)
+        assertEquals("中等置信度依然忠实采信实测 P30 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P30, result.source)
         assertEquals(StandbyConfidenceLevel.MEDIUM, result.confidence)
         // 关键断言：结果必须是真实的实测值，不包含 (1-alpha)*0.15 的任何人工保底合成掺水
-        assertEquals(0.14, result.baselinePowerWatts, 0.01)
+        assertEquals(0.132, result.baselinePowerWatts, 0.01)
         assertEquals(0.12, result.floorWatts ?: 0.0, 0.01)
     }
 
@@ -374,8 +374,8 @@ class StandbyBaselineEstimatorTest {
         assertTrue("覆盖率极低", result.sleepCoverageRatio < 0.10)
         assertNull("覆盖不足时观测均值必须如实置空为 null，绝不冒充实测", result.sleepMeanWatts)
         assertFalse("观测均值未生效", result.isMeanObserved)
-        // 典型基线由固定窗口 P50 给出 (0.10W 与 0.12W 的中位数 = 0.11W)
-        assertEquals(0.11, result.baselinePowerWatts, 0.01)
+        // 典型基线由固定窗口 P30 给出 (0.10W 与 0.12W 的 P30 = 0.106W)
+        assertEquals(0.106, result.baselinePowerWatts, 0.01)
 
         // 进一步验证分解结果标记 isDeepSleepInferred = true
         val decomposed = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
@@ -388,5 +388,45 @@ class StandbyBaselineEstimatorTest {
 
         assertTrue("整段深睡能量由基线外推时，必须显式标注 isDeepSleepInferred = true", decomposed.isDeepSleepInferred)
         assertNull("观测实测均值字段必须为 null", decomposed.observedSleepMeanWatts)
+    }
+
+    /**
+     * 验证 P30 算法相比 P50 有效抑制了息屏偶发唤醒窗口带来的基线虚高问题。
+     * 当一半窗口处于深睡（0.08W），但伴随部分后台同步唤醒窗口（0.20W）时，
+     * P50 会被唤醒尾部拉升至 0.14W，而 P30 精确锁定在深睡真值 0.08W。
+     */
+    @Test
+    fun testP30SuppressesAwakeTailPollutionComparedToP50() {
+        val samples = mutableListOf<PowerDischargePoint>()
+        val startTs = 6000000L
+        val windowDurationMs = 60_000L
+
+        // 构造 10 个窗口：前 5 个处于深睡稳态 (0.08W)，后 5 个处于唤醒活跃 (0.20W)
+        // 排序后的窗口代表功耗序列：[0.08, 0.08, 0.08, 0.08, 0.08, 0.20, 0.20, 0.20, 0.20, 0.20]
+        for (w in 0 until 10) {
+            val power = if (w < 5) 0.08f else 0.20f
+            val baseTs = startTs + w * windowDurationMs
+            samples.add(createPoint(baseTs + 10_000L, power))
+            samples.add(createPoint(baseTs + 40_000L, power))
+        }
+
+        val resultP30 = StandbyBaselineEstimator.estimate(
+            samples = samples,
+            config = StandbyBaselineConfig(baselineQuantile = 0.30)
+        )
+        val resultP50 = StandbyBaselineEstimator.estimate(
+            samples = samples,
+            config = StandbyBaselineConfig(baselineQuantile = 0.50)
+        )
+
+        assertEquals(StandbyBaselineSource.MEASURED_WINDOW_P30, resultP30.source)
+        // P50 = 0.14W (0.08 与 0.20 的中位数插值)，严重偏高
+        assertEquals(0.14, resultP50.baselinePowerWatts, 0.01)
+        // P30 = 0.08W，精准滤除唤醒污染窗口，紧密贴合深睡真实水平
+        assertEquals(0.08, resultP30.baselinePowerWatts, 0.01)
+        assertTrue(
+            "P30 算法基线必须显著低于 P50 算法，彻底消除偏高现象",
+            resultP30.baselinePowerWatts < resultP50.baselinePowerWatts
+        )
     }
 }

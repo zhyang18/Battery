@@ -6963,7 +6963,7 @@ class PowerUsageCalculationTest {
     }
 
     /**
-     * 验证深睡典型基准功耗采纳稳健 P50 中位数，绝不再被单点偶然极小底噪（0.07W）穿透支配整夜长断层。
+     * 验证深睡典型基准功耗采纳稳健 P30 基线，绝不再被单点偶然极小底噪（0.07W）穿透支配整夜长断层。
      */
     @Test
     fun testScreenOffSleepWattsNotDominatedByFloorMinPower() {
@@ -6977,18 +6977,18 @@ class PowerUsageCalculationTest {
         val stats = PowerUsageManager.computeDischargePowerStats(samples)
         assertNotNull("放电统计结果不得为 null", stats)
         assertTrue(
-            "息屏平均功耗必须高于 0.12W，忠实反映 P50 典型深睡基线",
+            "息屏平均功耗必须高于 0.12W，忠实反映 P30 典型深睡基线",
             stats!!.screenOffPowerWatts >= 0.12f
         )
     }
 
 
     /**
-     * 验证当采样序列具备多个固定时间窗口支持时，深睡推算优先采信实测稳健 P50 基线，
+     * 验证当采样序列具备多个固定时间窗口支持时，深睡推算优先采信实测稳健 P30 基线，
      * 绝不再被样本中的单点极限底噪（0.05W）拉低深睡推算能耗。
      */
     @Test
-    fun testScreenOffDecompositionPrioritizesMeasuredWindowP50OverFloorNoise() {
+    fun testScreenOffDecompositionPrioritizesMeasuredWindowP30OverFloorNoise() {
         val windowDurationMs = 15 * 60 * 1000L // 15 分钟窗口
         val samples = mutableListOf<PowerDischargePoint>()
         // 构造 3 个有效时间窗口，每个窗口内包含稳态 0.15W 样本，并在其中混入单点 0.05W 极限噪底
@@ -7008,18 +7008,18 @@ class PowerUsageCalculationTest {
             samples = samples
         )
 
-        assertTrue("深睡功耗必须采信稳健 P50 基线(>= 0.12W)，绝不被 0.05W 极限噪底拉低", result.deepSleepWatts >= 0.12f)
+        assertTrue("深睡功耗必须采信稳健 P30 基线(>= 0.12W)，绝不被 0.05W 极限噪底拉低", result.deepSleepWatts >= 0.12f)
         assertTrue("深睡推算应被标记为推算基线驱动", result.isDeepSleepInferred)
     }
 
 
     /**
-     * 验证深睡基线 P50 提取严格建立在剔除关屏初期前 180 秒（3 分钟）过渡震荡态的高纯度稳态样本基础之上。
+     * 验证深睡基线 P30 提取严格建立在剔除关屏初期前 180 秒（3 分钟）过渡震荡态的高纯度稳态样本基础之上。
      * 模拟关屏前 180 秒内伴随 2.0W 刷盘与断网震荡点、随后进入 0.15W 稳定休眠的场景；
-     * 断言送入估计器提取出的 P50 基线严格对齐稳态 0.15W，绝不受 180 秒内 2.0W 震荡态的任何污染。
+     * 断言送入估计器提取出的 P30 基线严格对齐稳态 0.15W，绝不受 180 秒内 2.0W 震荡态的任何污染。
      */
     @Test
-    fun testScreenOffP50BaselineExcludesScreenOffTransitionVibration() {
+    fun testScreenOffP30BaselineExcludesScreenOffTransitionVibration() {
         val startTs = 1000L
         val samples = mutableListOf<PowerDischargePoint>()
         // 1. 亮屏转灭屏时序边界

@@ -70,7 +70,7 @@ class StandbyBaselineEstimatorTest {
             config = config
         )
 
-        assertEquals("必须采信实测窗口 P20 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P20, result.source)
+        assertEquals("必须采信实测窗口 P15 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P15, result.source)
         assertEquals("原始极小值必须忠实记录为 0.005W 供诊断", 0.005, result.rawMinWatts ?: 0.0, 0.001)
         // 关键断言：最终基线必须落在 0.12W 附近，绝对不能被 0.005W 绑架！
         assertTrue(
@@ -78,7 +78,7 @@ class StandbyBaselineEstimatorTest {
             result.baselinePowerWatts >= 0.10
         )
         assertTrue(
-            "基线功率(${result.baselinePowerWatts})必须接近窗口 P20(0.12W~0.14W)",
+            "基线功率(${result.baselinePowerWatts})必须接近窗口 P15(0.12W~0.14W)",
             result.baselinePowerWatts in 0.11..0.15
         )
         assertEquals(0.12, result.floorWatts ?: 0.0, 0.02)
@@ -112,7 +112,7 @@ class StandbyBaselineEstimatorTest {
             config = config
         )
 
-        assertEquals("必须采信实测窗口 P20 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P20, result.source)
+        assertEquals("必须采信实测窗口 P15 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P15, result.source)
         // 关键断言：经过时间窗口聚合，高频唤醒仅占 2 个窗口，稳态深睡占 6 个窗口，
         // 故窗口级 P50 成功锚定在 0.10W，未被 120 个高频唤醒点吞噬！
         assertEquals(0.10, result.baselinePowerWatts, 0.02)
@@ -198,7 +198,7 @@ class StandbyBaselineEstimatorTest {
             config = StandbyBaselineConfig(baseWindowDurationMs = 60_000L)
         )
 
-        assertEquals("中等置信度依然忠实采信实测 P20 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P20, result.source)
+        assertEquals("中等置信度依然忠实采信实测 P15 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P15, result.source)
         assertEquals(StandbyConfidenceLevel.MEDIUM, result.confidence)
         // 关键断言：结果必须是真实的实测值，不包含 (1-alpha)*0.15 的任何人工保底合成掺水
         assertEquals(0.128, result.baselinePowerWatts, 0.01)
@@ -429,14 +429,21 @@ class StandbyBaselineEstimatorTest {
             samples = samples,
             config = StandbyBaselineConfig(baselineQuantile = 0.20)
         )
+        val resultP15 = StandbyBaselineEstimator.estimate(
+            samples = samples
+            // 默认配置即为 baselineQuantile = 0.15
+        )
 
         assertEquals(StandbyBaselineSource.MEASURED_WINDOW_P20, resultP20.source)
+        assertEquals(StandbyBaselineSource.MEASURED_WINDOW_P15, resultP15.source)
         // P50 = 0.40W，被中等唤醒严重拉高
         assertEquals(0.40, resultP50.baselinePowerWatts, 0.01)
         // P30 = 0.295W (0.05*0.3 + 0.40*0.7)，依然偏高
         assertEquals(0.295, resultP30.baselinePowerWatts, 0.01)
         // P20 = 0.05W，精准下潜锁定在深睡真值！
         assertEquals(0.05, resultP20.baselinePowerWatts, 0.01)
+        // P15 = 0.05W，深度锁定在深睡真值！
+        assertEquals(0.05, resultP15.baselinePowerWatts, 0.01)
 
         assertTrue(
             "P20 基线必须显著低于 P30 基线，压制唤醒残留",
@@ -445,6 +452,52 @@ class StandbyBaselineEstimatorTest {
         assertTrue(
             "P30 基线必须显著低于 P50 基线",
             resultP30.baselinePowerWatts < resultP50.baselinePowerWatts
+        )
+    }
+
+    /**
+     * 验证当唤醒窗口占比达到 15%~20% 时，P15 算法相比 P20 具备更强的抗唤醒拖尾穿透力，
+     * 能精准剔除轻度活跃窗口，深度锚定芯片纯净静止底噪。
+     */
+    @Test
+    fun testP15SuppressesWakelockTailBeyondP20UnderMarginalAwakeWindows() {
+        val samples = mutableListOf<PowerDischargePoint>()
+        val startTs = 8000000L
+        val windowDurationMs = 60_000L
+
+        // 构造 20 个窗口：
+        // 前 4 个窗口为纯净深睡底噪 (0.05W) -> 占比 20%
+        // 接下来的 2 个窗口为轻度唤醒过渡 (0.22W) -> 占比 10%
+        // 剩余 14 个窗口为中高唤醒活跃 (0.45W)
+        // 每个窗口内采集 2 个点（间隔 5 秒，满足窗口内最少采样点），窗口之间间隔 55 秒（> 30 秒插值断层门限，
+        // 模拟真实睡眠挂起导致的非连续断续采样，测试固定窗口 P15 基线提取算法）
+        for (w in 0 until 20) {
+            val power = when {
+                w < 4 -> 0.05f
+                w < 6 -> 0.22f
+                else -> 0.45f
+            }
+            val baseTs = startTs + w * windowDurationMs
+            samples.add(createPoint(baseTs + 10_000L, power))
+            samples.add(createPoint(baseTs + 15_000L, power))
+        }
+
+        val resultP20 = StandbyBaselineEstimator.estimate(
+            samples = samples,
+            config = StandbyBaselineConfig(baselineQuantile = 0.20)
+        )
+        val resultP15 = StandbyBaselineEstimator.estimate(
+            samples = samples
+            // 默认配置 baselineQuantile = 0.15
+        )
+
+        assertEquals(StandbyBaselineSource.MEASURED_WINDOW_P15, resultP15.source)
+        assertEquals(StandbyBaselineSource.MEASURED_WINDOW_P20, resultP20.source)
+        // P15 (15%) 精准锁定在 0.05W 深睡真值，而 P20 (20%) 被 0.22W 的活跃窗口拉高
+        assertEquals(0.05, resultP15.baselinePowerWatts, 0.02)
+        assertTrue(
+            "P15 必须有效穿透 15%~20% 边缘唤醒，功率显著低于 P20",
+            resultP15.baselinePowerWatts < resultP20.baselinePowerWatts
         )
     }
 }

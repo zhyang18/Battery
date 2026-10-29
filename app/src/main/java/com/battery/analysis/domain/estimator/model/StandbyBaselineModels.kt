@@ -20,7 +20,11 @@ enum class StandbyStateClassification {
  * 遵循系统零假数据原则，严格标注待机基线是来源于真实实测窗口统计，还是在数据缺失时回退的客观先验。
  */
 enum class StandbyBaselineSource {
-    /** 来源于有效深睡固定长度窗口第 20 百分位数 (P20) 典型基线 */
+    /** 来源于有效深睡固定长度窗口第 15 百分位数 (P15) 典型基线 */
+    MEASURED_WINDOW_P15,
+
+    /** 来源于有效深睡固定长度窗口第 20 百分位数 (P20) 典型基线（保留向下兼容） */
+    @Deprecated("已升级为 P15 算法，推荐使用 MEASURED_WINDOW_P15")
     MEASURED_WINDOW_P20,
 
     /** 来源于有效深睡固定长度窗口第 30 百分位数 (P30) 典型基线（保留兼容） */
@@ -103,6 +107,7 @@ data class StandbyBaselineEstimate(
     val isMeanObserved: Boolean = false,
     val p5Watts: Double? = null,
     val p10Watts: Double? = null,
+    val p15Watts: Double? = null,
     val p20Watts: Double? = null,
     val p30Watts: Double? = null,
     val p50Watts: Double? = null,
@@ -130,7 +135,7 @@ data class StandbyBaselineEstimate(
 data class StandbyBaselineConfig(
     val defaultPriorWatts: Double = 0.15,
     val suspiciousPollutionThresholdWatts: Double = 0.20,
-    val baselineQuantile: Double = 0.20,
+    val baselineQuantile: Double = 0.15,
     val floorQuantile: Double = 0.10,
     val diagnosticLowerQuantile: Double = 0.05,
     val baseWindowDurationMs: Long = 60_000L,

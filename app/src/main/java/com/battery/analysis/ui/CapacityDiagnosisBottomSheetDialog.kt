@@ -1,6 +1,5 @@
 package com.battery.analysis.ui
 
-import android.app.AlertDialog
 import android.graphics.Color
 import android.os.Bundle
 import android.view.KeyEvent
@@ -159,128 +158,19 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
         }
     }
 
-    private data class ThresholdOptionItem(
-        val percent: Int,
-        val valueLabel: String,
-        val desc: String
-    )
-
-    private val thresholdOptionItems = listOf(
-        ThresholdOptionItem(10, "> 10%", "极速建模 · 容纳浅充浅放"),
-        ThresholdOptionItem(15, "> 15%", "日常均衡模式"),
-        ThresholdOptionItem(20, "> 20%", "推荐 · 精度与收敛最佳平衡"),
-        ThresholdOptionItem(25, "> 25%", "常态充放跨度"),
-        ThresholdOptionItem(30, "> 30%", "高精度 · 减少量化离散"),
-        ThresholdOptionItem(40, "> 40%", "深度自学习"),
-        ThresholdOptionItem(50, "> 50%", "半程以上 · 高置信度"),
-        ThresholdOptionItem(60, "> 60%", "大跨度充放"),
-        ThresholdOptionItem(70, "> 70%", "高纯度样本"),
-        ThresholdOptionItem(80, "> 80%", "深度充放 · 极高精度"),
-        ThresholdOptionItem(90, "> 90%", "超深度充放循环"),
-        ThresholdOptionItem(100, "100%", "完整 0%~100% 深度充放")
-    )
-
     /**
-     * 弹出与项目现代暗黑设计语言 100% 协调的美化版有效数据门限选择弹窗。
-     * 采用自定义卡片化列表、翡翠绿高亮勾选态与圆角质感按钮，确定后即时保存门限并触发模型实时重新计算。
+     * 弹出与科学诊断主界面设计风格一致的自学习有效数据门限选择底部抽屉弹窗。
+     * 从屏幕底部向上平滑滑入，采用与主诊断弹窗完全一致的现代化暗黑卡片风格，确定后即刻更新界面显示。
+     *
+     * @param rootView 触发弹窗的根视图对象，用于定位并局部刷新门限指示器文本
      */
     private fun showThresholdPickerDialog(rootView: View) {
-        val ctx = context ?: return
-        val dialogView = LayoutInflater.from(ctx).inflate(R.layout.dialog_capacity_threshold_picker, null)
-        val dialog = AlertDialog.Builder(ctx)
-            .setView(dialogView)
-            .create()
-
-        dialog.window?.let { window ->
-            window.setBackgroundDrawableResource(android.R.color.transparent)
-            val displayMetrics = resources.displayMetrics
-            val width = (displayMetrics.widthPixels * 0.90).toInt()
-            val maxListHeight = (displayMetrics.heightPixels * 0.46).toInt()
-            window.setLayout(width, ViewGroup.LayoutParams.WRAP_CONTENT)
-            window.setGravity(android.view.Gravity.CENTER)
-
-            val rv = dialogView.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.rv_threshold_options)
-            rv.layoutParams.height = maxListHeight
-        }
-
-        val manager = BatteryCapacityManager.getInstance(ctx)
-        val currentVal = manager.getEffectiveSocSpanThreshold()
-        var selectedPercent = currentVal
-
-        val rv = dialogView.findViewById<androidx.recyclerview.widget.RecyclerView>(R.id.rv_threshold_options)
-        rv.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(ctx)
-        val optionAdapter = ThresholdOptionAdapter(thresholdOptionItems, selectedPercent) { clickedItem ->
-            selectedPercent = clickedItem.percent
-        }
-        rv.adapter = optionAdapter
-
-        val selectedIdx = thresholdOptionItems.indexOfFirst { it.percent == selectedPercent }
-        if (selectedIdx >= 0) {
-            rv.scrollToPosition(selectedIdx)
-        }
-
-        dialogView.findViewById<View>(R.id.btn_close_threshold_dialog)?.setOnClickListener {
-            dialog.dismiss()
-        }
-        dialogView.findViewById<View>(R.id.btn_cancel_threshold)?.setOnClickListener {
-            dialog.dismiss()
-        }
-        dialogView.findViewById<View>(R.id.btn_confirm_threshold)?.setOnClickListener {
-            dialog.dismiss()
-            manager.setEffectiveSocSpanThreshold(selectedPercent)
+        val pickerDialog = CapacityThresholdPickerBottomSheetDialog()
+        pickerDialog.setOnThresholdSelectedListener { selectedPercent ->
             val labelText = if (selectedPercent == 100) "100% ▾" else "> ${selectedPercent}% ▾"
             rootView.findViewById<TextView>(R.id.tv_diag_threshold_selector)?.text = labelText
-            Toast.makeText(ctx, "已设为门限 ${if (selectedPercent == 100) "100%" else "> $selectedPercent%"}，已即时重新计算模型", Toast.LENGTH_SHORT).show()
         }
-
-        dialog.show()
-    }
-
-    private class ThresholdOptionAdapter(
-        private val items: List<ThresholdOptionItem>,
-        initialSelected: Int,
-        private val onSelected: (ThresholdOptionItem) -> Unit
-    ) : androidx.recyclerview.widget.RecyclerView.Adapter<ThresholdOptionViewHolder>() {
-
-        var selectedPercent: Int = initialSelected
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ThresholdOptionViewHolder {
-            val v = LayoutInflater.from(parent.context).inflate(R.layout.item_capacity_threshold_option, parent, false)
-            return ThresholdOptionViewHolder(v)
-        }
-
-        override fun onBindViewHolder(holder: ThresholdOptionViewHolder, position: Int) {
-            val item = items[position]
-            val isSelected = item.percent == selectedPercent
-
-            holder.tvValue.text = item.valueLabel
-            holder.tvDesc.text = item.desc
-
-            if (isSelected) {
-                holder.root.setBackgroundResource(R.drawable.bg_threshold_opt_selected)
-                holder.tvValue.setTextColor(Color.parseColor("#10b981"))
-                holder.ivCheck.visibility = View.VISIBLE
-            } else {
-                holder.root.setBackgroundResource(R.drawable.bg_threshold_opt_normal)
-                holder.tvValue.setTextColor(Color.parseColor("#f1f5f9"))
-                holder.ivCheck.visibility = View.GONE
-            }
-
-            holder.root.setOnClickListener {
-                selectedPercent = item.percent
-                notifyDataSetChanged()
-                onSelected(item)
-            }
-        }
-
-        override fun getItemCount(): Int = items.size
-    }
-
-    private class ThresholdOptionViewHolder(view: View) : androidx.recyclerview.widget.RecyclerView.ViewHolder(view) {
-        val root: View = view.findViewById(R.id.layout_threshold_item_root)
-        val tvValue: TextView = view.findViewById(R.id.tv_threshold_value)
-        val tvDesc: TextView = view.findViewById(R.id.tv_threshold_desc)
-        val ivCheck: ImageView = view.findViewById(R.id.iv_threshold_check)
+        pickerDialog.show(parentFragmentManager, "CapacityThresholdPickerBottomSheetDialog")
     }
 
     /**

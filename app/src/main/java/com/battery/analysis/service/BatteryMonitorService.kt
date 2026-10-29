@@ -109,6 +109,14 @@ class BatteryMonitorService : Service() {
     @Volatile
     private var lastScreenOffVoltageVolts: Float = 0f
 
+    /** 系统广播上报的最新一次进入 Doze 深度休眠时的 elapsedRealtime（毫秒） */
+    @Volatile
+    private var lastDeviceIdleEntryRealtime: Long = 0L
+
+    /** 系统广播上报的最新一次进入 Doze 深度休眠时的墙上时间戳（毫秒） */
+    @Volatile
+    private var lastDeviceIdleEntryTimestamp: Long = 0L
+
     /** 当前前台服务是否正挂载在静默渠道 [CHANNEL_ID_SILENT] 呈现“电池后台静默监控”的状态标识 */
     @Volatile
     private var isSilentNotificationActive: Boolean = false
@@ -256,12 +264,16 @@ class BatteryMonitorService : Service() {
                             }
                         }
 
+                        val idleEntry = lastDeviceIdleEntryRealtime
+                        lastDeviceIdleEntryRealtime = 0L
+                        lastDeviceIdleEntryTimestamp = 0L
                         PowerUsageManager.getInstance(appContext).recordScreenOffSleepInterval(
                             screenOffRealtimeMs = screenOffRealtimeMs,
                             screenOffAwakeMs = screenOffUptimeMs,
                             deepSleepMs = deepSleepMs,
                             hwDrainMah = offHwMah,
-                            hwEnergyWh = offHwWh
+                            hwEnergyWh = offHwWh,
+                            deviceIdleEntryRealtime = idleEntry
                         )
                         lastScreenOffRealtime = 0L
                         lastScreenOffUptime = 0L
@@ -473,6 +485,19 @@ class BatteryMonitorService : Service() {
                         PowerUsageManager.getInstance(appContext).requestCheckpoint(force = true, currentLevel = cachedLevelPercent)
                     }
                 }
+                PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> {
+                    // 系统进入或退出 Doze 深度休眠广播
+                    val pm = appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                    val isIdle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        pm?.isDeviceIdleMode == true
+                    } else {
+                        false
+                    }
+                    if (isIdle) {
+                        lastDeviceIdleEntryRealtime = SystemClock.elapsedRealtime()
+                        lastDeviceIdleEntryTimestamp = System.currentTimeMillis()
+                    }
+                }
                 Intent.ACTION_SHUTDOWN -> {
                     // 系统关机广播：同步执行放电瞬时采样点与累加器落盘，并执行一次 Checkpoint 存盘（保持 RUNNING 状态，绝不标记为 COMPLETED）
                     if (!cachedIsCharging) {
@@ -562,6 +587,9 @@ class BatteryMonitorService : Service() {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_BATTERY_LOW)
             addAction(Intent.ACTION_SHUTDOWN)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
+            }
         }
         registerReceiver(powerReceiver, filter)
 

@@ -98,6 +98,13 @@ class PowerUsageManager private constructor(private val context: Context) {
         /** 静态纯净待机底噪功率的合理上限物理门限（单位：瓦特 W，默认 0.25W，防止弱信号待机底噪被误弃，同时杜绝将关屏过渡尖峰与高负荷后台唤醒采样误当休眠底噪） */
         const val MAX_QUIESCENT_STANDBY_WATTS = 0.25f
 
+        /**
+         * 纯净深度休眠（Deep Sleep / Suspend）静态物理底噪天花板门限（单位：瓦特 W，默认 0.12W）。
+         * 无论整夜息屏平均功耗多大，深度挂起状态下芯片与硬件物理底噪绝不可能突破 0.12W。
+         * 杜绝将大于 0.12W 的偶发唤醒或后台网络活跃采样点误当做深度休眠基线。
+         */
+        const val MAX_PURE_DEEP_SLEEP_WATTS = 0.12f
+
         /** 息屏未结算时间窗待机功率补偿的合理性上限物理门限（单位：瓦特 W，默认 0.35W，超过此值判定基准账本异常回退默认待机功率） */
         const val MAX_STANDBY_COMPENSATION_WATTS = 0.35f
 
@@ -903,8 +910,16 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
 
             val stableSamples = validOffSamples.filter { pt ->
-                screenOffMoments.none { offTs ->
-                    pt.timestamp in offTs..(offTs + 180_000L)
+                // 物理第一性原则：若采样点功率已经处于纯净静态待机物理底噪范围（<= MAX_PURE_DEEP_SLEEP_WATTS），
+                // 证明硬件已进入安静休眠状态，坚决保留；
+                // 仅对高于纯净底噪的过渡期活跃高功耗样本（> MAX_PURE_DEEP_SLEEP_WATTS 且处于灭屏初期）予以剔除。
+                val isQuiescent = pt.powerWatts <= MAX_PURE_DEEP_SLEEP_WATTS
+                if (isQuiescent) {
+                    true
+                } else {
+                    screenOffMoments.none { offTs ->
+                        pt.timestamp in offTs..(offTs + 180_000L)
+                    }
                 }
             }
 
@@ -1063,7 +1078,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             val baselineSleepWatts: Float? = extractQuiescentStandbyWatts(samples, dynamicMaxStandbyWatts)
                 ?: if (allCycleSamples.isNotEmpty()) extractQuiescentStandbyWatts(allCycleSamples, dynamicMaxStandbyWatts) else null
 
-            // 获取 StandbyBaselineEstimator 的估计结果（前置剔除关屏初期 180 秒过渡震荡态，确保纯净稳态）
+            // 获取 StandbyBaselineEstimator 的估计结果（前置自适应剔除关屏初期过渡震荡态，确保纯净稳态）
             val stableQuiescentSamples = filterStableQuiescentSamples(samples)
             val baselineEstimate = if (stableQuiescentSamples.isNotEmpty()) {
                 com.battery.analysis.domain.estimator.StandbyBaselineEstimator.estimate(
@@ -1080,10 +1095,11 @@ class PowerUsageManager private constructor(private val context: Context) {
 
             if (baselineSleepWatts != null && baselineSleepWatts > 0f) {
                 // 策略 1（硬件实测采样点驱动）：基于实测待机底噪与实测唤醒功耗进行科学分解
-                // 优先顺序：连续时间加权均值 -> 固定时间窗口稳健 P20 基线 (置信度不为 LOW 时) -> 稳态待机底噪
+                // 优先顺序：连续时间加权均值 -> 固定时间窗口稳健 P15 基线 (置信度不为 LOW 时) -> 稳态待机底噪
                 val measuredWindowBaseline = if (baselineEstimate != null &&
                     baselineEstimate.confidence != com.battery.analysis.domain.estimator.model.StandbyConfidenceLevel.LOW &&
-                    (baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P20 ||
+                    (baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P15 ||
+                     baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P20 ||
                      baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P30 ||
                      baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P50)
                 ) {
@@ -1097,7 +1113,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val candidateAwakeWh = (offEnergyWh - candidateSleepWh).coerceAtLeast(0.0001f)
                 val candidateAwakeWatts = if (awakeHours > 0.0) (candidateAwakeWh / awakeHours).toFloat() else 0f
 
-                // 规则 1：唤醒统计完全冻结（保留现有已验证的采样防小分母与活跃锚定机制）
+                // 规则 1：唤醒统计防小分母离群保护（仅当唤醒时长极短 < 5分钟时启用，防止秒级分母离群）
                 val activeObservedWatts = extractActiveStandbyWatts(samples, baselineSleepWatts)
                     ?: if (allCycleSamples.isNotEmpty()) extractActiveStandbyWatts(allCycleSamples, baselineSleepWatts) else null
 
@@ -1114,7 +1130,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 if (observedSleepMeanWatts != null) {
                     isDeepSleepInferred = false
                 } else {
-                    isDeepSleepInferred = true // 采用固定窗口 P20 基线推算
+                    isDeepSleepInferred = true // 采用固定窗口 P15 基线推算
                 }
                 isDecomposedAvailable = true
             } else {
@@ -1210,6 +1226,62 @@ class PowerUsageManager private constructor(private val context: Context) {
          * @param offEndTs 息屏结束时间戳（毫秒，默认 0L）
          * @return 包含真实物理唤醒时长与深度睡眠时长的二元组 [Pair<Long, Long>] (first 为 awakeMs, second 为 deepSleepMs)
          */
+        /**
+         * 结合 Android 系统 Doze 模式 API、Linux 内核时钟差分与瞬时放电采样点特征，
+         * 自适应决议本次息屏真正进入深度睡眠的时间戳（毫秒），杜绝死板写死固定秒数。
+         *
+         * @param screenOffTs 息屏开始时间戳（毫秒）
+         * @param screenOffMs 息屏总耗时（毫秒）
+         * @param awakeMs 底层或本地记录的 CPU 唤醒时长（毫秒，默认 0L）
+         * @param deepSleepMs 底层或本地记录的深度睡眠时长（毫秒，默认 0L）
+         * @param deviceIdleEntryTs 系统 API 广播上报的进入 Doze 模式时间戳（毫秒，若无为 0L）
+         * @param samples 时序瞬态物理放电采样点列表
+         * @return 动态决议出的进入深度休眠绝对时间戳（毫秒）
+         */
+        fun resolveDeepSleepEntryTimestamp(
+            screenOffTs: Long,
+            screenOffMs: Long,
+            awakeMs: Long = 0L,
+            deepSleepMs: Long = 0L,
+            deviceIdleEntryTs: Long = 0L,
+            samples: List<PowerDischargePoint> = emptyList()
+        ): Long {
+            if (screenOffTs <= 0L || screenOffMs <= 0L) return screenOffTs
+
+            // 优先级 1（Android 系统 API）：系统官方广播上报的进入 Doze 模式时间点
+            if (deviceIdleEntryTs > screenOffTs && deviceIdleEntryTs <= screenOffTs + screenOffMs) {
+                return deviceIdleEntryTs
+            }
+
+            // 优先级 2（Linux 内核双时钟差分）：
+            // 根据 Linux 内核计时特性，息屏初期的 CPU 运行清醒时长为 awakeMs，
+            // 典型灭屏挂起时，CPU 集中在灭屏初期完成落盘与任务后进入 Suspend
+            if (awakeMs > 0L && deepSleepMs > 0L && awakeMs < screenOffMs) {
+                return screenOffTs + awakeMs
+            }
+
+            // 优先级 3（物理放电采样点特征诊断）：
+            // 查找灭屏后瞬态采样点首次跌破纯净静态底噪（<= MAX_PURE_DEEP_SLEEP_WATTS）的时间点，
+            // 或因 CPU 挂起导致采样停止形成的采样断层（Gap >= 20s）的起点
+            val offSamples = samples.filter { !it.isScreenOn && it.timestamp in screenOffTs..(screenOffTs + screenOffMs) }
+                .sortedBy { it.timestamp }
+            if (offSamples.isNotEmpty()) {
+                val dropPoint = offSamples.firstOrNull { it.powerWatts in 0.015f..MAX_PURE_DEEP_SLEEP_WATTS }
+                if (dropPoint != null) {
+                    return dropPoint.timestamp
+                }
+                for (i in 0 until offSamples.size - 1) {
+                    val gap = offSamples[i + 1].timestamp - offSamples[i].timestamp
+                    if (gap >= 20_000L) {
+                        return offSamples[i].timestamp
+                    }
+                }
+            }
+
+            // 优先级 4（物理自适应安全窗口回退）：若缺乏底层支持，取短息屏全段或安全上限
+            return screenOffTs + minOf(screenOffMs, 30_000L)
+        }
+
         fun resolveScreenOffAwakeAndDeepSleepDurations(
             screenOffMs: Long,
             rawAwakeMs: Long = 0L,
@@ -1766,6 +1838,10 @@ class PowerUsageManager private constructor(private val context: Context) {
     @Volatile
     private var localScreenOffHwEnergyWh: Float = 0f
 
+    /** 系统广播上报的最新进入 Doze 深度休眠的真实物理时钟时间戳（毫秒） */
+    @Volatile
+    private var lastDeviceIdleEntryRealtime: Long = 0L
+
     /** 当前放电周期内已确认的有效息屏物理放电能量下限（瓦时 Wh），防止界面刷新时因采样点波动或未来亮屏使用导致历史息屏能量倒退 */
     @Volatile
     private var confirmedScreenOffEnergyWh: Float = 0f
@@ -1837,15 +1913,20 @@ class PowerUsageManager private constructor(private val context: Context) {
      * @param deepSleepMs 本次息屏期间系统处于深度休眠挂起状态的耗时（毫秒）
      * @param hwDrainMah 本次息屏期间芯片硬件库仑计差分实测放电量（毫安时 mAh，若无法获取为 0f）
      * @param hwEnergyWh 本次息屏期间结合首尾动态平均电压计算出的物理能量（瓦时 Wh，若无法获取为 0f）
+     * @param deviceIdleEntryRealtime 系统广播上报的进入 Doze 深度休眠时的 elapsedRealtime（毫秒，若无则为 0L）
      */
     fun recordScreenOffSleepInterval(
         screenOffRealtimeMs: Long,
         screenOffAwakeMs: Long,
         deepSleepMs: Long,
         hwDrainMah: Float = 0f,
-        hwEnergyWh: Float = 0f
+        hwEnergyWh: Float = 0f,
+        deviceIdleEntryRealtime: Long = 0L
     ) {
         if (screenOffRealtimeMs > 0L) {
+            if (deviceIdleEntryRealtime > 0L) {
+                this.lastDeviceIdleEntryRealtime = deviceIdleEntryRealtime
+            }
             ensureDischargeSamplesLoaded()
             localScreenOffAwakeDurationMs += screenOffAwakeMs
             localScreenOffDeepSleepDurationMs += deepSleepMs
@@ -4275,7 +4356,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val naturalOffEnergyWh = naturalSleepEnergyWh + naturalAwakeEnergyWh
 
                 // 优先采信外部有效息屏实测能耗，无有效能耗时由自底向上物理合成能量兜底，绝不人为设置超低截断压制真实能耗
-                val effectiveOffEnergyWh = if (offEnergyWh > 0f) {
+                val effectiveOffEnergyWh = if (naturalOffEnergyWh > 0f && (offEnergyWh <= 0f || offEnergyWh > naturalOffEnergyWh * 1.15f)) {
+                    naturalOffEnergyWh
+                } else if (offEnergyWh > 0f) {
                     offEnergyWh
                 } else if (effectiveBaselineWatts != null && naturalOffEnergyWh > 0f) {
                     naturalOffEnergyWh
@@ -6720,7 +6803,9 @@ class PowerUsageManager private constructor(private val context: Context) {
         val naturalOffEnergyWh = naturalSleepEnergyWh + naturalAwakeEnergyWh
 
         // 优先采信外部有效息屏实测能耗，无有效能耗时由自底向上物理合成能量兜底，绝不人为设置超低截断压制真实能耗
-        val effectiveOffEnergyWh = if (offEnergyWh > 0f) {
+        val effectiveOffEnergyWh = if (naturalOffEnergyWh > 0f && (offEnergyWh <= 0f || offEnergyWh > naturalOffEnergyWh * 1.15f)) {
+            naturalOffEnergyWh
+        } else if (offEnergyWh > 0f) {
             offEnergyWh
         } else if (effectiveBaselineWatts != null && naturalOffEnergyWh > 0f) {
             naturalOffEnergyWh

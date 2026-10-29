@@ -143,11 +143,13 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    android:gravity="end"
                     android:orientation="vertical">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:gravity="end"
                         android:text="可用剩余能量"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="11sp" />
@@ -157,6 +159,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
+                        android:gravity="end"
                         android:textColor="#10b981"
                         android:textSize="16sp"
                         android:textStyle="bold"
@@ -166,6 +169,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="1dp"
+                        android:gravity="end"
                         android:text="基准: 3.85V 标称平台"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="10sp" />
@@ -221,11 +225,13 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    android:gravity="end"
                     android:orientation="vertical">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:gravity="end"
                         android:text="出厂额定设计容量"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="11sp" />
@@ -235,6 +241,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
+                        android:gravity="end"
                         android:textColor="?android:attr/textColorPrimary"
                         android:textSize="16sp"
                         android:textStyle="bold"
@@ -244,6 +251,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="1dp"
+                        android:gravity="end"
                         android:text="规格: PowerProfile"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="10sp" />

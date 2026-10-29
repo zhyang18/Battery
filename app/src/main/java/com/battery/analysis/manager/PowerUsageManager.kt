@@ -474,7 +474,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                 null
             }
 
-            var baselinePowerWatts = if (baselineEstimate != null && baselineEstimate.confidence != com.battery.analysis.domain.estimator.model.StandbyConfidenceLevel.LOW) {
+            var baselinePowerWatts = if (baselineEstimate != null &&
+                baselineEstimate.confidence != com.battery.analysis.domain.estimator.model.StandbyConfidenceLevel.LOW &&
+                baselineEstimate.confidence != com.battery.analysis.domain.estimator.model.StandbyConfidenceLevel.UNAVAILABLE
+            ) {
                 baselineEstimate.baselinePowerWatts
             } else {
                 val baselinePercentile = 0.05 + (0.10 - 0.05) * confidenceScore
@@ -951,7 +954,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                 samples = validOffSamples,
                 config = dynamicConfig
             )
-            if (baselineEstimate.confidence != com.battery.analysis.domain.estimator.model.StandbyConfidenceLevel.LOW) {
+            if (baselineEstimate.confidence != com.battery.analysis.domain.estimator.model.StandbyConfidenceLevel.LOW &&
+                baselineEstimate.confidence != com.battery.analysis.domain.estimator.model.StandbyConfidenceLevel.UNAVAILABLE
+            ) {
                 val watts = (baselineEstimate.sleepMeanWatts ?: baselineEstimate.baselinePowerWatts).toFloat()
                 if (watts in 0.015f..maxStandbyWatts) {
                     return watts
@@ -1098,7 +1103,9 @@ class PowerUsageManager private constructor(private val context: Context) {
                 // 优先顺序：连续时间加权均值 -> 固定时间窗口稳健 P15 基线 (置信度不为 LOW 时) -> 稳态待机底噪
                 val measuredWindowBaseline = if (baselineEstimate != null &&
                     baselineEstimate.confidence != com.battery.analysis.domain.estimator.model.StandbyConfidenceLevel.LOW &&
-                    (baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P15 ||
+                    baselineEstimate.confidence != com.battery.analysis.domain.estimator.model.StandbyConfidenceLevel.UNAVAILABLE &&
+                    (baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P10 ||
+                     baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P15 ||
                      baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P20 ||
                      baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P30 ||
                      baselineEstimate.source == com.battery.analysis.domain.estimator.model.StandbyBaselineSource.MEASURED_WINDOW_P50)

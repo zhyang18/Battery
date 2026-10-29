@@ -300,22 +300,19 @@ class MainActivity : AppCompatActivity() {
     private var isBottomNavVisible: Boolean = true
 
     /**
-     * 设置底部导航栏联动显隐状态，配合平滑动效实现平滑滑入或滑出。
-     * 隐藏时自动附加安全冗余位移，防止在高分辨率屏幕或全面屏手势条下残留边缘线条。
+     * 设置底部导航栏显隐状态。
+     * 采用布局层级解耦（ViewPager2 布局于底部导航栏之上）后，底部导航栏常驻吸底呈现，
+     * 保持主视图与系统三键导航栏完全解耦，杜绝内容遮挡与按键事件冲突。
      *
      * @param visible 是否显示底部导航栏（true 为显示，false 为隐藏）
      */
     fun setBottomNavigationVisibility(visible: Boolean) {
-        if (isBottomNavVisible == visible) return
-        isBottomNavVisible = visible
-        val containerHeight = binding.layoutBottomNavContainer.height.toFloat().takeIf { it > 0f } ?: 300f
-        val targetTranslationY = if (visible) 0f else (containerHeight + 120f)
-        binding.layoutBottomNavContainer.animate().cancel()
-        binding.layoutBottomNavContainer.animate()
-            .translationY(targetTranslationY)
-            .setDuration(220L)
-            .setInterpolator(androidx.interpolator.view.animation.FastOutSlowInInterpolator())
-            .start()
+        // 主页签吸底稳定展示，避免手势联动隐藏导致的空白或事件拦截冲突
+        if (binding.layoutBottomNavContainer.translationY != 0f) {
+            binding.layoutBottomNavContainer.animate().cancel()
+            binding.layoutBottomNavContainer.translationY = 0f
+        }
+        isBottomNavVisible = true
     }
 
     /** 底部导航栏首个页签当前呈现的充放电模式缓存，防止重复赋值触发重绘 */
@@ -394,6 +391,14 @@ class MainActivity : AppCompatActivity() {
 
             insets
         }
+
+        // 拦截并清空 BottomNavigationView 内部默认自动叠加的底边距，
+        // 杜绝与父容器 layoutBottomNavContainer 的 bottomInset 双重叠加挤压导航按钮显示空间
+        ViewCompat.setOnApplyWindowInsetsListener(binding.bottomNavigation) { v, insets ->
+            v.setPadding(0, 0, 0, 0)
+            insets
+        }
+        binding.bottomNavigation.setPadding(0, 0, 0, 0)
     }
 
     /**

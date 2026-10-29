@@ -4,8 +4,10 @@ import com.battery.analysis.domain.estimator.model.StandbyBaselineConfig
 import com.battery.analysis.domain.estimator.model.StandbyBaselineEstimate
 import com.battery.analysis.domain.estimator.model.StandbyBaselineSource
 import com.battery.analysis.domain.estimator.model.StandbyConfidenceLevel
+import com.battery.analysis.domain.estimator.model.StandbyReasonCode
 import com.battery.analysis.model.PowerDischargePoint
 import java.util.Locale
+import kotlin.math.abs
 
 /**
  * 息屏待机基线与深睡功耗多阶稳健估计器。
@@ -55,12 +57,12 @@ object StandbyBaselineEstimator {
 
         val rawMinWatts = validOffSamples.minOfOrNull { it.powerWatts.toDouble() }
 
-        // 核心守卫：若有效息屏样本量不足以划分时间窗口，直接安全回退默认先验
+        // 核心守卫：若有效息屏样本量不足以划分时间窗口，直接安全回退默认先验，标记为 UNAVAILABLE
         if (validOffSamples.size < config.minSamplesPerWindow) {
             return StandbyBaselineEstimate(
                 baselinePowerWatts = config.defaultPriorWatts,
                 source = StandbyBaselineSource.DEFAULT_STANDBY_PRIOR,
-                confidence = StandbyConfidenceLevel.LOW,
+                confidence = StandbyConfidenceLevel.UNAVAILABLE,
                 validWindowCount = 0,
                 coverageDurationMs = 0L,
                 floorWatts = null,
@@ -68,6 +70,7 @@ object StandbyBaselineEstimator {
                 sleepCoverageRatio = 0.0,
                 isMeanObserved = false,
                 rawMinWatts = rawMinWatts,
+                reasonCodes = listOf(StandbyReasonCode.INSUFFICIENT_SAMPLES),
                 fallbackReason = "有效息屏采样点不足(${validOffSamples.size} < ${config.minSamplesPerWindow})"
             )
         }
@@ -109,12 +112,12 @@ object StandbyBaselineEstimator {
             minSamplesPerWindow = minSamplesPerWindow
         )
 
-        // 若有效窗口数不足以支撑稳健分位数统计
-        if (windows.size < config.minWindowsForMediumConfidence) {
+        // 若有效窗口数不足以支撑最低置信度估计 (< minWindowsForLowConfidence，默认 3 个窗口)
+        if (windows.size < config.minWindowsForLowConfidence) {
             return StandbyBaselineEstimate(
                 baselinePowerWatts = config.defaultPriorWatts,
                 source = StandbyBaselineSource.DEFAULT_STANDBY_PRIOR,
-                confidence = StandbyConfidenceLevel.LOW,
+                confidence = StandbyConfidenceLevel.UNAVAILABLE,
                 validWindowCount = windows.size,
                 coverageDurationMs = coveredDurationMs,
                 floorWatts = null,
@@ -122,19 +125,27 @@ object StandbyBaselineEstimator {
                 sleepCoverageRatio = coverageRatio,
                 isMeanObserved = false,
                 rawMinWatts = rawMinWatts,
-                fallbackReason = "有效时间窗口数不足(${windows.size} < ${config.minWindowsForMediumConfidence})"
+                reasonCodes = listOf(StandbyReasonCode.INSUFFICIENT_CANDIDATE_WINDOWS),
+                fallbackReason = "有效时间窗口数严重不足(${windows.size} < ${config.minWindowsForLowConfidence})"
             )
         }
 
-        // 4. 计算固定窗口级代表功率稳健统计量（P5, P10, P15, P20, P30, P50, MAD）
+        // 4. 计算固定窗口级代表功率稳健统计量（P5, P10, P15, P20, P25, P30, P50, MAD）
         val windowPowers = windows.map { it.representativePowerWatts }.sorted()
         val p5Watts = calculatePercentile(windowPowers, config.diagnosticLowerQuantile)
         val p10Watts = calculatePercentile(windowPowers, config.floorQuantile)
         val p15Watts = calculatePercentile(windowPowers, 0.15)
         val p20Watts = calculatePercentile(windowPowers, 0.20)
+        val p25Watts = calculatePercentile(windowPowers, config.checkQuantile)
         val p30Watts = calculatePercentile(windowPowers, 0.30)
         val p50Watts = calculatePercentile(windowPowers, 0.50)
         val madWatts = calculateMad(windowPowers, p50Watts)
+
+        // P25 与 P15 平坦度与离散度校验
+        val quantileGapW = (p25Watts - p15Watts).coerceAtLeast(0.0)
+        val relativeQuantileGap = quantileGapW / maxOf(abs(p25Watts), config.epsilonW)
+        val isGapExcessive = quantileGapW > config.maxAllowedAbsoluteQuantileGapWatts &&
+                relativeQuantileGap > config.maxAllowedRelativeQuantileGap
 
         // 5. 多窗口低功耗支持度评估与活跃污染熔断检查
         // 统计有多少个独立固定时间窗口的代表功率处于纯净待机合理水平（<= 0.20W）
@@ -158,16 +169,19 @@ object StandbyBaselineEstimator {
                 p10Watts = p10Watts,
                 p15Watts = p15Watts,
                 p20Watts = p20Watts,
+                p25Watts = p25Watts,
                 p30Watts = p30Watts,
                 p50Watts = p50Watts,
                 madWatts = madWatts,
+                quantileGapW = quantileGapW,
+                relativeQuantileGap = relativeQuantileGap,
                 rawMinWatts = rawMinWatts,
+                reasonCodes = listOf(StandbyReasonCode.SUSPICIOUS_POLLUTION_DETECTED),
                 fallbackReason = "息屏样本疑似受活跃任务严重污染(P10=${String.format(Locale.US, "%.2f", p10Watts)}W > ${config.suspiciousPollutionThresholdWatts}W 且缺乏低功耗窗口重复支持)"
             )
         }
 
-        // 6. 三阶指标确定（彻底废除 rawMinWatts 篡权覆盖基线的逻辑）
-        // 典型静态待机基线候选值采用固定窗口分位数（默认 P15，即第 15 百分位数，同时兼容外部传入的自定义分位数）
+        // 6. 三阶指标确定：主基线采用固定窗口主分位数（默认 P15）
         val candidateBaselineWatts = calculatePercentile(windowPowers, config.baselineQuantile)
 
         // 7. 时间积分观测均值与覆盖率门禁（70% 覆盖率与 15 分钟覆盖时长）
@@ -180,19 +194,36 @@ object StandbyBaselineEstimator {
             Pair(null, false)
         }
 
-        // 8. 确定置信等级与来源
-        val isHighConfidence = isCoverageSufficient &&
-                windows.size >= config.minWindowsForHighConfidence &&
-                madWatts <= 0.10
+        // 8. 确定置信等级、原因码与来源
+        val reasonCodes = mutableListOf<StandbyReasonCode>()
+        if (!isCoverageSufficient) {
+            reasonCodes.add(StandbyReasonCode.LOW_DATA_COVERAGE)
+        }
+        if (windows.size < config.minWindowsForMediumConfidence) {
+            reasonCodes.add(StandbyReasonCode.INSUFFICIENT_CANDIDATE_WINDOWS)
+        }
+        if (isGapExcessive) {
+            reasonCodes.add(StandbyReasonCode.P15_P25_GAP_HIGH)
+        }
+        if (madWatts > 0.10) {
+            reasonCodes.add(StandbyReasonCode.SENSOR_ABNORMAL_OR_QUANTIZED)
+        }
 
         val confidenceLevel = when {
-            isHighConfidence -> StandbyConfidenceLevel.HIGH
-            windows.size >= config.minWindowsForMediumConfidence -> StandbyConfidenceLevel.MEDIUM
-            else -> StandbyConfidenceLevel.LOW
+            windows.size >= config.minWindowsForHighConfidence && isCoverageSufficient && madWatts <= 0.10 && !isGapExcessive -> {
+                StandbyConfidenceLevel.HIGH
+            }
+            windows.size >= config.minWindowsForMediumConfidence && !isGapExcessive -> {
+                StandbyConfidenceLevel.MEDIUM
+            }
+            else -> {
+                StandbyConfidenceLevel.LOW
+            }
         }
 
         val baselineSource = when {
             isObservedMean -> StandbyBaselineSource.MEASURED_TRAPEZOIDAL_INTEGRAL
+            config.baselineQuantile <= 0.10 -> StandbyBaselineSource.MEASURED_WINDOW_P10
             config.baselineQuantile <= 0.15 -> StandbyBaselineSource.MEASURED_WINDOW_P15
             config.baselineQuantile <= 0.20 -> StandbyBaselineSource.MEASURED_WINDOW_P20
             config.baselineQuantile <= 0.30 -> StandbyBaselineSource.MEASURED_WINDOW_P30
@@ -201,9 +232,17 @@ object StandbyBaselineEstimator {
 
         val reason = if (!isObservedMean) {
             val quantilePercent = (config.baselineQuantile * 100).toInt()
-            "连续采样覆盖率不足(${String.format(Locale.US, "%.1f", coverageRatio * 100)}% < ${String.format(Locale.US, "%.0f", config.minCoverageRatioForMean * 100)}%)，如实置空观测均值并采用固定窗口P${quantilePercent}分位数作为典型待机基线"
+            if (isGapExcessive) {
+                "低功耗平台平坦度不足(P15=${String.format(Locale.US, "%.2f", p15Watts)}W, P25=${String.format(Locale.US, "%.2f", p25Watts)}W, 差距${String.format(Locale.US, "%.1f", relativeQuantileGap * 100)}% > ${String.format(Locale.US, "%.0f", config.maxAllowedRelativeQuantileGap * 100)}%)，降低置信度并采用固定窗口P${quantilePercent}作为典型基线"
+            } else {
+                "连续采样覆盖率不足(${String.format(Locale.US, "%.1f", coverageRatio * 100)}% < ${String.format(Locale.US, "%.0f", config.minCoverageRatioForMean * 100)}%)，如实置空观测均值并采用固定窗口P${quantilePercent}分位数作为典型待机基线"
+            }
         } else {
-            null
+            if (isGapExcessive) {
+                "实测观测均值已计算，但低功耗平台平坦度不足(P15=${String.format(Locale.US, "%.2f", p15Watts)}W, P25=${String.format(Locale.US, "%.2f", p25Watts)}W)"
+            } else {
+                null
+            }
         }
 
         return StandbyBaselineEstimate(
@@ -220,10 +259,14 @@ object StandbyBaselineEstimator {
             p10Watts = p10Watts,
             p15Watts = p15Watts,
             p20Watts = p20Watts,
+            p25Watts = p25Watts,
             p30Watts = p30Watts,
             p50Watts = p50Watts,
             madWatts = madWatts,
+            quantileGapW = quantileGapW,
+            relativeQuantileGap = relativeQuantileGap,
             rawMinWatts = rawMinWatts,
+            reasonCodes = reasonCodes,
             fallbackReason = reason
         )
     }

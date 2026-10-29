@@ -427,7 +427,6 @@ class PowerUsageFragment : Fragment() {
 
         // 1. 顶部 AppBarLayout 偏移联动：标题栏平滑淡出，核心指标卡片随 AppBarLayout 原生吸顶常驻展示
         binding.appbarPower.addOnOffsetChangedListener { appBarLayout, verticalOffset ->
-            val prevOffset = lastAppBarVerticalOffset
             lastAppBarVerticalOffset = verticalOffset
             if (currentDisplayTab == 1) {
                 // 充电模式下完全禁用联动折叠动效，固定常驻完整展开标题栏，隐藏放电核心指标卡片
@@ -439,14 +438,6 @@ class PowerUsageFragment : Fragment() {
                 binding.cardPowerMetrics.alpha = 1f
                 binding.cardPowerMetrics.visibility = View.GONE
                 return@addOnOffsetChangedListener
-            }
-
-            // AppBarLayout 向上收拢手势感知：当用户上滑折叠顶部卡片时，立即联动隐藏底部页签栏
-            if (verticalOffset < prevOffset && verticalOffset < -4) {
-                (activity as? MainActivity)?.setBottomNavigationVisibility(false)
-            } else if (verticalOffset > prevOffset && verticalOffset >= 0 && !binding.recyclerAppUsage.canScrollVertically(-1)) {
-                // 向下滑回最顶端且完全展开时，恢复展示底部页签栏
-                (activity as? MainActivity)?.setBottomNavigationVisibility(true)
             }
 
             val totalRange = appBarLayout.totalScrollRange
@@ -477,50 +468,13 @@ class PowerUsageFragment : Fragment() {
             }
         }
 
-        // 2. 列表手势与滚动监听：支持触摸向上滑动与原生滚动联动控制底部页签栏显隐，滑动期冻结图表重绘
-        var startTouchY = 0f
-        binding.recyclerAppUsage.setOnTouchListener { _, event ->
-            if (currentDisplayTab != 1) {
-                when (event.actionMasked) {
-                    android.view.MotionEvent.ACTION_DOWN -> {
-                        startTouchY = event.rawY
-                    }
-                    android.view.MotionEvent.ACTION_MOVE -> {
-                        val deltaY = event.rawY - startTouchY
-                        if (deltaY < -12f) {
-                            // 手指向上拖动，确保立即灵敏联动隐藏底部页签栏，避免遮挡底部内容
-                            (activity as? MainActivity)?.setBottomNavigationVisibility(false)
-                            startTouchY = event.rawY
-                        } else if (deltaY > 15f && !binding.recyclerAppUsage.canScrollVertically(-1) && lastAppBarVerticalOffset >= 0) {
-                            // 列表处于最顶部且手指向下拉动，恢复展示底部页签栏
-                            (activity as? MainActivity)?.setBottomNavigationVisibility(true)
-                            startTouchY = event.rawY
-                        }
-                    }
-                }
-            }
-            false
-        }
-
+        // 2. 列表滚动监听：滑动期冻结图表重绘
         binding.recyclerAppUsage.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: androidx.recyclerview.widget.RecyclerView, newState: Int) {
                 super.onScrollStateChanged(recyclerView, newState)
                 // 滑动过程中彻底冻结图表重绘、重载与数据刷新
                 val isScrolling = (newState != androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE)
                 adapter.setScrolling(isScrolling)
-            }
-
-            override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
-                super.onScrolled(recyclerView, dx, dy)
-                if (currentDisplayTab == 1) {
-                    (activity as? MainActivity)?.setBottomNavigationVisibility(true)
-                    return
-                }
-                if (dy > 4) {
-                    (activity as? MainActivity)?.setBottomNavigationVisibility(false)
-                } else if (dy < -8 || (dy < 0 && !recyclerView.canScrollVertically(-1) && lastAppBarVerticalOffset == 0)) {
-                    (activity as? MainActivity)?.setBottomNavigationVisibility(true)
-                }
             }
         })
     }

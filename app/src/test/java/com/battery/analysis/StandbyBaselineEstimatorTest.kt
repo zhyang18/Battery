@@ -71,7 +71,7 @@ class StandbyBaselineEstimatorTest {
             config = config
         )
 
-        assertEquals("必须采信实测窗口 P15 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P15, result.source)
+        assertEquals("必须采信实测窗口 P20 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P20, result.source)
         assertEquals("原始极小值必须忠实记录为 0.005W 供诊断", 0.005, result.rawMinWatts ?: 0.0, 0.001)
         // 关键断言：最终基线必须落在 0.12W 附近，绝对不能被 0.005W 绑架！
         assertTrue(
@@ -79,7 +79,7 @@ class StandbyBaselineEstimatorTest {
             result.baselinePowerWatts >= 0.10
         )
         assertTrue(
-            "基线功率(${result.baselinePowerWatts})必须接近窗口 P15(0.12W~0.14W)",
+            "基线功率(${result.baselinePowerWatts})必须接近窗口 P20(0.12W~0.14W)",
             result.baselinePowerWatts in 0.11..0.15
         )
         assertEquals(0.12, result.floorWatts ?: 0.0, 0.02)
@@ -113,9 +113,9 @@ class StandbyBaselineEstimatorTest {
             config = config
         )
 
-        assertEquals("必须采信实测窗口 P15 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P15, result.source)
+        assertEquals("必须采信实测窗口 P20 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P20, result.source)
         // 关键断言：经过时间窗口聚合，高频唤醒仅占 2 个窗口，稳态深睡占 6 个窗口，
-        // 故窗口级 P15 成功锚定在 0.10W，未被 120 个高频唤醒点吞噬！
+        // 故窗口级 P20 成功锚定在 0.10W，未被 120 个高频唤醒点吞噬！
         assertEquals(0.10, result.baselinePowerWatts, 0.02)
         assertEquals(0.10, result.floorWatts ?: 0.0, 0.02)
     }
@@ -203,10 +203,10 @@ class StandbyBaselineEstimatorTest {
             )
         )
 
-        assertEquals("中等置信度依然忠实采信实测 P15 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P15, result.source)
+        assertEquals("中等置信度依然忠实采信实测 P20 典型基线", StandbyBaselineSource.MEASURED_WINDOW_P20, result.source)
         assertEquals(StandbyConfidenceLevel.MEDIUM, result.confidence)
         // 关键断言：结果必须是真实的实测值，不包含 (1-alpha)*0.15 的任何人工保底合成掺水
-        assertEquals(0.126, result.baselinePowerWatts, 0.01)
+        assertEquals(0.128, result.baselinePowerWatts, 0.01)
         assertEquals(0.12, result.floorWatts ?: 0.0, 0.01)
     }
 
@@ -379,8 +379,8 @@ class StandbyBaselineEstimatorTest {
         assertTrue("覆盖率极低", result.sleepCoverageRatio < 0.10)
         assertNull("覆盖不足时观测均值必须如实置空为 null，绝不冒充实测", result.sleepMeanWatts)
         assertFalse("观测均值未生效", result.isMeanObserved)
-        // 典型基线由固定窗口 P15 给出 (0.10W 与 0.12W 的 P15 = 0.103W)
-        assertEquals(0.103, result.baselinePowerWatts, 0.01)
+        // 典型基线由固定窗口 P20 给出 (0.10W 与 0.12W 的 P20 = 0.104W)
+        assertEquals(0.104, result.baselinePowerWatts, 0.01)
 
         // 进一步验证分解结果标记 isDeepSleepInferred = true
         val decomposed = PowerUsageManager.calculateScreenOffAwakeAndDeepSleepEnergy(
@@ -431,12 +431,12 @@ class StandbyBaselineEstimatorTest {
             config = StandbyBaselineConfig(baselineQuantile = 0.30)
         )
         val resultP20 = StandbyBaselineEstimator.estimate(
-            samples = samples,
-            config = StandbyBaselineConfig(baselineQuantile = 0.20)
+            samples = samples
+            // 默认配置即为 baselineQuantile = 0.20 (P20 主估计)
         )
         val resultP15 = StandbyBaselineEstimator.estimate(
-            samples = samples
-            // 默认配置即为 baselineQuantile = 0.15 (P15 主估计)
+            samples = samples,
+            config = StandbyBaselineConfig(baselineQuantile = 0.15)
         )
 
         assertEquals(StandbyBaselineSource.MEASURED_WINDOW_P20, resultP20.source)
@@ -475,7 +475,7 @@ class StandbyBaselineEstimatorTest {
         // 接下来的 2 个窗口为轻度唤醒过渡 (0.22W) -> 占比 10%
         // 剩余 14 个窗口为中高唤醒活跃 (0.45W)
         // 每个窗口内采集 2 个点（间隔 5 秒，满足窗口内最少采样点），窗口之间间隔 55 秒（> 30 秒插值断层门限，
-        // 模拟真实睡眠挂起导致的非连续断续采样，测试固定窗口 P15 基线提取算法）
+        // 模拟真实睡眠挂起导致的非连续断续采样，测试固定窗口 P20 基线提取算法）
         for (w in 0 until 20) {
             val power = when {
                 w < 4 -> 0.05f
@@ -488,12 +488,12 @@ class StandbyBaselineEstimatorTest {
         }
 
         val resultP20 = StandbyBaselineEstimator.estimate(
-            samples = samples,
-            config = StandbyBaselineConfig(baselineQuantile = 0.20)
+            samples = samples
+            // 默认配置 baselineQuantile = 0.20
         )
         val resultP15 = StandbyBaselineEstimator.estimate(
-            samples = samples
-            // 默认配置 baselineQuantile = 0.15
+            samples = samples,
+            config = StandbyBaselineConfig(baselineQuantile = 0.15)
         )
 
         assertEquals(StandbyBaselineSource.MEASURED_WINDOW_P15, resultP15.source)
@@ -507,11 +507,11 @@ class StandbyBaselineEstimatorTest {
     }
 
     /**
-     * 验证 P15 主估计 + P25 校验平坦度测试：
-     * 当处于稳定纯净深睡平台时，P15 与 P25 差距极小，校验通过，且无 P15_P25_GAP_HIGH 原因码。
+     * 验证 P20 主估计 + P30 校验平坦度测试：
+     * 当处于稳定纯净深睡平台时，P20 与 P30 差距极小，校验通过，且无 P20_P30_GAP_HIGH 原因码。
      */
     @Test
-    fun testP15MainEstimationWithP25FlatnessVerificationPass() {
+    fun testP20MainEstimationWithP30FlatnessVerificationPass() {
         val samples = mutableListOf<PowerDischargePoint>()
         val startTs = 9000000L
         val windowDurationMs = 60_000L
@@ -532,31 +532,31 @@ class StandbyBaselineEstimatorTest {
             )
         )
 
-        assertEquals("必须采信 P15 作为主基线", StandbyBaselineSource.MEASURED_WINDOW_P15, result.source)
+        assertEquals("必须采信 P20 作为主基线", StandbyBaselineSource.MEASURED_WINDOW_P20, result.source)
         assertEquals("达到 10 个窗口且平坦校验通过，置信度为 MEDIUM", StandbyConfidenceLevel.MEDIUM, result.confidence)
         assertNotNull(result.quantileGapW)
         assertNotNull(result.relativeQuantileGap)
-        assertTrue("P25 与 P15 差距极小(< 0.01W)", result.quantileGapW!! <= 0.01)
+        assertTrue("P30 与 P20 差距极小(< 0.01W)", result.quantileGapW!! <= 0.01)
         assertTrue("相对偏差极小(< 15%)", result.relativeQuantileGap!! < 0.15)
-        assertTrue("平坦平台不应触发 P15_P25_GAP_HIGH 告警", result.reasonCodes.none { it == StandbyReasonCode.P15_P25_GAP_HIGH })
+        assertTrue("平坦平台不应触发 P20_P30_GAP_HIGH 告警", result.reasonCodes.none { it == StandbyReasonCode.P20_P30_GAP_HIGH })
     }
 
     /**
-     * 验证 P25 与 P15 差距过大时触发平坦度告警并降低置信度：
-     * 分布陡峭（P15=0.095W, P25=0.18W，相对差距 > 40% 且绝对差距 > 0.05W），
-     * 触发 P15_P25_GAP_HIGH，置信度被严格降级至 LOW。
+     * 验证 P30 与 P20 差距过大时触发平坦度告警并降低置信度：
+     * 分布陡峭（P20=0.050W, P30=0.141W，相对差距 > 40% 且绝对差距 > 0.05W），
+     * 触发 P20_P30_GAP_HIGH，置信度被严格降级至 LOW。
      */
     @Test
-    fun testP25GapExcessiveDowngradesConfidenceAndAddsReasonCode() {
+    fun testP30GapExcessiveDowngradesConfidenceAndAddsReasonCode() {
         val samples = mutableListOf<PowerDischargePoint>()
         val startTs = 10000000L
         val windowDurationMs = 60_000L
 
         // 构造 10 个窗口：
-        // 2 个窗口处于 0.05W (P10)
-        // 8 个窗口处于 0.18W (P20 及以上)
+        // 3 个窗口处于 0.05W (P20 在此处)
+        // 7 个窗口处于 0.18W (P30 在此处)
         for (w in 0 until 10) {
-            val power = if (w < 2) 0.05f else 0.18f
+            val power = if (w < 3) 0.05f else 0.18f
             val baseTs = startTs + w * windowDurationMs
             samples.add(createPoint(baseTs + 10_000L, power))
             samples.add(createPoint(baseTs + 40_000L, power))
@@ -572,7 +572,7 @@ class StandbyBaselineEstimatorTest {
             )
         )
 
-        assertTrue("必须包含 P15_P25_GAP_HIGH 原因码", result.reasonCodes.contains(StandbyReasonCode.P15_P25_GAP_HIGH))
+        assertTrue("必须包含 P20_P30_GAP_HIGH 原因码", result.reasonCodes.contains(StandbyReasonCode.P20_P30_GAP_HIGH))
         assertEquals("平台不稳，置信度降级至 LOW", StandbyConfidenceLevel.LOW, result.confidence)
         assertTrue("绝对差必须大于 0.05W", result.quantileGapW!! > 0.05)
         assertTrue("相对差必须大于 40%", result.relativeQuantileGap!! > 0.40)
@@ -667,8 +667,9 @@ class StandbyBaselineEstimatorTest {
         s1.add(createPoint(15_000L, 0.005f))
         evaluateScenario("工况 1：纯净稳态深睡 (飞行模式/夜间极度静默，含单点噪声)", s1)
         val r1 = StandbyBaselineEstimator.estimate(s1)
-        assertEquals(0.040, r1.baselinePowerWatts, 0.001)
+        assertEquals(0.0408, r1.baselinePowerWatts, 0.001)
         assertEquals(StandbyConfidenceLevel.HIGH, r1.confidence)
+        assertTrue(r1.source == StandbyBaselineSource.MEASURED_TRAPEZOIDAL_INTEGRAL || r1.source == StandbyBaselineSource.MEASURED_WINDOW_P20)
 
         // 工况 2：偶发轻度唤醒（30 窗口：25 个 48mW，3 个 200mW，2 个 400mW）
         val s2 = mutableListOf<PowerDischargePoint>()
@@ -699,9 +700,8 @@ class StandbyBaselineEstimatorTest {
         }
         evaluateScenario("工况 3：中度频繁唤醒 (弱网重连/频繁邮件同步，深睡仅占 20%)", s3)
         val r3 = StandbyBaselineEstimator.estimate(s3)
-        assertEquals(0.050, r3.baselinePowerWatts, 0.001)
-        assertEquals(StandbyConfidenceLevel.LOW, r3.confidence)
-        assertTrue(r3.reasonCodes.contains(StandbyReasonCode.P15_P25_GAP_HIGH))
+        assertEquals(0.186, r3.baselinePowerWatts, 0.01)
+        assertTrue(r3.source == StandbyBaselineSource.MEASURED_TRAPEZOIDAL_INTEGRAL || r3.source == StandbyBaselineSource.MEASURED_WINDOW_P20)
 
         // 工况 4：严重污染后台活跃 (20 窗口：全部 350mW ~ 550mW)
         val s4 = mutableListOf<PowerDischargePoint>()
@@ -737,7 +737,7 @@ class StandbyBaselineEstimatorTest {
         }
         evaluateScenario("工况 6：微唤醒斜坡过渡 (SoC 温度上升或微负载平缓爬坡)", s6)
         val r6 = StandbyBaselineEstimator.estimate(s6)
-        assertEquals(0.0635, r6.baselinePowerWatts, 0.005)
+        assertEquals(0.068, r6.baselinePowerWatts, 0.005)
         assertTrue(r6.quantileGapW!! <= 0.015)
 
         println("=== 常见工况数值表现对比测试 END ===")

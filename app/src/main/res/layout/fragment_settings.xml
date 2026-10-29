@@ -39,7 +39,7 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:paddingHorizontal="10dp"
-            android:paddingBottom="10dp">
+            android:paddingBottom="0dp">
 
             <!-- 1. 用户界面 分类 -->
             <TextView

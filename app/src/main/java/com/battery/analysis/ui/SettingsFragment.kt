@@ -205,6 +205,23 @@ class SettingsFragment : Fragment() {
         setupHelpSection()
         setupAboutSection()
         setupScrollListener()
+
+        // 注册底部安全内边距监听，动态分配底边距防系统导航键拦截
+        (activity as? MainActivity)?.registerBottomInsetListener(bottomInsetListener)
+    }
+
+    private val bottomInsetListener: (Int) -> Unit = { bottomInset ->
+        _binding?.let { b ->
+            val density = resources.displayMetrics.density
+            val totalBottomPadding = bottomInset + (20 * density).toInt()
+            b.scrollView.clipToPadding = false
+            b.scrollView.setPaddingRelative(
+                b.scrollView.paddingStart,
+                b.scrollView.paddingTop,
+                b.scrollView.paddingEnd,
+                totalBottomPadding
+            )
+        }
     }
 
     /**
@@ -213,10 +230,10 @@ class SettingsFragment : Fragment() {
     private fun setupScrollListener() {
         binding.scrollView.setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
             val dy = scrollY - oldScrollY
-            if (dy > 4) {
+            if (dy > 12) {
                 // 手指向上滑动列表，灵敏联动隐藏底部页签栏
                 (activity as? MainActivity)?.setBottomNavigationVisibility(false)
-            } else if (dy < -8 || (dy < 0 && scrollY <= 0)) {
+            } else if (dy < -12 || !binding.scrollView.canScrollVertically(-1)) {
                 // 手指向下滑动列表或已回滚至最顶端，恢复展示底部页签栏
                 (activity as? MainActivity)?.setBottomNavigationVisibility(true)
             }
@@ -2296,6 +2313,7 @@ class SettingsFragment : Fragment() {
      */
     override fun onDestroyView() {
         dismissAllActiveWindows()
+        (activity as? MainActivity)?.unregisterBottomInsetListener(bottomInsetListener)
         super.onDestroyView()
         _binding = null
     }

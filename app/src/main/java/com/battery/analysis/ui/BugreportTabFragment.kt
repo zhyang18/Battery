@@ -87,6 +87,7 @@ class BugreportTabFragment : Fragment() {
 
         // 配置滚动监听联动隐藏底部页签栏
         setupScrollListener()
+        (activity as? MainActivity)?.registerBottomInsetListener(bottomInsetListener)
 
         // 原始数据折叠/展开事件
         binding.rawToggleHeader.setOnClickListener {
@@ -145,16 +146,30 @@ class BugreportTabFragment : Fragment() {
         }
     }
 
+    private val bottomInsetListener: (Int) -> Unit = { bottomInset ->
+        _binding?.let { b ->
+            val density = resources.displayMetrics.density
+            val totalBottomPadding = bottomInset + (20 * density).toInt()
+            b.nestedScrollView.clipToPadding = false
+            b.nestedScrollView.setPaddingRelative(
+                b.nestedScrollView.paddingStart,
+                b.nestedScrollView.paddingTop,
+                b.nestedScrollView.paddingEnd,
+                totalBottomPadding
+            )
+        }
+    }
+
     /**
      * 配置列表滚动与手势监听，联动控制 MainActivity 底部页签栏的显示与隐藏。
      */
     private fun setupScrollListener() {
         binding.nestedScrollView.setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
             val dy = scrollY - oldScrollY
-            if (dy > 4) {
+            if (dy > 12) {
                 // 手指向上滑动列表，灵敏联动隐藏底部页签栏
                 (activity as? MainActivity)?.setBottomNavigationVisibility(false)
-            } else if (dy < -8 || (dy < 0 && scrollY <= 0)) {
+            } else if (dy < -12 || !binding.nestedScrollView.canScrollVertically(-1)) {
                 // 手指向下滑动列表或已回滚至最顶端，恢复展示底部页签栏
                 (activity as? MainActivity)?.setBottomNavigationVisibility(true)
             }
@@ -187,6 +202,7 @@ class BugreportTabFragment : Fragment() {
      * 视图销毁时的清理工作。
      */
     override fun onDestroyView() {
+        (activity as? MainActivity)?.unregisterBottomInsetListener(bottomInsetListener)
         super.onDestroyView()
         _binding = null
     }

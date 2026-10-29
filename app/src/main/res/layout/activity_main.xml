@@ -4,12 +4,11 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <!-- 顶级 ViewPager2 容器：承载“耗电/充电”、“检测”、“设置”三大顶级页面，约束在底部导航栏上方避免遮挡与按键冲突 -->
+    <!-- 顶级 ViewPager2 容器：全屏铺满承载各大主页面，支持全沉浸与底层滑动穿越 -->
     <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/main_view_pager"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_above="@+id/layout_bottom_nav_container" />
+        android:layout_height="match_parent" />
 
     <!-- 底部导航容器（包含底部分割线与导航栏，支持整体平滑联动平移下沉隐藏与上浮显示） -->
     <LinearLayout
@@ -26,17 +25,20 @@
             android:layout_height="1dp"
             android:background="#14888888" />
 
-        <!-- 底部 Material 3 导航栏 -->
+        <!-- 底部 Material 3 导航栏：高度定制为 60dp，纯图标沉浸导航（去除文字） -->
         <com.google.android.material.bottomnavigation.BottomNavigationView
             android:id="@+id/bottom_navigation"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="?android:attr/colorBackground"
-            app:elevation="8dp"
+            android:layout_height="60dp"
+            android:background="@android:color/transparent"
+            app:elevation="0dp"
             app:itemIconTint="@color/selector_nav_item_color"
             app:itemTextColor="@color/selector_nav_item_color"
-            app:labelVisibilityMode="labeled"
-            app:menu="@menu/bottom_nav_menu" />
+            app:itemIconSize="24dp"
+            app:labelVisibilityMode="unlabeled"
+            app:menu="@menu/bottom_nav_menu"
+            app:paddingBottomSystemWindowInsets="false"
+            app:paddingTopSystemWindowInsets="false" />
     </LinearLayout>
 
 </RelativeLayout>

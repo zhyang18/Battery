@@ -136,14 +136,16 @@ object StandbyBaselineEstimator {
         val p10Watts = calculatePercentile(windowPowers, config.floorQuantile)
         val p15Watts = calculatePercentile(windowPowers, 0.15)
         val p20Watts = calculatePercentile(windowPowers, 0.20)
-        val p25Watts = calculatePercentile(windowPowers, config.checkQuantile)
+        val p25Watts = calculatePercentile(windowPowers, 0.25)
         val p30Watts = calculatePercentile(windowPowers, 0.30)
         val p50Watts = calculatePercentile(windowPowers, 0.50)
         val madWatts = calculateMad(windowPowers, p50Watts)
 
-        // P25 与 P15 平坦度与离散度校验
-        val quantileGapW = (p25Watts - p15Watts).coerceAtLeast(0.0)
-        val relativeQuantileGap = quantileGapW / maxOf(abs(p25Watts), config.epsilonW)
+        // 校验分位数（默认 P30）与主基线分位数（默认 P20）平坦度与离散度校验
+        val checkWatts = calculatePercentile(windowPowers, config.checkQuantile)
+        val baselineQuantileWatts = calculatePercentile(windowPowers, config.baselineQuantile)
+        val quantileGapW = (checkWatts - baselineQuantileWatts).coerceAtLeast(0.0)
+        val relativeQuantileGap = quantileGapW / maxOf(abs(checkWatts), config.epsilonW)
         val isGapExcessive = quantileGapW > config.maxAllowedAbsoluteQuantileGapWatts &&
                 relativeQuantileGap > config.maxAllowedRelativeQuantileGap
 
@@ -181,8 +183,8 @@ object StandbyBaselineEstimator {
             )
         }
 
-        // 6. 三阶指标确定：主基线采用固定窗口主分位数（默认 P15）
-        val candidateBaselineWatts = calculatePercentile(windowPowers, config.baselineQuantile)
+        // 6. 三阶指标确定：主基线采用固定窗口主分位数（默认 P20）
+        val candidateBaselineWatts = baselineQuantileWatts
 
         // 7. 时间积分观测均值与覆盖率门禁（70% 覆盖率与 15 分钟覆盖时长）
         val isCoverageSufficient = coverageRatio >= config.minCoverageRatioForMean && coveredDurationMs >= 15 * 60 * 1000L
@@ -203,7 +205,11 @@ object StandbyBaselineEstimator {
             reasonCodes.add(StandbyReasonCode.INSUFFICIENT_CANDIDATE_WINDOWS)
         }
         if (isGapExcessive) {
-            reasonCodes.add(StandbyReasonCode.P15_P25_GAP_HIGH)
+            when {
+                config.baselineQuantile >= 0.20 -> reasonCodes.add(StandbyReasonCode.P20_P30_GAP_HIGH)
+                config.baselineQuantile >= 0.15 -> reasonCodes.add(StandbyReasonCode.P15_P25_GAP_HIGH)
+                else -> reasonCodes.add(StandbyReasonCode.P10_P20_GAP_HIGH)
+            }
         }
         if (madWatts > 0.10) {
             reasonCodes.add(StandbyReasonCode.SENSOR_ABNORMAL_OR_QUANTIZED)
@@ -232,14 +238,17 @@ object StandbyBaselineEstimator {
 
         val reason = if (!isObservedMean) {
             val quantilePercent = (config.baselineQuantile * 100).toInt()
+            val checkQuantilePercent = (config.checkQuantile * 100).toInt()
             if (isGapExcessive) {
-                "低功耗平台平坦度不足(P15=${String.format(Locale.US, "%.2f", p15Watts)}W, P25=${String.format(Locale.US, "%.2f", p25Watts)}W, 差距${String.format(Locale.US, "%.1f", relativeQuantileGap * 100)}% > ${String.format(Locale.US, "%.0f", config.maxAllowedRelativeQuantileGap * 100)}%)，降低置信度并采用固定窗口P${quantilePercent}作为典型基线"
+                "低功耗平台平坦度不足(P${quantilePercent}=${String.format(Locale.US, "%.2f", baselineQuantileWatts)}W, P${checkQuantilePercent}=${String.format(Locale.US, "%.2f", checkWatts)}W, 差距${String.format(Locale.US, "%.1f", relativeQuantileGap * 100)}% > ${String.format(Locale.US, "%.0f", config.maxAllowedRelativeQuantileGap * 100)}%)，降低置信度并采用固定窗口P${quantilePercent}作为典型基线"
             } else {
                 "连续采样覆盖率不足(${String.format(Locale.US, "%.1f", coverageRatio * 100)}% < ${String.format(Locale.US, "%.0f", config.minCoverageRatioForMean * 100)}%)，如实置空观测均值并采用固定窗口P${quantilePercent}分位数作为典型待机基线"
             }
         } else {
+            val quantilePercent = (config.baselineQuantile * 100).toInt()
+            val checkQuantilePercent = (config.checkQuantile * 100).toInt()
             if (isGapExcessive) {
-                "实测观测均值已计算，但低功耗平台平坦度不足(P15=${String.format(Locale.US, "%.2f", p15Watts)}W, P25=${String.format(Locale.US, "%.2f", p25Watts)}W)"
+                "实测观测均值已计算，但低功耗平台平坦度不足(P${quantilePercent}=${String.format(Locale.US, "%.2f", baselineQuantileWatts)}W, P${checkQuantilePercent}=${String.format(Locale.US, "%.2f", checkWatts)}W)"
             } else {
                 null
             }

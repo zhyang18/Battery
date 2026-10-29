@@ -97,6 +97,7 @@ class MainActivity : AppCompatActivity() {
      */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         updateSystemBarAppearance()
 
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -300,19 +301,23 @@ class MainActivity : AppCompatActivity() {
     private var isBottomNavVisible: Boolean = true
 
     /**
-     * 设置底部导航栏显隐状态。
-     * 采用布局层级解耦（ViewPager2 布局于底部导航栏之上）后，底部导航栏常驻吸底呈现，
-     * 保持主视图与系统三键导航栏完全解耦，杜绝内容遮挡与按键事件冲突。
+     * 设置底部导航栏联动显隐状态，配合平滑动效实现平滑滑入或滑出。
+     * 隐藏时整体平移下沉出屏幕，显示时回位；完美兼容全面屏手势与系统三键导航沉浸式避让。
      *
      * @param visible 是否显示底部导航栏（true 为显示，false 为隐藏）
      */
     fun setBottomNavigationVisibility(visible: Boolean) {
-        // 主页签吸底稳定展示，避免手势联动隐藏导致的空白或事件拦截冲突
-        if (binding.layoutBottomNavContainer.translationY != 0f) {
-            binding.layoutBottomNavContainer.animate().cancel()
-            binding.layoutBottomNavContainer.translationY = 0f
-        }
-        isBottomNavVisible = true
+        if (isBottomNavVisible == visible) return
+        isBottomNavVisible = visible
+        val containerHeight = binding.layoutBottomNavContainer.height.toFloat().takeIf { it > 0f }
+            ?: (60f * resources.displayMetrics.density + 150f)
+        val targetTranslationY = if (visible) 0f else containerHeight
+        binding.layoutBottomNavContainer.animate().cancel()
+        binding.layoutBottomNavContainer.animate()
+            .translationY(targetTranslationY)
+            .setDuration(220L)
+            .setInterpolator(androidx.interpolator.view.animation.FastOutSlowInInterpolator())
+            .start()
     }
 
     /** 底部导航栏首个页签当前呈现的充放电模式缓存，防止重复赋值触发重绘 */
@@ -360,10 +365,53 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** 系统底部导航栏/手势条物理避让安全内边距（单位：像素） */
+    var systemBottomInset: Int = 0
+        private set
+
+    /** 底部安全内边距动态分发监听器列表 */
+    private val bottomInsetListeners = mutableListOf<(Int) -> Unit>()
+
     /**
-     * 根据当前日夜间模式与主题，自动调整状态栏及导航栏图标的明暗颜色。
+     * 注册底部导航安全内边距监听器。
+     * 若当前已捕获到系统 Insets，则立即触发一次回调同步初始边距。
+     */
+    fun registerBottomInsetListener(listener: (Int) -> Unit) {
+        if (!bottomInsetListeners.contains(listener)) {
+            bottomInsetListeners.add(listener)
+        }
+        if (systemBottomInset > 0) {
+            listener(systemBottomInset)
+        }
+    }
+
+    /**
+     * 注销底部导航安全内边距监听器。
+     */
+    fun unregisterBottomInsetListener(listener: (Int) -> Unit) {
+        bottomInsetListeners.remove(listener)
+    }
+
+    /**
+     * 屏幕配置改变（如日夜间模式物理切换）时更新状态栏与导航栏沉浸样式。
+     */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        updateSystemBarAppearance()
+    }
+
+    /**
+     * 根据当前日夜间模式与主题，自动调整状态栏及导航栏图标的明暗颜色与全沉浸式背景。
+     * 显式将系统导航栏与状态栏背景设为全透明，并在 Android 10+ 禁用导航键高对比度黑色强制遮罩，
+     * 确保系统三键导航（◁ ○ ▢）与全面屏手势条完美沉浸于应用底色之上。
      */
     private fun updateSystemBarAppearance() {
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = android.graphics.Color.TRANSPARENT
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+            window.isStatusBarContrastEnforced = false
+        }
         val insetsController = WindowCompat.getInsetsController(window, window.decorView)
         val isNight = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
         insetsController.isAppearanceLightStatusBars = !isNight
@@ -385,6 +433,9 @@ class MainActivity : AppCompatActivity() {
             val leftInset = maxOf(statusBarInsets.left, displayCutout.left, navBarInsets.left)
             val rightInset = maxOf(statusBarInsets.right, displayCutout.right, navBarInsets.right)
             val bottomInset = maxOf(navBarInsets.bottom, displayCutout.bottom)
+
+            systemBottomInset = bottomInset
+            bottomInsetListeners.forEach { it(bottomInset) }
 
             binding.mainViewPager.setPadding(leftInset, topInset, rightInset, 0)
             binding.layoutBottomNavContainer.setPadding(leftInset, 0, rightInset, bottomInset)

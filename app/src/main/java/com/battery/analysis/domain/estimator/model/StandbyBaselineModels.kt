@@ -20,12 +20,11 @@ enum class StandbyStateClassification {
  * 遵循系统零假数据原则，严格标注待机基线是来源于真实实测窗口统计，还是在数据缺失时回退的客观先验。
  */
 enum class StandbyBaselineSource {
+    /** 来源于有效深睡固定长度窗口第 20 百分位数 (P20) 典型基线 */
+    MEASURED_WINDOW_P20,
+
     /** 来源于有效深睡固定长度窗口第 15 百分位数 (P15) 典型基线 */
     MEASURED_WINDOW_P15,
-
-    /** 来源于有效深睡固定长度窗口第 20 百分位数 (P20) 典型基线（保留向下兼容） */
-    @Deprecated("已升级为 P15 算法，推荐使用 MEASURED_WINDOW_P15")
-    MEASURED_WINDOW_P20,
 
     /** 来源于有效深睡固定长度窗口第 30 百分位数 (P30) 典型基线（保留兼容） */
     @Deprecated("已升级为 P20 算法，推荐使用 MEASURED_WINDOW_P20")
@@ -98,8 +97,11 @@ enum class StandbyReasonCode {
     /** P10 与 P20 分位数差距过大，低功耗底噪平台平坦度不足，疑似微唤醒频繁（保留兼容） */
     P10_P20_GAP_HIGH,
 
-    /** P15 与 P25 分位数差距过大，低功耗底噪平台平坦度不足，疑似微唤醒频繁 */
+    /** P15 与 P25 分位数差距过大，低功耗底噪平台平坦度不足，疑似微唤醒频繁（保留兼容） */
     P15_P25_GAP_HIGH,
+
+    /** P20 与 P30 分位数差距过大，低功耗底噪平台平坦度不足，疑似微唤醒频繁 */
+    P20_P30_GAP_HIGH,
 
     /** 息屏期间疑似受到后台任务严重污染 (全窗口功率偏高且无低功耗窗口支持) */
     SUSPICIOUS_POLLUTION_DETECTED,
@@ -115,7 +117,7 @@ enum class StandbyReasonCode {
  * 息屏待机基线与深睡功耗多阶综合估计结果数据类。
  * 遵循严格的数据独立性与物理语义分离原则，严禁残差互甩或将估计值伪造为实测。
  *
- * @property baselinePowerWatts 从经过有效状态筛选的固定长度窗口代表功率计算的 P15 主基线（单位：瓦特 W，典型深睡静态基线候选）
+ * @property baselinePowerWatts 从经过有效状态筛选的固定长度窗口代表功率计算的 P20 主基线（单位：瓦特 W，典型深睡静态基线候选）
  * @property source 待机基线功率来源 [StandbyBaselineSource]
  * @property confidence 估计结果置信度等级 [StandbyConfidenceLevel]
  * @property validWindowCount 参与有效统计的时间窗口总数
@@ -126,14 +128,14 @@ enum class StandbyReasonCode {
  * @property isMeanObserved 均值是否为真实时间积分观测值（true: 梯形微积分直接观测; false: 覆盖不足/无实测均值）
  * @property p5Watts 窗口级代表功率第 5 百分位数（单位：W，用于诊断低端离散度与下界，可为 null）
  * @property p10Watts 窗口级代表功率第 10 百分位数（单位：W，诊断用低分位参考，可为 null）
- * @property p15Watts 窗口级代表功率第 15 百分位数（单位：W，主基线值，可为 null）
- * @property p20Watts 窗口级代表功率第 20 百分位数（单位：W，诊断用低位功耗基准，可为 null）
- * @property p25Watts 窗口级代表功率第 25 百分位数（单位：W，用于 P15 平坦度校验基准，可为 null）
- * @property p30Watts 窗口级代表功率第 30 百分位数（单位：W，诊断用低位功耗基准，可为 null）
+ * @property p15Watts 窗口级代表功率第 15 百分位数（单位：W，诊断用低位基线值，可为 null）
+ * @property p20Watts 窗口级代表功率第 20 百分位数（单位：W，主基线值，可为 null）
+ * @property p25Watts 窗口级代表功率第 25 百分位数（单位：W，诊断用低位功耗基准，可为 null）
+ * @property p30Watts 窗口级代表功率第 30 百分位数（单位：W，用于 P20 平坦度校验基准，可为 null）
  * @property p50Watts 窗口级代表功率中位数（单位：W，诊断用窗口中位功耗，可为 null）
  * @property madWatts 窗口级代表功率绝对中位差 MAD（单位：W，衡量窗口间稳健离散度，可为 null）
- * @property quantileGapW P25 与 P15 的绝对分位数差（单位：W，衡量低功耗平台平坦度）
- * @property relativeQuantileGap P25 与 P15 的相对分位数差（(P25 - P15) / max(P25, epsilon)）
+ * @property quantileGapW P30 与 P20 的绝对分位数差（单位：W，衡量低功耗平台平坦度）
+ * @property relativeQuantileGap P30 与 P20 的相对分位数差（(P30 - P20) / max(P30, epsilon)）
  * @property rawMinWatts 原始采样点中的物理极小值（单位：W，仅用于硬件底噪与异常诊断，严禁直接支配基线）
  * @property reasonCodes 触发门禁、降级或回退的结构化原因码列表
  * @property fallbackReason 触发回退先验或覆盖不足的具体原因文本说明（兼容旧接口）
@@ -168,12 +170,12 @@ data class StandbyBaselineEstimate(
  *
  * @property defaultPriorWatts 缺少可靠实测样本时的初始默认待机先验功率（单位：W，默认 0.15W）
  * @property suspiciousPollutionThresholdWatts 疑似活跃任务污染判定门限（单位：W，默认 0.20W，高于此门限触发污染风险诊断）
- * @property baselineQuantile 用于作为待机基线的主分位点（默认 0.15 即 P15 主基线分位数）
- * @property checkQuantile 用于校验待机基线平坦度的一致性分位点（默认 0.25 即 P25 校验分位数）
+ * @property baselineQuantile 用于作为待机基线的主分位点（默认 0.20 即 P20 主基线分位数）
+ * @property checkQuantile 用于校验待机基线平坦度的一致性分位点（默认 0.30 即 P30 校验分位数）
  * @property floorQuantile 用于诊断低功耗下界的分位点（默认 0.10 即 P10）
  * @property diagnosticLowerQuantile 用于诊断极低端离散度的下界分位点（默认 0.05 即 P5）
- * @property maxAllowedRelativeQuantileGap 最大允许的 P25 与 P15 相对偏差率（默认 0.40 即 40%）
- * @property maxAllowedAbsoluteQuantileGapWatts 最大允许的 P25 与 P15 绝对偏差门限（单位：W，默认 0.05W）
+ * @property maxAllowedRelativeQuantileGap 最大允许的 P30 与 P20 相对偏差率（默认 0.40 即 40%）
+ * @property maxAllowedAbsoluteQuantileGapWatts 最大允许的 P30 与 P20 绝对偏差门限（单位：W，默认 0.05W）
  * @property epsilonW 计算相对偏差时的分母保护偏置项（单位：W，默认 0.02W）
  * @property baseWindowDurationMs 基础固定长度时间聚合窗口长度（单位：毫秒，默认 60,000ms 即 1 分钟）
  * @property minSamplesPerWindow 单个时间窗口判定为有效所需的最少有效采样点数（默认 2 个）
@@ -187,8 +189,8 @@ data class StandbyBaselineEstimate(
 data class StandbyBaselineConfig(
     val defaultPriorWatts: Double = 0.15,
     val suspiciousPollutionThresholdWatts: Double = 0.20,
-    val baselineQuantile: Double = 0.15,
-    val checkQuantile: Double = 0.25,
+    val baselineQuantile: Double = 0.20,
+    val checkQuantile: Double = 0.30,
     val floorQuantile: Double = 0.10,
     val diagnosticLowerQuantile: Double = 0.05,
     val maxAllowedRelativeQuantileGap: Double = 0.40,

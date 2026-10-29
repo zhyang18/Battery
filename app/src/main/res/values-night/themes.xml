@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <!-- AMOLED 纯黑深色模式主题（基于 Material3，全部属性使用 @color/... 引用） -->
     <style name="Theme.BatteryApp" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/primary_light</item>
@@ -12,6 +12,8 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:enforceNavigationBarContrast" tools:targetApi="q">false</item>
+        <item name="android:enforceStatusBarContrast" tools:targetApi="q">false</item>
         <item name="android:textColorPrimary">@color/text_primary_dark</item>
         <item name="android:textColorSecondary">@color/text_secondary_dark</item>
         <item name="alertDialogTheme">@style/AmoledAlertDialogTheme</item>

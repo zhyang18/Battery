@@ -428,6 +428,10 @@ class PowerUsageFragment : Fragment() {
         // 1. 顶部 AppBarLayout 偏移联动：标题栏平滑淡出，核心指标卡片随 AppBarLayout 原生吸顶常驻展示
         binding.appbarPower.addOnOffsetChangedListener { appBarLayout, verticalOffset ->
             lastAppBarVerticalOffset = verticalOffset
+            if (verticalOffset == 0) {
+                // 当顶部标题栏完全展开到最顶端时，恢复展示底部导航栏
+                (activity as? MainActivity)?.setBottomNavigationVisibility(true)
+            }
             if (currentDisplayTab == 1) {
                 // 充电模式下完全禁用联动折叠动效，固定常驻完整展开标题栏，隐藏放电核心指标卡片
                 binding.layoutExpandedHeader.alpha = 1f
@@ -468,13 +472,24 @@ class PowerUsageFragment : Fragment() {
             }
         }
 
-        // 2. 列表滚动监听：滑动期冻结图表重绘
+        // 2. 列表滚动监听：滑动期冻结图表重绘，并联动隐藏/显示底部导航栏
         binding.recyclerAppUsage.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: androidx.recyclerview.widget.RecyclerView, newState: Int) {
                 super.onScrollStateChanged(recyclerView, newState)
                 // 滑动过程中彻底冻结图表重绘、重载与数据刷新
                 val isScrolling = (newState != androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE)
                 adapter.setScrolling(isScrolling)
+            }
+
+            override fun onScrolled(recyclerView: androidx.recyclerview.widget.RecyclerView, dx: Int, dy: Int) {
+                super.onScrolled(recyclerView, dx, dy)
+                if (dy > 12) {
+                    // 手指上滑（查看下方内容），平滑联动隐藏底部导航栏
+                    (activity as? MainActivity)?.setBottomNavigationVisibility(false)
+                } else if (dy < -12 || !recyclerView.canScrollVertically(-1)) {
+                    // 手指下滑或已回滚至最顶端，平滑恢复展示底部导航栏
+                    (activity as? MainActivity)?.setBottomNavigationVisibility(true)
+                }
             }
         })
     }
@@ -639,6 +654,7 @@ class PowerUsageFragment : Fragment() {
      */
     override fun onDestroyView() {
         dismissAllActiveWindows()
+        (activity as? MainActivity)?.unregisterBottomInsetListener(bottomInsetListener)
         super.onDestroyView()
         stopChargingPolling()
         stopDischargePolling()
@@ -751,6 +767,28 @@ class PowerUsageFragment : Fragment() {
         adapter.setFirstTimeSetup(true, selectedMode, isShizukuInstalled)
     }
 
+    private val bottomInsetListener: (Int) -> Unit = { bottomInset ->
+        updateListBottomPadding(bottomInset)
+    }
+
+    /**
+     * 动态更新应用耗电列表底部内边距，保障列表末项在滚动到底端时完全展现于系统三键或底部导航栏之上，
+     * 杜绝系统虚拟返回键、主页键覆盖列表 item 导致触摸点击事件被系统拦截。
+     */
+    private fun updateListBottomPadding(bottomInset: Int) {
+        if (_binding == null) return
+        val density = resources.displayMetrics.density
+        // 上滑到底部时底栏自动隐藏，保留精确 20dp 的安全底边距（三键导航下叠加 bottomInset 防按键冲突）
+        val totalBottomPadding = bottomInset + (20 * density).toInt()
+        binding.recyclerAppUsage.clipToPadding = false
+        binding.recyclerAppUsage.setPaddingRelative(
+            binding.recyclerAppUsage.paddingStart,
+            binding.recyclerAppUsage.paddingTop,
+            binding.recyclerAppUsage.paddingEnd,
+            totalBottomPadding
+        )
+    }
+
     /**
      * 初始化应用耗电 RecyclerView 列表，并注册列表项点击弹出前后台深度能耗详情 BottomSheet 弹窗监听。
      * 点击单个应用条目时，按需异步定向查询该应用在放电时间段内的后台相关数据（流量、硬件开销），并实时刷新呈现。
@@ -759,6 +797,9 @@ class PowerUsageFragment : Fragment() {
     private fun setupRecyclerView() {
         binding.recyclerAppUsage.layoutManager = LinearLayoutManager(requireContext())
         binding.recyclerAppUsage.adapter = adapter
+
+        // 注册底部安全内边距监听，动态分配底边距防系统导航键拦截
+        (activity as? MainActivity)?.registerBottomInsetListener(bottomInsetListener)
 
         adapter.onListCountChangedListener = { count ->
             updateUsageListTitle(count)

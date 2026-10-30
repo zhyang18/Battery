@@ -100,9 +100,14 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         /**
          * 纯净深度休眠（Deep Sleep / Suspend）静态物理底噪天花板门限（单位：瓦特 W，默认 0.12W）。
-         * 无论整夜息屏平均功耗多大，深度挂起状态下芯片与硬件物理底噪绝不可能突破 0.12W。
-         * 杜绝将大于 0.12W 的偶发唤醒或后台网络活跃采样点误当做深度休眠基线。
+         *
+         * @deprecated 已废除死板的 0.12W 绝对上限。真实硬件（如双卡、5G SA、弱信号、平板/折叠屏）静态底噪
+         * 完全可能处于 0.12W~0.25W。算法已全面升级为基于真实时序分布的自适应稳态基线识别。
          */
+        @Deprecated(
+            message = "已废除死板的 0.12W 绝对上限，算法已升级为基于样本真实分布的自适应稳态基线识别",
+            level = DeprecationLevel.WARNING
+        )
         const val MAX_PURE_DEEP_SLEEP_WATTS = 0.12f
 
         /** 息屏未结算时间窗待机功率补偿的合理性上限物理门限（单位：瓦特 W，默认 0.35W，超过此值判定基准账本异常回退默认待机功率） */
@@ -885,13 +890,18 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         /**
          * 从放电时序采样点序列中提取稳定的深度休眠物理采样点。
-         * 自动识别亮屏转灭屏的时序边界，剔除关屏初期前 180 秒（3 分钟）内脏数据落盘与网络连接切断的过渡态震荡样本，
-         * 优先保留进入稳定挂起阶段的高纯度物理采样点。
+         * 自动识别亮屏转灭屏的时序边界，遵循物理第一性原则：彻底摒弃死板写死的 0.12W 绝对上限，自适应识别当前设备的静默待机底噪。
+         * 灭屏初期（前 180 秒内）若采样点已收敛至稳态待机基线，坚决予以保留；
+         * 仅对高于稳态基线的过渡期活跃高功耗样本（> quiescentThreshold 且处于灭屏初期 180 秒内）予以剔除。
          *
          * @param samples 原始放电瞬态采样点序列
-         * @return 过滤过渡震荡后的稳定息屏物理采样点列表
+         * @param quiescentThreshold 允许判别为静默稳态的动态功耗门限（单位：瓦特 W，可选；若为 null 则基于样本真实分布自适应推导）
+         * @return 过滤过渡震荡后的稳定息屏物理采样点列表 [List<PowerDischargePoint>]
          */
-        internal fun filterStableQuiescentSamples(samples: List<PowerDischargePoint>): List<PowerDischargePoint> {
+        internal fun filterStableQuiescentSamples(
+            samples: List<PowerDischargePoint>,
+            quiescentThreshold: Float? = null
+        ): List<PowerDischargePoint> {
             val sortedSamples = samples.sortedBy { it.timestamp }
             val validOffSamples = sortedSamples.filter { !it.isScreenOn && it.powerWatts > 0f }
             if (validOffSamples.size < 3) return validOffSamples
@@ -912,11 +922,24 @@ class PowerUsageManager private constructor(private val context: Context) {
                 }
             }
 
+            // 自适应稳态静默基准功率（若外部未显式传入动态上限，则从有效息屏样本中提取稳态基准）
+            // 物理第一性原则：对于弱网/双卡/平板等高底噪设备（底噪 0.13W~0.22W），其真实稳态样本绝不应被误判为过渡期活跃尖峰。
+            val effectiveQuiescentThreshold = quiescentThreshold ?: run {
+                if (validOffSamples.size >= 4) {
+                    val sortedPowers = validOffSamples.map { it.powerWatts }.sorted()
+                    val p25 = sortedPowers[(sortedPowers.size * 0.25).toInt().coerceIn(0, sortedPowers.size - 1)]
+                    val adaptiveBase = maxOf(p25 * 1.5f, p25 + 0.05f)
+                    minOf(adaptiveBase, MAX_QUIESCENT_STANDBY_WATTS)
+                } else {
+                    MAX_QUIESCENT_STANDBY_WATTS
+                }
+            }
+
             val stableSamples = validOffSamples.filter { pt ->
-                // 物理第一性原则：若采样点功率已经处于纯净静态待机物理底噪范围（<= MAX_PURE_DEEP_SLEEP_WATTS），
+                // 物理第一性原则：若采样点功率已处于当前设备的稳态待机基线范围（<= effectiveQuiescentThreshold），
                 // 证明硬件已进入安静休眠状态，坚决保留；
-                // 仅对高于纯净底噪的过渡期活跃高功耗样本（> MAX_PURE_DEEP_SLEEP_WATTS 且处于灭屏初期）予以剔除。
-                val isQuiescent = pt.powerWatts <= MAX_PURE_DEEP_SLEEP_WATTS
+                // 仅对高于稳态基线的过渡期活跃高功耗样本（> effectiveQuiescentThreshold 且处于灭屏初期 180s）予以剔除。
+                val isQuiescent = pt.powerWatts <= effectiveQuiescentThreshold
                 if (isQuiescent) {
                     true
                 } else {
@@ -942,7 +965,7 @@ class PowerUsageManager private constructor(private val context: Context) {
             samples: List<PowerDischargePoint>,
             maxStandbyWatts: Float = MAX_QUIESCENT_STANDBY_WATTS
         ): Float? {
-            val stableSamples = filterStableQuiescentSamples(samples)
+            val stableSamples = filterStableQuiescentSamples(samples, maxStandbyWatts)
             val validOffSamples = if (stableSamples.isNotEmpty()) stableSamples else samples.filter { !it.isScreenOn && it.powerWatts > 0f }
             if (validOffSamples.isEmpty()) return null
 
@@ -1084,7 +1107,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                 ?: if (allCycleSamples.isNotEmpty()) extractQuiescentStandbyWatts(allCycleSamples, dynamicMaxStandbyWatts) else null
 
             // 获取 StandbyBaselineEstimator 的估计结果（前置自适应剔除关屏初期过渡震荡态，确保纯净稳态）
-            val stableQuiescentSamples = filterStableQuiescentSamples(samples)
+            val stableQuiescentSamples = filterStableQuiescentSamples(samples, dynamicMaxStandbyWatts)
             val baselineEstimate = if (stableQuiescentSamples.isNotEmpty()) {
                 com.battery.analysis.domain.estimator.StandbyBaselineEstimator.estimate(
                     samples = stableQuiescentSamples,
@@ -1235,14 +1258,15 @@ class PowerUsageManager private constructor(private val context: Context) {
          */
         /**
          * 结合 Android 系统 Doze 模式 API、Linux 内核时钟差分与瞬时放电采样点特征，
-         * 自适应决议本次息屏真正进入深度睡眠的时间戳（毫秒），杜绝死板写死固定秒数。
+         * 自适应决议本次息屏真正进入深度睡眠的时间戳（毫秒），杜绝死板写死固定秒数或固定 0.12W 门限。
          *
          * @param screenOffTs 息屏开始时间戳（毫秒）
          * @param screenOffMs 息屏总耗时（毫秒）
          * @param awakeMs 底层或本地记录的 CPU 唤醒时长（毫秒，默认 0L）
          * @param deepSleepMs 底层或本地记录的深度睡眠时长（毫秒，默认 0L）
          * @param deviceIdleEntryTs 系统 API 广播上报的进入 Doze 模式时间戳（毫秒，若无为 0L）
-         * @param samples 时序瞬态物理放电采样点列表
+         * @param samples 时序瞬态物理放电采样点列表 [List<PowerDischargePoint>]
+         * @param standbyThreshold 判定为待机静默状态的功耗上限门限（单位：瓦特 W，默认 [MAX_QUIESCENT_STANDBY_WATTS]）
          * @return 动态决议出的进入深度休眠绝对时间戳（毫秒）
          */
         fun resolveDeepSleepEntryTimestamp(
@@ -1251,7 +1275,8 @@ class PowerUsageManager private constructor(private val context: Context) {
             awakeMs: Long = 0L,
             deepSleepMs: Long = 0L,
             deviceIdleEntryTs: Long = 0L,
-            samples: List<PowerDischargePoint> = emptyList()
+            samples: List<PowerDischargePoint> = emptyList(),
+            standbyThreshold: Float = MAX_QUIESCENT_STANDBY_WATTS
         ): Long {
             if (screenOffTs <= 0L || screenOffMs <= 0L) return screenOffTs
 
@@ -1268,14 +1293,23 @@ class PowerUsageManager private constructor(private val context: Context) {
             }
 
             // 优先级 3（物理放电采样点特征诊断）：
-            // 查找灭屏后瞬态采样点首次跌破纯净静态底噪（<= MAX_PURE_DEEP_SLEEP_WATTS）的时间点，
-            // 或因 CPU 挂起导致采样停止形成的采样断层（Gap >= 20s）的起点
+            // 查找灭屏后瞬态采样点首次跌破当前会话自适应静态底噪的时间点，
+            // 或因 CPU 挂起导致采样停止形成的采样断层（Gap >= 20s）的起点。
+            // 彻底废除 0.12W 死板硬编码，依据样本真实稳态低分位自适应识别。
             val offSamples = samples.filter { !it.isScreenOn && it.timestamp in screenOffTs..(screenOffTs + screenOffMs) }
                 .sortedBy { it.timestamp }
             if (offSamples.isNotEmpty()) {
-                val dropPoint = offSamples.firstOrNull { it.powerWatts in 0.015f..MAX_PURE_DEEP_SLEEP_WATTS }
-                if (dropPoint != null) {
-                    return dropPoint.timestamp
+                val validPowers = offSamples.map { it.powerWatts }.filter { it > 0.015f }
+                if (validPowers.isNotEmpty()) {
+                    val sortedPowers = validPowers.sorted()
+                    val steadyFloor = sortedPowers[(sortedPowers.size * 0.20).toInt().coerceIn(0, sortedPowers.size - 1)]
+                    if (steadyFloor <= standbyThreshold) {
+                        val dropThreshold = maxOf(steadyFloor * 1.25f, steadyFloor + 0.03f).coerceAtMost(standbyThreshold)
+                        val dropPoint = offSamples.firstOrNull { it.powerWatts in 0.015f..dropThreshold }
+                        if (dropPoint != null) {
+                            return dropPoint.timestamp
+                        }
+                    }
                 }
                 for (i in 0 until offSamples.size - 1) {
                     val gap = offSamples[i + 1].timestamp - offSamples[i].timestamp

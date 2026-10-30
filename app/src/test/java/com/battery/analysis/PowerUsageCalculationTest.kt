@@ -7126,7 +7126,8 @@ class PowerUsageCalculationTest {
      * 验证自适应进入深度睡眠时间点决议算法（[PowerUsageManager.resolveDeepSleepEntryTimestamp]）：
      * 1. 当 Android 系统 Doze 模式广播（ACTION_DEVICE_IDLE_MODE_CHANGED）提供进入时间戳时，100% 优先采信该系统 API 权威时间点；
      * 2. 当系统 Doze 广播缺失但 Linux 内核时钟差分给出明确唤醒时长时，动态决议进入休眠时间点为关屏时刻累加唤醒时长；
-     * 3. 当底层统计均缺失时，依据时序采样点跌破纯净底噪（<= 0.12W）的时间点自适应判定，杜绝死板写死 30 秒或 180 秒。
+     * 3. 当底层统计均缺失时，依据时序采样点跌破纯净底噪（自适应判定，支持 0.15W 等高底噪设备，杜绝写死 0.12W）的时间点自适应判定，杜绝死板写死 30 秒或 180 秒；
+     * 4. 针对高待机底噪机型（如双卡/弱信号/折叠屏，稳态底噪 0.16W > 0.12W），验证算法彻底摆脱 0.12W 枷锁，准确自适应捕获进入休眠时间点。
      */
     @Test
     fun testResolveDeepSleepEntryTimestampPrioritizesSystemDozeApiAndKernelClock() {
@@ -7154,7 +7155,7 @@ class PowerUsageCalculationTest {
         )
         org.junit.Assert.assertEquals("内核双时钟差分决议进入休眠时间点", screenOffTs + 8_500L, resolvedFromKernel)
 
-        // 场景 3：底层统计均缺失，依据瞬态采样点首次跌入静止底噪（0.06W <= 0.12W）的时间点决议
+        // 场景 3：底层统计均缺失，依据瞬态采样点首次跌入静止底噪（0.06W <= 自适应稳态门限）的时间点决议
         val samples = listOf(
             PowerDischargePoint(timestamp = screenOffTs + 2_000L, elapsedHours = 0f, batteryLevel = 80, powerWatts = 1.20f, isScreenOn = false),
             PowerDischargePoint(timestamp = screenOffTs + 6_000L, elapsedHours = 0f, batteryLevel = 80, powerWatts = 0.45f, isScreenOn = false),
@@ -7169,12 +7170,29 @@ class PowerUsageCalculationTest {
             samples = samples
         )
         org.junit.Assert.assertEquals("依据放电采样点首次跌破底噪时间戳决议", screenOffTs + 12_000L, resolvedFromSamples)
+
+        // 场景 4：高底噪设备（如双卡/弱信号/折叠屏，稳态底噪 0.16W > 0.12W），验证算法彻底摆脱 0.12W 枷锁，准确识别 0.16W 跌入时间点
+        val highStandbySamples = listOf(
+            PowerDischargePoint(timestamp = screenOffTs + 3_000L, elapsedHours = 0f, batteryLevel = 80, powerWatts = 1.60f, isScreenOn = false),
+            PowerDischargePoint(timestamp = screenOffTs + 8_000L, elapsedHours = 0f, batteryLevel = 80, powerWatts = 0.55f, isScreenOn = false),
+            PowerDischargePoint(timestamp = screenOffTs + 15_000L, elapsedHours = 0f, batteryLevel = 80, powerWatts = 0.16f, isScreenOn = false) // 首次跌入0.16W稳态底噪
+        )
+        val resolvedFromHighStandby = PowerUsageManager.resolveDeepSleepEntryTimestamp(
+            screenOffTs = screenOffTs,
+            screenOffMs = screenOffMs,
+            awakeMs = 0L,
+            deepSleepMs = 0L,
+            deviceIdleEntryTs = 0L,
+            samples = highStandbySamples
+        )
+        org.junit.Assert.assertEquals("高底噪设备(0.16W)依然能够精准自适应识别跌破底噪时间戳", screenOffTs + 15_000L, resolvedFromHighStandby)
     }
 
     /**
      * 验证自适应过滤与纯净底噪保留机制（[PowerUsageManager.filterStableQuiescentSamples]）：
-     * 灭屏初期（30秒内）即使处于过渡窗口，若采样点本身已处于芯片纯净底噪（0.05W <= 0.12W），坚决保留不予误杀；
-     * 若处于过渡窗口且功耗偏高（0.38W、0.42W），精准剔除，杜绝过渡尖峰污染底噪基准。
+     * 1. 灭屏初期（30秒内）即使处于过渡窗口，若采样点本身已处于芯片纯净稳态底噪（0.05W），坚决保留不予误杀；
+     * 2. 若处于过渡窗口且功耗偏高（0.45W），精准剔除，杜绝过渡尖峰污染底噪基准；
+     * 3. 针对高待机底噪机型（如弱网 0.16W），灭屏初期的 0.16W 稳态点不会因超过旧 0.12W 上限而被误剔除。
      */
     @Test
     fun testFilterStableQuiescentSamplesPreservesQuiescentPointsEvenInEarlyWindow() {
@@ -7188,8 +7206,20 @@ class PowerUsageCalculationTest {
         )
 
         val stableSamples = PowerUsageManager.filterStableQuiescentSamples(samples)
-        org.junit.Assert.assertTrue("灭屏瞬态高功耗样本（0.45W）必须被剔除", stableSamples.none { it.powerWatts > 0.12f })
+        org.junit.Assert.assertTrue("灭屏瞬态高功耗样本（0.45W）必须被剔除", stableSamples.none { it.powerWatts >= 0.40f })
         org.junit.Assert.assertTrue("灭屏早期的纯净底噪样本（0.05W, 0.06W）必须被完好保留，绝不误杀", stableSamples.any { it.timestamp == screenOffTs + 10_000L })
         org.junit.Assert.assertEquals("纯净底噪提取结果必须为 0.05W 级别", 0.05f, PowerUsageManager.extractQuiescentStandbyWatts(samples)!!, 0.02f)
+
+        // 高底噪设备验证（真实待机底噪 0.16W，灭屏初期即进入 0.16W 稳态）
+        val highStandbySamples = listOf(
+            PowerDischargePoint(screenOffTs - 5_000L, 0f, 90, 3.85f, 30f, 1.80f, emptyList(), true),
+            PowerDischargePoint(screenOffTs, 0f, 90, 3.85f, 30f, 0.65f, emptyList(), false), // 灭屏瞬态尖峰
+            PowerDischargePoint(screenOffTs + 10_000L, 0f, 90, 3.85f, 30f, 0.16f, emptyList(), false), // 灭屏后10秒降至0.16W稳态（不得被当做0.12W以上尖峰误杀！）
+            PowerDischargePoint(screenOffTs + 20_000L, 0f, 90, 3.85f, 30f, 0.16f, emptyList(), false),
+            PowerDischargePoint(screenOffTs + 300_000L, 0f, 90, 3.85f, 30f, 0.16f, emptyList(), false)
+        )
+        val highStable = PowerUsageManager.filterStableQuiescentSamples(highStandbySamples)
+        org.junit.Assert.assertTrue("灭屏早期 0.16W 样本坚决保留，绝不受 0.12W 限制误杀", highStable.any { it.timestamp == screenOffTs + 10_000L })
+        org.junit.Assert.assertTrue("灭屏瞬态 0.65W 尖峰被剔除", highStable.none { it.powerWatts >= 0.60f })
     }
 }

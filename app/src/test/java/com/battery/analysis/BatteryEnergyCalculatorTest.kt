@@ -513,12 +513,13 @@ class BatteryEnergyCalculatorTest {
             predictedPowerWatts = 1.60,
             confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
             energySource = com.battery.analysis.domain.estimator.model.EnergySource.FCC_TIMES_NOMINAL_VOLTAGE,
-            effectiveHistoryMs = 34L * 3600_000L,
+            effectiveHistoryMs = 75L * 3600_000L,
             usedRegimeModel = true,
             screenOnFullRuntimeMs = (18 * 3600 + 53 * 60 + 24) * 1000L, // 18h53m24s
             predictedScreenOnPowerWatts = 1.60,
             historyWindowDays = 7.0,
-            effectiveDischargeDurationMs = 34L * 3600_000L,
+            effectiveDischargeDurationMs = 75L * 3600_000L,
+            screenOnEffectiveMs = 75L * 3600_000L,
             dataSufficiency = com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.SUFFICIENT,
             modelVersion = com.battery.analysis.domain.estimator.model.RuntimeModelVersion.FULL_RUNTIME_V2_2
         )
@@ -539,7 +540,7 @@ class BatteryEnergyCalculatorTest {
             rowType = BatteryEnergyCalculator.ROW_SCREEN_ON,
             currentRatePercentPerHour = 5.0f,
             sevenDaysRatePercentPerHour = 5.4f,
-            sevenDaysDurationMs = 34L * 3600_000L,
+            sevenDaysDurationMs = 75L * 3600_000L,
             fullDurationMs = (18 * 3600 + 53 * 60 + 24) * 1000L,
             v2Result = v2Result,
             remainingEstimate = remEstimate,
@@ -556,7 +557,7 @@ class BatteryEnergyCalculatorTest {
             rowType = BatteryEnergyCalculator.ROW_SCREEN_ON,
             currentRatePercentPerHour = 5.0f,
             sevenDaysRatePercentPerHour = 5.4f,
-            sevenDaysDurationMs = 34L * 3600_000L,
+            sevenDaysDurationMs = 75L * 3600_000L,
             fullDurationMs = (18 * 3600 + 53 * 60 + 24) * 1000L,
             v2Result = v2Result,
             remainingEstimate = remEstimate,
@@ -983,6 +984,228 @@ class BatteryEnergyCalculatorTest {
             fallbackGlobalRemainingMs = 50_000_000L
         )
         assertEquals(50_000_000L, fallbackMs)
+    }
+
+    /**
+     * 验证亮屏、息屏与全局累积使用时间在置信度与充分性枚举计算中的分级阶梯：
+     * 1. 亮屏/息屏：<24h 为 LOW，24h~72h 为 MEDIUM，>=72h 为 HIGH；
+     * 2. 全局：<48h 为 LOW，48h~120h 为 MEDIUM，>=120h 为 HIGH。
+     */
+    @Test
+    fun testConfidenceAndSufficiencyThresholdsByAccumulatedDuration() {
+        val onRow = BatteryEnergyCalculator.ROW_SCREEN_ON
+        val offRow = BatteryEnergyCalculator.ROW_SCREEN_OFF
+        val globalRow = BatteryEnergyCalculator.ROW_GLOBAL
+
+        // 1. 亮屏阶梯验证
+        assertEquals("亮屏 10h 必须为 LOW", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.LOW,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(onRow, 10L * 3600_000L))
+        assertEquals("亮屏 23h59m 必须为 LOW", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.LOW,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(onRow, 24L * 3600_000L - 1000L))
+        assertEquals("亮屏 24h 必须为 MEDIUM", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(onRow, 24L * 3600_000L))
+        assertEquals("亮屏 50h 必须为 MEDIUM", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(onRow, 50L * 3600_000L))
+        assertEquals("亮屏 71h59m 必须为 MEDIUM", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(onRow, 72L * 3600_000L - 1000L))
+        assertEquals("亮屏 72h 必须为 HIGH", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(onRow, 72L * 3600_000L))
+        assertEquals("亮屏 100h 必须为 HIGH", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(onRow, 100L * 3600_000L))
+
+        // 2. 息屏阶梯验证（与亮屏相同）
+        assertEquals("息屏 10h 必须为 LOW", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.LOW,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(offRow, 10L * 3600_000L))
+        assertEquals("息屏 24h 必须为 MEDIUM", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(offRow, 24L * 3600_000L))
+        assertEquals("息屏 72h 必须为 HIGH", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(offRow, 72L * 3600_000L))
+
+        // 3. 全局阶梯验证
+        assertEquals("全局 20h 必须为 LOW", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.LOW,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(globalRow, 20L * 3600_000L))
+        assertEquals("全局 47h59m 必须为 LOW", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.LOW,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(globalRow, 48L * 3600_000L - 1000L))
+        assertEquals("全局 48h 必须为 MEDIUM", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(globalRow, 48L * 3600_000L))
+        assertEquals("全局 80h 必须为 MEDIUM", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(globalRow, 80L * 3600_000L))
+        assertEquals("全局 119h59m 必须为 MEDIUM", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(globalRow, 120L * 3600_000L - 1000L))
+        assertEquals("全局 120h 必须为 HIGH", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(globalRow, 120L * 3600_000L))
+        assertEquals("全局 150h 必须为 HIGH", com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(globalRow, 150L * 3600_000L))
+    }
+
+    /**
+     * 验证亮屏、息屏与全局详情弹窗格式化文案中，可信度文案严格遵循新时长阶梯输出：
+     * 亮屏：<24h (可信度较低)，24h~72h (可信度中等)，>72h (可信度高)；
+     * 息屏：<24h (可信度较低)，24h~72h (可信度中等)，>72h (可信度高)；
+     * 全局：<48h (可信度较低)，48h~120h (可信度中等)，>120h (可信度高)。
+     */
+    @Test
+    fun testFormatDischargeSpeedDetailMessage_ConfidenceTextsInBubbleDialogs() {
+        val remHigh = com.battery.analysis.domain.estimator.model.RuntimeEstimate(
+            remainingMs = 10 * 3600_000L,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            predictedPowerWatts = 1.5,
+            remainingEnergyWh = 15.0,
+            confidence = 0.9,
+            modelType = com.battery.analysis.domain.estimator.model.RuntimeModelType.MULTI_TIMESCALE
+        )
+
+        // 1. 亮屏弹框在 12 小时（旧逻辑曾为高，现必须为低）
+        val v2OnLow = com.battery.analysis.domain.estimator.model.FullChargeRuntimeResult(
+            fullRuntimeMs = 20 * 3600_000L,
+            fullEnergyWh = 20.0,
+            predictedPowerWatts = 1.0,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.LOW,
+            energySource = com.battery.analysis.domain.estimator.model.EnergySource.FCC_TIMES_NOMINAL_VOLTAGE,
+            effectiveHistoryMs = 12L * 3600_000L,
+            usedRegimeModel = true,
+            screenOnFullRuntimeMs = 10 * 3600_000L,
+            screenOnEffectiveMs = 12L * 3600_000L,
+            screenOnConfidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.LOW,
+            screenOnDataSufficiency = com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.INSUFFICIENT
+        )
+        val msgOnLow = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_ON,
+            currentRatePercentPerHour = 5.0f,
+            sevenDaysRatePercentPerHour = 5.0f,
+            sevenDaysDurationMs = 12L * 3600_000L,
+            fullDurationMs = 20 * 3600_000L,
+            v2Result = v2OnLow,
+            remainingEstimate = remHigh
+        )
+        assertTrue("亮屏12h升级模型必须显示可信度较低", msgOnLow.contains("• 升级模型(v2.1)：10h00m00s (可信度较低)"))
+        assertTrue("亮屏12h当前剩余续航置信度受限为较低", msgOnLow.contains("• 当前剩余续航：10h00m00s (可信度较低)"))
+
+        // 2. 亮屏弹框在 36 小时（24h~72h 之间，必须为中等）
+        val v2OnMed = com.battery.analysis.domain.estimator.model.FullChargeRuntimeResult(
+            fullRuntimeMs = 20 * 3600_000L,
+            fullEnergyWh = 20.0,
+            predictedPowerWatts = 1.0,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM,
+            energySource = com.battery.analysis.domain.estimator.model.EnergySource.FCC_TIMES_NOMINAL_VOLTAGE,
+            effectiveHistoryMs = 36L * 3600_000L,
+            usedRegimeModel = true,
+            screenOnFullRuntimeMs = 10 * 3600_000L,
+            screenOnEffectiveMs = 36L * 3600_000L,
+            screenOnConfidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM,
+            screenOnDataSufficiency = com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.MODERATE
+        )
+        val msgOnMed = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_ON,
+            currentRatePercentPerHour = 5.0f,
+            sevenDaysRatePercentPerHour = 5.0f,
+            sevenDaysDurationMs = 36L * 3600_000L,
+            fullDurationMs = 20 * 3600_000L,
+            v2Result = v2OnMed,
+            remainingEstimate = remHigh
+        )
+        assertTrue("亮屏36h升级模型必须显示可信度中等", msgOnMed.contains("• 升级模型(v2.1)：10h00m00s (可信度中等)"))
+        assertTrue("亮屏36h当前剩余续航置信度受限为中等", msgOnMed.contains("• 当前剩余续航：10h00m00s (可信度中等)"))
+
+        // 3. 亮屏弹框在 80 小时（>72h，必须为高）
+        val v2OnHigh = com.battery.analysis.domain.estimator.model.FullChargeRuntimeResult(
+            fullRuntimeMs = 20 * 3600_000L,
+            fullEnergyWh = 20.0,
+            predictedPowerWatts = 1.0,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            energySource = com.battery.analysis.domain.estimator.model.EnergySource.FCC_TIMES_NOMINAL_VOLTAGE,
+            effectiveHistoryMs = 80L * 3600_000L,
+            usedRegimeModel = true,
+            screenOnFullRuntimeMs = 10 * 3600_000L,
+            screenOnEffectiveMs = 80L * 3600_000L,
+            screenOnConfidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            screenOnDataSufficiency = com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.SUFFICIENT
+        )
+        val msgOnHigh = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_ON,
+            currentRatePercentPerHour = 5.0f,
+            sevenDaysRatePercentPerHour = 5.0f,
+            sevenDaysDurationMs = 80L * 3600_000L,
+            fullDurationMs = 20 * 3600_000L,
+            v2Result = v2OnHigh,
+            remainingEstimate = remHigh
+        )
+        assertTrue("亮屏80h升级模型必须显示可信度高", msgOnHigh.contains("• 升级模型(v2.1)：10h00m00s (可信度高)"))
+        assertTrue("亮屏80h当前剩余续航必须显示可信度高", msgOnHigh.contains("• 当前剩余续航：10h00m00s (可信度高)"))
+
+        // 4. 息屏弹框在 30 小时（24h~72h 之间，必须为中等）
+        val v2OffMed = com.battery.analysis.domain.estimator.model.FullChargeRuntimeResult(
+            fullRuntimeMs = 40 * 3600_000L,
+            fullEnergyWh = 20.0,
+            predictedPowerWatts = 0.5,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM,
+            energySource = com.battery.analysis.domain.estimator.model.EnergySource.FCC_TIMES_NOMINAL_VOLTAGE,
+            effectiveHistoryMs = 30L * 3600_000L,
+            usedRegimeModel = true,
+            screenOffFullRuntimeMs = 40 * 3600_000L,
+            screenOffEffectiveMs = 30L * 3600_000L,
+            screenOffConfidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM,
+            screenOffDataSufficiency = com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.MODERATE
+        )
+        val msgOffMed = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_OFF,
+            currentRatePercentPerHour = 2.0f,
+            sevenDaysRatePercentPerHour = 2.0f,
+            sevenDaysDurationMs = 30L * 3600_000L,
+            fullDurationMs = 40 * 3600_000L,
+            v2Result = v2OffMed,
+            remainingEstimate = remHigh
+        )
+        assertTrue("息屏30h升级模型必须显示可信度中等", msgOffMed.contains("• 升级模型(v2.1)：01d16h00m00s (可信度中等)"))
+        assertTrue("息屏30h当前待机续航置信度受限为中等", msgOffMed.contains("• 当前待机续航：10h00m00s (可信度中等)"))
+
+        // 5. 全局弹框在 60 小时（48h~120h 之间，必须为中等）
+        val v2GlobalMed = com.battery.analysis.domain.estimator.model.FullChargeRuntimeResult(
+            fullRuntimeMs = 25 * 3600_000L,
+            fullEnergyWh = 20.0,
+            predictedPowerWatts = 0.8,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM,
+            energySource = com.battery.analysis.domain.estimator.model.EnergySource.FCC_TIMES_NOMINAL_VOLTAGE,
+            effectiveHistoryMs = 60L * 3600_000L,
+            usedRegimeModel = true,
+            effectiveDischargeDurationMs = 60L * 3600_000L,
+            dataSufficiency = com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.MODERATE
+        )
+        val msgGlobalMed = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_GLOBAL,
+            currentRatePercentPerHour = 3.0f,
+            sevenDaysRatePercentPerHour = 3.0f,
+            sevenDaysDurationMs = 60L * 3600_000L,
+            fullDurationMs = 25 * 3600_000L,
+            v2Result = v2GlobalMed,
+            remainingEstimate = remHigh
+        )
+        assertTrue("全局60h升级模型必须显示可信度中等", msgGlobalMed.contains("• 升级模型(v2.1)：01d01h00m00s (可信度中等)"))
+        assertTrue("全局60h当前剩余续航置信度受限为中等", msgGlobalMed.contains("• 当前剩余续航：10h00m00s (可信度中等)"))
+
+        // 6. 全局弹框在 130 小时（>120h，必须为高）
+        val v2GlobalHigh = com.battery.analysis.domain.estimator.model.FullChargeRuntimeResult(
+            fullRuntimeMs = 25 * 3600_000L,
+            fullEnergyWh = 20.0,
+            predictedPowerWatts = 0.8,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            energySource = com.battery.analysis.domain.estimator.model.EnergySource.FCC_TIMES_NOMINAL_VOLTAGE,
+            effectiveHistoryMs = 130L * 3600_000L,
+            usedRegimeModel = true,
+            effectiveDischargeDurationMs = 130L * 3600_000L,
+            dataSufficiency = com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.SUFFICIENT
+        )
+        val msgGlobalHigh = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_GLOBAL,
+            currentRatePercentPerHour = 3.0f,
+            sevenDaysRatePercentPerHour = 3.0f,
+            sevenDaysDurationMs = 130L * 3600_000L,
+            fullDurationMs = 25 * 3600_000L,
+            v2Result = v2GlobalHigh,
+            remainingEstimate = remHigh
+        )
+        assertTrue("全局130h升级模型必须显示可信度高", msgGlobalHigh.contains("• 升级模型(v2.1)：01d01h00m00s (可信度高)"))
+        assertTrue("全局130h当前剩余续航必须显示可信度高", msgGlobalHigh.contains("• 当前剩余续航：10h00m00s (可信度高)"))
     }
 }
 

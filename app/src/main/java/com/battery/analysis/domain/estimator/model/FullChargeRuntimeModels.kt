@@ -76,7 +76,43 @@ enum class DataSufficiencyLevel(val description: String) {
     /** 样本基本可用，具备核心放电工况，可提供可靠参考基准 */
     MODERATE("基本可用"),
     /** 样本偏少（如新机刚用一两天），处于数据积累初期，已如实降权 */
-    INSUFFICIENT("样本较少")
+    INSUFFICIENT("样本较少");
+
+    companion object {
+        /**
+         * 根据累积物理使用时长与行分类标识推导数据充分性等级。
+         * 亮屏/息屏：<24h 为样本较少，24h~72h 为基本可用，>=72h 为数据充足；
+         * 全局：<48h 为样本较少，48h~120h 为基本可用，>=120h 为数据充足。
+         *
+         * @param rowType 行分类标识（[com.battery.analysis.util.BatteryEnergyCalculator.ROW_SCREEN_ON] 为亮屏，[ROW_SCREEN_OFF] 为息屏，[ROW_GLOBAL] 为全局）
+         * @param accumulatedDurationMs 对应维度的累积物理使用时长（单位：毫秒，缺失或未获取传入 null）
+         * @return 对应的数据充分性等级 [DataSufficiencyLevel]
+         */
+        fun evaluateByDuration(rowType: Int, accumulatedDurationMs: Long?): DataSufficiencyLevel {
+            if (accumulatedDurationMs == null || accumulatedDurationMs <= 0L) {
+                return INSUFFICIENT
+            }
+            val hours = accumulatedDurationMs / 3600_000.0
+            return when (rowType) {
+                com.battery.analysis.util.BatteryEnergyCalculator.ROW_SCREEN_ON,
+                com.battery.analysis.util.BatteryEnergyCalculator.ROW_SCREEN_OFF -> when {
+                    hours >= 72.0 -> SUFFICIENT
+                    hours >= 24.0 -> MODERATE
+                    else -> INSUFFICIENT
+                }
+                com.battery.analysis.util.BatteryEnergyCalculator.ROW_GLOBAL -> when {
+                    hours >= 120.0 -> SUFFICIENT
+                    hours >= 48.0 -> MODERATE
+                    else -> INSUFFICIENT
+                }
+                else -> when {
+                    hours >= 72.0 -> SUFFICIENT
+                    hours >= 24.0 -> MODERATE
+                    else -> INSUFFICIENT
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -169,6 +205,42 @@ enum class RuntimeConfidenceLevel(val description: String) {
                 else -> LOW
             }
         }
+
+        /**
+         * 根据累积物理使用时长与卡片分类维度（亮屏、息屏、全局）推导对应的置信度等级。
+         * 严格遵循工业级准则：
+         * 1. 亮屏（ROW_SCREEN_ON）/ 息屏（ROW_SCREEN_OFF）：小于 24 小时为低，大于等于 24 小时且小于 72 小时为中，大于等于 72 小时为高；
+         * 2. 全局（ROW_GLOBAL）：小于 48 小时为低，大于等于 48 小时且小于 120 小时为中，大于等于 120 小时为高；
+         * 3. 时长缺失或非正数时如实返回数据不足 [UNAVAILABLE]。
+         *
+         * @param rowType 行分类标识（[com.battery.analysis.util.BatteryEnergyCalculator.ROW_SCREEN_ON] 为亮屏，[ROW_SCREEN_OFF] 为息屏，[ROW_GLOBAL] 为全局）
+         * @param accumulatedDurationMs 对应维度的累积物理使用时长（单位：毫秒，缺失或未获取传入 null）
+         * @return 对应的置信度等级枚举 [RuntimeConfidenceLevel]
+         */
+        fun evaluateByDuration(rowType: Int, accumulatedDurationMs: Long?): RuntimeConfidenceLevel {
+            if (accumulatedDurationMs == null || accumulatedDurationMs <= 0L) {
+                return UNAVAILABLE
+            }
+            val hours = accumulatedDurationMs / 3600_000.0
+            return when (rowType) {
+                com.battery.analysis.util.BatteryEnergyCalculator.ROW_SCREEN_ON,
+                com.battery.analysis.util.BatteryEnergyCalculator.ROW_SCREEN_OFF -> when {
+                    hours >= 72.0 -> HIGH
+                    hours >= 24.0 -> MEDIUM
+                    else -> LOW
+                }
+                com.battery.analysis.util.BatteryEnergyCalculator.ROW_GLOBAL -> when {
+                    hours >= 120.0 -> HIGH
+                    hours >= 48.0 -> MEDIUM
+                    else -> LOW
+                }
+                else -> when {
+                    hours >= 72.0 -> HIGH
+                    hours >= 24.0 -> MEDIUM
+                    else -> LOW
+                }
+            }
+        }
     }
 }
 
@@ -259,6 +331,10 @@ data class RuntimeProfile(
  * @property dataSufficiency 历史样本数据充分性等级 [DataSufficiencyLevel]
  * @property screenOnEffectiveMs 实际统计的亮屏有效放电时长（单位：毫秒，可选）
  * @property screenOffEffectiveMs 实际统计的息屏有效放电时长（单位：毫秒，可选）
+ * @property screenOnConfidenceLevel 亮屏预测结果的数据置信度等级 [RuntimeConfidenceLevel]
+ * @property screenOffConfidenceLevel 息屏预测结果的数据置信度等级 [RuntimeConfidenceLevel]
+ * @property screenOnDataSufficiency 亮屏历史样本数据充分性等级 [DataSufficiencyLevel]
+ * @property screenOffDataSufficiency 息屏历史样本数据充分性等级 [DataSufficiencyLevel]
  * @property profile 详细的自适应用机工况画像与时间占比物理统计实体 [RuntimeProfile]（可选）
  */
 data class FullChargeRuntimeResult(
@@ -281,5 +357,9 @@ data class FullChargeRuntimeResult(
     val dataSufficiency: DataSufficiencyLevel = DataSufficiencyLevel.SUFFICIENT,
     val screenOnEffectiveMs: Long? = null,
     val screenOffEffectiveMs: Long? = null,
+    val screenOnConfidenceLevel: RuntimeConfidenceLevel = confidenceLevel,
+    val screenOffConfidenceLevel: RuntimeConfidenceLevel = confidenceLevel,
+    val screenOnDataSufficiency: DataSufficiencyLevel = dataSufficiency,
+    val screenOffDataSufficiency: DataSufficiencyLevel = dataSufficiency,
     val profile: RuntimeProfile? = null
 )

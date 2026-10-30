@@ -775,9 +775,9 @@ object BatteryEnergyCalculator {
                         }
                         val effOnStr = v2Result.screenOnEffectiveMs?.let { formatFullDuration(it) } ?: formatFullDuration(v2Result.effectiveDischargeDurationMs)
                         val v2Tag = if (v2Result.modelVersion == com.battery.analysis.domain.estimator.model.RuntimeModelVersion.FULL_RUNTIME_V2_2) "升级模型(v2.2)" else "升级模型(v2.1)"
-                        append("• $v2Tag：$v2OnDurStr (${v2Result.confidenceLevel.description})\n")
+                        append("• $v2Tag：$v2OnDurStr (${v2Result.screenOnConfidenceLevel.description})\n")
                         append("  统计范围：$windowStr\n")
-                        append("  有效放电：累计亮屏 $effOnStr (${v2Result.dataSufficiency.description})\n")
+                        append("  有效放电：累计亮屏 $effOnStr (${v2Result.screenOnDataSufficiency.description})\n")
                         val prof = v2Result.profile
                         if (prof != null && prof.screenOnMs > 0L) {
                             val lightPct = String.format(Locale.US, "%.1f%%", prof.lightRatio * 100.0)
@@ -799,7 +799,12 @@ object BatteryEnergyCalculator {
                     append("• 预测基准放电速度：$currentRateStr\n")
                     if (remainingEstimate != null && remainingEstimate.remainingMs != null) {
                         val remStr = formatDurationWithSeconds(remainingEstimate.remainingMs)
-                        append("• 当前剩余续航：$remStr (${remainingEstimate.confidenceLevel.description})\n")
+                        val effectiveConf = getBoundedRemainingConfidence(
+                            rowType = ROW_SCREEN_ON,
+                            remainingEstimate = remainingEstimate,
+                            accumulatedDurationMs = v2Result?.screenOnEffectiveMs ?: sevenDaysDurationMs
+                        )
+                        append("• 当前剩余续航：$remStr (${effectiveConf.description})\n")
                         if (remainingEstimate.minRemainingMs != null && remainingEstimate.maxRemainingMs != null) {
                             val minStr = formatFullDuration(remainingEstimate.minRemainingMs)
                             val maxStr = formatFullDuration(remainingEstimate.maxRemainingMs)
@@ -861,9 +866,9 @@ object BatteryEnergyCalculator {
                         }
                         val effOffStr = v2Result.screenOffEffectiveMs?.let { formatFullDuration(it) } ?: formatFullDuration(v2Result.effectiveDischargeDurationMs)
                         val v2Tag = if (v2Result.modelVersion == com.battery.analysis.domain.estimator.model.RuntimeModelVersion.FULL_RUNTIME_V2_2) "升级模型(v2.2)" else "升级模型(v2.1)"
-                        append("• $v2Tag：$v2OffDurStr (${v2Result.confidenceLevel.description})\n")
+                        append("• $v2Tag：$v2OffDurStr (${v2Result.screenOffConfidenceLevel.description})\n")
                         append("  统计范围：$windowStr\n")
-                        append("  有效放电：累计息屏 $effOffStr (${v2Result.dataSufficiency.description})\n")
+                        append("  有效放电：累计息屏 $effOffStr (${v2Result.screenOffDataSufficiency.description})\n")
                         val prof = v2Result.profile
                         if (prof != null && prof.screenOffMs > 0L) {
                             val lowPct = String.format(Locale.US, "%.1f%%", prof.offLowRatio * 100.0)
@@ -883,7 +888,12 @@ object BatteryEnergyCalculator {
                     append("• 预测基准放电速度：$currentRateStr\n")
                     if (remainingEstimate != null && remainingEstimate.remainingMs != null) {
                         val remStr = formatDurationWithSeconds(remainingEstimate.remainingMs)
-                        append("• 当前待机续航：$remStr (${remainingEstimate.confidenceLevel.description})\n")
+                        val effectiveConf = getBoundedRemainingConfidence(
+                            rowType = ROW_SCREEN_OFF,
+                            remainingEstimate = remainingEstimate,
+                            accumulatedDurationMs = v2Result?.screenOffEffectiveMs ?: sevenDaysDurationMs
+                        )
+                        append("• 当前待机续航：$remStr (${effectiveConf.description})\n")
                         if (remainingEstimate.minRemainingMs != null && remainingEstimate.maxRemainingMs != null) {
                             val minStr = formatFullDuration(remainingEstimate.minRemainingMs)
                             val maxStr = formatFullDuration(remainingEstimate.maxRemainingMs)
@@ -937,7 +947,12 @@ object BatteryEnergyCalculator {
                     append("• 预测基准放电速度：$currentRateStr\n")
                     if (remainingEstimate != null && remainingEstimate.remainingMs != null) {
                         val remStr = formatDurationWithSeconds(remainingEstimate.remainingMs)
-                        append("• 当前剩余续航：$remStr (${remainingEstimate.confidenceLevel.description})\n")
+                        val effectiveConf = getBoundedRemainingConfidence(
+                            rowType = ROW_GLOBAL,
+                            remainingEstimate = remainingEstimate,
+                            accumulatedDurationMs = v2Result?.effectiveDischargeDurationMs ?: sevenDaysDurationMs
+                        )
+                        append("• 当前剩余续航：$remStr (${effectiveConf.description})\n")
                         if (remainingEstimate.minRemainingMs != null && remainingEstimate.maxRemainingMs != null) {
                             val minStr = formatFullDuration(remainingEstimate.minRemainingMs)
                             val maxStr = formatFullDuration(remainingEstimate.maxRemainingMs)
@@ -1008,6 +1023,40 @@ object BatteryEnergyCalculator {
                 }
             }
             else -> ""
+        }
+    }
+
+    /**
+     * 根据累积使用时长与行分类维度获取受到物理累积时长约束的有效剩余续航置信度等级。
+     * 防止短会话在历史大样本积累不足时虚高显示高可信度。
+     *
+     * @param rowType 行分类标识（亮屏 [ROW_SCREEN_ON]、息屏 [ROW_SCREEN_OFF]、全局 [ROW_GLOBAL]）
+     * @param remainingEstimate 当前剩余续航估计结果实体 [com.battery.analysis.domain.estimator.model.RuntimeEstimate]，无数据时为 null
+     * @param accumulatedDurationMs 对应维度的累积物理时长（毫秒，无数据时为 null）
+     * @return 最终约束后的置信度等级枚举 [com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel]
+     */
+    fun getBoundedRemainingConfidence(
+        rowType: Int,
+        remainingEstimate: com.battery.analysis.domain.estimator.model.RuntimeEstimate?,
+        accumulatedDurationMs: Long?
+    ): com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel {
+        val baseConf = remainingEstimate?.confidenceLevel ?: com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.UNAVAILABLE
+        if (accumulatedDurationMs == null || accumulatedDurationMs <= 0L) {
+            return baseConf
+        }
+        val durationCeiling = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.evaluateByDuration(rowType, accumulatedDurationMs)
+        return when (durationCeiling) {
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.LOW -> {
+                if (baseConf == com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH || baseConf == com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM) {
+                    com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.LOW
+                } else baseConf
+            }
+            com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM -> {
+                if (baseConf == com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH) {
+                    com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.MEDIUM
+                } else baseConf
+            }
+            else -> baseConf
         }
     }
 

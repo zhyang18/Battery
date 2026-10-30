@@ -295,19 +295,18 @@ class FullChargeRuntimeEstimator(
             ((fullWh / pTypicalScreenOff) * 3600.0 * 1000.0).roundToLong()
         } else null
 
-        // 9. 数据充分性与置信度多维评定 (方案第 14 节)
-        val sufficiency = windowMetrics?.sufficiency ?: when {
-            onDurMs >= 12L * 3600L * 1000L && stableOnRegimeCount >= 2 -> DataSufficiencyLevel.SUFFICIENT
-            onDurMs >= 3L * 3600L * 1000L && stableOnRegimeCount >= 1 -> DataSufficiencyLevel.MODERATE
-            else -> DataSufficiencyLevel.INSUFFICIENT
-        }
+        // 9. 数据充分性与置信度多维评定（亮屏、息屏、全局三态解耦与时长门槛提升）
+        // 亮屏：<24h 为低/较少，24h~72h 为中/可用，>=72h 为高/充足
+        val screenOnConfidence = RuntimeConfidenceLevel.evaluateByDuration(com.battery.analysis.util.BatteryEnergyCalculator.ROW_SCREEN_ON, onDurMs)
+        val screenOnSufficiency = DataSufficiencyLevel.evaluateByDuration(com.battery.analysis.util.BatteryEnergyCalculator.ROW_SCREEN_ON, onDurMs)
 
-        val confidence = when {
-            sufficiency == DataSufficiencyLevel.SUFFICIENT && canUseRegimeModel && windowDays <= 14.1 -> RuntimeConfidenceLevel.HIGH
-            sufficiency == DataSufficiencyLevel.SUFFICIENT || sufficiency == DataSufficiencyLevel.MODERATE || onDurMs >= 3L * 3600L * 1000L -> RuntimeConfidenceLevel.MEDIUM
-            totalHistoryMs >= 600_000L -> RuntimeConfidenceLevel.LOW
-            else -> RuntimeConfidenceLevel.UNAVAILABLE
-        }
+        // 息屏：同亮屏一致（<24h 为低/较少，24h~72h 为中/可用，>=72h 为高/充足）
+        val screenOffConfidence = RuntimeConfidenceLevel.evaluateByDuration(com.battery.analysis.util.BatteryEnergyCalculator.ROW_SCREEN_OFF, offDurMs)
+        val screenOffSufficiency = DataSufficiencyLevel.evaluateByDuration(com.battery.analysis.util.BatteryEnergyCalculator.ROW_SCREEN_OFF, offDurMs)
+
+        // 全局：<48h 为低/较少，48h~120h 为中/可用，>=120h 为高/充足
+        val globalConfidence = RuntimeConfidenceLevel.evaluateByDuration(com.battery.analysis.util.BatteryEnergyCalculator.ROW_GLOBAL, totalHistoryMs)
+        val globalSufficiency = DataSufficiencyLevel.evaluateByDuration(com.battery.analysis.util.BatteryEnergyCalculator.ROW_GLOBAL, totalHistoryMs)
 
         // 10. 构建 RuntimeProfile 画像实体 (方案第 18 节)
         val nowMs = intervals.maxOfOrNull { it.endTimeMs } ?: System.currentTimeMillis()
@@ -339,7 +338,7 @@ class FullChargeRuntimeEstimator(
             offHighPowerW = offHighPower,
             typicalScreenOffPowerW = pTypicalScreenOff,
             typicalGlobalPowerW = finalPredictedPower,
-            confidence = confidence
+            confidence = globalConfidence
         )
 
         // 11. 构建质量说明与追溯依据 (方案第 12、13 节)
@@ -381,7 +380,7 @@ class FullChargeRuntimeEstimator(
             fullEnergyWh = fullWh,
             predictedPowerWatts = finalPredictedPower,
             modelVersion = RuntimeModelVersion.FULL_RUNTIME_V2_2,
-            confidenceLevel = confidence,
+            confidenceLevel = globalConfidence,
             energySource = energyEstimate.source,
             effectiveHistoryMs = totalHistoryMs,
             usedRegimeModel = canUseRegimeModel,
@@ -393,9 +392,13 @@ class FullChargeRuntimeEstimator(
             qualityReasons = qualityReasons,
             historyWindowDays = windowDays,
             effectiveDischargeDurationMs = totalHistoryMs,
-            dataSufficiency = sufficiency,
+            dataSufficiency = globalSufficiency,
             screenOnEffectiveMs = onDurMs,
             screenOffEffectiveMs = offDurMs,
+            screenOnConfidenceLevel = screenOnConfidence,
+            screenOffConfidenceLevel = screenOffConfidence,
+            screenOnDataSufficiency = screenOnSufficiency,
+            screenOffDataSufficiency = screenOffSufficiency,
             profile = profile
         )
     }

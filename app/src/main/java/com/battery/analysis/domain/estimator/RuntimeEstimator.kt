@@ -582,8 +582,48 @@ class RuntimeEstimator(
         val usableEnergy = energyEstimate.usableEnergyWh
         val energyConfidence = energyEstimate.energyConfidence
 
-        // 评估长期历史大样本数据质量分（反映样本充分度）
-        val longQuality = when {
+        // 评估长期历史大样本数据质量分（反映各维度样本充分度与可信度阶梯）
+        val longOnQuality = when {
+            sevenDaysStats?.v2Result != null -> {
+                when (sevenDaysStats.v2Result.screenOnDataSufficiency) {
+                    com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.SUFFICIENT -> 1.0
+                    com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.MODERATE -> 0.85
+                    com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.INSUFFICIENT -> 0.60
+                }
+            }
+            sevenDaysStats?.screenOnDurationMs != null -> {
+                val h = sevenDaysStats.screenOnDurationMs / 3600_000.0
+                when {
+                    h >= 72.0 -> 0.95
+                    h >= 24.0 -> 0.80
+                    else -> 0.60
+                }
+            }
+            sevenDaysStats != null -> 0.70
+            else -> 0.50
+        }
+
+        val longOffQuality = when {
+            sevenDaysStats?.v2Result != null -> {
+                when (sevenDaysStats.v2Result.screenOffDataSufficiency) {
+                    com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.SUFFICIENT -> 1.0
+                    com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.MODERATE -> 0.85
+                    com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.INSUFFICIENT -> 0.60
+                }
+            }
+            sevenDaysStats?.screenOffDurationMs != null -> {
+                val h = sevenDaysStats.screenOffDurationMs / 3600_000.0
+                when {
+                    h >= 72.0 -> 0.95
+                    h >= 24.0 -> 0.80
+                    else -> 0.60
+                }
+            }
+            sevenDaysStats != null -> 0.70
+            else -> 0.50
+        }
+
+        val longGlobalQuality = when {
             sevenDaysStats?.v2Result != null -> {
                 when (sevenDaysStats.v2Result.dataSufficiency) {
                     com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.SUFFICIENT -> 1.0
@@ -591,7 +631,14 @@ class RuntimeEstimator(
                     com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.INSUFFICIENT -> 0.60
                 }
             }
-            sevenDaysStats?.screenOnDurationMs != null && sevenDaysStats.screenOnDurationMs >= 3600_000L * 24 -> 0.90
+            sevenDaysStats?.globalDurationMs != null -> {
+                val h = sevenDaysStats.globalDurationMs / 3600_000.0
+                when {
+                    h >= 120.0 -> 0.95
+                    h >= 48.0 -> 0.80
+                    else -> 0.60
+                }
+            }
             sevenDaysStats != null -> 0.70
             else -> 0.50
         }
@@ -612,7 +659,7 @@ class RuntimeEstimator(
 
         // 1. 构建亮屏多时间尺度估计器（配置亮屏专属动态平衡权重）
         val onEstimator = PowerEstimator(profile = EstimatorProfile.SCREEN_ON)
-        onEstimator.setLongTermQuality(longQuality)
+        onEstimator.setLongTermQuality(longOnQuality)
         val longOnPower = sevenDaysStats?.v2Result?.predictedScreenOnPowerWatts
             ?: if (sevenDaysStats != null && totalCapacityWh != null && totalCapacityWh > 0f) {
                 val rate = sevenDaysStats.screenOnDischargeRatePercentPerHour
@@ -635,7 +682,7 @@ class RuntimeEstimator(
 
         // 2. 构建息屏待机多时间尺度估计器（优先对接连续向前滑动待机做功窗口 rollingOffWindow 作为 Medium 稳态基石）
         val offEstimator = PowerEstimator(profile = EstimatorProfile.SCREEN_OFF)
-        offEstimator.setLongTermQuality(longQuality)
+        offEstimator.setLongTermQuality(longOffQuality)
         val longOffPower = sevenDaysStats?.v2Result?.predictedScreenOffPowerWatts
             ?: if (sevenDaysStats != null && totalCapacityWh != null && totalCapacityWh > 0f) {
                 val rate = sevenDaysStats.screenOffDischargeRatePercentPerHour
@@ -658,7 +705,7 @@ class RuntimeEstimator(
 
         // 3. 构建全局直接估计器备用（优先对接连续向前滑动全局放电窗口 rollingGlobalWindow 作为 Medium 稳态基石）
         val globalFallbackEstimator = PowerEstimator(profile = EstimatorProfile.GLOBAL)
-        globalFallbackEstimator.setLongTermQuality(longQuality)
+        globalFallbackEstimator.setLongTermQuality(longGlobalQuality)
         val longGlobalPower = sevenDaysStats?.v2Result?.predictedPowerWatts
             ?: if (sevenDaysStats != null && totalCapacityWh != null && totalCapacityWh > 0f) {
                 val rate = sevenDaysStats.globalDischargeRatePercentPerHour

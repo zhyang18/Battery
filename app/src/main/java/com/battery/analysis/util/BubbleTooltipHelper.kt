@@ -190,10 +190,12 @@ object BubbleTooltipHelper {
 
     /**
      * 将气泡说明文本格式化为包含优雅悬挂缩进的富文本对象。
-     * 1. 当段落以标识符号（如 "• "、"💡 "、"- "、"* " 等）开头且内容发生自动折行时，
+     * 1. 当段落以列表标识符号（如 "• "、"💡 "、"- "、"* " 等）开头且内容发生自动折行时，
      *    折行后的后续行文本自动向右缩进避开首行标识符号，与首行的正文字符完美垂直对齐；
-     * 2. 当段落以前导空格（如以两个空格 "  " 开头的子级描述行、工况范围行等）开头且内容发生折行时，
-     *    折行后的后续行文本自动向右缩进相同的空格像素宽度，与上一行的首字符（正文文字）完全垂直左对齐。
+     * 2. 当段落以前导空格（如以两个空格 "  " 开头的子级描述行、工况范围行、统计范围行等）开头时，
+     *    首行通过设置前置 LeadingMargin 动态补齐空格像素与标准圆点符号（"• "）的宽度差额，
+     *    使子级正文首字符与上一行的列表正文字符严格垂直对齐；
+     *    折行后的后续行文本自动向右缩进标准符号宽度，确保整个子段落与上方文字完全对齐。
      *
      * @param textView 目标呈现提示文本的 [TextView] 实例，用于测量字体排版像素宽度
      * @param text 待处理的原始文本内容
@@ -208,6 +210,7 @@ object BubbleTooltipHelper {
 
         val lines = str.split("\n")
         var currentStart = 0
+        val standardBulletIndent = paint.measureText("• ").toInt()
         for (line in lines) {
             val lineLength = line.length
             val lineEnd = currentStart + lineLength
@@ -228,17 +231,32 @@ object BubbleTooltipHelper {
 
             val totalPrefixLength = leadingSpaces + bulletPrefixLength
 
-            if (totalPrefixLength > 0 && lineLength > totalPrefixLength) {
-                val prefixStr = line.substring(0, totalPrefixLength)
-                val indentWidth = paint.measureText(prefixStr).toInt()
-                // 为该段落应用悬挂缩进：首行 0 缩进（前导空格或符号已在首行字符流中占位），
-                // 自动折行后的后续行文本自动向右缩进 indentWidth 像素，与首行正文字符完美垂直左对齐
-                spannable.setSpan(
-                    LeadingMarginSpan.Standard(0, indentWidth),
-                    currentStart,
-                    lineEnd,
-                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-                )
+            if (lineLength > 0) {
+                if (leadingSpaces > 0 && bulletPrefixLength == 0) {
+                    // 子级描述行（如以两个空格 "  " 开头的 "统计范围"、"有效放电"、"工况预期范围" 等）：
+                    // 首行缩进补齐与父级列表符号对齐的差额，使首字符（正文文字）与上一行正文字符完全垂直对齐；
+                    // 自动折行后的后续行文本自动向右缩进 standardBulletIndent 像素，保持全段落垂直统一
+                    val spacesWidth = paint.measureText(line.substring(0, leadingSpaces)).toInt()
+                    val firstIndent = (standardBulletIndent - spacesWidth).coerceAtLeast(0)
+                    val restIndent = standardBulletIndent
+                    spannable.setSpan(
+                        LeadingMarginSpan.Standard(firstIndent, restIndent),
+                        currentStart,
+                        lineEnd,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                } else if (totalPrefixLength > 0 && lineLength > totalPrefixLength) {
+                    val prefixStr = line.substring(0, totalPrefixLength)
+                    val indentWidth = paint.measureText(prefixStr).toInt()
+                    // 为该段落应用悬挂缩进：首行 0 缩进（前导空格或符号已在首行字符流中占位），
+                    // 自动折行后的后续行文本自动向右缩进 indentWidth 像素，与首行正文字符完美垂直左对齐
+                    spannable.setSpan(
+                        LeadingMarginSpan.Standard(0, indentWidth),
+                        currentStart,
+                        lineEnd,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
             }
 
             currentStart = lineEnd + 1 // +1 跳过换行符 '\n'
@@ -248,7 +266,7 @@ object BubbleTooltipHelper {
 
     /**
      * 计算单行文本所能展开的最大期望宽度。
-     * 遍历文本中的各段换行行，测量每行文字所需的单行宽度，并返回其中的最大值。
+     * 遍历文本中的各段换行行，测量每行文字所需的单行宽度，并自动计入子级描述行的前置对齐边距，返回其中的最大值。
      *
      * @param paint 绘制文本所使用的 [Paint] 对象
      * @param message 待计算的文本内容
@@ -259,8 +277,26 @@ object BubbleTooltipHelper {
         if (str.isEmpty()) return 0f
         var maxWidth = 0f
         val lines = str.split("\n")
+        val standardBulletIndent = paint.measureText("• ")
         for (line in lines) {
-            val lineWidth = paint.measureText(line)
+            val leadingSpaces = line.takeWhile { it == ' ' }.length
+            val contentAfterSpaces = line.substring(leadingSpaces)
+            val bulletPrefixLength = when {
+                contentAfterSpaces.startsWith("• ") -> 2
+                contentAfterSpaces.startsWith("•") -> 1
+                contentAfterSpaces.startsWith("💡 ") -> 2
+                contentAfterSpaces.startsWith("💡") -> 1
+                contentAfterSpaces.startsWith("- ") -> 2
+                contentAfterSpaces.startsWith("* ") -> 2
+                else -> 0
+            }
+            val extraIndent = if (leadingSpaces > 0 && bulletPrefixLength == 0) {
+                val spacesWidth = paint.measureText(line.substring(0, leadingSpaces))
+                (standardBulletIndent - spacesWidth).coerceAtLeast(0f)
+            } else {
+                0f
+            }
+            val lineWidth = paint.measureText(line) + extraIndent
             if (lineWidth > maxWidth) {
                 maxWidth = lineWidth
             }

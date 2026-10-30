@@ -1,5 +1,8 @@
 package com.battery.analysis.model
 
+import android.content.Context
+import com.battery.analysis.R
+import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -223,12 +226,15 @@ data class ChargingHistoryRecord(
     }
 
     /**
-     * 获取设计图右下角展示的功耗说明标签名称。
+     * 获取设计图右下角展示的功耗说明标签名称（支持国际化自适应）。
      *
-     * @return 标签文本（"平均充电功率"）
+     * @param context 应用程序上下文，用于读取本地化字符串
+     * @return 标签文本（如 "平均充电功率" 或 "Avg Charging Power"）
      */
-    fun getDisplayPowerLabel(): String {
-        return "平均充电功率"
+    fun getDisplayPowerLabel(context: Context? = null): String {
+        val isZh = context?.resources?.configuration?.locales?.get(0)?.language?.startsWith("zh")
+            ?: Locale.getDefault().language.startsWith("zh")
+        return context?.getString(R.string.charging_avg_power_label) ?: if (isZh) "平均充电功率" else "Avg Charging Power"
     }
 
     /**
@@ -263,7 +269,36 @@ data class ChargingHistoryRecord(
         return result
     }
 
+    /**
+     * 获取符合当前系统或界面语言环境的充电连接类型本地化显示文本。
+     *
+     * @param context Android 应用程序上下文
+     * @return 本地化后的充电类型展示文本（如 "AC Fast Charge"、"交流快充"）
+     */
+    fun getLocalizedChargeType(context: Context): String {
+        return getLocalizedChargeType(context, chargeType)
+    }
+
     companion object {
+        /**
+         * 将原始充电连接类型描述转化为符合当前语言环境的本地化显示文本。
+         *
+         * @param context Android 上下文环境
+         * @param rawChargeType 底层记录的原始充电类型字符串（如 "交流快充"、"USB充电" 等）
+         * @return 本地化后的友好显示文本（如 "AC Fast Charge"、"USB Charging"）
+         */
+        fun getLocalizedChargeType(context: Context, rawChargeType: String): String {
+            val trimmed = rawChargeType.trim()
+            return when {
+                trimmed.contains("交流") || trimmed.contains("AC", ignoreCase = true) -> context.getString(R.string.charge_type_ac_fast)
+                trimmed.contains("USB", ignoreCase = true) -> context.getString(R.string.charge_type_usb)
+                trimmed.contains("无线") || trimmed.contains("Wireless", ignoreCase = true) -> context.getString(R.string.charge_type_wireless)
+                trimmed.contains("外部") || trimmed.contains("External", ignoreCase = true) -> context.getString(R.string.charge_type_external)
+                trimmed.contains("未充电") || trimmed.contains("Discharging", ignoreCase = true) -> context.getString(R.string.charge_type_none)
+                trimmed.isEmpty() -> context.getString(R.string.charge_type_external)
+                else -> rawChargeType
+            }
+        }
         private val DATE_FORMAT_FULL = ThreadLocal.withInitial {
             java.text.SimpleDateFormat("yyyy/MM/dd HH:mm", java.util.Locale.getDefault())
         }

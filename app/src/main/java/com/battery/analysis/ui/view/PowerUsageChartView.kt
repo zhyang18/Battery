@@ -19,6 +19,7 @@ import android.view.MotionEvent
 import android.view.View
 import androidx.core.graphics.drawable.toBitmap
 import com.battery.analysis.model.PowerDischargePoint
+import com.battery.analysis.R
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -557,10 +558,10 @@ class PowerUsageChartView @JvmOverloads constructor(
 
         // 提示文本
         val timeLabel = formatAxisTime(pt.timestamp)
-        val titleText = "电量: ${pt.batteryLevel}% ($timeLabel)"
-        val timeText = "放电耗时: ${pt.getFormattedTimeLabel()} | ${pt.temperature}℃"
+        val titleText = context.getString(R.string.chart_point_level_format, pt.batteryLevel, timeLabel)
+        val timeText = context.getString(R.string.chart_point_time_temp_format, pt.getFormattedTimeLabel(), pt.temperature)
         val appsText = if (pt.activeAppNames.isNotEmpty()) {
-            "前台应用: " + pt.activeAppNames.take(3).joinToString(", ")
+            context.getString(R.string.chart_point_app_prefix) + pt.activeAppNames.take(3).joinToString(", ")
         } else null
 
         val paddingH = dp8

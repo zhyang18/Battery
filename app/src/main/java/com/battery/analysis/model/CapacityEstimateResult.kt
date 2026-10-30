@@ -9,7 +9,21 @@ enum class CapacitySourceTier(val displayName: String) {
     /** 基于多次日常充放电历史会话高精微积分稳健学习收敛所得 */
     MULTI_SESSION_LEARNED("充放电会话自学习"),
     /** 系统出厂内置 PowerProfile 标称设计规格底线参考 */
-    DESIGN_SPEC_PROFILE("出厂设计规格参考")
+    DESIGN_SPEC_PROFILE("出厂设计规格参考");
+
+    /**
+     * 获取来源等级的多语言展示名称。
+     *
+     * @param context 应用程序上下文
+     * @return 本地化的来源展示文本
+     */
+    fun getDisplayName(context: android.content.Context): String {
+        return when (this) {
+            HARDWARE_VERIFIED -> context.getString(com.battery.analysis.R.string.capacity_tier_hardware)
+            MULTI_SESSION_LEARNED -> context.getString(com.battery.analysis.R.string.capacity_tier_learned)
+            DESIGN_SPEC_PROFILE -> context.getString(com.battery.analysis.R.string.capacity_tier_spec)
+        }
+    }
 }
 
 /**
@@ -23,7 +37,22 @@ enum class MaturityLevel(val displayName: String) {
     /** 积累了 ≥ 3 次有效会话且跨度充分，样本自洽收敛，达到工业级高置信度 */
     CONVERGED("高置信度 · 样本自洽"),
     /** 经过长时间、多温区与持续验证，形成高度稳定的容量基准 */
-    STABLE_TRACKING("长期稳定追踪")
+    STABLE_TRACKING("长期稳定追踪");
+
+    /**
+     * 获取成熟度等级的多语言展示名称。
+     *
+     * @param context 应用程序上下文
+     * @return 本地化的成熟度展示文本
+     */
+    fun getDisplayName(context: android.content.Context): String {
+        return when (this) {
+            PENDING -> context.getString(com.battery.analysis.R.string.capacity_maturity_pending)
+            INITIAL_OBSERVATION -> context.getString(com.battery.analysis.R.string.capacity_maturity_observation)
+            CONVERGED -> context.getString(com.battery.analysis.R.string.capacity_maturity_converged)
+            STABLE_TRACKING -> context.getString(com.battery.analysis.R.string.capacity_maturity_tracking)
+        }
+    }
 }
 
 /**

@@ -445,7 +445,7 @@
 
     <string name="settings_section_about">关于</string>
     <string name="setting_health_guide">电池健康度计算方式说明</string>
-    <string name="setting_app_version">电池检测 (Battery App)</string>
+    <string name="setting_app_version">电池检测</string>
 
     <!-- 语言选择 -->
     <string name="lang_follow_system">🌐 系统</string>
@@ -733,5 +733,475 @@
     <string name="settings_accessibility_status_disabled">未开启</string>
     <string name="settings_accessibility_btn_enable">去开启</string>
     <string name="settings_accessibility_btn_manage">管理</string>
+
+    <!-- 图表维度指标 -->
+    <string name="metric_power">功耗</string>
+    <string name="metric_level">电量</string>
+    <string name="metric_energy">能量</string>
+    <string name="metric_temp">温度</string>
+    <string name="metric_voltage">电压</string>
+    <string name="metric_app">应用</string>
+
+    <!-- 排序与单位切换 -->
+    <string name="power_sort_mah">按消耗电量 (mAh)</string>
+    <string name="power_sort_wh">按消耗能量 (Wh)</string>
+    <string name="power_unit_label_wh">瓦时 (能量)</string>
+    <string name="power_unit_label_mah">毫安时 (电量)</string>
+    <string name="power_toast_unit_switched">已切换为%s</string>
+    <string name="power_toast_unit_guide_hint">后续切换将直接生效，长按单位按钮可随时再次查看说明</string>
+
+    <!-- 确认删除与反馈 -->
+    <string name="dialog_delete_snapshot_title">确认删除此耗电快照？</string>
+    <string name="dialog_delete_snapshot_desc">删除后该条放电快照记录将从本地永久移除，无法找回。</string>
+    <string name="dialog_delete_charge_title">确认删除此充电记录？</string>
+    <string name="dialog_delete_charge_desc">删除后该条充电历史记录将从本地永久移除，无法找回。</string>
+    <string name="dialog_delete_multi_snapshots_title">确认删除选中的 %d 条记录？</string>
+    <string name="dialog_delete_multi_snapshots_desc">删除后所选的放电快照记录将从本地永久移除，无法找回。</string>
+    <string name="dialog_delete_sample_title">删除样本确认</string>
+    <string name="dialog_delete_sample_desc">确定删除本次推算容量为 %s 的会话样本？删除后系统将立即重新计算容量模型。</string>
+
+    <!-- 操作提示 Toast -->
+    <string name="toast_saved">已保存</string>
+    <string name="toast_no_records_to_delete">暂无记录可删除</string>
+    <string name="toast_select_records_first">请先选择要删除的记录</string>
+    <string name="toast_selection_inverted">已反选</string>
+    <string name="toast_deleted_count">已删除 %d 条记录</string>
+    <string name="toast_service_stop_failed">停止失败</string>
+    <string name="toast_service_root_start_failed">Root 启动失败</string>
+    <string name="toast_service_shizuku_start_failed">Shizuku 启动失败</string>
+    <string name="toast_threshold_updated">已设为门限 %s，已即时重新计算模型</string>
+
+    <!-- 历史记录与选择条 -->
+    <string name="history_selected_count_format">已选 %d 项</string>
+    <string name="history_select_records">选择记录</string>
+    <string name="power_history_filter_empty_title">未找到符合条件的放电记录</string>
+    <string name="power_history_filter_empty_desc">暂无亮屏时长 %s 的记录</string>
+    <string name="charging_history_empty_filtered_desc">暂无电量增量 %s 的充电记录</string>
+    <string name="charging_history_filter_empty_title">未找到符合条件的充电记录</string>
+    <string name="power_history_stats_range_format">📊 统计范围：共 %1$d 条放电记录%2$s</string>
+    <string name="power_history_total_drop_format"> · 累计掉电 -%d%%</string>
+    <string name="power_history_baseline_energy_format">🔋 计算基准总能量：%.2f Wh</string>
+
+    <!-- 图表状态与点选标签 -->
+    <string name="chart_waiting_charge_data">等待充电数据采样...</string>
+    <string name="chart_collecting_charge_data">正在连接并采集充电数据...</string>
+    <string name="chart_point_level_format">电量: %1$d%% (%2$s)</string>
+    <string name="chart_point_time_temp_format">放电耗时: %1$s | %2$d℃</string>
+    <string name="chart_point_app_prefix">前台应用: </string>
+
+    <!-- 应用耗电明细与角标 -->
+    <string name="app_status_fg_resident">前台+常驻</string>
+    <string name="app_status_fg_bg">前台+后台</string>
+    <string name="app_status_foreground">前台活跃</string>
+    <string name="app_status_resident">常驻服务</string>
+    <string name="app_status_background">纯后台运行</string>
+    <string name="app_status_bg_standby">后台待机</string>
+    <string name="app_metric_fg_prefix">前: %s</string>
+    <string name="app_metric_bg_empty">后: --</string>
+    <string name="app_metric_avg_temp_format">平均: %.1f ℃</string>
+    <string name="app_metric_avg_temp_empty">平均: --</string>
+    <string name="app_metric_max_temp_format">最高: %.1f ℃</string>
+    <string name="app_metric_max_temp_empty">最高: --</string>
+    <string name="app_bg_energy_unified_notice">-- (整机息屏统一统计)</string>
+    <string name="app_source_batterystats_uninstalled">BatteryStats (已卸载应用)</string>
+    <string name="app_source_usagestats_uninstalled">UsageStats (已卸载应用)</string>
+    <string name="app_source_batterystats_system">BatteryStats (系统底座)</string>
+    <string name="app_source_usagestats_system">UsageStats (系统事件)</string>
+    <string name="app_lock_gps_format">锁: %1$s | GPS: %2$s</string>
+    <string name="app_confidence_format">可信度: %s</string>
+    <string name="app_confidence_high">高</string>
+    <string name="app_confidence_medium">中</string>
+    <string name="app_confidence_low">低</string>
+    <string name="app_energy_source_estimated">算法估算</string>
+
+    <!-- 容量诊断与会话列表 -->
+    <string name="capacity_est_prefix">预估满电容量: </string>
+    <string name="capacity_learning">学习中</string>
+    <string name="capacity_initializing">初始化中</string>
+    <string name="capacity_awaiting_data">等待充电数据</string>
+    <string name="capacity_nominal_voltage">标称工作平台</string>
+    <string name="capacity_not_ready">未就绪</string>
+    <string name="capacity_learning_progress_format">自学习中(%d/5)</string>
+    <string name="capacity_physical_charge_format">物理电荷 · %d%%</string>
+    <string name="capacity_physical_charge">物理电荷</string>
+    <string name="capacity_nominal_energy">标称电压物理能量</string>
+    <string name="capacity_status_converged">🛡️ 收敛</string>
+    <string name="capacity_status_observing">⏳ 观察</string>
+    <string name="capacity_status_pending">🌱 自学习中</string>
+    <string name="capacity_tier_hardware">硬件电量计直读</string>
+    <string name="capacity_tier_learned">充放电会话自学习</string>
+    <string name="capacity_tier_spec">出厂设计规格参考</string>
+    <string name="capacity_maturity_pending">样本积累中 · 待校准</string>
+    <string name="capacity_maturity_observation">初步建模中</string>
+    <string name="capacity_maturity_converged">高置信度 · 样本自洽</string>
+    <string name="capacity_maturity_tracking">长期稳定追踪</string>
+    <string name="capacity_session_subtitle_format">累计 %1$d 次记录 · %2$d 次纳入有效模型 (门限 &gt; %3$d%%)</string>
+    <string name="capacity_session_tab_all_format">全部 (%d)</string>
+    <string name="capacity_session_tab_charge_format">⚡ 充电 (%d)</string>
+    <string name="capacity_session_tab_discharge_format">🔋 放电 (%d)</string>
+    <string name="capacity_session_badge_charge">⚡ 充电会话</string>
+    <string name="capacity_session_badge_discharge">🔋 放电会话</string>
+    <string name="capacity_session_status_outlier">离群排除</string>
+    <string name="capacity_session_status_below_threshold">未达门限</string>
+    <string name="capacity_session_status_included">✓ 纳入模型</string>
+    <string name="capacity_session_net_charge">净充入</string>
+    <string name="capacity_session_net_discharge">净放出</string>
+    <string name="capacity_session_avg_temp_format">均温: %.1f℃</string>
+    <string name="capacity_diag_zero_times">0 次</string>
+    <string name="capacity_diag_accumulating">数据积累中</string>
+    <string name="capacity_diag_source_format">来源: %s</string>
+    <string name="capacity_diag_counts_format">充电 %1$d 次 ｜ 放电 %2$d 次</string>
+    <string name="capacity_diag_consistency_good">%.2f%% (一致性良好)</string>
+    <string name="capacity_diag_consistency_diff">%.2f%% (差异偏大 · 观察中)</string>
+    <string name="capacity_diag_no_conflict">单方向数据 · 暂无冲突</string>
+
+    <!-- 门限设置项副标题 -->
+    <string name="capacity_thresh_desc_10">极速建模 · 容纳浅充浅放</string>
+    <string name="capacity_thresh_desc_15">日常均衡模式</string>
+    <string name="capacity_thresh_desc_20">推荐 · 精度与收敛最佳平衡</string>
+    <string name="capacity_thresh_desc_25">常态充放跨度</string>
+    <string name="capacity_thresh_desc_30">高精度 · 减少量化离散</string>
+    <string name="capacity_thresh_desc_40">深度自学习</string>
+    <string name="capacity_thresh_desc_50">半程以上 · 高置信度</string>
+    <string name="capacity_thresh_desc_60">大跨度充放验证</string>
+    <string name="capacity_thresh_desc_70">极限全量程校准</string>
+    <string name="capacity_thresh_desc_80">深度充放 · 极高精度</string>
+    <string name="capacity_thresh_desc_90">超深度充放循环</string>
+    <string name="capacity_thresh_desc_100" formatted="false">完整 0%~100% 深度充放</string>
+
+    <!-- 耗电与充电卡片提示 -->
+    <string name="power_bubble_screen_on_summary">亮屏：时间、平均功耗、放电速度、能量</string>
+    <string name="power_bubble_screen_off_summary">息屏：时间、平均功耗、放电速度、能量</string>
+    <string name="power_bubble_global_summary">全局：时间、平均功耗、放电速度、能量</string>
+    <string name="charging_record_label">充电记录</string>
+    <string name="power_mode_system">系统模式</string>
+    <string name="charging_card_charged_duration_format">已充电: %s</string>
+    <string name="charging_detail_dialog_title_format">充电详情 (%s)</string>
+    <string name="charging_detail_port_format">充电接口：%s\n</string>
+    <string name="charging_detail_total_dur_format">总充电时长：%s\n</string>
+    <string name="charging_detail_screen_on_dur_format">亮屏充电时长：%s\n</string>
+    <string name="charging_detail_screen_off_dur_format">息屏充电时长：%s\n</string>
+    <string name="charging_detail_level_change_format">电量变化：%1$d%% → %2$d%% (+%3$d%%)\n</string>
+    <string name="charging_detail_charged_energy_format">充入能量：+%.2f Wh\n</string>
+    <string name="charging_detail_avg_power_format">平均功率：%.2f W\n</string>
+    <string name="charging_detail_max_power_format">峰值功率：%.2f W\n</string>
+    <string name="charging_detail_max_temp_format">最高温度：%.1f ℃</string>
+
+    <!-- 设置与状态栏监测 -->
+    <string name="settings_bar_pos_status_bar">状态栏位置</string>
+    <string name="settings_bar_pos_custom">自定义位置</string>
+    <string name="settings_bar_sp_font">sp字号</string>
+    <string name="settings_bar_opacity_suffix">%透明度</string>
+    <string name="settings_bar_regular_font"> · 常规体</string>
+    <string name="settings_bar_no_border"> · 无边框</string>
+    <string name="settings_bar_no_unit"> · 无单位</string>
+    <string name="settings_bar_custom_y_format">Y: %d px (状态栏)</string>
+
+    <!-- 视图模型与快照载入 -->
+    <string name="bugreport_status_not_imported">未导入错误报告日志。点击下方按钮选择 bugreport.zip 或 txt 提取底层数据。</string>
+        <string name="category_all">全部</string>
+    <string name="bugreport_snapshot_header_format">【历史快照载入】\n检测时间: %1$s\n数据来源: 错误报告快照\n</string>
+
+    <!-- 时长格式化 -->
+    <string name="dur_zero_min">0 分钟</string>
+    <string name="dur_secs_format">%d 秒</string>
+    <string name="dur_mins_format">%d 分钟</string>
+    <string name="dur_hours_mins_format">%1$d 时 %2$d 分</string>
+    <string name="dur_hours_format">%d 小时</string>
+
+    <!-- 错误报告解析表格指标与描述 -->
+    <string name="table_item_charging_status">⚡ 充电状态</string>
+    <string name="table_item_level">🔋 电量</string>
+    <string name="table_item_voltage">🔋 电池电压</string>
+    <string name="table_item_current">⚡ 电流</string>
+    <string name="table_item_power">⚡ 电池功率</string>
+    <string name="table_item_temperature">🌡️ 电池温度</string>
+    <string name="table_item_cycle_count">🔄 循环次数</string>
+    <string name="table_item_design_capacity">🔋 设计容量</string>
+    <string name="table_item_full_capacity">🔋 充满容量</string>
+    <string name="table_item_current_capacity">🔋 当前容量</string>
+    <string name="table_item_health_ratio">❤️ 健康度</string>
+    <string name="table_item_battery_tech">🔋 电池类型</string>
+    <string name="table_item_health_state">🩺 电池健康</string>
+    <string name="table_item_report_time">⏱️ 报告时间</string>
+    <string name="table_desc_charging_status">当前充放电状态</string>
+    <string name="table_desc_level">当前剩余电量</string>
+    <string name="table_desc_voltage">当前电池端电压</string>
+    <string name="table_desc_current">当前电池电流</string>
+    <string name="table_desc_power">电池瞬时工作功率</string>
+    <string name="table_desc_temperature">当前温度</string>
+    <string name="table_desc_cycle_count">等效完整循环</string>
+    <string name="table_desc_design_capacity">出厂设计容量</string>
+    <string name="table_desc_full_capacity">电量计估算 FCC</string>
+    <string name="table_desc_current_capacity">当前剩余容量</string>
+    <string name="table_desc_battery_tech">锂离子</string>
+    <string name="table_desc_health_state_normal">Android 判断正常</string>
+    <string name="table_desc_report_time">错误报告生成/抓取时间</string>
+    <string name="status_val_charging">正在充电</string>
+    <string name="status_val_discharging">放电中</string>
+    <string name="status_val_not_charging">未充电</string>
+    <string name="status_val_full">已充满</string>
+    <string name="status_val_unknown">状态未知</string>
+    <string name="health_val_overheat">OVERHEAT (过热)</string>
+    <string name="health_val_dead">DEAD (损坏)</string>
+    <string name="health_val_over_voltage">OVER_VOLTAGE (电压过高)</string>
+    <string name="health_val_cold">COLD (过冷)</string>
+    <string name="capacity_source_direct_hardware">硬件原生能量计数器</string>
+    <string name="capacity_source_charge_counter">硬件实时电荷计数器</string>
+    <string name="capacity_source_effective_capacity">有效基准容量</string>
+    <string name="capacity_source_design_capacity">出厂设计容量</string>
+    <string name="capacity_source_unknown">未知</string>
+    <string name="capacity_source_unobtained">未获取</string>
+
+    <string name="service_notification_default_desc">⚡ 电池监控持续运行中</string>
+    <string name="charging_history_stats_range_format">📊 统计范围：共 %1$d 条充电记录%2$s</string>
+    <string name="charging_history_gain_format"> · 累计充入 +%d%%</string>
+    <string name="charging_peak_power_format">⚡ 最高充电功率：%.1f W</string>
+    <string name="charging_peak_temp_format">🌡️ 电池最高温度：%.1f ℃</string>
+    <string name="history_snapshot_suffix"> (快照)</string>
+    <string name="history_snapshot_in_progress"> · 进行中</string>
+    <string name="app_usage_resident_format"> (常驻: %s)</string>
+    <string name="capacity_session_soc_span_format">%1$d%% → %2$d%% (跨度 %3$d%%)</string>
+    <string name="power_avg_screen_on_power">平均亮屏功耗</string>
+    <string name="power_avg_discharge_power">平均放电功耗</string>
+    <string name="charging_avg_power_label">平均充电功率</string>
+    <!-- 关于项目详情弹窗 -->
+    <string name="about_dialog_title">关于项目详情</string>
+    <string name="about_dialog_subtitle">轻量 · 精准 · 现代的电池统计与健康分析工具</string>
+    <string name="about_app_summary_title">📖 项目定位与准则</string>
+    <string name="about_app_summary_desc">专为 Android 设计的轻量、精准、专业能耗统计、硬件健康度与物理快充监测工具。全局坚守客观真实数据准则，严禁捏造虚假脏数据或保底篡改，忠实反映系统底层与硬件传感器的真实读数。</string>
+    <string name="about_core_features_title">🌟 核心技术矩阵</string>
+    <string name="about_feature_power_title">📊 耗电统计与能耗拆解</string>
+    <string name="about_feature_power_desc">智能感应放电周期，全维度拆解亮屏/息屏/深度睡眠功耗与有效能量(Wh)，基于最近 7 天统计基准科学推算满电续航，支持高帧率 Canvas 放电轨迹与前后台应用账本。</string>
+    <string name="about_feature_charging_title">⚡ 物理快充与温升监测</string>
+    <string name="about_feature_charging_desc">真实电芯功率与 USB 输入端口物理读数，时间积分精准计算充入有效能量，三合一走势图表动态记录快充功率、电量与温度温升。</string>
+    <string name="about_feature_health_title">🩺 多源电池健康度诊断</string>
+    <string name="about_feature_health_desc">支持标准系统 API、Shizuku 提权直接穿透 Linux 内核驱动节点及电量计 IC 硬件寄存器、系统 Bugreport 秒级流式解析，精准诊断出厂设计与当前真实 FCC 容量。</string>
+    <string name="about_feature_daemon_title">🛡️ 保活守护与悬浮窗监控</string>
+    <string name="about_feature_daemon_desc">提供前台常驻服务、无障碍秒级自愈与 PID 1 特权守护进程，支持桌面与状态栏悬浮窗实时监控当前电量、物理功率与实时温度。</string>
+    <string name="about_license_title">📄 开源协议与致谢</string>
+    <string name="about_license_desc">本项目基于 MIT License 协议完全开源，允许自由学习、修改与二次开发。特别致谢 Shizuku、MPAndroidChart、Google Material Components 等开源社区的卓越贡献。</string>
+    <string name="about_repo_title">🔗 开源仓库与主页</string>
+    <string name="about_repo_url">https://github.com/zhyang18/Battery</string>
+    <string name="about_author_title">👤 开发者</string>
+    <string name="about_author_name">zhyang18</string>
+
+    <!-- 电池容量概览卡片与科学诊断 -->
+    <string name="capacity_remaining_charge_title">当前剩余可用电荷</string>
+    <string name="capacity_remaining_energy_title">可用剩余能量</string>
+    <string name="capacity_fcc_baseline_label">基准满充(FCC): </string>
+    <string name="capacity_open_diagnosis">诊断档案 ›</string>
+    <string name="capacity_diag_title">电池容量科学诊断与学习档案</string>
+    <string name="capacity_diag_subtitle">基于电荷微积分与充放电会话自学习 · 预估数据</string>
+    <string name="capacity_diag_overview_title">容量与健康度全景</string>
+    <string name="capacity_diag_remaining_charge_label">当前剩余电荷量</string>
+    <string name="capacity_diag_method_diff">测定: 物理差分</string>
+    <string name="capacity_diag_remaining_energy_label">可用剩余能量</string>
+    <string name="capacity_diag_platform_baseline">基准: 3.85V 标称平台</string>
+    <string name="capacity_diag_fcc_label">真实满充容量(FCC)</string>
+    <string name="capacity_diag_design_cap_label">出厂额定设计容量</string>
+    <string name="capacity_diag_spec_power_profile">规格: PowerProfile</string>
+    <string name="capacity_diag_soh_label">电池容量健康度(SOH): </string>
+    <string name="capacity_diag_sample_profile_title">自学习样本档案</string>
+    <string name="capacity_diag_sessions_label">有效学习会话</string>
+    <string name="capacity_diag_threshold_label">有效数据门限</string>
+    <string name="capacity_diag_threshold_hint">单次充放电跨度需达标方参与模型计算</string>
+    <string name="capacity_diag_soc_span_label">累计 SOC 覆盖跨度</string>
+    <string name="capacity_diag_dispersion_label">加权样本离散度(CV)</string>
+    <string name="capacity_diag_confidence_interval_label">模型置信区间</string>
+    <string name="capacity_diag_audit_title">数据源审计与交叉校验</string>
+    <string name="capacity_diag_conflict_d_label">充放电观测相对差异率 D</string>
+    <string name="capacity_diag_cycle_protection_label">循环校准防护</string>
+    <string name="capacity_diag_cycle_protection_desc">纯物理净电量 (已隔离功耗模型)</string>
+    <string name="capacity_diag_statement_title">⚠️ 严谨物理与工况声明</string>
+    <string name="capacity_diag_statement_1">1. 本机型电化学温度与内阻模型未进行外部硬件测试台架标定，系统忠实展示电芯基准物理容量，杜绝未经实测的硬编码折减。</string>
+    <string name="capacity_diag_statement_2">2. 模型置信度与离散度仅代表多次采样在统计模型内部的数据自洽度，不作为绝对测量精度的商业担保。</string>
+    <string name="capacity_diag_guide_title">💡 日常使用与自学习校准指南</string>
+    <string name="capacity_diag_guide_desc" formatted="false">无需刻意进行 0%~100% 深度充放电。在日常使用中，只要产生 1~2 次单次电量跨度大于 20% 的自然充放电，系统将自动增量更新档案。</string>
+    <string name="capacity_session_list_title">自学习会话样本明细</string>
+    <string name="capacity_session_empty_title">暂无会话样本数据</string>
+    <string name="capacity_session_empty_desc">完成自然充放电（跨度达到有效数据门限）后系统将自动生成自学习样本</string>
+    <string name="capacity_threshold_picker_title">设置自学习有效数据百分比</string>
+    <string name="capacity_item_fcc_label">推算满电容量 (FCC)</string>
+
+    <!-- 放电速度与续航预测弹窗动态文本 -->
+    <string name="prediction_title_screen_on">【亮屏续航预测】</string>
+    <string name="prediction_title_screen_off">【息屏续航预测】</string>
+    <string name="prediction_title_global">【全局续航预测】</string>
+    <string name="prediction_session_drain_rate">• 当前会话放电速度：%s</string>
+    <string name="prediction_session_sub_screen_on">(亮屏 %s)</string>
+    <string name="prediction_session_sub_screen_off">(息屏 %s)</string>
+    <string name="prediction_session_sub_discharge">(放电 %s)</string>
+    <string name="prediction_seven_days_drain_rate">• 近7天放电速度：%s</string>
+    <string name="prediction_full_screen_on_runtime">• 满电亮屏续航：%s</string>
+    <string name="prediction_full_screen_off_runtime">• 满电待机时长：%s</string>
+    <string name="prediction_model_v2_tag_2_2">升级模型(v2.2)</string>
+    <string name="prediction_model_v2_tag_2_1">升级模型(v2.1)</string>
+    <string name="prediction_model_stat_range">"  统计范围：%s"</string>
+    <string name="prediction_window_past_7_days">最近 7 天</string>
+    <string name="prediction_window_adaptive_format">自适应扩展至近 %.1f 天</string>
+    <string name="prediction_eff_screen_on_format">"  有效放电：累计亮屏 %1$s (%2$s)"</string>
+    <string name="prediction_eff_screen_off_format">"  有效放电：累计息屏 %1$s (%2$s)"</string>
+    <string name="prediction_eff_global_format">"  有效放电：实际参与累计 %1$s (%2$s)"</string>
+    <string name="prediction_screen_on_workload">"  亮屏工况：轻载 %1$s · 普通 %2$s · 重载 %3$s"</string>
+    <string name="prediction_screen_on_workload_power">"  工况功耗：%s"</string>
+    <string name="prediction_light_load_format">轻载 %s</string>
+    <string name="prediction_normal_load_format">普通 %s</string>
+    <string name="prediction_heavy_load_format">重载 %s</string>
+    <string name="prediction_typical_power">"  典型功耗：%s"</string>
+    <string name="prediction_standby_workload">"  待机工况：休眠 %1$s · 唤醒 %2$s"</string>
+    <string name="prediction_sleep_load_format">休眠 %s</string>
+    <string name="prediction_awake_load_format">唤醒 %s</string>
+    <string name="prediction_typical_standby_power">"  典型待机功耗：%s"</string>
+    <string name="prediction_two_state_distribution">"  两态分布：亮屏 %1$s · 息屏 %2$s"</string>
+    <string name="prediction_workload_model_format">"  工况建模：基于 %s 推算"</string>
+    <string name="prediction_model_desc_regime">工况条件化典型模型</string>
+    <string name="prediction_model_desc_fallback">全局物理基准降级</string>
+    <string name="prediction_baseline_drain_rate">• 预测基准放电速度：%s</string>
+    <string name="prediction_current_remaining_runtime">• 当前剩余续航：%s</string>
+    <string name="prediction_current_remaining_runtime_with_conf">• 当前剩余续航：%1$s (%2$s)</string>
+    <string name="prediction_current_standby_runtime_with_conf">• 当前待机续航：%1$s (%2$s)</string>
+    <string name="prediction_range_screen_on">"  工况预期范围：%1$s(重载) ~ %2$s(轻载)"</string>
+    <string name="prediction_range_screen_off">"  工况预期范围：%1$s(频繁唤醒) ~ %2$s(深度休眠)"</string>
+    <string name="prediction_range_global">"  工况预期范围：%1$s(偏重载) ~ %2$s(偏轻载)"</string>
+    <string name="prediction_pred_discharge_power">"  预测放电功耗：%1$s%2$s%3$s"</string>
+    <string name="prediction_pred_standby_power">"  预测待机功耗：%1$s%2$s%3$s"</string>
+    <string name="prediction_pred_overall_power">"  预测综合功耗：%1$s%2$s%3$s"</string>
+    <string name="prediction_avail_energy_suffix"> (可用 %s)</string>
+    <string name="prediction_real_capacity">• 预测真实容量：%s</string>
+    <string name="prediction_full_estimates_header">\n📊 满电综合续航推算：\n</string>
+    <string name="prediction_mode_1_title">• 模式1（全局加权）：%s</string>
+    <string name="prediction_mode_1_desc">"  基于7天全局真实功耗线性推算"</string>
+    <string name="prediction_mode_2_title">• 模式2（场景融合）：%s</string>
+    <string name="prediction_mode_2_desc">"  按日常习惯 %1$s 亮屏 + %2$s 息屏加权"</string>
+    <string name="prediction_notes_header">\n💡 说明：\n</string>
+    <string name="prediction_note_screen_on_1">• 会话放电速度反映本次拔电以来的实际平均耗电表现；\n</string>
+    <string name="prediction_note_screen_on_2">• 预测基准放电速度反映近期稳态工况，作为推算当前剩余续航的基准；\n</string>
+    <string name="prediction_note_screen_on_3">• 满电续航按7天实际亮屏加权推算；\n</string>
+    <string name="prediction_note_screen_on_4">• 升级模型自适应历史窗口与衰减权重；\n</string>
+    <string name="prediction_note_screen_on_5">• 剩余续航基于物理能量与自适应多时间尺度推算。</string>
+    <string name="prediction_note_screen_off_1">• 会话放电速度反映本次拔电以来的息屏待机耗电表现；\n</string>
+    <string name="prediction_note_screen_off_2">• 预测基准放电速度反映近期稳态工况，作为推算待机续航的基准；\n</string>
+    <string name="prediction_note_screen_off_3">• 待机时长按7天实际待机时间加权推算；\n</string>
+    <string name="prediction_note_screen_off_4">• 升级模型解构深睡底噪与后台唤醒；\n</string>
+    <string name="prediction_note_screen_off_5">• 待机续航基于物理能量与多时间尺度稳态推算。</string>
+    <string name="prediction_note_global_1">• 会话放电速度反映本次拔电以来的全局综合耗电表现；\n</string>
+    <string name="prediction_note_global_2">• 预测基准放电速度反映近期稳态工况，作为推算综合剩余续航的基准；\n</string>
+    <string name="prediction_note_global_3">• 模式1忠实反映历史全周期能量总积分；\n</string>
+    <string name="prediction_note_global_4">• 模式2解构亮屏与待机两态比例；\n</string>
+    <string name="prediction_note_global_5">• 升级模型自适应历史窗口与工况建模；\n</string>
+    <string name="prediction_note_global_6">• 剩余续航基于物理能量与多时间尺度综合推算。</string>
+
+    <!-- 置信度与数据充分性 -->
+    <string name="conf_level_high">可信度高</string>
+    <string name="conf_level_medium">可信度中等</string>
+    <string name="conf_level_low">可信度较低</string>
+    <string name="conf_level_unavailable">数据不足</string>
+    <string name="data_sufficiency_sufficient">数据充足</string>
+    <string name="data_sufficiency_moderate">基本可用</string>
+    <string name="data_sufficiency_insufficient">样本较少</string>
+
+    <!-- 应用详情与能耗明细 -->
+    <string name="app_detail_consumed_energy">消耗能量</string>
+    <string name="app_detail_avg_power">平均功耗</string>
+    <string name="app_detail_peak_power">峰值功耗</string>
+    <string name="app_detail_active_time">活动时间</string>
+    <string name="app_detail_cpu_time">CPU 运行时间</string>
+    <string name="app_detail_network_traffic">网络流量</string>
+    <string name="app_detail_wakelock_location">Wakelock / 定位</string>
+    <string name="app_detail_data_source">数据来源</string>
+    <string name="app_detail_temp">运行温度</string>
+    <string name="app_detail_runtime_section">工况运行时长</string>
+    <string name="app_detail_fg_screen_on_time">前台亮屏时长</string>
+    <string name="app_detail_bg_time">后台运行耗时</string>
+    <string name="app_detail_total_runtime">运行时长总计</string>
+    <string name="app_detail_drain_allocation">电量消耗分配</string>
+    <string name="app_detail_fg_drain">前台消耗电量</string>
+    <string name="app_detail_bg_drain">后台消耗电量</string>
+    <string name="app_detail_total_drain">总计消耗电量</string>
+    <string name="app_detail_hardware_overhead">硬件资源开销</string>
+    <string name="app_detail_cpu_calc_time">CPU 计算时间</string>
+    <string name="app_detail_net_transfer">网络数据传输</string>
+    <string name="app_detail_record_source">记录与来源</string>
+    <string name="app_detail_time_range">统计时间区间</string>
+    <string name="app_detail_last_used">最近使用时间</string>
+
+    <!-- 充放电历史摘要表格 -->
+    <string name="history_summary_metric">指标</string>
+    <string name="history_summary_col_time">⏱️ 时</string>
+    <string name="history_summary_col_energy">⚡ 能(Wh)</string>
+    <string name="history_summary_col_power">💡 功(W)</string>
+    <string name="history_summary_col_rate">📈 速(%/h)</string>
+    <string name="charging_summary_desc">📌 说明：所有指标严格基于底层真实硬件物理量与充电会话数据累加计算，忠实反映设备充电性能表现。</string>
+    <string name="power_summary_desc">📌 说明：所有指标严格基于底层真实硬件物理守恒定律累加计算，忠实反映设备放电能耗表现。</string>
+
+
+    <!-- 电流校准与设置 -->
+    <string name="current_calib_raw_hw">底层硬件采样电流</string>
+    <string name="current_calib_instant">校准后瞬时电流</string>
+    <string name="current_calib_steps_10x">10的倍数档位</string>
+    <string name="unit_seconds">秒</string>
+
+    <!-- 单位切换说明 -->
+    <string name="power_unit_dialog_formula_title">换算基准公式 (国际标准 3.85V)</string>
+    <string name="power_unit_dialog_def_title">物理定义</string>
+    <string name="power_unit_dialog_science_title">科学守恒</string>
+    <string name="power_unit_dialog_dont_show_again">不再弹出提示（长按单位徽标可随时重看）</string>
+    <string name="power_unit_dialog_formula_desc">换算公式</string>
+
+    <!-- 快照保存 -->
+    <string name="snapshot_dialog_title">保存电池检测快照</string>
+    <string name="snapshot_category_label">快照分类标签</string>
+    <string name="snapshot_tag_daily">日常检测</string>
+    <string name="snapshot_tag_full">满电状态</string>
+    <string name="snapshot_tag_low">低电量</string>
+    <string name="snapshot_tag_charging">充电测试</string>
+    <string name="snapshot_tag_thermal">发热重载</string>
+    <string name="snapshot_tag_standby">待机测试</string>
+    <string name="snapshot_name_hint">分类名称（可自由输入或点击上方快捷标签）</string>
+    <string name="snapshot_note_hint">备注说明（可选，如：67W快充/游戏后测试）</string>
+    <string name="charging_screen_always_on">充电保持屏幕常亮</string>
+    <string name="filter_charge">⚡ 充电</string>
+    <string name="filter_discharge">🔋 放电</string>
+    <!-- 充电类型本地化展示 -->
+    <string name="charge_type_ac_fast">交流快充</string>
+    <string name="charge_type_usb">USB充电</string>
+    <string name="charge_type_wireless">无线充电</string>
+    <string name="charge_type_external">外部供电</string>
+    <string name="charge_type_none">未充电</string>
+
+    <!-- 息屏细分状态卡片气泡弹窗（息屏、唤醒、深睡） -->
+    <string name="screen_off_detail_title">【息屏耗电】\n</string>
+    <string name="screen_off_detail_drain_format">• 息屏掉电：%1$s（待机 %2$s）\n</string>
+    <string name="screen_off_detail_rate_format">• 放电速度：%s\n</string>
+    <string name="screen_off_detail_energy_format">• 消耗能量：%1$s (折合 %2$s)\n</string>
+    <string name="screen_off_detail_power_format">• 平均功率：%s\n\n</string>
+    <string name="screen_off_detail_screen_on_title">【亮屏对比】\n</string>
+    <string name="screen_off_detail_on_drain_format">• 亮屏掉电：%1$s（时长 %2$s）\n</string>
+    <string name="screen_off_detail_on_rate_format">• 亮屏放电速度：%s\n</string>
+    <string name="screen_off_detail_notes">💡 说明：\n• 占比基于整机电池满电总能量基准计算；\n• 息屏能耗由后台唤醒与深度休眠底噪构成。</string>
+
+    <string name="awake_detail_title">【息屏唤醒】\n</string>
+    <string name="awake_detail_drain_format">• 唤醒掉电：%1$s（活跃 %2$s）\n</string>
+    <string name="awake_detail_freq_format">• 唤醒频次：%s\n</string>
+    <string name="awake_freq_with_rate_format">%1$d 次 (约 %2$.1f 次/小时)</string>
+    <string name="awake_freq_only_format">%d 次</string>
+    <string name="awake_detail_ratio_format">• 唤醒占比：%s（占息屏时长）\n\n</string>
+    <string name="awake_detail_notes">💡 说明：\n• 熄屏后被系统广播、推送或定时任务唤醒的活跃状态；\n• 唤醒过频或时长过长是待机异常掉电的主要诱因。</string>
+
+    <string name="deep_sleep_detail_title">【深度睡眠】\n</string>
+    <string name="deep_sleep_detail_drain_format">• 深睡掉电：%1$s（累计 %2$s）\n</string>
+    <string name="deep_sleep_detail_power_format">• 休眠功率：%s\n</string>
+    <string name="deep_sleep_detail_ratio_format">• 深度睡眠率：%s\n</string>
+    <string name="deep_sleep_detail_count_format">• 进入休眠：%s\n\n</string>
+    <string name="deep_sleep_count_val_format">%d 次</string>
+    <string name="deep_sleep_detail_note_1">💡 说明：\n• 灭屏后 CPU 挂起仅留硬件底噪的极低功耗模式；\n</string>
+    <string name="deep_sleep_detail_note_high_power">• 当前深睡功率偏高（> 0.20W），通常由双卡5G网络寻呼、弱信号基带发射、外设硬件漏电或后台静默拉起引起；\n</string>
+    <string name="deep_sleep_detail_note_high_ratio_format">• 深睡占息屏总时长 %s，整机绝大部分待机电量在此阶段被硬件底噪消耗，符合物理能量守恒；\n</string>
+    <string name="deep_sleep_detail_note_ratio_summary">• 睡眠率越接近 100%，表明待机休眠越充分、耗电越平稳。</string>
+
+    <string name="rate_percent_and_mah_format">%1$s (约 %2$s)</string>
+    <string name="rate_mah_only_format">约 %s</string>
 </resources>
+
 

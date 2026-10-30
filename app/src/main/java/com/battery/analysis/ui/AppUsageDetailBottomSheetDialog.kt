@@ -142,27 +142,27 @@ class AppUsageDetailBottomSheetDialog(
         val hasFgs = item.fgsDurationMs > 0L
         when {
             hasFg && hasFgs -> {
-                tvStatusBadge.text = "前台+常驻"
+                tvStatusBadge.text = context.getString(R.string.app_status_fg_resident)
                 tvStatusBadge.setTextColor(Color.parseColor("#2196F3"))
             }
             hasFg && hasBg -> {
-                tvStatusBadge.text = "前台+后台"
+                tvStatusBadge.text = context.getString(R.string.app_status_fg_bg)
                 tvStatusBadge.setTextColor(Color.parseColor("#2196F3"))
             }
             hasFg -> {
-                tvStatusBadge.text = "前台活跃"
+                tvStatusBadge.text = context.getString(R.string.app_status_foreground)
                 tvStatusBadge.setTextColor(Color.parseColor("#34C759"))
             }
             hasFgs -> {
-                tvStatusBadge.text = "常驻服务"
+                tvStatusBadge.text = context.getString(R.string.app_status_resident)
                 tvStatusBadge.setTextColor(Color.parseColor("#2196F3"))
             }
             hasBg -> {
-                tvStatusBadge.text = "纯后台运行"
+                tvStatusBadge.text = context.getString(R.string.app_status_background)
                 tvStatusBadge.setTextColor(Color.parseColor("#2196F3"))
             }
             else -> {
-                tvStatusBadge.text = "后台待机"
+                tvStatusBadge.text = context.getString(R.string.app_status_bg_standby)
                 tvStatusBadge.setTextColor(Color.parseColor("#888888"))
             }
         }
@@ -171,8 +171,8 @@ class AppUsageDetailBottomSheetDialog(
         // 能量列
         val fgEnergyVal = item.foregroundEnergyWh
         tvEnergyPrimary.text = formatEnergyValue(fgEnergyVal)
-        tvEnergyFg.text = "前: ${formatEnergyValue(fgEnergyVal)}"
-        tvEnergyBg.text = "后: --"
+        tvEnergyFg.text = context.getString(R.string.app_metric_fg_prefix, formatEnergyValue(fgEnergyVal))
+        tvEnergyBg.text = context.getString(R.string.app_metric_bg_empty)
 
         // 功率列
         val fgPwrStr = if (item.foregroundPowerWatts >= 0.005f) {
@@ -183,27 +183,27 @@ class AppUsageDetailBottomSheetDialog(
             "--"
         }
         tvPowerPrimary.text = fgPwrStr
-        tvPowerFg.text = "前: $fgPwrStr"
-        tvPowerBg.text = "后: --"
+        tvPowerFg.text = context.getString(R.string.app_metric_fg_prefix, fgPwrStr)
+        tvPowerBg.text = context.getString(R.string.app_metric_bg_empty)
 
         // 温度列
         if (item.avgTemperature > 0f) {
             tvTempPrimary.text = String.format(Locale.getDefault(), "%.1f ℃", item.avgTemperature)
-            tvTempAvg.text = String.format(Locale.getDefault(), "平均: %.1f ℃", item.avgTemperature)
+            tvTempAvg.text = context.getString(R.string.app_metric_avg_temp_format, item.avgTemperature)
         } else {
             tvTempPrimary.text = "--"
-            tvTempAvg.text = "平均: --"
+            tvTempAvg.text = context.getString(R.string.app_metric_avg_temp_empty)
         }
         if (item.maxTemperature > 0f) {
-            tvTempMax.text = String.format(Locale.getDefault(), "最高: %.1f ℃", item.maxTemperature)
+            tvTempMax.text = context.getString(R.string.app_metric_max_temp_format, item.maxTemperature)
         } else {
-            tvTempMax.text = "最高: --"
+            tvTempMax.text = context.getString(R.string.app_metric_max_temp_empty)
         }
 
         // 4. 工况运行时长（明确区分前台、后台实际工作与常驻挂载总时长）
         tvFgDuration.text = formatDurationMs(item.foregroundTimeMs)
         tvBgDuration.text = if (hasFgs) {
-            "${formatDurationMs(item.backgroundTimeMs)} (常驻: ${formatDurationMs(item.fgsDurationMs)})"
+            "${formatDurationMs(item.backgroundTimeMs)}${context.getString(R.string.app_usage_resident_format, formatDurationMs(item.fgsDurationMs))}"
         } else {
             formatDurationMs(item.backgroundTimeMs)
         }
@@ -211,7 +211,7 @@ class AppUsageDetailBottomSheetDialog(
 
         // 5. 电量消耗分配
         tvFgEnergy.text = formatEnergyValue(fgEnergyVal)
-        tvBgEnergy.text = "-- (整机息屏统一统计)"
+        tvBgEnergy.text = context.getString(R.string.app_bg_energy_unified_notice)
         tvTotalEnergy.text = formatEnergyValue(fgEnergyVal)
 
         // 6. 硬件系统开销
@@ -223,11 +223,11 @@ class AppUsageDetailBottomSheetDialog(
         tvPeriodRange.text = periodRangeText ?: formatDefaultPeriodRange()
         tvLastUsed.text = if (item.lastUsedTimeMs > 0L) dateTimeFormatter.format(Date(item.lastUsedTimeMs)) else "--"
         tvSource.text = if (item.isUninstalledApp()) {
-            if (isShizuku) "BatteryStats (已卸载应用)" else "UsageStats (已卸载应用)"
+            if (isShizuku) context.getString(R.string.app_source_batterystats_uninstalled) else context.getString(R.string.app_source_usagestats_uninstalled)
         } else if (isShizuku) {
-            "BatteryStats (系统底座)"
+            context.getString(R.string.app_source_batterystats_system)
         } else {
-            "UsageStats (系统事件)"
+            context.getString(R.string.app_source_usagestats_system)
         }
     }
 
@@ -390,6 +390,6 @@ class AppUsageDetailBottomSheetDialog(
         if (wakeMs <= 0L && gpsMs <= 0L) return "--"
         val wakeStr = if (wakeMs > 0L) formatDurationMs(wakeMs) else "00s"
         val gpsStr = if (gpsMs > 0L) formatDurationMs(gpsMs) else "00s"
-        return "锁: $wakeStr | GPS: $gpsStr"
+        return context.getString(R.string.app_lock_gps_format, wakeStr, gpsStr)
     }
 }

@@ -51,103 +51,127 @@ data class DecayStatistics(
     val hasCycleData: Boolean = false
 ) {
     /**
-     * 获取每日平均健康度衰减值的格式化显示文本。
+     * 获取每日平均健康度衰减值的格式化显示文本（支持自适应多语言）。
      *
-     * @return 格式化后的每日衰减文本（如 "-0.020%/天" 或 "--"）
+     * @param context 可选 Android 上下文环境
+     * @return 格式化后的每日衰减文本（如 "-0.020%/天"、"-0.020%/d" 或 "--"）
      */
-    fun formatDailyDecay(): String {
+    fun formatDailyDecay(context: Context? = null): String {
+        val isZh = context?.resources?.configuration?.locales?.get(0)?.language?.startsWith("zh")
+            ?: Locale.getDefault().language.startsWith("zh")
         return dailyDecayRate?.let { rate ->
+            val unit = if (isZh) "/天" else "/d"
             if (rate > 0f) {
-                String.format(Locale.getDefault(), "-%.3f%%/天", rate)
+                String.format(Locale.getDefault(), "-%.3f%%%s", rate, unit)
             } else if (rate < 0f) {
-                String.format(Locale.getDefault(), "+%.3f%%/天", -rate)
+                String.format(Locale.getDefault(), "+%.3f%%%s", -rate, unit)
             } else {
-                "0.000%/天"
+                "0.000%$unit"
             }
         } ?: "--"
     }
 
     /**
-     * 获取每月平均健康度衰减值的格式化显示文本。
+     * 获取每月平均健康度衰减值的格式化显示文本（支持自适应多语言）。
      *
-     * @return 格式化后的每月衰减文本（如 "-0.61%/月" 或 "--"）
+     * @param context 可选 Android 上下文环境
+     * @return 格式化后的每月衰减文本（如 "-0.61%/月"、"-0.61%/mo" 或 "--"）
      */
-    fun formatMonthlyDecay(): String {
+    fun formatMonthlyDecay(context: Context? = null): String {
+        val isZh = context?.resources?.configuration?.locales?.get(0)?.language?.startsWith("zh")
+            ?: Locale.getDefault().language.startsWith("zh")
         return monthlyDecayRate?.let { rate ->
+            val unit = if (isZh) "/月" else "/mo"
             if (rate > 0f) {
-                String.format(Locale.getDefault(), "-%.2f%%/月", rate)
+                String.format(Locale.getDefault(), "-%.2f%%%s", rate, unit)
             } else if (rate < 0f) {
-                String.format(Locale.getDefault(), "+%.2f%%/月", -rate)
+                String.format(Locale.getDefault(), "+%.2f%%%s", -rate, unit)
             } else {
-                "0.00%/月"
+                "0.00%$unit"
             }
         } ?: "--"
     }
 
     /**
-     * 获取每年平均/预估健康度衰减值的格式化显示文本。
+     * 获取每年平均/预估健康度衰减值的格式化显示文本（支持自适应多语言）。
      *
-     * @return 格式化后的每年衰减文本（如 "-7.30%/年" 或 "--"）
+     * @param context 可选 Android 上下文环境
+     * @return 格式化后的每年衰减文本（如 "-7.30%/年"、"-7.30%/yr" 或 "--"）
      */
-    fun formatYearlyDecay(): String {
+    fun formatYearlyDecay(context: Context? = null): String {
+        val isZh = context?.resources?.configuration?.locales?.get(0)?.language?.startsWith("zh")
+            ?: Locale.getDefault().language.startsWith("zh")
         return yearlyDecayRate?.let { rate ->
+            val unit = if (isZh) "/年" else "/yr"
             if (rate > 0f) {
-                String.format(Locale.getDefault(), "-%.2f%%/年", rate)
+                String.format(Locale.getDefault(), "-%.2f%%%s", rate, unit)
             } else if (rate < 0f) {
-                String.format(Locale.getDefault(), "+%.2f%%/年", -rate)
+                String.format(Locale.getDefault(), "+%.2f%%%s", -rate, unit)
             } else {
-                "0.00%/年"
+                "0.00%$unit"
             }
         } ?: "--"
     }
 
     /**
-     * 获取每日平均循环消耗量的格式化显示文本。
+     * 获取每日平均循环消耗量的格式化显示文本（支持自适应多语言）。
      *
-     * @return 格式化后的每日循环消耗文本（如 "+0.52 次/天" 或 "--"）
+     * @param context 可选 Android 上下文环境
+     * @return 格式化后的每日循环消耗文本（如 "+0.52 次/天"、"+0.52 c/d" 或 "--"）
      */
-    fun formatDailyCycle(): String {
+    fun formatDailyCycle(context: Context? = null): String {
+        val isZh = context?.resources?.configuration?.locales?.get(0)?.language?.startsWith("zh")
+            ?: Locale.getDefault().language.startsWith("zh")
         return dailyCycleRate?.let { rate ->
+            val unit = if (isZh) " 次/天" else " c/d"
             if (rate > 0.0001f) {
-                String.format(Locale.getDefault(), "+%.2f 次/天", rate)
+                String.format(Locale.getDefault(), "+%.2f%s", rate, unit)
             } else if (rate < -0.0001f) {
-                String.format(Locale.getDefault(), "%.2f 次/天", rate)
+                String.format(Locale.getDefault(), "%.2f%s", rate, unit)
             } else {
-                "0.00 次/天"
+                "0.00$unit"
             }
         } ?: "--"
     }
 
     /**
-     * 获取每月平均循环消耗量的格式化显示文本。
+     * 获取每月平均循环消耗量的格式化显示文本（支持自适应多语言）。
      *
-     * @return 格式化后的每月循环消耗文本（如 "+15.8 次/月" 或 "--"）
+     * @param context 可选 Android 上下文环境
+     * @return 格式化后的每月循环消耗文本（如 "+15.8 次/月"、"+15.8 c/mo" 或 "--"）
      */
-    fun formatMonthlyCycle(): String {
+    fun formatMonthlyCycle(context: Context? = null): String {
+        val isZh = context?.resources?.configuration?.locales?.get(0)?.language?.startsWith("zh")
+            ?: Locale.getDefault().language.startsWith("zh")
         return monthlyCycleRate?.let { rate ->
+            val unit = if (isZh) " 次/月" else " c/mo"
             if (rate > 0.0001f) {
-                String.format(Locale.getDefault(), "+%.1f 次/月", rate)
+                String.format(Locale.getDefault(), "+%.1f%s", rate, unit)
             } else if (rate < -0.0001f) {
-                String.format(Locale.getDefault(), "%.1f 次/月", rate)
+                String.format(Locale.getDefault(), "%.1f%s", rate, unit)
             } else {
-                "0.0 次/月"
+                "0.0$unit"
             }
         } ?: "--"
     }
 
     /**
-     * 获取每年预估循环消耗量的格式化显示文本。
+     * 获取每年预估循环消耗量的格式化显示文本（支持自适应多语言）。
      *
-     * @return 格式化后的每年预估循环消耗文本（如 "+190 次/年" 或 "--"）
+     * @param context 可选 Android 上下文环境
+     * @return 格式化后的每年预估循环消耗文本（如 "+190 次/年"、"+190 c/yr" 或 "--"）
      */
-    fun formatYearlyCycle(): String {
+    fun formatYearlyCycle(context: Context? = null): String {
+        val isZh = context?.resources?.configuration?.locales?.get(0)?.language?.startsWith("zh")
+            ?: Locale.getDefault().language.startsWith("zh")
         return yearlyCycleRate?.let { rate ->
+            val unit = if (isZh) " 次/年" else " c/yr"
             if (rate > 0.0001f) {
-                String.format(Locale.getDefault(), "+%.0f 次/年", rate)
+                String.format(Locale.getDefault(), "+%.0f%s", rate, unit)
             } else if (rate < -0.0001f) {
-                String.format(Locale.getDefault(), "%.0f 次/年", rate)
+                String.format(Locale.getDefault(), "%.0f%s", rate, unit)
             } else {
-                "0 次/年"
+                "0$unit"
             }
         } ?: "--"
     }
@@ -188,7 +212,7 @@ data class PeriodicDecayItem(
         return when {
             decay > 0.001f -> String.format(Locale.getDefault(), "-%.2f%%", decay)
             decay < -0.001f -> String.format(Locale.getDefault(), "+%.2f%%", -decay)
-            else -> context?.getString(R.string.decay_stat_flat) ?: "持平 (0.00%)"
+            else -> context?.getString(R.string.decay_stat_flat) ?: if (Locale.getDefault().language.startsWith("zh")) "持平 (0.00%)" else "Flat (0.00%)"
         }
     }
 
@@ -201,9 +225,9 @@ data class PeriodicDecayItem(
     fun getFormattedPeriodLabel(context: Context? = null): String {
         return if (periodKey.length == 7 && periodKey.contains("-")) {
             val parts = periodKey.split("-")
-            context?.getString(R.string.period_month_format, parts[0], parts[1]) ?: "${parts[0]}年${parts[1]}月"
+            context?.getString(R.string.period_month_format, parts[0], parts[1]) ?: if (Locale.getDefault().language.startsWith("zh")) "${parts[0]}年${parts[1]}月" else "${parts[0]}-${parts[1]}"
         } else if (periodKey.length == 4) {
-            context?.getString(R.string.period_year_format, periodKey) ?: "${periodKey}年度"
+            context?.getString(R.string.period_year_format, periodKey) ?: if (Locale.getDefault().language.startsWith("zh")) "${periodKey}年度" else periodKey
         } else {
             periodKey
         }
@@ -218,11 +242,11 @@ data class PeriodicDecayItem(
     fun formatCycleChange(context: Context? = null): String {
         return cycleChange?.let { change ->
             if (change > 0) {
-                if (context != null) context.getString(R.string.period_cycle_single_format, "+$change") else "+$change 次"
+                if (context != null) context.getString(R.string.period_cycle_single_format, "+$change") else if (Locale.getDefault().language.startsWith("zh")) "+$change 次" else "+$change cycles"
             } else if (change < 0) {
-                if (context != null) context.getString(R.string.period_cycle_single_format, "$change") else "$change 次"
+                if (context != null) context.getString(R.string.period_cycle_single_format, "$change") else if (Locale.getDefault().language.startsWith("zh")) "$change 次" else "$change cycles"
             } else {
-                context?.getString(R.string.cycle_rate_zero_format) ?: "0 次"
+                context?.getString(R.string.cycle_rate_zero_format) ?: if (Locale.getDefault().language.startsWith("zh")) "0 次" else "0 cycles"
             }
         } ?: "--"
     }

@@ -78,7 +78,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="8dp"
-            android:text="秒"
+            android:text="@string/unit_seconds"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="14sp"
             android:textStyle="bold" />

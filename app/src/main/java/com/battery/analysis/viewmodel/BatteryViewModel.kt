@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.battery.analysis.R
 import com.battery.analysis.db.HistoryDbHelper
 import com.battery.analysis.manager.BackupManager
 import com.battery.analysis.model.BackupData
@@ -66,11 +67,17 @@ class BatteryViewModel : ViewModel() {
     private val _bugreportProgress = MutableStateFlow(0)
     val bugreportProgress: StateFlow<Int> = _bugreportProgress.asStateFlow()
 
-    private val _bugreportStatus = MutableStateFlow("未导入错误报告日志。点击下方按钮选择 bugreport.zip 或 txt 提取底层数据。")
+    private val _isInitZh = Locale.getDefault().language.startsWith("zh")
+    private val _bugreportStatus = MutableStateFlow(
+        if (_isInitZh) "未导入错误报告日志。点击下方按钮选择 bugreport.zip 或 txt 提取底层数据。"
+        else "No bugreport imported. Tap below to select bugreport.zip or txt."
+    )
     val bugreportStatus: StateFlow<String> = _bugreportStatus.asStateFlow()
 
     // 5. Shizuku 连接与权限状态
-    private val _shizukuStatus = MutableStateFlow("检查中...")
+    private val _shizukuStatus = MutableStateFlow(
+        if (_isInitZh) "检查中..." else "Checking..."
+    )
     val shizukuStatus: StateFlow<String> = _shizukuStatus.asStateFlow()
 
     private val _isShizukuGranted = MutableStateFlow(false)
@@ -95,10 +102,10 @@ class BatteryViewModel : ViewModel() {
     val targetSnapshotTab: StateFlow<Int?> = _targetSnapshotTab.asStateFlow()
 
     // 9. 固定三大数据源分类体系（全部、系统api、Shizuku、错误报告）
-    private val _selectedCategory = MutableStateFlow("全部")
+    private val _selectedCategory = MutableStateFlow(CATEGORY_ALL)
     val selectedCategory: StateFlow<String> = _selectedCategory.asStateFlow()
 
-    val categoryList: List<String> = listOf("全部", "系统api", "Shizuku", "错误报告")
+    val categoryList: List<String> = CATEGORY_KEY_LIST
 
     /**
      * 根据当前选中的数据源分类自动筛选过滤后的历史记录流。
@@ -318,12 +325,7 @@ class BatteryViewModel : ViewModel() {
             val latestRecord = dbHelper.getLatestRecordByCategory("错误报告")
             if (latestRecord != null) {
                 val batteryInfo = latestRecord.toBatteryInfo(appCtx.getString(com.battery.analysis.R.string.tab_bugreport) + " (" + appCtx.getString(com.battery.analysis.R.string.nav_history) + ")")
-                val isZh = Locale.getDefault().language.startsWith("zh")
-                val header = if (isZh) {
-                    "【历史快照载入】\n检测时间: ${latestRecord.captureTime}\n数据来源: 错误报告快照\n"
-                } else {
-                    "[History Snapshot Loaded]\nCapture Time: ${latestRecord.captureTime}\nSource: Bugreport Snapshot\n"
-                }
+                val header = appCtx.getString(R.string.bugreport_snapshot_header_format, latestRecord.captureTime ?: "")
                 val bugreportResult = BugreportResult(
                     tableItems = emptyList(),
                     rawHealthInfoText = "$header${latestRecord.formatFullDetails(appCtx)}",
@@ -469,12 +471,17 @@ class BatteryViewModel : ViewModel() {
      *
      * @param record 待加载查看的历史记录对象
      */
-    fun loadRecordToDetection(record: HistoryRecord) {
+    fun loadRecordToDetection(record: HistoryRecord, context: Context? = null) {
         _loadedSnapshotRecord.value = record
         _isViewingHistorySnapshot.value = true
 
+        val isZh = context?.resources?.configuration?.locales?.get(0)?.language?.startsWith("zh")
+            ?: Locale.getDefault().language.startsWith("zh")
+        val categoryDisplay = context?.let { getCategoryDisplayName(it, record.category) } ?: record.category
+        val snapshotSuffix = context?.getString(R.string.history_snapshot_suffix) ?: if (isZh) " (快照)" else " (Snapshot)"
+
         val batteryInfo = record.toBatteryInfo(
-            customSource = "${record.category} (快照)"
+            customSource = "$categoryDisplay$snapshotSuffix"
         )
 
         when (record.category) {
@@ -601,6 +608,31 @@ class BatteryViewModel : ViewModel() {
     }
 
     companion object {
+        const val CATEGORY_ALL = "全部"
+        const val CATEGORY_NORMAL = "系统api"
+        const val CATEGORY_SHIZUKU = "Shizuku"
+        const val CATEGORY_BUGREPORT = "错误报告"
+
+        val CATEGORY_KEY_LIST: List<String> = listOf(CATEGORY_ALL, CATEGORY_NORMAL, CATEGORY_SHIZUKU, CATEGORY_BUGREPORT)
+
+        /**
+         * 获取分类在 UI 界面上的多语言显示名称。
+         *
+         * @param context 应用程序上下文
+         * @param categoryKey 内部分类键名
+         * @return 本地化显示文本
+         */
+        @JvmStatic
+        fun getCategoryDisplayName(context: Context, categoryKey: String): String {
+            return when (categoryKey) {
+                CATEGORY_ALL -> context.getString(R.string.category_all)
+                CATEGORY_NORMAL -> context.getString(R.string.tab_normal_api)
+                CATEGORY_SHIZUKU -> context.getString(R.string.tab_shizuku)
+                CATEGORY_BUGREPORT -> context.getString(R.string.tab_bugreport)
+                else -> categoryKey
+            }
+        }
+
         @Volatile
         private var cachedShizukuBatteryInfo: BatteryInfo? = null
 

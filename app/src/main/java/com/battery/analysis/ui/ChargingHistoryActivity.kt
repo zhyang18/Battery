@@ -205,14 +205,14 @@ class ChargingHistoryActivity : AppCompatActivity() {
         binding.btnClearAll.setOnClickListener {
             if (!adapter.isSelectionMode) {
                 if (allRecordList.isEmpty()) {
-                    Toast.makeText(this, "暂无记录可删除", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.toast_no_records_to_delete), Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
                 enterSelectionMode()
             } else {
                 val selectedIds = adapter.getSelectedIdSet()
                 if (selectedIds.isEmpty()) {
-                    Toast.makeText(this, "请先选择要删除的记录", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.toast_select_records_first), Toast.LENGTH_SHORT).show()
                 } else {
                     showBatchDeleteConfirmDialog(selectedIds)
                 }
@@ -236,7 +236,7 @@ class ChargingHistoryActivity : AppCompatActivity() {
             val visibleIds = adapter.currentList.map { it.id }
             if (visibleIds.isNotEmpty()) {
                 adapter.invertSelection(visibleIds)
-                Toast.makeText(this, "已反选", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.toast_selection_inverted), Toast.LENGTH_SHORT).show()
             }
             true
         }
@@ -358,8 +358,8 @@ class ChargingHistoryActivity : AppCompatActivity() {
                 binding.tvEmptyTitle.text = getString(R.string.charging_history_empty_title)
                 binding.tvEmptyDesc.text = getString(R.string.charging_history_empty_desc)
             } else {
-                binding.tvEmptyTitle.text = "未找到符合条件的充电记录"
-                binding.tvEmptyDesc.text = "暂无电量增量 ${filter?.label} 的充电记录"
+                binding.tvEmptyTitle.text = getString(R.string.charging_history_filter_empty_title)
+                binding.tvEmptyDesc.text = getString(R.string.charging_history_empty_filtered_desc, filter?.label)
             }
         } else {
             binding.rvChargingHistory.visibility = View.VISIBLE
@@ -407,7 +407,7 @@ class ChargingHistoryActivity : AppCompatActivity() {
      */
     private fun updateSelectionUI(selectedCount: Int, totalCount: Int) {
         if (adapter.isSelectionMode) {
-            binding.tvTitle.text = if (selectedCount > 0) "已选 ${selectedCount} 项" else "选择记录"
+            binding.tvTitle.text = if (selectedCount > 0) getString(R.string.history_selected_count_format, selectedCount) else getString(R.string.history_select_records)
             val visibleIds = adapter.currentList.map { it.id }
             binding.cbSelectAll.isChecked = adapter.isAllSelected(visibleIds)
         } else {
@@ -513,9 +513,9 @@ class ChargingHistoryActivity : AppCompatActivity() {
         val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
         val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
 
-        tvTitle.text = "确认删除此充电记录？"
-        tvDesc.text = "删除后该条充电历史记录将从本地永久移除，无法找回。"
-        tvPreviewCat.text = if (record.chargeType.isNotEmpty()) record.chargeType else "充电记录"
+        tvTitle.text = getString(R.string.dialog_delete_charge_title)
+        tvDesc.text = getString(R.string.dialog_delete_charge_desc)
+        tvPreviewCat.text = record.getLocalizedChargeType(this)
         tvPreviewTime.text = record.recordTime
         val effEnd = record.getEffectiveEndLevel()
         val effGain = record.getEffectiveLevelGain()
@@ -554,8 +554,8 @@ class ChargingHistoryActivity : AppCompatActivity() {
         val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
         val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
 
-        tvTitle.text = "确认删除选中的 ${selectedIds.size} 条记录？"
-        tvDesc.text = "删除后所选的充电历史记录将从本地永久移除，无法找回。"
+        tvTitle.text = getString(R.string.dialog_delete_multi_snapshots_title, selectedIds.size)
+        tvDesc.text = getString(R.string.dialog_delete_multi_snapshots_desc)
         layoutPreview.visibility = View.GONE
 
         val dialog = AlertDialog.Builder(this)
@@ -570,7 +570,7 @@ class ChargingHistoryActivity : AppCompatActivity() {
                     exitSelectionMode()
                     loadHistoryList()
                     dialog.dismiss()
-                    Toast.makeText(this@ChargingHistoryActivity, "已删除 ${selectedIds.size} 条记录", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@ChargingHistoryActivity, getString(R.string.toast_deleted_count, selectedIds.size), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -595,8 +595,8 @@ class ChargingHistoryActivity : AppCompatActivity() {
         tvTitle.text = getString(R.string.charging_history_summary_dialog_title)
 
         // 1. 范围与累计充入电量百分比
-        val gainText = if (summary.totalLevelGainPercent > 0) " · 累计充入 +${summary.totalLevelGainPercent}%" else ""
-        tvSubtitle.setUnitText("📊 统计范围：共 ${summary.recordCount} 条充电记录$gainText")
+        val gainText = if (summary.totalLevelGainPercent > 0) getString(R.string.charging_history_gain_format, summary.totalLevelGainPercent) else ""
+        tvSubtitle.setUnitText(getString(R.string.charging_history_stats_range_format, summary.recordCount, gainText))
 
         // 2. 时长行（纯数字时间简写与占比）
         val onDurPct = if (summary.totalDurationMs > 0L) {
@@ -650,8 +650,8 @@ class ChargingHistoryActivity : AppCompatActivity() {
         // 6. 底部最高瞬时功率与最高温升说明
         val tvPeaks = dialogView.findViewById<TextView>(R.id.tv_dialog_charging_peaks)
         val peakParts = mutableListOf<String>()
-        summary.maxPowerWatts?.let { peakParts.add(String.format(java.util.Locale.getDefault(), "⚡ 最高充电功率：%.1f W", it)) }
-        summary.maxTemperature?.let { peakParts.add(String.format(java.util.Locale.getDefault(), "🌡️ 电池最高温度：%.1f ℃", it)) }
+        summary.maxPowerWatts?.let { peakParts.add(String.format(java.util.Locale.getDefault(), getString(R.string.charging_peak_power_format), it)) }
+        summary.maxTemperature?.let { peakParts.add(String.format(java.util.Locale.getDefault(), getString(R.string.charging_peak_temp_format), it)) }
         if (peakParts.isNotEmpty()) {
             tvPeaks.setUnitText(peakParts.joinToString("  •  "))
             tvPeaks.visibility = View.VISIBLE

@@ -204,7 +204,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
 
         val validCount = allCandidates.count { !it.isExcluded && it.socSpanPercent >= currentThreshold }
         val subtitle = view?.findViewById<TextView>(R.id.tv_session_list_subtitle)
-        subtitle?.text = "累计 ${allCandidates.size} 次记录 · ${validCount} 次纳入有效模型 (门限 > ${currentThreshold}%)"
+        subtitle?.text = getString(R.string.capacity_session_subtitle_format, allCandidates.size, validCount, currentThreshold)
 
         val tabAll = view?.findViewById<TextView>(R.id.tab_session_all)
         val tabCharge = view?.findViewById<TextView>(R.id.tab_session_charge)
@@ -212,9 +212,9 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
 
         val chargeTotal = allCandidates.count { it.sessionType == CandidateSessionType.CHARGE }
         val dischargeTotal = allCandidates.count { it.sessionType == CandidateSessionType.DISCHARGE }
-        tabAll?.text = "全部 (${allCandidates.size})"
-        tabCharge?.text = "⚡ 充电 ($chargeTotal)"
-        tabDischarge?.text = "🔋 放电 ($dischargeTotal)"
+        tabAll?.text = getString(R.string.capacity_session_tab_all_format, allCandidates.size)
+        tabCharge?.text = getString(R.string.capacity_session_tab_charge_format, chargeTotal)
+        tabDischarge?.text = getString(R.string.capacity_session_tab_discharge_format, dischargeTotal)
 
         adapter.submitList(filtered, currentThreshold)
     }
@@ -222,10 +222,10 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
     private fun showDeleteConfirmDialog(candidate: CapacityCandidate) {
         val ctx = context ?: return
         AlertDialog.Builder(ctx)
-            .setTitle("删除样本确认")
-            .setMessage("确定删除本次推算容量为 ${String.format(Locale.getDefault(), "%.0f mAh", candidate.fccObservedMah)} 的会话样本？删除后系统将立即重新计算容量模型。")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("删除") { _, _ ->
+            .setTitle(R.string.dialog_delete_sample_title)
+            .setMessage(getString(R.string.dialog_delete_sample_desc, String.format(Locale.getDefault(), "%.0f mAh", candidate.fccObservedMah)))
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.delete) { _, _ ->
                 viewLifecycleOwner.lifecycleScope.launch {
                     withContext(Dispatchers.IO) {
                         CapacityCandidateDbHelper.getInstance(ctx).deleteCandidate(candidate.id)
@@ -281,10 +281,10 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
 
             // 1. 类型徽章
             if (isCharge) {
-                holder.tvTypeBadge.text = "⚡ 充电会话"
+                holder.tvTypeBadge.text = holder.itemView.context.getString(R.string.capacity_session_badge_charge)
                 holder.tvTypeBadge.setTextColor(Color.parseColor("#10b981"))
             } else {
-                holder.tvTypeBadge.text = "🔋 放电会话"
+                holder.tvTypeBadge.text = holder.itemView.context.getString(R.string.capacity_session_badge_discharge)
                 holder.tvTypeBadge.setTextColor(Color.parseColor("#38bdf8"))
             }
 
@@ -295,32 +295,32 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             val meetsThreshold = item.socSpanPercent >= threshold
             when {
                 item.isExcluded -> {
-                    holder.tvStatus.text = "离群排除"
+                    holder.tvStatus.text = holder.itemView.context.getString(R.string.capacity_session_status_outlier)
                     holder.tvStatus.setTextColor(Color.parseColor("#f59e0b"))
                     holder.tvReason.visibility = View.VISIBLE
-                    holder.tvReason.text = if (item.exclusionReason.isNotBlank()) "排除原因: ${item.exclusionReason}" else "离群异常样本已排除"
+                    holder.tvReason.text = if (item.exclusionReason.isNotBlank()) item.exclusionReason else holder.itemView.context.getString(R.string.capacity_session_status_outlier)
                 }
                 !meetsThreshold -> {
-                    holder.tvStatus.text = "未达门限"
+                    holder.tvStatus.text = holder.itemView.context.getString(R.string.capacity_session_status_below_threshold)
                     holder.tvStatus.setTextColor(Color.parseColor("#64748b"))
                     holder.tvReason.visibility = View.VISIBLE
-                    holder.tvReason.text = "单次电量跨度 (${item.socSpanPercent}%) 小于当前门限 (> ${threshold}%)"
+                    holder.tvReason.text = "${item.socSpanPercent}% <= $threshold%"
                 }
                 else -> {
-                    holder.tvStatus.text = "✓ 纳入模型"
+                    holder.tvStatus.text = holder.itemView.context.getString(R.string.capacity_session_status_included)
                     holder.tvStatus.setTextColor(Color.parseColor("#10b981"))
                     holder.tvReason.visibility = View.GONE
                 }
             }
 
             // 4. 电量跨度
-            holder.tvSoc.text = "${item.startSoc}% → ${item.endSoc}% (跨度 ${item.socSpanPercent}%)"
+            holder.tvSoc.text = holder.itemView.context.getString(R.string.capacity_session_soc_span_format, item.startSoc, item.endSoc, item.socSpanPercent)
 
             // 5. 推算 FCC
             holder.tvFcc.text = String.format(Locale.getDefault(), "%.0f mAh", item.fccObservedMah)
 
             // 6. 测定净电量
-            val netPrefix = if (isCharge) "净充入" else "净放出"
+            val netPrefix = if (isCharge) holder.itemView.context.getString(R.string.capacity_session_net_charge) else holder.itemView.context.getString(R.string.capacity_session_net_discharge)
             holder.tvNetCharge.text = "$netPrefix: ${String.format(Locale.getDefault(), "%.0f mAh", item.netBatteryChargeMah)}"
 
             // 7. 时长
@@ -328,7 +328,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             holder.tvDuration.text = if (durMin >= 60) "${durMin / 60}h ${durMin % 60}m" else "${durMin}m"
 
             // 8. 均温
-            holder.tvTemp.text = String.format(Locale.getDefault(), "均温: %.1f℃", item.avgTemperatureCelsius)
+            holder.tvTemp.text = holder.itemView.context.getString(R.string.capacity_session_avg_temp_format, item.avgTemperatureCelsius)
 
             // 9. 删除按钮
             holder.btnDelete.setOnClickListener {

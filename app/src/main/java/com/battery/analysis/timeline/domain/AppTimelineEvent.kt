@@ -2,6 +2,8 @@ package com.battery.analysis.timeline.domain
 
 import android.graphics.drawable.Drawable
 import java.util.Locale
+import android.content.Context
+import com.battery.analysis.R
 
 /**
  * 应用程序时间轴活跃事件实体数据类。
@@ -109,29 +111,33 @@ data class AppTimelineEvent(
     }
 
     /**
-     * 获取格式化后的置信度中文描述。
+     * 获取格式化后的置信度多语言描述。
      *
-     * @return 置信度中文描述
+     * @param context 可选 Android 上下文，若为 null 则根据系统语言降级自适应
+     * @return 本地化的置信度描述文本
      */
-    fun getConfidenceLabel(): String {
+    fun getConfidenceLabel(context: Context? = null): String {
+        val isZh = Locale.getDefault().language.startsWith("zh")
         return when (confidence) {
-            ConfidenceLevel.HIGH -> "高"
-            ConfidenceLevel.MEDIUM -> "中"
-            ConfidenceLevel.LOW -> "低"
+            ConfidenceLevel.HIGH -> context?.getString(R.string.app_confidence_high) ?: if (isZh) "高" else "High"
+            ConfidenceLevel.MEDIUM -> context?.getString(R.string.app_confidence_medium) ?: if (isZh) "中" else "Mid"
+            ConfidenceLevel.LOW -> context?.getString(R.string.app_confidence_low) ?: if (isZh) "低" else "Low"
         }
     }
 
     /**
-     * 获取格式化后的数据来源中文描述。
+     * 获取格式化后的数据来源多语言描述。
      *
-     * @return 数据来源中文描述
+     * @param context 可选 Android 上下文，若为 null 则根据系统语言降级自适应
+     * @return 本地化的数据来源描述文本
      */
-    fun getSourceLabel(): String {
+    fun getSourceLabel(context: Context? = null): String {
+        val isZh = Locale.getDefault().language.startsWith("zh")
         return when (source) {
             EnergySource.BATTERY_STATS -> "BatteryStats"
             EnergySource.SYSFS -> "Sysfs"
             EnergySource.BATTERY_MANAGER -> "BatteryManager"
-            EnergySource.ESTIMATED -> "算法估算"
+            EnergySource.ESTIMATED -> context?.getString(R.string.app_energy_source_estimated) ?: if (isZh) "算法估算" else "Estimated"
         }
     }
 }

@@ -205,14 +205,14 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
             tvFcc?.text = "-- mAh"
             tvDesignCap?.text = "-- mAh"
             tvSoh?.text = "--%"
-            tvMaturityBadge?.text = "样本积累中 · 待校准"
+            tvMaturityBadge?.text = getString(R.string.capacity_maturity_pending)
             tvMaturityBadge?.setTextColor(Color.parseColor("#64748b"))
             tvMaturityBadge?.let { setRoundedBadgeBackground(it, Color.parseColor("#64748b"), 6f) }
-            tvSessionCounts?.text = "0 次"
+            tvSessionCounts?.text = getString(R.string.capacity_diag_zero_times)
             tvSocSpan?.text = "0%"
             tvDispersion?.text = "--"
             tvConfidenceInterval?.text = "--"
-            tvConflictD?.text = "数据积累中"
+            tvConflictD?.text = getString(R.string.capacity_diag_accumulating)
             return
         }
 
@@ -220,10 +220,10 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
         tvRemainingCharge?.text = result.getFormattedRemainingCharge()
         tvRemainingEnergy?.text = result.getFormattedRemainingEnergy()
         tvFcc?.text = result.getFormattedFcc()
-        tvFccSource?.text = "来源: ${result.sourceTier.displayName}"
+        tvFccSource?.text = getString(R.string.capacity_diag_source_format, result.sourceTier.getDisplayName(requireContext()))
         tvDesignCap?.text = result.designCapacityMah?.let {
             String.format(Locale.getDefault(), "%.0f mAh", it)
-        } ?: "未获取"
+        } ?: getString(R.string.capacity_source_unobtained)
         tvSoh?.text = result.getFormattedSoh()
 
         // 2. 板块二：自学习样本档案
@@ -233,10 +233,10 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
             MaturityLevel.INITIAL_OBSERVATION -> Color.parseColor("#f59e0b")
             MaturityLevel.PENDING -> Color.parseColor("#64748b")
         }
-        tvMaturityBadge?.text = result.maturityLevel.displayName
+        tvMaturityBadge?.text = result.maturityLevel.getDisplayName(requireContext())
         tvMaturityBadge?.setTextColor(badgeColor)
         tvMaturityBadge?.let { setRoundedBadgeBackground(it, badgeColor, 6f) }
-        tvSessionCounts?.text = "充电 ${result.chargeSessionCount} 次 ｜ 放电 ${result.dischargeSessionCount} 次"
+        tvSessionCounts?.text = getString(R.string.capacity_diag_counts_format, result.chargeSessionCount, result.dischargeSessionCount)
         tvSocSpan?.text = "${result.totalSocSpanCovered}%"
         tvDispersion?.text = result.dispersionCoefficientPercent?.let {
             String.format(Locale.getDefault(), "±%.2f%%", it)
@@ -248,11 +248,11 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
         // 3. 板块三：交叉冲突率 D
         tvConflictD?.text = result.conflictRateDPercent?.let {
             if (it < 10.0) {
-                String.format(Locale.getDefault(), "%.2f%% (一致性良好)", it)
+                String.format(Locale.getDefault(), getString(R.string.capacity_diag_consistency_good), it)
             } else {
-                String.format(Locale.getDefault(), "%.2f%% (差异偏大 · 观察中)", it)
+                String.format(Locale.getDefault(), getString(R.string.capacity_diag_consistency_diff), it)
             }
-        } ?: "单方向数据 · 暂无冲突"
+        } ?: getString(R.string.capacity_diag_no_conflict)
     }
 
     /**

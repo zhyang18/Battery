@@ -159,7 +159,7 @@ class CapacityThresholdPickerBottomSheetDialog : BottomSheetDialogFragment() {
             manager.setEffectiveSocSpanThreshold(selectedPercent)
             onThresholdSelectedListener?.invoke(selectedPercent)
             val thresholdText = if (selectedPercent == 100) "100%" else "> $selectedPercent%"
-            Toast.makeText(ctx, "已设为门限 $thresholdText，已即时重新计算模型", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, getString(R.string.toast_threshold_updated, thresholdText), Toast.LENGTH_SHORT).show()
             dismissWithSlideDownAnimation()
         }
 
@@ -188,22 +188,22 @@ class CapacityThresholdPickerBottomSheetDialog : BottomSheetDialogFragment() {
     private data class ThresholdOptionItem(
         val percent: Int,
         val valueLabel: String,
-        val desc: String
+        val descResId: Int
     )
 
     private val thresholdOptionItems = listOf(
-        ThresholdOptionItem(10, "> 10%", "极速建模 · 容纳浅充浅放"),
-        ThresholdOptionItem(15, "> 15%", "日常均衡模式"),
-        ThresholdOptionItem(20, "> 20%", "推荐 · 精度与收敛最佳平衡"),
-        ThresholdOptionItem(25, "> 25%", "常态充放跨度"),
-        ThresholdOptionItem(30, "> 30%", "高精度 · 减少量化离散"),
-        ThresholdOptionItem(40, "> 40%", "深度自学习"),
-        ThresholdOptionItem(50, "> 50%", "半程以上 · 高置信度"),
-        ThresholdOptionItem(60, "> 60%", "大跨度充放"),
-        ThresholdOptionItem(70, "> 70%", "高纯度样本"),
-        ThresholdOptionItem(80, "> 80%", "深度充放 · 极高精度"),
-        ThresholdOptionItem(90, "> 90%", "超深度充放循环"),
-        ThresholdOptionItem(100, "100%", "完整 0%~100% 深度充放")
+        ThresholdOptionItem(10, "> 10%", R.string.capacity_thresh_desc_10),
+        ThresholdOptionItem(15, "> 15%", R.string.capacity_thresh_desc_15),
+        ThresholdOptionItem(20, "> 20%", R.string.capacity_thresh_desc_20),
+        ThresholdOptionItem(25, "> 25%", R.string.capacity_thresh_desc_25),
+        ThresholdOptionItem(30, "> 30%", R.string.capacity_thresh_desc_30),
+        ThresholdOptionItem(40, "> 40%", R.string.capacity_thresh_desc_40),
+        ThresholdOptionItem(50, "> 50%", R.string.capacity_thresh_desc_50),
+        ThresholdOptionItem(60, "> 60%", R.string.capacity_thresh_desc_60),
+        ThresholdOptionItem(70, "> 70%", R.string.capacity_thresh_desc_70),
+        ThresholdOptionItem(80, "> 80%", R.string.capacity_thresh_desc_80),
+        ThresholdOptionItem(90, "> 90%", R.string.capacity_thresh_desc_90),
+        ThresholdOptionItem(100, "100%", R.string.capacity_thresh_desc_100)
     )
 
     /**
@@ -244,7 +244,7 @@ class CapacityThresholdPickerBottomSheetDialog : BottomSheetDialogFragment() {
             val isSelected = item.percent == selectedPercent
 
             holder.tvValue.text = item.valueLabel
-            holder.tvDesc.text = item.desc
+            holder.tvDesc.setText(item.descResId)
 
             if (isSelected) {
                 holder.root.setBackgroundResource(R.drawable.bg_threshold_opt_selected)

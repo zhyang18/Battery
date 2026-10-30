@@ -75,7 +75,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="底层硬件采样电流"
+                    android:text="@string/current_calib_raw_hw"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="12.5sp" />
 
@@ -100,7 +100,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="校准后瞬时电流"
+                    android:text="@string/current_calib_instant"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="12.5sp" />
 
@@ -135,7 +135,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="10的倍数档位"
+                android:text="@string/current_calib_steps_10x"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="11sp" />
         </LinearLayout>
@@ -402,31 +402,43 @@
                 app:trackTint="@color/selector_switch_track" />
         </LinearLayout>
 
-        <!-- 底部按钮栏 -->
+        <!-- 底部操作按钮栏 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:gravity="end"
+            android:layout_marginTop="14dp"
+            android:gravity="center"
             android:orientation="horizontal">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_cancel"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
-                android:layout_width="wrap_content"
-                android:layout_height="40dp"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:backgroundTint="#26888888"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
                 android:text="@string/cancel"
-                android:textColor="?android:attr/textColorSecondary" />
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="13sp"
+                app:cornerRadius="8dp"
+                app:elevation="0dp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_confirm"
-                android:layout_width="wrap_content"
-                android:layout_height="40dp"
-                android:layout_marginStart="8dp"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
                 android:backgroundTint="#2196F3"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
                 android:text="@string/confirm"
                 android:textColor="@android:color/white"
-                app:cornerRadius="8dp" />
+                android:textSize="13sp"
+                app:cornerRadius="8dp"
+                app:elevation="0dp" />
         </LinearLayout>
     </LinearLayout>
 </ScrollView>

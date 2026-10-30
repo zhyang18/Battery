@@ -485,7 +485,7 @@ class HistoryFragment : Fragment() {
         return if (ctx != null) {
             ctx.getString(R.string.period_cycle_single_format, numStr).replace("•", "").trim()
         } else {
-            "$numStr 次"
+            if (Locale.getDefault().language.startsWith("zh")) "$numStr 次" else "$numStr c"
         }
     }
 

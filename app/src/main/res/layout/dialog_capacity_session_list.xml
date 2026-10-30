@@ -40,7 +40,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="自学习会话样本明细"
+                    android:text="@string/capacity_session_list_title"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="17sp"
                     android:textStyle="bold" />
@@ -90,7 +90,7 @@
             android:focusable="true"
             android:gravity="center"
             android:singleLine="true"
-            android:text="全部"
+            android:text="@string/filter_all"
             android:textColor="#10b981"
             android:textSize="11.5sp"
             android:textStyle="bold" />
@@ -106,7 +106,7 @@
             android:focusable="true"
             android:gravity="center"
             android:singleLine="true"
-            android:text="⚡ 充电"
+            android:text="@string/filter_charge"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="11.5sp" />
 
@@ -121,7 +121,7 @@
             android:focusable="true"
             android:gravity="center"
             android:singleLine="true"
-            android:text="🔋 放电"
+            android:text="@string/filter_discharge"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="11.5sp" />
     </LinearLayout>
@@ -154,7 +154,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="暂无会话样本数据"
+                android:text="@string/capacity_session_empty_title"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="14sp"
                 android:textStyle="bold" />
@@ -164,7 +164,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:gravity="center"
-                android:text="完成自然充放电（跨度达到有效数据门限）后系统将自动生成自学习样本"
+                android:text="@string/capacity_session_empty_desc"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="11sp" />
         </LinearLayout>

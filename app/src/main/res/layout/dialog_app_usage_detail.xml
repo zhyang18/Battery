@@ -101,7 +101,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="消耗能量"
+                    android:text="@string/app_detail_consumed_energy"
                     android:textColor="#888888"
                     android:textSize="11.5sp" />
 
@@ -145,7 +145,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="平均功耗"
+                    android:text="@string/app_detail_avg_power"
                     android:textColor="#888888"
                     android:textSize="11.5sp" />
 
@@ -189,7 +189,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="运行温度"
+                    android:text="@string/app_detail_temp"
                     android:textColor="#888888"
                     android:textSize="11.5sp" />
 
@@ -240,7 +240,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="4dp"
-                android:text="工况运行时长"
+                android:text="@string/app_detail_runtime_section"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="12.5sp"
                 android:textStyle="bold" />
@@ -254,7 +254,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="前台亮屏时长"
+                    android:text="@string/app_detail_fg_screen_on_time"
                     android:textColor="#888888"
                     android:textSize="12sp" />
 
@@ -277,7 +277,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="后台运行耗时"
+                    android:text="@string/app_detail_bg_time"
                     android:textColor="#888888"
                     android:textSize="12sp" />
 
@@ -300,7 +300,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="运行时长总计"
+                    android:text="@string/app_detail_total_runtime"
                     android:textColor="#888888"
                     android:textSize="12sp" />
 
@@ -319,7 +319,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="4dp"
-                android:text="电量消耗分配"
+                android:text="@string/app_detail_drain_allocation"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="12.5sp"
                 android:textStyle="bold" />
@@ -333,7 +333,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="前台消耗电量"
+                    android:text="@string/app_detail_fg_drain"
                     android:textColor="#888888"
                     android:textSize="12sp" />
 
@@ -356,7 +356,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="后台消耗电量"
+                    android:text="@string/app_detail_bg_drain"
                     android:textColor="#888888"
                     android:textSize="12sp" />
 
@@ -379,7 +379,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="总计消耗电量"
+                    android:text="@string/app_detail_total_drain"
                     android:textColor="#888888"
                     android:textSize="12sp" />
 
@@ -398,7 +398,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="4dp"
-                android:text="硬件资源开销"
+                android:text="@string/app_detail_hardware_overhead"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="12.5sp"
                 android:textStyle="bold" />
@@ -412,7 +412,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="CPU 计算时间"
+                    android:text="@string/app_detail_cpu_calc_time"
                     android:textColor="#888888"
                     android:textSize="12sp" />
 
@@ -435,7 +435,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="网络数据传输"
+                    android:text="@string/app_detail_net_transfer"
                     android:textColor="#888888"
                     android:textSize="12sp" />
 
@@ -458,7 +458,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Wakelock / 定位"
+                    android:text="@string/app_detail_wakelock_location"
                     android:textColor="#888888"
                     android:textSize="12sp" />
 
@@ -477,7 +477,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="4dp"
-                android:text="记录与来源"
+                android:text="@string/app_detail_record_source"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="12.5sp"
                 android:textStyle="bold" />
@@ -491,7 +491,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="统计时间区间"
+                    android:text="@string/app_detail_time_range"
                     android:textColor="#888888"
                     android:textSize="12sp" />
 
@@ -514,7 +514,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="最近使用时间"
+                    android:text="@string/app_detail_last_used"
                     android:textColor="#888888"
                     android:textSize="12sp" />
 
@@ -536,7 +536,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="数据来源"
+                    android:text="@string/app_detail_data_source"
                     android:textColor="#888888"
                     android:textSize="12sp" />
 

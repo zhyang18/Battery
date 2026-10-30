@@ -5,6 +5,7 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
+import com.battery.analysis.R
 import com.battery.analysis.databinding.ItemPowerHistoryRecordBinding
 import com.battery.analysis.model.PowerUsageRecord
 import com.battery.analysis.util.setUnitText
@@ -185,7 +186,8 @@ class PowerHistoryAdapter(
 
             // 3. 左下：时长与电量变化区间（如 "46m · 76%~69%(-7%)"）
             val baseSubInfo = record.getFormattedDurationAndLevel()
-            binding.tvHistorySubInfo.setUnitText(if (!record.isCompleted) "$baseSubInfo · 进行中" else baseSubInfo)
+            val inProgressSuffix = binding.root.context.getString(R.string.history_snapshot_in_progress)
+            binding.tvHistorySubInfo.setUnitText(if (!record.isCompleted) "$baseSubInfo$inProgressSuffix" else baseSubInfo)
 
             // 4. 右下：亮屏时间数值（与右上角平均功耗值保持相同的大字粗体样式，如 "1h55m"）
             binding.tvHistoryScreenOnTime.setUnitText(record.getDisplayScreenOnDuration())

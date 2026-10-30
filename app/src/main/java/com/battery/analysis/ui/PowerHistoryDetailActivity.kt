@@ -467,7 +467,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         popupWindow.animationStyle = R.style.Animation_PopupTopRight
 
         val tvSortEnergy = popupView.findViewById<TextView>(R.id.tv_sort_energy)
-        tvSortEnergy.text = if (currentDisplayUnit == PowerDisplayUnit.MAH) "按消耗电量 (mAh)" else "按消耗能量 (Wh)"
+        tvSortEnergy.text = getString(if (currentDisplayUnit == PowerDisplayUnit.MAH) R.string.power_sort_mah else R.string.power_sort_wh)
 
         val sortViews = listOf(
             popupView.findViewById<TextView>(R.id.tv_sort_duration),
@@ -673,19 +673,19 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
 
         // 指标卡片三行点击气泡提示（亮屏 / 息屏 / 全局）
         hBinding.layoutMetricScreenOnRow.setOnClickListener {
-            showBubbleTooltip(hBinding.layoutMetricScreenOnRow, "亮屏：时间、平均功耗、放电速度、能量")
+            showBubbleTooltip(hBinding.layoutMetricScreenOnRow, getString(R.string.power_bubble_screen_on_summary))
         }
         hBinding.layoutMetricScreenOffRow.setOnClickListener {
-            showBubbleTooltip(hBinding.layoutMetricScreenOffRow, "息屏：时间、平均功耗、放电速度、能量")
+            showBubbleTooltip(hBinding.layoutMetricScreenOffRow, getString(R.string.power_bubble_screen_off_summary))
         }
         hBinding.layoutMetricGlobalRow.setOnClickListener {
-            showBubbleTooltip(hBinding.layoutMetricGlobalRow, "全局：时间、平均功耗、放电速度、能量")
+            showBubbleTooltip(hBinding.layoutMetricGlobalRow, getString(R.string.power_bubble_global_summary))
         }
 
         // 核心功耗指标卡片能量数值点击弹出等效电量（mAh）详细说明气泡弹框
         hBinding.tvMetricScreenOnEnergy.setOnClickListener {
             val message = BatteryEnergyCalculator.formatEnergyConversionMessage(
-                title = "亮屏",
+                title = getString(R.string.power_header_screen_on),
                 energyWh = onEnergy,
                 ratioStr = onEnergyRatioStr.takeIf { it != "--%" },
                 totalEnergyInfo = totalEnergyInfo
@@ -694,7 +694,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         }
         hBinding.tvMetricScreenOffEnergy.setOnClickListener {
             val message = BatteryEnergyCalculator.formatEnergyConversionMessage(
-                title = "息屏",
+                title = getString(R.string.power_header_screen_off),
                 energyWh = offEnergy,
                 ratioStr = offEnergyRatioStr.takeIf { it != "--%" },
                 totalEnergyInfo = totalEnergyInfo
@@ -703,7 +703,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         }
         hBinding.tvMetricGlobalEnergy.setOnClickListener {
             val message = BatteryEnergyCalculator.formatEnergyConversionMessage(
-                title = "全局",
+                title = getString(R.string.power_header_global),
                 energyWh = totalEnergy,
                 ratioStr = globalEnergyRatioStr.takeIf { it != "--%" },
                 totalEnergyInfo = totalEnergyInfo
@@ -971,7 +971,8 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             displayUnit = currentDisplayUnit,
             nominalVoltageVolts = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS,
             sessionRatePercentPerHour = sessionRate,
-            sessionDurationMs = sessionDurationMs
+            sessionDurationMs = sessionDurationMs,
+            context = this
         )
         if (message.isNotBlank()) {
             val styledMessage = PowerDischargeMetricsViewBinder.formatDischargeSpeedBubbleMessage(message)
@@ -1010,21 +1011,24 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
                 BatteryEnergyCalculator.formatScreenOffCardDetailMessage(
                     overview = overview,
                     nominalTotalWh = nominalTotalWh,
-                    nominalVoltageVolts = nominalVoltage
+                    nominalVoltageVolts = nominalVoltage,
+                    context = this
                 )
             }
             PowerDischargeMetricsViewBinder.CARD_AWAKE -> {
                 BatteryEnergyCalculator.formatAwakeCardDetailMessage(
                     overview = overview,
                     nominalTotalWh = nominalTotalWh,
-                    nominalVoltageVolts = nominalVoltage
+                    nominalVoltageVolts = nominalVoltage,
+                    context = this
                 )
             }
             PowerDischargeMetricsViewBinder.CARD_DEEP_SLEEP -> {
                 BatteryEnergyCalculator.formatDeepSleepCardDetailMessage(
                     overview = overview,
                     nominalTotalWh = nominalTotalWh,
-                    nominalVoltageVolts = nominalVoltage
+                    nominalVoltageVolts = nominalVoltage,
+                    context = this
                 )
             }
             else -> return
@@ -1175,11 +1179,11 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
         val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
 
-        tvTitle.text = "确认删除此耗电快照？"
-        tvDesc.text = "删除后该条放电快照记录将从本地永久移除，无法找回。"
-        tvPreviewCat.text = if (record.isShizukuRealData) "Shizuku" else "系统模式"
+        tvTitle.text = getString(R.string.dialog_delete_snapshot_title)
+        tvDesc.text = getString(R.string.dialog_delete_snapshot_desc)
+        tvPreviewCat.text = if (record.isShizukuRealData) "Shizuku" else getString(R.string.power_mode_system)
         tvPreviewTime.text = record.recordTime
-        tvPreviewSummary.setUnitText("🔋 终止电量 ${record.levelPercent}%   •   ⏱️ 持续 ${record.totalDurationText}")
+        tvPreviewSummary.setUnitText("🔋 ${record.levelPercent}%   •   ⏱️ ${record.totalDurationText}")
 
         val dialog = AlertDialog.Builder(this)
             .setView(dialogView)

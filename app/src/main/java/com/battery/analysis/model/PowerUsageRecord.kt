@@ -2,6 +2,8 @@ package com.battery.analysis.model
 
 import android.content.Context
 import android.graphics.drawable.Drawable
+import com.battery.analysis.R
+import java.util.Locale
 import com.battery.analysis.manager.BatteryStatusSnapshot
 import com.battery.analysis.manager.FullPowerDataPackage
 import com.battery.analysis.manager.PowerOverviewStats
@@ -529,12 +531,19 @@ data class PowerUsageRecord(
     }
 
     /**
-     * 获取设计图右下角展示的功耗说明标签名称。
+     * 获取设计图右下角展示的功耗说明标签名称（支持国际化自适应）。
      *
+     * @param context 应用程序上下文，用于读取本地化字符串
      * @return 标签文本（如 "平均亮屏功耗" 或 "平均放电功耗"）
      */
-    fun getDisplayPowerLabel(): String {
-        return if (screenOnPowerWatts > 0f) "平均亮屏功耗" else "平均放电功耗"
+    fun getDisplayPowerLabel(context: Context? = null): String {
+        val isZh = context?.resources?.configuration?.locales?.get(0)?.language?.startsWith("zh")
+            ?: Locale.getDefault().language.startsWith("zh")
+        return if (screenOnPowerWatts > 0f) {
+            context?.getString(R.string.power_avg_screen_on_power) ?: if (isZh) "平均亮屏功耗" else "Screen-on Avg Power"
+        } else {
+            context?.getString(R.string.power_avg_discharge_power) ?: if (isZh) "平均放电功耗" else "Avg Discharge Power"
+        }
     }
 
     /**

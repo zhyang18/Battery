@@ -413,5 +413,32 @@ class PowerDischargeMetricsViewBinderTest {
         assertEquals(0, PowerDischargeMetricsViewBinder.calculateRuntimeProgress(-100L, fullMs))
         assertEquals(0, PowerDischargeMetricsViewBinder.calculateRuntimeProgress(remMs, -100L))
     }
-}
 
+    /**
+     * 测试英文环境下气泡弹窗预测数据正则表达式匹配能力。
+     * 验证包含英文前缀的预测文案能够被精准捕获并提取出时长与放电速率目标数值，
+     * 确保多语言环境下预测核心数值的高亮渲染体验一致。
+     */
+    @Test
+    fun testRegexMatchesEnglishPredictionText() {
+        val v2Text = "• Upgraded Model (v2.2): 15h41m53s (High Confidence)"
+        val v2Match = PowerDischargeMetricsViewBinder.REGEX_V2_MODEL_DURATION.find(v2Text)
+        org.junit.Assert.assertNotNull(v2Match)
+        org.junit.Assert.assertEquals("15h41m53s", v2Match!!.groups[1]?.value)
+
+        val rateText = "• Predicted baseline drain rate: 7.4%/h"
+        val rateMatch = PowerDischargeMetricsViewBinder.REGEX_PREDICTION_BENCHMARK_RATE.find(rateText)
+        org.junit.Assert.assertNotNull(rateMatch)
+        org.junit.Assert.assertEquals("7.4%/h", rateMatch!!.groups[1]?.value)
+
+        val remText = "• Current remaining runtime: 07h22m44s (Medium Confidence)"
+        val remMatch = PowerDischargeMetricsViewBinder.REGEX_CURRENT_REMAINING_DURATION.find(remText)
+        org.junit.Assert.assertNotNull(remMatch)
+        org.junit.Assert.assertEquals("07h22m44s", remMatch!!.groups[1]?.value)
+
+        val standbyText = "• Current remaining standby: 01d12h35m58s (Medium Confidence)"
+        val standbyMatch = PowerDischargeMetricsViewBinder.REGEX_CURRENT_REMAINING_DURATION.find(standbyText)
+        org.junit.Assert.assertNotNull(standbyMatch)
+        org.junit.Assert.assertEquals("01d12h35m58s", standbyMatch!!.groups[1]?.value)
+    }
+}

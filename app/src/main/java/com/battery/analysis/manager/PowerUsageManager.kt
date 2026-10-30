@@ -7628,21 +7628,22 @@ class PowerUsageManager private constructor(private val context: Context) {
      * @return 格式化后的中文时长文本
      */
     private fun formatSleepAwakeDuration(durationMs: Long): String {
-        if (durationMs <= 0L) return "0 分钟"
+        val isZh = java.util.Locale.getDefault().language.startsWith("zh")
+        if (durationMs <= 0L) return if (isZh) "0 分钟" else "0 min"
         val totalSecs = durationMs / 1000L
         if (totalSecs < 60L) {
-            return "${totalSecs.coerceAtLeast(1L)} 秒"
+            return if (isZh) "${totalSecs.coerceAtLeast(1L)} 秒" else "${totalSecs.coerceAtLeast(1L)}s"
         }
         val totalMins = totalSecs / 60L
         if (totalMins < 60L) {
-            return "$totalMins 分钟"
+            return if (isZh) "$totalMins 分钟" else "${totalMins}m"
         }
         val hours = totalMins / 60L
         val mins = totalMins % 60L
         return if (mins > 0L) {
-            "$hours 时 $mins 分"
+            if (isZh) "$hours 时 $mins 分" else "${hours}h ${mins}m"
         } else {
-            "$hours 小时"
+            if (isZh) "$hours 小时" else "${hours}h"
         }
     }
 

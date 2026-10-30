@@ -97,7 +97,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="消耗能量"
+                android:text="@string/app_detail_consumed_energy"
                 android:textColor="#888888"
                 android:textSize="12sp" />
 
@@ -123,7 +123,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="平均功耗"
+                android:text="@string/app_detail_avg_power"
                 android:textColor="#888888"
                 android:textSize="12sp" />
 
@@ -149,7 +149,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="峰值功耗"
+                android:text="@string/app_detail_peak_power"
                 android:textColor="#888888"
                 android:textSize="12sp" />
 
@@ -186,7 +186,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="活动时间"
+                android:text="@string/app_detail_active_time"
                 android:textColor="#888888"
                 android:textSize="13sp" />
 
@@ -209,7 +209,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="CPU 运行时间"
+                android:text="@string/app_detail_cpu_time"
                 android:textColor="#888888"
                 android:textSize="13sp" />
 
@@ -232,7 +232,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="网络流量"
+                android:text="@string/app_detail_network_traffic"
                 android:textColor="#888888"
                 android:textSize="13sp" />
 
@@ -255,7 +255,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Wakelock / 定位"
+                android:text="@string/app_detail_wakelock_location"
                 android:textColor="#888888"
                 android:textSize="13sp" />
 
@@ -277,7 +277,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="数据来源"
+                android:text="@string/app_detail_data_source"
                 android:textColor="#888888"
                 android:textSize="13sp" />
 

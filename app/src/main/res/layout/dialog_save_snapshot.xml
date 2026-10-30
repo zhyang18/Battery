@@ -15,7 +15,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="保存电池检测快照"
+            android:text="@string/snapshot_dialog_title"
             android:textColor="?android:attr/textColorPrimary"
             android:textSize="18sp"
             android:textStyle="bold" />
@@ -72,7 +72,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="快照分类标签"
+            android:text="@string/snapshot_category_label"
             android:textColor="?android:attr/textColorPrimary"
             android:textSize="14sp"
             android:textStyle="bold" />
@@ -91,42 +91,42 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:checked="true"
-                android:text="日常检测" />
+                android:text="@string/snapshot_tag_daily" />
 
             <com.google.android.material.chip.Chip
                 android:id="@+id/chip_cat_full"
                 style="@style/Widget.MaterialComponents.Chip.Choice"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="满电状态" />
+                android:text="@string/snapshot_tag_full" />
 
             <com.google.android.material.chip.Chip
                 android:id="@+id/chip_cat_low"
                 style="@style/Widget.MaterialComponents.Chip.Choice"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="低电量" />
+                android:text="@string/snapshot_tag_low" />
 
             <com.google.android.material.chip.Chip
                 android:id="@+id/chip_cat_charge"
                 style="@style/Widget.MaterialComponents.Chip.Choice"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="充电测试" />
+                android:text="@string/snapshot_tag_charging" />
 
             <com.google.android.material.chip.Chip
                 android:id="@+id/chip_cat_heavy"
                 style="@style/Widget.MaterialComponents.Chip.Choice"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="发热重载" />
+                android:text="@string/snapshot_tag_thermal" />
 
             <com.google.android.material.chip.Chip
                 android:id="@+id/chip_cat_standby"
                 style="@style/Widget.MaterialComponents.Chip.Choice"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="待机测试" />
+                android:text="@string/snapshot_tag_standby" />
         </com.google.android.material.chip.ChipGroup>
 
         <!-- 自定义分类输入框 -->
@@ -135,7 +135,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:hint="分类名称（可自由输入或点击上方快捷标签）">
+            android:hint="@string/snapshot_name_hint">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/et_custom_category"
@@ -143,7 +143,7 @@
                 android:layout_height="wrap_content"
                 android:inputType="text"
                 android:maxLines="1"
-                android:text="日常检测"
+                android:text="@string/snapshot_tag_daily"
                 android:textSize="14sp" />
         </com.google.android.material.textfield.TextInputLayout>
 
@@ -153,7 +153,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:hint="备注说明（可选，如：67W快充/游戏后测试）">
+            android:hint="@string/snapshot_note_hint">
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/et_snapshot_note"

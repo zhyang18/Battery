@@ -85,7 +85,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1.0"
                 android:gravity="center"
-                android:text="指标"
+                android:text="@string/history_summary_metric"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -141,7 +141,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1.0"
                 android:gravity="center"
-                android:text="⏱️ 时"
+                android:text="@string/history_summary_col_time"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="12.5sp" />
 
@@ -256,7 +256,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="⚡ 能(Wh)"
+                    android:text="@string/history_summary_col_energy"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="12sp" />
 
@@ -377,7 +377,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1.0"
                 android:gravity="center"
-                android:text="💡 功(W)"
+                android:text="@string/history_summary_col_power"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="12sp" />
 
@@ -441,7 +441,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1.0"
                 android:gravity="center"
-                android:text="📈 速(%/h)"
+                android:text="@string/history_summary_col_rate"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="11.5sp" />
 
@@ -509,7 +509,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="3dp"
             android:lineSpacingExtra="2dp"
-            android:text="📌 说明：所有指标严格基于底层真实硬件物理量与充电会话数据累加计算，忠实反映设备充电性能表现。"
+            android:text="@string/charging_summary_desc"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="11.5sp" />
     </LinearLayout>

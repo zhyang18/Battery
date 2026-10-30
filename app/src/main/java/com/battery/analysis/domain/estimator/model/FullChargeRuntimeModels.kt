@@ -1,5 +1,8 @@
 package com.battery.analysis.domain.estimator.model
 
+import android.content.Context
+import com.battery.analysis.R
+
 /**
  * 满充电池能量的物理获取来源枚举。
  * 遵循系统底层物理数据可靠性优先级定义，真实反映硬件与电量计层的数据来源。
@@ -77,6 +80,21 @@ enum class DataSufficiencyLevel(val description: String) {
     MODERATE("基本可用"),
     /** 样本偏少（如新机刚用一两天），处于数据积累初期，已如实降权 */
     INSUFFICIENT("样本较少");
+
+    /**
+     * 获取符合当前系统或用户界面语言设置的充分性等级可读描述。
+     *
+     * @param context 应用程序上下文环境，可为 null
+     * @return 对应语言环境的充分性等级描述文本
+     */
+    fun getDescription(context: Context?): String {
+        if (context == null) return description
+        return when (this) {
+            SUFFICIENT -> context.getString(R.string.data_sufficiency_sufficient)
+            MODERATE -> context.getString(R.string.data_sufficiency_moderate)
+            INSUFFICIENT -> context.getString(R.string.data_sufficiency_insufficient)
+        }
+    }
 
     companion object {
         /**
@@ -189,6 +207,22 @@ enum class RuntimeConfidenceLevel(val description: String) {
     LOW("可信度较低"),
     /** 数据严重缺失或未获取到能量，无法可靠估算 */
     UNAVAILABLE("数据不足");
+
+    /**
+     * 获取符合当前系统或用户界面语言设置的置信度等级可读描述。
+     *
+     * @param context 应用程序上下文环境，可为 null
+     * @return 对应语言环境的置信度等级描述文本
+     */
+    fun getDescription(context: Context?): String {
+        if (context == null) return description
+        return when (this) {
+            HIGH -> context.getString(R.string.conf_level_high)
+            MEDIUM -> context.getString(R.string.conf_level_medium)
+            LOW -> context.getString(R.string.conf_level_low)
+            UNAVAILABLE -> context.getString(R.string.conf_level_unavailable)
+        }
+    }
 
     companion object {
         /**

@@ -1,6 +1,9 @@
 package com.battery.analysis.model
 
+import android.content.Context
+import com.battery.analysis.R
 import com.battery.analysis.util.BatteryEnergyCalculator
+import java.util.Locale
 
 /**
  * 电池信息数据实体类。
@@ -92,48 +95,85 @@ data class BatteryInfo(
      *
      * @return 包含各项参数的格式化字符串
      */
-    fun formatToString(): String {
+    /**
+     * 将电池信息格式化为包含键名与键值的多行字符串（支持自适应多语言）。
+     *
+     * @param context 可选 Android 上下文环境
+     * @return 包含各项参数的格式化多行字符串
+     */
+    fun formatToString(context: Context? = null): String {
+        val isZh = context?.resources?.configuration?.locales?.get(0)?.language?.startsWith("zh")
+            ?: Locale.getDefault().language.startsWith("zh")
+        val unknownText = context?.getString(R.string.unknown) ?: if (isZh) "未知" else "Unknown"
+        val realtimeText = if (isZh) "实时" else "Realtime"
+        val yesText = context?.getString(R.string.yes) ?: if (isZh) "是" else "Yes"
+        val noText = context?.getString(R.string.no) ?: if (isZh) "否" else "No"
+
+        val labelTime = context?.getString(R.string.param_capture_time) ?: if (isZh) "⏱️ 检测时间" else "Time"
+        val labelLevel = context?.getString(R.string.param_level) ?: if (isZh) "🔋 当前电量" else "Level"
+        val labelStatus = context?.getString(R.string.param_status) ?: if (isZh) "⚡ 电池状态" else "Status"
+        val labelHealth = context?.getString(R.string.param_health_status) ?: if (isZh) "🩺 电池健康" else "Health"
+        val labelHealthPct = context?.getString(R.string.param_health_percent) ?: if (isZh) "❤️ 健康度" else "SOH"
+        val labelCycle = context?.getString(R.string.param_cycle_count) ?: if (isZh) "🔄 循环计数" else "Cycles"
+        val labelTemp = context?.getString(R.string.param_temperature) ?: if (isZh) "🌡️ 电池温度" else "Temp"
+        val labelVolt = context?.getString(R.string.param_voltage) ?: if (isZh) "🔋 电池电压" else "Volt"
+        val labelCur = context?.getString(R.string.param_current) ?: if (isZh) "⚡ 瞬时电流" else "Current"
+        val labelDual = context?.getString(R.string.param_dual_cell) ?: if (isZh) "🔋 双电芯" else "Dual Cell"
+        val labelPower = context?.getString(R.string.param_power) ?: if (isZh) "⚡ 电池功率" else "Power"
+        val labelDesign = context?.getString(R.string.param_design_capacity) ?: if (isZh) "🔋 设计容量" else "Design Cap"
+        val labelFull = context?.getString(R.string.param_full_capacity) ?: if (isZh) "🔋 充满容量" else "Full Cap"
+        val labelCurCap = context?.getString(R.string.param_current_capacity) ?: if (isZh) "🔋 当前容量" else "Current Cap"
+        val labelTech = context?.getString(R.string.param_technology) ?: if (isZh) "🔬 电池技术" else "Tech"
+
         return """
-            报告时间: ${captureTime ?: "实时"}
-            电量: ${level?.let { "$it%" } ?: "未知"}
-            电池状态: ${status ?: "未知"}
-            电池健康: ${healthStatus ?: "未知"}
-            健康度: ${batteryHealth?.let { String.format("%.2f%%", it) } ?: "未知"}
-            循环计数: ${cycleCount ?: "未知"}
-            电池温度: ${temperature?.let { String.format("%.1f℃", it) } ?: "未知"}
-            电池电压: ${voltage?.let { String.format("%.0f mV", it) } ?: "未知"}
-            电流: ${currentNow?.let { if (it > 0f) String.format("+%.0f mA", it) else String.format("%.0f mA", it) } ?: "未知"}
-            双电芯: ${isDualCell?.let { if (it) "是" else "否" } ?: "否"}
-            电池功率: ${powerWatts?.let { if (it > 0f) String.format("+%.2f W", it) else String.format("%.2f W", it) } ?: "未知"}
-            设计容量: ${BatteryEnergyCalculator.formatCapacityWithNominalWh(designCapacity) ?: "未知"}
-            充满容量: ${BatteryEnergyCalculator.formatCapacityWithNominalWh(fullChargeCapacity) ?: "未知"}
-            当前容量: ${BatteryEnergyCalculator.formatCapacityWithNominalWh(currentCapacity) ?: "未知"}
-            电池技术: ${technology ?: "未知"}
+            $labelTime: ${captureTime ?: realtimeText}
+            $labelLevel: ${level?.let { "$it%" } ?: unknownText}
+            $labelStatus: ${status ?: unknownText}
+            $labelHealth: ${healthStatus ?: unknownText}
+            $labelHealthPct: ${batteryHealth?.let { String.format(Locale.getDefault(), "%.2f%%", it) } ?: unknownText}
+            $labelCycle: ${cycleCount ?: unknownText}
+            $labelTemp: ${temperature?.let { String.format(Locale.getDefault(), "%.1f℃", it) } ?: unknownText}
+            $labelVolt: ${voltage?.let { String.format(Locale.getDefault(), "%.0f mV", it) } ?: unknownText}
+            $labelCur: ${currentNow?.let { if (it > 0f) String.format(Locale.getDefault(), "+%.0f mA", it) else String.format(Locale.getDefault(), "%.0f mA", it) } ?: unknownText}
+            $labelDual: ${isDualCell?.let { if (it) yesText else noText } ?: noText}
+            $labelPower: ${powerWatts?.let { if (it > 0f) String.format(Locale.getDefault(), "+%.2f W", it) else String.format(Locale.getDefault(), "%.2f W", it) } ?: unknownText}
+            $labelDesign: ${BatteryEnergyCalculator.formatCapacityWithNominalWh(designCapacity) ?: unknownText}
+            $labelFull: ${BatteryEnergyCalculator.formatCapacityWithNominalWh(fullChargeCapacity) ?: unknownText}
+            $labelCurCap: ${BatteryEnergyCalculator.formatCapacityWithNominalWh(currentCapacity) ?: unknownText}
+            $labelTech: ${technology ?: unknownText}
         """.trimIndent()
     }
 
     /**
-     * 仅将电池信息的数据值格式化为多行字符串（用于多列对齐展示）。
+     * 仅将电池信息的数据值格式化为多行字符串（用于多列对齐展示，支持自适应多语言）。
      *
+     * @param context 可选 Android 上下文环境
      * @return 仅包含数据值的多行文本
      */
-    fun formatValuesOnly(): String {
+    fun formatValuesOnly(context: Context? = null): String {
+        val isZh = context?.resources?.configuration?.locales?.get(0)?.language?.startsWith("zh")
+            ?: Locale.getDefault().language.startsWith("zh")
+        val unknownText = context?.getString(R.string.unknown) ?: if (isZh) "未知" else "Unknown"
+        val realtimeText = if (isZh) "实时" else "Realtime"
+        val yesText = context?.getString(R.string.yes) ?: if (isZh) "是" else "Yes"
+        val noText = context?.getString(R.string.no) ?: if (isZh) "否" else "No"
+
         return """
-            ${captureTime ?: "实时"}
-            ${level?.let { "$it%" } ?: "未知"}
-            ${status ?: "未知"}
-            ${healthStatus ?: "未知"}
-            ${batteryHealth?.let { String.format("%.2f%%", it) } ?: "未知"}
-            ${cycleCount ?: "未知"}
-            ${temperature?.let { String.format("%.1f℃", it) } ?: "未知"}
-            ${voltage?.let { String.format("%.0f mV", it) } ?: "未知"}
-            ${currentNow?.let { if (it > 0f) String.format("+%.0f mA", it) else String.format("%.0f mA", it) } ?: "未知"}
-            ${isDualCell?.let { if (it) "是" else "否" } ?: "否"}
-            ${powerWatts?.let { if (it > 0f) String.format("+%.2f W", it) else String.format("%.2f W", it) } ?: "未知"}
-            ${BatteryEnergyCalculator.formatCapacityWithNominalWh(designCapacity) ?: "未知"}
-            ${BatteryEnergyCalculator.formatCapacityWithNominalWh(fullChargeCapacity) ?: "未知"}
-            ${BatteryEnergyCalculator.formatCapacityWithNominalWh(currentCapacity) ?: "未知"}
-            ${technology ?: "未知"}
+            ${captureTime ?: realtimeText}
+            ${level?.let { "$it%" } ?: unknownText}
+            ${status ?: unknownText}
+            ${healthStatus ?: unknownText}
+            ${batteryHealth?.let { String.format(Locale.getDefault(), "%.2f%%", it) } ?: unknownText}
+            ${cycleCount ?: unknownText}
+            ${temperature?.let { String.format(Locale.getDefault(), "%.1f℃", it) } ?: unknownText}
+            ${voltage?.let { String.format(Locale.getDefault(), "%.0f mV", it) } ?: unknownText}
+            ${currentNow?.let { if (it > 0f) String.format(Locale.getDefault(), "+%.0f mA", it) else String.format(Locale.getDefault(), "%.0f mA", it) } ?: unknownText}
+            ${isDualCell?.let { if (it) yesText else noText } ?: noText}
+            ${powerWatts?.let { if (it > 0f) String.format(Locale.getDefault(), "+%.2f W", it) else String.format(Locale.getDefault(), "%.2f W", it) } ?: unknownText}
+            ${BatteryEnergyCalculator.formatCapacityWithNominalWh(designCapacity) ?: unknownText}
+            ${BatteryEnergyCalculator.formatCapacityWithNominalWh(fullChargeCapacity) ?: unknownText}
+            ${BatteryEnergyCalculator.formatCapacityWithNominalWh(currentCapacity) ?: unknownText}
+            ${technology ?: unknownText}
         """.trimIndent()
     }
 }

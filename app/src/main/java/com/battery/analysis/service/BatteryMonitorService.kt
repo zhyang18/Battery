@@ -79,7 +79,7 @@ class BatteryMonitorService : Service() {
     @Volatile
     private var cachedScreenOffDischargePowerWatts: Float? = null
     @Volatile
-    private var cachedSingleLineInfo: String = "⚡ 电池监控持续运行中"
+    private var cachedSingleLineInfo: String = if (java.util.Locale.getDefault().language.startsWith("zh")) "⚡ 电池监控持续运行中" else "⚡ Battery monitor active"
 
     /**
      * 屏幕点亮/交互状态内存缓存，由动态广播 [Intent.ACTION_SCREEN_ON] 与 [Intent.ACTION_SCREEN_OFF] 实时维护。
@@ -548,6 +548,7 @@ class BatteryMonitorService : Service() {
         isServiceActive = true
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
+        cachedSingleLineInfo = getString(R.string.service_notification_default_desc)
 
         // 核心保护：开机或服务创建第一时间确保放电采样点与物理能量累加器已从本地持久化加载至内存，
         // 杜绝后续采样协程直接向空集合写入并误覆盖磁盘历史文件

@@ -1207,6 +1207,133 @@ class BatteryEnergyCalculatorTest {
         assertTrue("全局130h升级模型必须显示可信度高", msgGlobalHigh.contains("• 升级模型(v2.1)：01d01h00m00s (可信度高)"))
         assertTrue("全局130h当前剩余续航必须显示可信度高", msgGlobalHigh.contains("• 当前剩余续航：10h00m00s (可信度高)"))
     }
+
+    /**
+     * 验证亮屏、息屏与全局三大续航预测弹窗中的所有二级子项行均严格携带两个前导空格（"  "），
+     * 保证在界面渲染时均能精准触发悬挂缩进排版，实现二级正文字符与上方一级列表正文字符垂直对齐。
+     */
+    @Test
+    fun testFormatDischargeSpeedDetailMessage_SubItemsStrictlyPrefixedWithTwoSpaces() {
+        val profile = com.battery.analysis.domain.estimator.model.RuntimeProfile(
+            windowStartMs = 0L,
+            windowEndMs = 0L,
+            windowDays = 7,
+            effectiveDischargeMs = 9000_000L,
+            screenOnRatio = 0.40,
+            screenOffRatio = 0.60,
+            lightRatio = 0.20,
+            normalRatio = 0.70,
+            heavyRatio = 0.10,
+            screenOnMs = 3600_000L,
+            screenOffMs = 5400_000L,
+            lightMs = 720_000L,
+            normalMs = 2520_000L,
+            heavyMs = 360_000L,
+            lightPowerW = 0.60,
+            normalPowerW = 1.70,
+            heavyPowerW = 3.90,
+            offLowRatio = 0.90,
+            offHighRatio = 0.10,
+            offLowPowerW = 0.05,
+            offHighPowerW = 0.45,
+            typicalScreenOnPowerW = 1.60,
+            typicalScreenOffPowerW = 0.08,
+            typicalGlobalPowerW = 0.85
+        )
+
+        val v2Result = com.battery.analysis.domain.estimator.model.FullChargeRuntimeResult(
+            fullRuntimeMs = 30 * 3600_000L,
+            fullEnergyWh = 24.0,
+            predictedPowerWatts = 0.85,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            energySource = com.battery.analysis.domain.estimator.model.EnergySource.FCC_TIMES_NOMINAL_VOLTAGE,
+            effectiveHistoryMs = 80L * 3600_000L,
+            usedRegimeModel = true,
+            screenOnFullRuntimeMs = 15 * 3600_000L,
+            screenOffFullRuntimeMs = 100 * 3600_000L,
+            predictedScreenOnPowerWatts = 1.60,
+            predictedScreenOffPowerWatts = 0.08,
+            historyWindowDays = 7.0,
+            effectiveDischargeDurationMs = 80L * 3600_000L,
+            dataSufficiency = com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.SUFFICIENT,
+            screenOnEffectiveMs = 30L * 3600_000L,
+            screenOffEffectiveMs = 50L * 3600_000L,
+            screenOnConfidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            screenOffConfidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            screenOnDataSufficiency = com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.SUFFICIENT,
+            screenOffDataSufficiency = com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.SUFFICIENT,
+            profile = profile
+        )
+
+        val remEstimate = com.battery.analysis.domain.estimator.model.RuntimeEstimate(
+            remainingMs = 10 * 3600_000L,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            minRemainingMs = 5 * 3600_000L,
+            maxRemainingMs = 20 * 3600_000L,
+            predictedPowerWatts = 1.5,
+            remainingEnergyWh = 15.0,
+            confidence = 0.9,
+            modelType = com.battery.analysis.domain.estimator.model.RuntimeModelType.MULTI_TIMESCALE
+        )
+
+        // 1. 验证亮屏弹窗 (ROW_SCREEN_ON) 中的子项规范
+        val msgOn = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_ON,
+            currentRatePercentPerHour = 5.0f,
+            sevenDaysRatePercentPerHour = 4.8f,
+            sevenDaysDurationMs = 30L * 3600_000L,
+            fullDurationMs = 15 * 3600_000L,
+            predictedCapacityWh = 24.0f,
+            v2Result = v2Result,
+            remainingEstimate = remEstimate
+        )
+        assertTrue("亮屏统计范围必须以双空格缩进开头", msgOn.contains("\n  统计范围：最近 7 天\n"))
+        assertTrue("亮屏有效放电必须以双空格缩进开头", msgOn.contains("\n  有效放电：累计亮屏"))
+        assertTrue("亮屏工况必须以双空格缩进开头", msgOn.contains("\n  亮屏工况：轻载"))
+        assertTrue("工况功耗必须以双空格缩进开头", msgOn.contains("\n  工况功耗：轻载"))
+        assertTrue("典型功耗必须以双空格缩进开头", msgOn.contains("\n  典型功耗：1.60W\n"))
+        assertTrue("工况预期范围必须以双空格缩进开头", msgOn.contains("\n  工况预期范围："))
+        assertTrue("预测放电功耗必须以双空格缩进开头", msgOn.contains("\n  预测放电功耗："))
+
+        // 2. 验证息屏弹窗 (ROW_SCREEN_OFF) 中的子项规范
+        val msgOff = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_OFF,
+            currentRatePercentPerHour = 1.0f,
+            sevenDaysRatePercentPerHour = 0.9f,
+            sevenDaysDurationMs = 50L * 3600_000L,
+            fullDurationMs = 100 * 3600_000L,
+            predictedCapacityWh = 24.0f,
+            v2Result = v2Result,
+            remainingEstimate = remEstimate
+        )
+        assertTrue("息屏统计范围必须以双空格缩进开头", msgOff.contains("\n  统计范围：最近 7 天\n"))
+        assertTrue("息屏有效放电必须以双空格缩进开头", msgOff.contains("\n  有效放电：累计息屏"))
+        assertTrue("息屏待机工况必须以双空格缩进开头", msgOff.contains("\n  待机工况：休眠"))
+        assertTrue("息屏工况功耗必须以双空格缩进开头", msgOff.contains("\n  工况功耗：休眠"))
+        assertTrue("息屏典型待机功耗必须以双空格缩进开头", msgOff.contains("\n  典型待机功耗：0.08W\n"))
+        assertTrue("息屏工况预期范围必须以双空格缩进开头", msgOff.contains("\n  工况预期范围："))
+        assertTrue("息屏预测待机功耗必须以双空格缩进开头", msgOff.contains("\n  预测待机功耗："))
+
+        // 3. 验证全局弹窗 (ROW_GLOBAL) 中的子项规范
+        val msgGlobal = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_GLOBAL,
+            currentRatePercentPerHour = 3.0f,
+            sevenDaysRatePercentPerHour = 2.8f,
+            sevenDaysDurationMs = 80L * 3600_000L,
+            fullDurationMs = 30 * 3600_000L,
+            predictedCapacityWh = 24.0f,
+            sceneScreenOnRatio = 0.40f,
+            sceneFullDurationMs = 28 * 3600_000L,
+            v2Result = v2Result,
+            remainingEstimate = remEstimate
+        )
+        assertTrue("全局工况预期范围必须以双空格缩进开头", msgGlobal.contains("\n  工况预期范围："))
+        assertTrue("全局预测综合功耗必须以双空格缩进开头", msgGlobal.contains("\n  预测综合功耗："))
+        assertTrue("模式1说明必须以双空格缩进开头", msgGlobal.contains("\n  基于7天全局真实功耗线性推算\n"))
+        assertTrue("模式2说明必须以双空格缩进开头", msgGlobal.contains("\n  按日常习惯 40.0% 亮屏 + 60.0% 息屏加权\n"))
+        assertTrue("全局统计范围必须以双空格缩进开头", msgGlobal.contains("\n  统计范围：最近 7 天\n"))
+        assertTrue("全局有效放电必须以双空格缩进开头", msgGlobal.contains("\n  有效放电：实际参与累计"))
+        assertTrue("全局两态分布必须以双空格缩进开头", msgGlobal.contains("\n  两态分布：亮屏"))
+        assertTrue("全局工况建模必须以双空格缩进开头", msgGlobal.contains("\n  工况建模：基于"))
+    }
 }
-
-

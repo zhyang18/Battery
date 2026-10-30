@@ -1169,7 +1169,7 @@ class PowerUsageFragment : Fragment() {
      * @param chargingView 充电布局绑定实例
      */
     private fun setupChargingView(chargingView: com.battery.analysis.databinding.LayoutChargingStatsBinding) {
-        chargingView.chargingMetricSelectorView.setPowerLabelText("功率")
+        chargingView.chargingMetricSelectorView.setPowerLabelText(getString(R.string.metric_power))
         chargingView.chargingMetricSelectorView.configurePrefs(
             prefsKey = "saved_charging_timeline_metrics",
             defaultMetrics = setOf(
@@ -1304,9 +1304,9 @@ class PowerUsageFragment : Fragment() {
      */
     private fun showMetricRowDetailBubble(anchorView: View, rowType: Int) {
         val message = when (rowType) {
-            ROW_SCREEN_ON -> "亮屏：时间、平均功耗、放电速度、能量"
-            ROW_SCREEN_OFF -> "息屏：时间、平均功耗、放电速度、能量"
-            ROW_GLOBAL -> "全局：时间、平均功耗、放电速度、能量"
+            ROW_SCREEN_ON -> getString(R.string.power_bubble_screen_on_summary)
+            ROW_SCREEN_OFF -> getString(R.string.power_bubble_screen_off_summary)
+            ROW_GLOBAL -> getString(R.string.power_bubble_global_summary)
             else -> return
         }
         showBubbleTooltip(anchorView, message)
@@ -1341,21 +1341,21 @@ class PowerUsageFragment : Fragment() {
                     val r = (overview.screenOnEnergyWh / baseTotalEnergy * 100f)
                     String.format(Locale.getDefault(), "%.1f%%", r)
                 } else null
-                Triple("亮屏", overview.screenOnEnergyWh, ratio)
+                Triple(getString(R.string.power_header_screen_on), overview.screenOnEnergyWh, ratio)
             }
             ROW_SCREEN_OFF -> {
                 val ratio = if (baseTotalEnergy != null) {
                     val r = (overview.screenOffEnergyWh / baseTotalEnergy * 100f)
                     String.format(Locale.getDefault(), "%.1f%%", r)
                 } else null
-                Triple("息屏", overview.screenOffEnergyWh, ratio)
+                Triple(getString(R.string.power_header_screen_off), overview.screenOffEnergyWh, ratio)
             }
             ROW_GLOBAL -> {
                 val ratio = if (baseTotalEnergy != null) {
                     val r = (overview.totalEnergyWh / baseTotalEnergy * 100f)
                     String.format(Locale.getDefault(), "%.1f%%", r)
                 } else null
-                Triple("全局", overview.totalEnergyWh, ratio)
+                Triple(getString(R.string.power_header_global), overview.totalEnergyWh, ratio)
             }
             else -> return
         }
@@ -1399,21 +1399,24 @@ class PowerUsageFragment : Fragment() {
                 BatteryEnergyCalculator.formatScreenOffCardDetailMessage(
                     overview = overview,
                     nominalTotalWh = nominalTotalWh,
-                    nominalVoltageVolts = nominalVoltage
+                    nominalVoltageVolts = nominalVoltage,
+                    context = requireContext()
                 )
             }
             AppPowerUsageAdapter.CARD_AWAKE -> {
                 BatteryEnergyCalculator.formatAwakeCardDetailMessage(
                     overview = overview,
                     nominalTotalWh = nominalTotalWh,
-                    nominalVoltageVolts = nominalVoltage
+                    nominalVoltageVolts = nominalVoltage,
+                    context = requireContext()
                 )
             }
             AppPowerUsageAdapter.CARD_DEEP_SLEEP -> {
                 BatteryEnergyCalculator.formatDeepSleepCardDetailMessage(
                     overview = overview,
                     nominalTotalWh = nominalTotalWh,
-                    nominalVoltageVolts = nominalVoltage
+                    nominalVoltageVolts = nominalVoltage,
+                    context = requireContext()
                 )
             }
             else -> return
@@ -1508,7 +1511,8 @@ class PowerUsageFragment : Fragment() {
             displayUnit = currentDisplayUnit,
             nominalVoltageVolts = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS,
             sessionRatePercentPerHour = sessionRate,
-            sessionDurationMs = sessionDurationMs
+            sessionDurationMs = sessionDurationMs,
+            context = requireContext()
         )
         if (message.isNotBlank()) {
             val styledMessage = PowerDischargeMetricsViewBinder.formatDischargeSpeedBubbleMessage(message)
@@ -1868,9 +1872,9 @@ class PowerUsageFragment : Fragment() {
 
         // 4. 充电状态标题与屏幕常亮灯泡控制
         chargingView.tvChargingStateTitle.text = if (summary.isCharging) {
-            "充电中"
+            getString(R.string.power_status_charging)
         } else {
-            "未充电"
+            getString(R.string.power_status_unplugged)
         }
         val prefs = requireContext().getSharedPreferences("charging_stats_prefs", Context.MODE_PRIVATE)
         val isKeepScreenOn = prefs.getBoolean(PREF_KEY_KEEP_SCREEN_ON, false)
@@ -2057,7 +2061,7 @@ class PowerUsageFragment : Fragment() {
         val summary = chargingManager.getCurrentSummary()
         val points = chargingManager.getSamplePoints()
 
-        val chargeType = if (summary.chargeType.isNotEmpty()) summary.chargeType else "充电监测"
+        val chargeType = com.battery.analysis.model.ChargingHistoryRecord.getLocalizedChargeType(requireContext(), summary.chargeType)
         tvType.text = "⚡ $chargeType"
 
         val durationMs = if (summary.endTimestamp >= summary.startTimestamp && summary.startTimestamp > 0L) {
@@ -2066,12 +2070,12 @@ class PowerUsageFragment : Fragment() {
             0L
         }
         val durationStr = formatDurationColon(durationMs)
-        tvTime.text = "已充电: $durationStr"
+        tvTime.text = getString(R.string.charging_card_charged_duration_format, durationStr)
 
         val gain = (summary.currentLevel - summary.startLevel).coerceAtLeast(0)
         val gainSign = if (gain >= 0) "+$gain%" else "$gain%"
         val pointCount = points.size
-        tvSummary.setUnitText("🔋 电量 ${summary.startLevel}% → ${summary.currentLevel}% ($gainSign)   •   📊 $pointCount 个采样点")
+        tvSummary.setUnitText("🔋 ${summary.startLevel}% → ${summary.currentLevel}% ($gainSign)   •   📊 $pointCount")
 
         val dialog = AlertDialog.Builder(requireContext())
             .setView(dialogView)
@@ -2785,11 +2789,11 @@ class PowerUsageFragment : Fragment() {
                 val btnCancel = deleteView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
                 val btnConfirm = deleteView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
 
-                tvTitle.text = "确认删除此耗电快照？"
-                tvDesc.text = "删除后该条放电快照记录将从本地永久移除，无法找回。"
-                tvCat.text = if (record.isShizukuRealData) "Shizuku" else "系统模式"
+                tvTitle.text = getString(R.string.dialog_delete_snapshot_title)
+                tvDesc.text = getString(R.string.dialog_delete_snapshot_desc)
+                tvCat.text = if (record.isShizukuRealData) "Shizuku" else getString(R.string.power_mode_system)
                 tvTime.text = record.recordTime
-                tvSummary.setUnitText("🔋 终止电量 ${record.levelPercent}%   •   ⏱️ 持续 ${record.totalDurationText}")
+                tvSummary.setUnitText("🔋 ${record.levelPercent}%   •   ⏱️ ${record.totalDurationText}")
 
                 val delDialog = AlertDialog.Builder(requireContext())
                     .setView(deleteView)
@@ -2890,17 +2894,17 @@ class PowerUsageFragment : Fragment() {
                 val effEnd = record.getEffectiveEndLevel()
                 val effGain = record.getEffectiveLevelGain()
                 val detailDialog = AlertDialog.Builder(requireContext())
-                    .setTitle("充电详情 (${record.recordTime})")
+                    .setTitle(getString(R.string.charging_detail_dialog_title_format, record.recordTime))
                     .setMessage(
-                        "充电接口：${record.chargeType}\n" +
-                        "总充电时长：${record.getFormattedDuration()}\n" +
-                        "亮屏充电时长：${record.getFormattedScreenOnDuration()}\n" +
-                        "息屏充电时长：${record.getFormattedScreenOffDuration()}\n" +
-                        "电量变化：${record.startLevel}% → ${effEnd}% (+${effGain}%)\n" +
-                        "充入能量：+${String.format(Locale.getDefault(), "%.2f", record.chargedEnergyWh)} Wh\n" +
-                        "平均功率：${String.format(Locale.getDefault(), "%.2f", record.avgPowerWatts)} W\n" +
-                        "峰值功率：${String.format(Locale.getDefault(), "%.2f", record.maxPowerWatts)} W\n" +
-                        "最高温度：${String.format(Locale.getDefault(), "%.1f", record.maxTemperature)} ℃"
+                        getString(R.string.charging_detail_port_format, record.chargeType) +
+                        getString(R.string.charging_detail_total_dur_format, record.getFormattedDuration()) +
+                        getString(R.string.charging_detail_screen_on_dur_format, record.getFormattedScreenOnDuration()) +
+                        getString(R.string.charging_detail_screen_off_dur_format, record.getFormattedScreenOffDuration()) +
+                        getString(R.string.charging_detail_level_change_format, record.startLevel, effEnd, effGain) +
+                        getString(R.string.charging_detail_charged_energy_format, record.chargedEnergyWh) +
+                        getString(R.string.charging_detail_avg_power_format, record.avgPowerWatts) +
+                        getString(R.string.charging_detail_max_power_format, record.maxPowerWatts) +
+                        getString(R.string.charging_detail_max_temp_format, record.maxTemperature)
                     )
                     .setPositiveButton(getString(R.string.understood), null)
                     .create()
@@ -2917,9 +2921,9 @@ class PowerUsageFragment : Fragment() {
                 val btnCancel = deleteView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
                 val btnConfirm = deleteView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
 
-                tvTitle.text = "确认删除此充电记录？"
-                tvDesc.text = "删除后该条充电历史记录将从本地永久移除，无法找回。"
-                tvCat.text = if (record.chargeType.isNotEmpty()) record.chargeType else "充电记录"
+                tvTitle.text = getString(R.string.dialog_delete_charge_title)
+                tvDesc.text = getString(R.string.dialog_delete_charge_desc)
+                tvCat.text = record.getLocalizedChargeType(requireContext())
                 tvTime.text = record.recordTime
                 val effEnd = record.getEffectiveEndLevel()
                 val effGain = record.getEffectiveLevelGain()
@@ -3106,7 +3110,7 @@ class PowerUsageFragment : Fragment() {
         if (!donotShow) {
             showPowerUnitExplanationDialog(newUnit)
         } else {
-            Toast.makeText(requireContext(), "已切换为${newUnit.label}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), getString(R.string.power_toast_unit_switched, newUnit.getLabel(requireContext())), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -3146,7 +3150,7 @@ class PowerUsageFragment : Fragment() {
             if (cbDonotShow.isChecked) {
                 val prefs = requireContext().getSharedPreferences(PowerDisplayUnit.PREFS_NAME, Context.MODE_PRIVATE)
                 prefs.edit().putBoolean(PowerDisplayUnit.PREF_KEY_POWER_UNIT_DIALOG_DONOT_SHOW, true).apply()
-                Toast.makeText(requireContext(), "后续切换将直接生效，长按单位按钮可随时再次查看说明", Toast.LENGTH_LONG).show()
+                Toast.makeText(requireContext(), getString(R.string.power_toast_unit_guide_hint), Toast.LENGTH_LONG).show()
             }
             dialog.dismiss()
         }
@@ -3241,7 +3245,7 @@ class PowerUsageFragment : Fragment() {
         val currentLevel = lastRenderedPackage?.batterySnapshot?.levelPercent
             ?: powerManager.getCurrentBatteryStatus().levelPercent
         val pointCount = lastRenderedPackage?.trendPoints?.size ?: 0
-        tvSummary.setUnitText("🔋 ${getString(R.string.dialog_power_reset_current_level)} $currentLevel%   •   📊 $pointCount 个采样点")
+        tvSummary.setUnitText("🔋 ${getString(R.string.dialog_power_reset_current_level)} $currentLevel%   •   📊 $pointCount")
 
         val dialog = AlertDialog.Builder(requireContext())
             .setView(dialogView)
@@ -3299,7 +3303,7 @@ class PowerUsageFragment : Fragment() {
         popupWindow.animationStyle = R.style.Animation_PopupTopRight
 
         val tvEnergySort = popupView.findViewById<TextView>(R.id.tv_sort_energy)
-        tvEnergySort.text = if (currentDisplayUnit == PowerDisplayUnit.MAH) "按消耗电量 (mAh)" else "按消耗能量 (Wh)"
+        tvEnergySort.text = getString(if (currentDisplayUnit == PowerDisplayUnit.MAH) R.string.power_sort_mah else R.string.power_sort_wh)
 
         val sortViews = listOf(
             popupView.findViewById<TextView>(R.id.tv_sort_duration),

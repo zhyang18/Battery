@@ -84,7 +84,7 @@
             <ImageView
                 android:layout_width="15dp"
                 android:layout_height="15dp"
-                android:contentDescription="换算公式"
+                android:contentDescription="@string/power_unit_dialog_formula_desc"
                 android:src="@drawable/ic_battery_power"
                 app:tint="#2196F3" />
 
@@ -92,7 +92,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="6dp"
-                android:text="换算基准公式 (国际标准 3.85V)"
+                android:text="@string/power_unit_dialog_formula_title"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="12.5sp"
                 android:textStyle="bold" />
@@ -164,7 +164,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="物理定义"
+                    android:text="@string/power_unit_dialog_def_title"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="12.5sp"
                     android:textStyle="bold" />
@@ -211,7 +211,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="科学守恒"
+                    android:text="@string/power_unit_dialog_science_title"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="12.5sp"
                     android:textStyle="bold" />
@@ -239,7 +239,7 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="10dp"
         android:buttonTint="#2196F3"
-        android:text="不再弹出提示（长按单位徽标可随时重看）"
+        android:text="@string/power_unit_dialog_dont_show_again"
         android:textColor="?android:attr/textColorSecondary"
         android:textSize="12sp" />
 

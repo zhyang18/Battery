@@ -26,7 +26,7 @@ object BubbleTooltipHelper {
     /**
      * 在目标锚点视图附近弹出气泡说明框。
      * 自动计算屏幕安全边距、支持基于触摸坐标或视图中点对齐，动态渲染指向依附 View 的小三角指示器，
-     * 自动适配上方/下方弹出平滑动画与自定义超时关闭机制。
+     * 自动适配上方/下方弹出平滑动画、内容过多时自适应最大高度与滚动布局及自定义超时关闭机制。
      *
      * @param anchorView 触发气泡弹窗的目标锚点视图
      * @param message 待呈现的提示文本内容
@@ -58,10 +58,15 @@ object BubbleTooltipHelper {
         val tvMessage = popupView.findViewById<TextView>(R.id.tv_bubble_message)
         tvMessage.text = applyHangingIndent(tvMessage, message)
 
+        val scrollContent = popupView.findViewById<View>(R.id.scroll_bubble_content)
+        scrollContent?.isVerticalScrollBarEnabled = false
+        scrollContent?.isHorizontalScrollBarEnabled = false
+
         val density = context.resources.displayMetrics.density
         val rootWidth = anchorView.rootView?.width ?: 0
+        val rootHeight = anchorView.rootView?.height ?: 0
         val screenWidth = if (rootWidth > 0) rootWidth else context.resources.displayMetrics.widthPixels
-        val screenHeight = context.resources.displayMetrics.heightPixels
+        val screenHeight = if (rootHeight > 0) rootHeight else context.resources.displayMetrics.heightPixels
         val margin = (BubbleTooltipLayout.DEFAULT_SCREEN_MARGIN_DP * density).toInt()
         val gap = (2 * density).toInt() // 箭头与依附 View 边缘的自然间隙
 
@@ -79,14 +84,6 @@ object BubbleTooltipHelper {
             density = density
         )
 
-        // 初步测量气泡尺寸（以自适应宽度进行精确测量）
-        popupView.measure(
-            View.MeasureSpec.makeMeasureSpec(targetBubbleWidth, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-        )
-        var popupWidth = popupView.measuredWidth
-        var popupHeight = popupView.measuredHeight
-
         val anchorLoc = IntArray(2)
         anchorView.getLocationOnScreen(anchorLoc)
 
@@ -96,11 +93,8 @@ object BubbleTooltipHelper {
         } else {
             anchorLoc[0] + anchorView.width / 2
         }
-        var targetScreenX = anchorCenterX - popupWidth / 2
-        val maxScreenX = (screenWidth - popupWidth - margin).coerceAtLeast(margin)
-        targetScreenX = targetScreenX.coerceIn(margin, maxScreenX)
 
-        // 垂直方向：计算展示方位
+        // 垂直方向：计算展示方位基准
         val anchorTopY = if (touchY != null) {
             anchorLoc[1] + touchY.toInt()
         } else {
@@ -112,38 +106,77 @@ object BubbleTooltipHelper {
             anchorLoc[1] + anchorView.height
         }
 
-        val spaceAbove = anchorTopY - margin
-        val isAbove = forceAbove || (spaceAbove >= popupHeight + gap)
+        val spaceAbove = (anchorTopY - margin - gap).coerceAtLeast(0)
+        val spaceBelow = (screenHeight - margin - anchorBottomY - gap).coerceAtLeast(0)
 
-        // 配置依附 View 指向箭头方位与相对 X 坐标
+        // 1. 先以无高度限制测量自然理想高度（含箭头高度预估）
+        bubbleLayout?.setMaxBubbleHeight(Int.MAX_VALUE)
+        popupView.measure(
+            View.MeasureSpec.makeMeasureSpec(targetBubbleWidth, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        val arrowHeightApprox = (7 * density).toInt()
+        val idealPopupHeight = popupView.measuredHeight + arrowHeightApprox
+
+        // 2. 依据空间充裕程度与超长内容判定展示方位
+        val isAbove = decideBubblePlacement(
+            forceAbove = forceAbove,
+            spaceAbove = spaceAbove,
+            spaceBelow = spaceBelow,
+            idealHeight = idealPopupHeight
+        )
+
+        // 3. 计算在当前方位下所允许的最大高度并设置给气泡容器
+        val maxAllowedHeight = calculateMaxAllowedHeight(
+            isAbove = isAbove,
+            spaceAbove = spaceAbove,
+            spaceBelow = spaceBelow,
+            screenHeight = screenHeight,
+            density = density
+        )
+        bubbleLayout?.setMaxBubbleHeight(maxAllowedHeight)
+
+        // 4. 配置依附 View 指向箭头方位与初始相对 X 坐标
         val arrowDirection = if (isAbove) {
             BubbleTooltipLayout.ArrowDirection.DOWN
         } else {
             BubbleTooltipLayout.ArrowDirection.UP
         }
+
+        popupView.measure(
+            View.MeasureSpec.makeMeasureSpec(targetBubbleWidth, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(maxAllowedHeight, View.MeasureSpec.AT_MOST)
+        )
+        var popupWidth = popupView.measuredWidth
+
+        var maxScreenX = (screenWidth - popupWidth - margin).coerceAtLeast(margin)
+        var targetScreenX = (anchorCenterX - popupWidth / 2).coerceIn(margin, maxScreenX)
         var relativeArrowX = (anchorCenterX - targetScreenX).toFloat()
         bubbleLayout?.setArrow(arrowDirection, relativeArrowX)
 
-        // 重新测量以纳入箭头高度内边距
+        // 5. 重新测量以纳入箭头高度内边距
         popupView.measure(
             View.MeasureSpec.makeMeasureSpec(targetBubbleWidth, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            View.MeasureSpec.makeMeasureSpec(maxAllowedHeight, View.MeasureSpec.AT_MOST)
         )
         popupWidth = popupView.measuredWidth
-        popupHeight = popupView.measuredHeight
+        val popupHeight = popupView.measuredHeight
 
         val reMaxScreenX = (screenWidth - popupWidth - margin).coerceAtLeast(margin)
         targetScreenX = (anchorCenterX - popupWidth / 2).coerceIn(margin, reMaxScreenX)
         relativeArrowX = (anchorCenterX - targetScreenX).toFloat()
         bubbleLayout?.setArrow(arrowDirection, relativeArrowX)
 
-        // 最终垂直屏幕位置
-        val targetScreenY = if (isAbove) {
-            anchorTopY - popupHeight - gap
-        } else {
-            (anchorBottomY + gap).coerceAtMost(screenHeight - popupHeight - margin)
-        }
-        val finalScreenY = targetScreenY.coerceIn(margin, screenHeight - popupHeight - margin)
+        // 6. 精确计算最终垂直屏幕位置（紧贴锚点外侧，绝不反向遮挡锚点）
+        val finalScreenY = calculateFinalScreenY(
+            isAbove = isAbove,
+            anchorTopY = anchorTopY,
+            anchorBottomY = anchorBottomY,
+            popupHeight = popupHeight,
+            gap = gap,
+            margin = margin,
+            screenHeight = screenHeight
+        )
 
         val popupWindow = PopupWindow(
             popupView,
@@ -186,6 +219,86 @@ object BubbleTooltipHelper {
 
         popupWindow.showAtLocation(anchorView, Gravity.NO_GRAVITY, targetScreenX, finalScreenY)
         return popupWindow
+    }
+
+    /**
+     * 依据锚点上方与下方可用垂直空间、气泡期望理想高度及强制方位参数，智能决策气泡应位于锚点上方或下方。
+     * 1. 当 [forceAbove] 为 true 时，无条件返回 true（位于上方）；
+     * 2. 当上方空间充裕且能完整容纳气泡理想高度时，优先返回 true；
+     * 3. 当上方空间不足但下方空间充裕能完整容纳时，返回 false；
+     * 4. 当上下两侧空间均无法完整容纳超长气泡（内容过多）时，选择可用空间更充裕的一侧展示，
+     *    配合滚动视图承载超长内容，防止内容过多导致全屏或挤占锚点导致箭头反向倒错。
+     *
+     * @param forceAbove 是否强制在锚点上方弹出
+     * @param spaceAbove 锚点上方可用垂直空间像素值
+     * @param spaceBelow 锚点下方可用垂直空间像素值
+     * @param idealHeight 气泡未受限制时的期望理想高度像素值
+     * @return true 表示应展示在锚点上方（箭头在气泡底部朝下）；false 表示应展示在锚点下方（箭头在气泡顶部朝上）
+     */
+    fun decideBubblePlacement(
+        forceAbove: Boolean,
+        spaceAbove: Int,
+        spaceBelow: Int,
+        idealHeight: Int
+    ): Boolean {
+        if (forceAbove) return true
+        if (spaceAbove >= idealHeight) return true
+        if (spaceBelow >= idealHeight) return false
+        return spaceAbove > spaceBelow
+    }
+
+    /**
+     * 根据所选展示方位、对应方向可用空间及屏幕全局安全比例，计算气泡所允许的最大高度限制像素值。
+     *
+     * @param isAbove 气泡是否展示在锚点上方
+     * @param spaceAbove 锚点上方可用垂直空间像素值
+     * @param spaceBelow 锚点下方可用垂直空间像素值
+     * @param screenHeight 屏幕或可见窗口总高度像素值
+     * @param density 屏幕像素密度
+     * @param maxScreenRatio 气泡单次弹出所允许占用的屏幕最大比例（默认 0.70f）
+     * @return 气泡允许的最大高度像素值
+     */
+    fun calculateMaxAllowedHeight(
+        isAbove: Boolean,
+        spaceAbove: Int,
+        spaceBelow: Int,
+        screenHeight: Int,
+        density: Float,
+        maxScreenRatio: Float = 0.70f
+    ): Int {
+        val maxScreenRatioHeight = (screenHeight * maxScreenRatio).toInt()
+        val sideSpace = if (isAbove) spaceAbove else spaceBelow
+        val minHeight = (60 * density).toInt()
+        return sideSpace.coerceAtMost(maxScreenRatioHeight).coerceAtLeast(minHeight)
+    }
+
+    /**
+     * 精确计算气泡弹窗在屏幕上的最终垂直 Y 坐标。
+     * 严格依据展示方位将气泡锚定在锚点上方或下方指定间隙处，杜绝任何侵占锚点或越界位移。
+     *
+     * @param isAbove 气泡是否展示在锚点上方
+     * @param anchorTopY 锚点上边缘 Y 坐标像素值
+     * @param anchorBottomY 锚点下边缘 Y 坐标像素值
+     * @param popupHeight 气泡测量高度像素值
+     * @param gap 气泡与锚点之间的垂直间隙像素值
+     * @param margin 屏幕顶部与底部安全边距像素值
+     * @param screenHeight 屏幕或可见窗口总高度像素值
+     * @return 气泡弹窗在屏幕上的绝对垂直 Y 坐标像素值
+     */
+    fun calculateFinalScreenY(
+        isAbove: Boolean,
+        anchorTopY: Int,
+        anchorBottomY: Int,
+        popupHeight: Int,
+        gap: Int,
+        margin: Int,
+        screenHeight: Int
+    ): Int {
+        return if (isAbove) {
+            (anchorTopY - popupHeight - gap).coerceAtLeast(margin)
+        } else {
+            (anchorBottomY + gap).coerceAtMost(screenHeight - popupHeight - margin)
+        }
     }
 
     /**

@@ -8,6 +8,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.battery.analysis.R
 
 /**
  * 功耗时间轴底部指标多选/反选选择器组件。
@@ -44,7 +45,7 @@ class MetricSelectorView @JvmOverloads constructor(
     private var currentPrefsName = PREFS_NAME
     private var currentKeySavedMetrics = KEY_SAVED_METRICS
     private var defaultMetrics = setOf(TimelineMetric.POWER, TimelineMetric.APP)
-    private var powerLabel = "功耗"
+    private var powerLabel = context.getString(R.string.metric_power)
 
     // 默认通过本地持久化恢复用户上次选择（若首次进入则默认勾选“功耗”与“应用”）
     private val selectedMetrics = mutableSetOf<TimelineMetric>()
@@ -52,12 +53,12 @@ class MetricSelectorView @JvmOverloads constructor(
 
     private fun buildMetricItems(): List<Pair<TimelineMetric, String>> {
         return listOf(
-            Pair(TimelineMetric.BATTERY, "电量"),
-            Pair(TimelineMetric.ENERGY, "能量"),
+            Pair(TimelineMetric.BATTERY, context.getString(R.string.metric_level)),
+            Pair(TimelineMetric.ENERGY, context.getString(R.string.metric_energy)),
             Pair(TimelineMetric.POWER, powerLabel),
-            Pair(TimelineMetric.TEMPERATURE, "温度"),
-            Pair(TimelineMetric.VOLTAGE, "电压"),
-            Pair(TimelineMetric.APP, "应用")
+            Pair(TimelineMetric.TEMPERATURE, context.getString(R.string.metric_temp)),
+            Pair(TimelineMetric.VOLTAGE, context.getString(R.string.metric_voltage)),
+            Pair(TimelineMetric.APP, context.getString(R.string.metric_app))
         )
     }
 

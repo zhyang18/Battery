@@ -9,11 +9,20 @@
     android:paddingEnd="8dp"
     android:paddingBottom="8dp">
 
-    <TextView
-        android:id="@+id/tv_bubble_message"
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/scroll_bubble_content"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:lineSpacingExtra="3dp"
-        android:textColor="@color/popup_item_text"
-        android:textSize="13sp" />
+        android:overScrollMode="never"
+        android:scrollbars="none">
+
+        <TextView
+            android:id="@+id/tv_bubble_message"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:lineSpacingExtra="3dp"
+            android:textColor="@color/popup_item_text"
+            android:textSize="13sp" />
+    </androidx.core.widget.NestedScrollView>
 </com.battery.analysis.ui.view.BubbleTooltipLayout>
+

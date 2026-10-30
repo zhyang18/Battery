@@ -40,7 +40,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="设置自学习有效数据百分比"
+                    android:text="@string/capacity_threshold_picker_title"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="17sp"
                     android:textStyle="bold" />
@@ -49,7 +49,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="单次充放电跨度需达标方参与模型计算"
+                    android:text="@string/capacity_diag_threshold_hint"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="11sp" />
             </LinearLayout>
@@ -107,7 +107,7 @@
             android:layout_marginEnd="8dp"
             android:layout_weight="1"
             android:background="@drawable/bg_dialog_btn_cancel"
-            android:text="取消"
+            android:text="@string/cancel"
             android:textColor="#94a3b8"
             android:textSize="14sp"
             app:backgroundTint="@null"
@@ -120,7 +120,7 @@
             android:layout_marginStart="8dp"
             android:layout_weight="1"
             android:backgroundTint="#10b981"
-            android:text="确定"
+            android:text="@string/confirm"
             android:textColor="#ffffff"
             android:textSize="14sp"
             app:cornerRadius="10dp" />

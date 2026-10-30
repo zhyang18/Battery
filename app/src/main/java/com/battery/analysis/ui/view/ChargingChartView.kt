@@ -24,6 +24,7 @@ import com.battery.analysis.timeline.util.DrawableBitmapCache
 import com.battery.analysis.timeline.util.TimelineLayoutCalculator
 import com.battery.analysis.util.BatteryEnergyCalculator
 import com.battery.analysis.util.UnitSpanFormatter
+import com.battery.analysis.R
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -609,7 +610,7 @@ class ChargingChartView @JvmOverloads constructor(
         }
 
         if (dataPoints.isEmpty()) {
-            val emptyText = "正在连接并采集充电数据..."
+            val emptyText = context.getString(R.string.chart_collecting_charge_data)
             canvas.drawText(emptyText, w / 2f, chartTop + chartHeight / 2f, emptyPaint)
             return
         }
@@ -1013,7 +1014,7 @@ class ChargingChartView @JvmOverloads constructor(
             headerTimePaint.textAlign = Paint.Align.CENTER
             headerTimePaint.color = Color.parseColor("#888888")
             val textY = headerTop + (headerBottom - headerTop) / 2f - (headerTimePaint.descent() + headerTimePaint.ascent()) / 2f
-            canvas.drawText("等待充电数据采样...", w / 2f, textY, headerTimePaint)
+            canvas.drawText(context.getString(R.string.chart_waiting_charge_data), w / 2f, textY, headerTimePaint)
             return
         }
 

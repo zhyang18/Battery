@@ -40,7 +40,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="电池容量科学诊断与学习档案"
+                    android:text="@string/capacity_diag_title"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="17sp"
                     android:textStyle="bold" />
@@ -49,7 +49,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="基于电荷微积分与充放电会话自学习 · 预估数据"
+                    android:text="@string/capacity_diag_subtitle"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="11sp" />
             </LinearLayout>
@@ -94,7 +94,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="容量与健康度全景"
+                android:text="@string/capacity_diag_overview_title"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -115,7 +115,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="当前剩余电荷量"
+                        android:text="@string/capacity_diag_remaining_charge_label"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="11sp" />
 
@@ -134,7 +134,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="1dp"
-                        android:text="测定: 物理差分"
+                        android:text="@string/capacity_diag_method_diff"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="10sp" />
                 </LinearLayout>
@@ -150,7 +150,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:gravity="end"
-                        android:text="可用剩余能量"
+                        android:text="@string/capacity_diag_remaining_energy_label"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="11sp" />
 
@@ -170,7 +170,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="1dp"
                         android:gravity="end"
-                        android:text="基准: 3.85V 标称平台"
+                        android:text="@string/capacity_diag_platform_baseline"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="10sp" />
                 </LinearLayout>
@@ -197,7 +197,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="真实满充容量(FCC)"
+                        android:text="@string/capacity_diag_fcc_label"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="11sp" />
 
@@ -216,7 +216,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="1dp"
-                        android:text="来源: 会话自学习"
+                        android:text="@string/capacity_tier_learned"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="10sp" />
                 </LinearLayout>
@@ -232,7 +232,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:gravity="end"
-                        android:text="出厂额定设计容量"
+                        android:text="@string/capacity_diag_design_cap_label"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="11sp" />
 
@@ -252,7 +252,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="1dp"
                         android:gravity="end"
-                        android:text="规格: PowerProfile"
+                        android:text="@string/capacity_diag_spec_power_profile"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="10sp" />
                 </LinearLayout>
@@ -268,7 +268,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="电池容量健康度(SOH): "
+                    android:text="@string/capacity_diag_soh_label"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="12sp" />
 
@@ -302,7 +302,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="自学习样本档案"
+                    android:text="@string/capacity_diag_sample_profile_title"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="12sp"
                     android:textStyle="bold" />
@@ -336,7 +336,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="有效学习会话"
+                    android:text="@string/capacity_diag_sessions_label"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="11sp" />
 
@@ -382,7 +382,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="有效数据门限"
+                        android:text="@string/capacity_diag_threshold_label"
                         android:textColor="?android:attr/textColorPrimary"
                         android:textSize="11.5sp"
                         android:textStyle="bold" />
@@ -391,7 +391,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="1dp"
-                        android:text="单次充放电跨度需达标方参与模型计算"
+                        android:text="@string/capacity_diag_threshold_hint"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="10sp" />
                 </LinearLayout>
@@ -426,7 +426,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="累计 SOC 覆盖跨度"
+                    android:text="@string/capacity_diag_soc_span_label"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="11sp" />
 
@@ -449,7 +449,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="加权样本离散度(CV)"
+                    android:text="@string/capacity_diag_dispersion_label"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="11sp" />
 
@@ -472,7 +472,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="模型置信区间"
+                    android:text="@string/capacity_diag_confidence_interval_label"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="11sp" />
 
@@ -498,7 +498,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="数据源审计与交叉校验"
+                android:text="@string/capacity_diag_audit_title"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -513,7 +513,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="充放电观测相对差异率 D"
+                    android:text="@string/capacity_diag_conflict_d_label"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="11sp" />
 
@@ -537,14 +537,14 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="循环校准防护"
+                    android:text="@string/capacity_diag_cycle_protection_label"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="11sp" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="纯物理净电量 (已隔离功耗模型)"
+                    android:text="@string/capacity_diag_cycle_protection_desc"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="11sp" />
             </LinearLayout>
@@ -562,7 +562,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="⚠️ 严谨物理与工况声明"
+                android:text="@string/capacity_diag_statement_title"
                 android:textColor="#f59e0b"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -572,7 +572,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:lineSpacingExtra="2dp"
-                android:text="1. 本机型电化学温度与内阻模型未进行外部硬件测试台架标定，系统忠实展示电芯基准物理容量，杜绝未经实测的硬编码折减。"
+                android:text="@string/capacity_diag_statement_1"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="10.5sp" />
 
@@ -581,7 +581,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
                 android:lineSpacingExtra="2dp"
-                android:text="2. 模型置信度与离散度仅代表多次采样在统计模型内部的数据自洽度，不作为绝对测量精度的商业担保。"
+                android:text="@string/capacity_diag_statement_2"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="10.5sp" />
         </LinearLayout>
@@ -598,7 +598,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="💡 日常使用与自学习校准指南"
+                android:text="@string/capacity_diag_guide_title"
                 android:textColor="?android:attr/textColorPrimary"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -608,7 +608,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:lineSpacingExtra="2dp"
-                android:text="无需刻意进行 0%~100% 深度充放电。在日常使用中，只要产生 1~2 次单次电量跨度大于 20% 的自然充放电，系统将自动增量更新档案。"
+                android:text="@string/capacity_diag_guide_desc"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="11sp" />
         </LinearLayout>
@@ -619,7 +619,7 @@
             android:layout_height="46dp"
             android:layout_marginTop="18dp"
             android:backgroundTint="#10b981"
-            android:text="确定"
+            android:text="@string/confirm"
             android:textColor="#ffffff"
             android:textSize="14sp"
             app:cornerRadius="12dp" />

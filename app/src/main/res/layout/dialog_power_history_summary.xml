@@ -85,7 +85,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="0.5"
                 android:gravity="center"
-                android:text="指标"
+                android:text="@string/history_summary_metric"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -509,7 +509,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="3dp"
             android:lineSpacingExtra="2dp"
-            android:text="📌 说明：所有指标严格基于底层真实硬件物理守恒定律累加计算，忠实反映设备放电能耗表现。"
+            android:text="@string/power_summary_desc"
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="11.5sp" />
     </LinearLayout>

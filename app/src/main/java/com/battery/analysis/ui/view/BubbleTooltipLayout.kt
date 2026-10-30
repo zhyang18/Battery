@@ -43,6 +43,7 @@ class BubbleTooltipLayout : FrameLayout {
 
     private var arrowDirection: ArrowDirection = ArrowDirection.NONE
     private var arrowCenterX: Float = 0f
+    private var maxBubbleHeight: Int = Int.MAX_VALUE
 
     private val arrowWidthPx: Float
     private val arrowHeightPx: Float
@@ -132,7 +133,33 @@ class BubbleTooltipLayout : FrameLayout {
     }
 
     /**
-     * 重写测量方法，限制气泡最大宽度不超过屏幕安全边界，确保内部多行长文本能自适应折行。
+     * 设置气泡的最大高度限制（像素）。
+     * 当内容测量高度超过此限制时，视图测量高度将被约束为此最大值，
+     * 配合内部滚动视图实现平滑滚动并防止遮挡锚点与全屏溢出。
+     *
+     * @param maxHeightPx 最大高度像素值（<= 0 时表示不限制最大高度）
+     */
+    fun setMaxBubbleHeight(maxHeightPx: Int) {
+        val newMax = if (maxHeightPx > 0) maxHeightPx else Int.MAX_VALUE
+        if (this.maxBubbleHeight != newMax) {
+            this.maxBubbleHeight = newMax
+            requestLayout()
+            invalidate()
+        }
+    }
+
+    /**
+     * 获取当前气泡的最大高度限制（像素）。
+     *
+     * @return 最大高度像素值，未配置时为 [Int.MAX_VALUE]
+     */
+    fun getMaxBubbleHeight(): Int {
+        return maxBubbleHeight
+    }
+
+    /**
+     * 重写测量方法，限制气泡最大宽度与最大高度不超过安全边界，
+     * 确保内部多行长文本能自适应折行且在超长内容时由滚动视图承载。
      *
      * @param widthMeasureSpec 宽度测量规范
      * @param heightMeasureSpec 高度测量规范
@@ -152,7 +179,28 @@ class BubbleTooltipLayout : FrameLayout {
             MeasureSpec.EXACTLY -> MeasureSpec.makeMeasureSpec(widthSize.coerceAtMost(maxWidth), MeasureSpec.EXACTLY)
             else -> widthMeasureSpec
         }
-        super.onMeasure(targetWidthSpec, heightMeasureSpec)
+
+        val heightMode = MeasureSpec.getMode(heightMeasureSpec)
+        val heightSize = MeasureSpec.getSize(heightMeasureSpec)
+
+        val targetHeightSpec = when (heightMode) {
+            MeasureSpec.UNSPECIFIED -> {
+                if (maxBubbleHeight < Int.MAX_VALUE) {
+                    MeasureSpec.makeMeasureSpec(maxBubbleHeight, MeasureSpec.AT_MOST)
+                } else {
+                    heightMeasureSpec
+                }
+            }
+            MeasureSpec.AT_MOST -> {
+                MeasureSpec.makeMeasureSpec(heightSize.coerceAtMost(maxBubbleHeight), MeasureSpec.AT_MOST)
+            }
+            MeasureSpec.EXACTLY -> {
+                MeasureSpec.makeMeasureSpec(heightSize.coerceAtMost(maxBubbleHeight), MeasureSpec.EXACTLY)
+            }
+            else -> heightMeasureSpec
+        }
+
+        super.onMeasure(targetWidthSpec, targetHeightSpec)
     }
 
     /**
@@ -343,5 +391,22 @@ class BubbleTooltipLayout : FrameLayout {
         canvas.drawPath(bubblePath, fillPaint)
         canvas.drawPath(bubblePath, strokePaint)
         super.onDraw(canvas)
+    }
+
+    /**
+     * 调度子视图绘制。
+     * 当气泡闭合路径已生成时，应用路径裁剪，确保内部滚动内容在边界圆角与箭头处不发生溢出穿透。
+     *
+     * @param canvas 绘制画布实例
+     */
+    override fun dispatchDraw(canvas: Canvas) {
+        if (!bubblePath.isEmpty) {
+            val saveCount = canvas.save()
+            canvas.clipPath(bubblePath)
+            super.dispatchDraw(canvas)
+            canvas.restoreToCount(saveCount)
+        } else {
+            super.dispatchDraw(canvas)
+        }
     }
 }

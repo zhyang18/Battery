@@ -281,6 +281,26 @@ cd Battery
 
 ---
 
-## 📄 开源许可证
+## 📄 开源许可证与协议说明
 
-本项目基于 [MIT License](LICENSE) 协议开源。
+本项目基于 **[MIT License](LICENSE)** 协议完全开源。
+
+### 1. 许可范围与使用约束 (License Terms)
+* **自由使用与修改**：欢迎任何个人、开发者将本项目用于学习、个人使用、学术研究或二次开发。
+* **分发约束与版权保留**：在重新分发本项目的源代码、二进制产物或其衍生作品时，必须在所有重要副本中完整保留原始版权声明（`Copyright (c) 2024-2026 zhyang18`）及 [MIT License](LICENSE) 许可条款副本。
+
+### 2. 免责声明 (Disclaimer & Liability)
+* 本软件按**“现状 (AS IS)”**提供，不包含任何形式的明示或暗示保证（包括但不限于适销性、特定用途适用性及无侵权保证）。
+* 本应用的核心数据采集依赖 Android 系统公开 API、底层 `sysfs` 内核电源节点（`/sys/class/power_supply`）、Shizuku 提权接口以及系统 Bugreport。由于各手机厂商（如荣耀、小米、OPPO、vivo、华为、三星等）的硬件传感器实现、私有快充协议驱动及系统 ROM 的差异，作者与维护者**不对数据的绝对绝对物理精度作出实质保证**，亦不承担因使用本软件或其统计数据直接或间接引起的任何软硬件故障、数据丢失或系统异常责任。
+
+### 3. 数据真实性准则 (Data Authenticity)
+* 本项目秉持**“真实、客观、纯净”**的核心原则，严禁捏造或篡改任何虚假数据、脏数据、占位保底数据（Mock/Fallback Mock）或人为物理范围限制。
+* 当底层硬件或驱动未上报某项指标（如 USB 输入功率、电芯真实温度、物理 FCC 容量）时，应用如实向上抛出或在界面展示为未知/未获取，忠实反映硬件传感器的原始状态。
+
+### 4. 第三方开源组件致谢 (Acknowledgements)
+本项目在开发与构建过程中深度受益于开源社区的优秀成果，特此向以下关键开源项目及其维护者致以诚挚敬意：
+* **[Shizuku](https://shizuku.rikka.app/) / [Shizuku-API](https://github.com/RikkaApps/Shizuku-API)**：免 Root 底层系统能力调用框架（Apache License 2.0）。
+* **[MPAndroidChart](https://github.com/PhilJay/MPAndroidChart)**：高性能、高灵活性 Android 图表渲染库（Apache License 2.0）。
+* **[Material Components for Android](https://github.com/material-components/material-components-android)**：现代 Material Design 3 组件库（Apache License 2.0）。
+* **[Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines)**：现代异步并发与流式响应框架（Apache License 2.0）。
+* **[AndroidX](https://developer.android.com/jetpack/androidx)**：Android Jetpack 官方基础架构与 UI 组件库（Apache License 2.0）。

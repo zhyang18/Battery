@@ -636,12 +636,12 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
         // 4. 数据绑定：严格遵循无假数据原则
         val result = capacityEstimateResult
-        val prefix = "预估满电容量: "
+        val prefix = binding.root.context.getString(R.string.capacity_est_prefix)
         val learningColor = Color.parseColor("#f59e0b") // 醒目的琥珀橙色，用于明确区分自学习中状态
 
         if (result == null) {
             // 未就绪/正在初始化状态
-            val fullText = "${prefix}学习中"
+            val fullText = "$prefix${binding.root.context.getString(R.string.capacity_learning)}"
             val spannable = SpannableString(fullText).apply {
                 setSpan(
                     ForegroundColorSpan(learningColor),
@@ -652,16 +652,16 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             }
             binding.tvCollapsedCharge.text = spannable
             binding.tvCollapsedEnergy.visibility = View.GONE
-            binding.tvCollapsedBadge.text = "初始化中"
+            binding.tvCollapsedBadge.text = binding.root.context.getString(R.string.capacity_initializing)
             binding.tvCollapsedBadge.setTextColor(Color.parseColor("#64748b"))
             setRoundedBadgeBackground(binding.tvCollapsedBadge, Color.parseColor("#64748b"), 6f)
 
             binding.tvValRemainingCharge.setUnitText("-- mAh")
-            binding.tvSubRemainingCharge.text = "等待充电数据"
+            binding.tvSubRemainingCharge.text = binding.root.context.getString(R.string.capacity_awaiting_data)
             binding.tvValRemainingEnergy.setUnitText("-- Wh")
-            binding.tvSubRemainingEnergy.text = "标称工作平台"
+            binding.tvSubRemainingEnergy.text = binding.root.context.getString(R.string.capacity_nominal_voltage)
             binding.tvValFccBaseline.setUnitText("-- mAh")
-            binding.tvValFccBadge.text = "未就绪"
+            binding.tvValFccBadge.text = binding.root.context.getString(R.string.capacity_not_ready)
             binding.tvValFccBadge.setTextColor(Color.parseColor("#64748b"))
             setRoundedBadgeBackground(binding.tvValFccBadge, Color.parseColor("#64748b"), 5f)
             return
@@ -670,7 +670,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         // 首行速览数据渲染：按“预估满电容量：满电容量 | 满电能量（学习中则加颜色区分）”标准定制，且单位比数值小 2 号
         val isLearning = (result.maturityLevel == MaturityLevel.PENDING)
         if (isLearning) {
-            val fullText = "${prefix}学习中"
+            val fullText = "$prefix${binding.root.context.getString(R.string.capacity_learning)}"
             val spannable = SpannableString(fullText).apply {
                 setSpan(
                     ForegroundColorSpan(learningColor),
@@ -698,7 +698,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 label to Color.parseColor("#f59e0b")
             }
             MaturityLevel.PENDING -> {
-                "自学习中(${result.validSessionCount}/5)" to Color.parseColor("#64748b")
+                binding.root.context.getString(R.string.capacity_learning_progress_format, result.validSessionCount) to Color.parseColor("#64748b")
             }
         }
         binding.tvCollapsedBadge.text = badgeText
@@ -708,21 +708,21 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         // 展开区双轨数据渲染：单位统一比数值小 2 号
         binding.tvValRemainingCharge.setUnitText(result.getFormattedRemainingCharge())
         binding.tvSubRemainingCharge.text = if (result.currentSoc != null) {
-            "物理电荷 · ${result.currentSoc}%"
+            binding.root.context.getString(R.string.capacity_physical_charge_format, result.currentSoc)
         } else {
-            "物理电荷"
+            binding.root.context.getString(R.string.capacity_physical_charge)
         }
 
         binding.tvValRemainingEnergy.setUnitText(result.getFormattedRemainingEnergy())
-        binding.tvSubRemainingEnergy.text = "标称电压物理能量"
+        binding.tvSubRemainingEnergy.text = binding.root.context.getString(R.string.capacity_nominal_energy)
 
         // 满充基准与诊断标识
         binding.tvValFccBaseline.setUnitText(result.getFormattedFcc())
         binding.tvValFccBadge.text = when (result.maturityLevel) {
             MaturityLevel.STABLE_TRACKING,
-            MaturityLevel.CONVERGED -> "🛡️ 收敛"
-            MaturityLevel.INITIAL_OBSERVATION -> "⏳ 观察"
-            MaturityLevel.PENDING -> "🌱 自学习中"
+            MaturityLevel.CONVERGED -> binding.root.context.getString(R.string.capacity_status_converged)
+            MaturityLevel.INITIAL_OBSERVATION -> binding.root.context.getString(R.string.capacity_status_observing)
+            MaturityLevel.PENDING -> binding.root.context.getString(R.string.capacity_status_pending)
         }
         binding.tvValFccBadge.setTextColor(badgeColor)
         setRoundedBadgeBackground(binding.tvValFccBadge, badgeColor, 5f)

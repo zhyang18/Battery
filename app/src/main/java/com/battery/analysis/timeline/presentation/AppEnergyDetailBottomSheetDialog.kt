@@ -77,7 +77,7 @@ class AppEnergyDetailBottomSheetDialog(
         tvPackage.text = "${event.packageName} (UID: ${event.uid})"
 
         // 置信度
-        tvConfidence.text = "可信度: ${event.getConfidenceLabel()}"
+        tvConfidence.text = context.getString(R.string.app_confidence_format, event.getConfidenceLabel(context))
 
         // 能耗与功率
         tvEnergy.text = event.getFormattedEnergy()
@@ -143,6 +143,6 @@ class AppEnergyDetailBottomSheetDialog(
         if (wakeMs <= 0L && gpsMs <= 0L) return "--"
         val wakeStr = if (wakeMs > 0L) formatDurationMs(wakeMs) else "00s"
         val gpsStr = if (gpsMs > 0L) formatDurationMs(gpsMs) else "00s"
-        return "锁: $wakeStr | GPS: $gpsStr"
+        return context.getString(R.string.app_lock_gps_format, wakeStr, gpsStr)
     }
 }

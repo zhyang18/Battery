@@ -97,7 +97,7 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
         }
 
         // 充电趋势图底部指标多选/反选监听（电量 / 功率 / 温度 / 电压 / 应用）
-        binding.chargingMetricSelectorView.setPowerLabelText("功率")
+        binding.chargingMetricSelectorView.setPowerLabelText(getString(R.string.metric_power))
         binding.chargingMetricSelectorView.configurePrefs(
             prefsKey = "saved_charging_timeline_metrics",
             defaultMetrics = setOf(
@@ -147,7 +147,7 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
      * @param record 充电历史快照数据实体
      */
     private fun renderRecordDetails(record: ChargingHistoryRecord) {
-        binding.tvChargeTypeBadge.text = record.chargeType.ifEmpty { "外部供电" }
+        binding.tvChargeTypeBadge.text = record.getLocalizedChargeType(this)
         binding.tvDetailTimeRange.text = record.getFormattedTimeRange()
 
         binding.tvTotalDuration.setUnitText(record.getFormattedDuration())
@@ -259,9 +259,9 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
         val btnCancel = dialogView.findViewById<android.widget.TextView>(R.id.btn_dialog_delete_cancel)
         val btnConfirm = dialogView.findViewById<android.widget.TextView>(R.id.btn_dialog_delete_confirm)
 
-        tvTitle.text = "确认删除此充电记录？"
-        tvDesc.text = "删除后该条充电历史记录将从本地永久移除，无法找回。"
-        tvPreviewCat.text = if (record.chargeType.isNotEmpty()) record.chargeType else "充电记录"
+        tvTitle.text = getString(R.string.dialog_delete_charge_title)
+        tvDesc.text = getString(R.string.dialog_delete_charge_desc)
+        tvPreviewCat.text = record.getLocalizedChargeType(this)
         tvPreviewTime.text = record.recordTime
         val effEnd = record.getEffectiveEndLevel()
         val effGain = record.getEffectiveLevelGain()

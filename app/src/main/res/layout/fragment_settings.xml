@@ -1397,11 +1397,14 @@
 
             <!-- 条目 7: 应用版本 -->
             <LinearLayout
+                android:id="@+id/ll_app_version"
                 android:layout_width="match_parent"
                 android:layout_height="56dp"
                 android:layout_marginBottom="6dp"
                 android:background="@drawable/bg_setting_card_item"
+                android:clickable="true"
                 android:clipToOutline="true"
+                android:focusable="true"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="12dp">
@@ -1419,8 +1422,7 @@
                     android:layout_weight="1"
                     android:text="@string/setting_app_version"
                     android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="15sp"
-                     />
+                    android:textSize="15sp" />
 
                 <TextView
                     android:id="@+id/tv_app_version"
@@ -1429,6 +1431,13 @@
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="14sp"
                     tools:text="v1.1.1" />
+
+                <ImageView
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:layout_marginStart="4dp"
+                    android:src="@drawable/ic_chevron_right"
+                    app:tint="?android:attr/textColorSecondary" />
             </LinearLayout>
 
         </LinearLayout>

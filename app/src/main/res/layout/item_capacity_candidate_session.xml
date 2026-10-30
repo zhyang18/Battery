@@ -94,7 +94,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:singleLine="true"
-                    android:text="电量变化"
+                    android:text="@string/charging_detail_level_change"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="10.5sp" />
 
@@ -121,7 +121,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:singleLine="true"
-                    android:text="推算满电容量 (FCC)"
+                    android:text="@string/capacity_item_fcc_label"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="10.5sp" />
 

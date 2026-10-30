@@ -31,6 +31,19 @@ enum class PowerDisplayUnit(val id: Int, val symbol: String, val label: String) 
         return if (this == WH) MAH else WH
     }
 
+    /**
+     * 获取多语言本地化的完整名称。
+     *
+     * @param context 应用程序上下文
+     * @return 本地化的单位名称（如 "瓦时 (能量)" / "Wh (Energy)"）
+     */
+    fun getLabel(context: android.content.Context): String {
+        return when (this) {
+            WH -> context.getString(com.battery.analysis.R.string.power_unit_label_wh)
+            MAH -> context.getString(com.battery.analysis.R.string.power_unit_label_mah)
+        }
+    }
+
     companion object {
         /** 耗电统计全局 SharedPreferences 配置文件名称 */
         const val PREFS_NAME = "power_stats_prefs"

@@ -444,7 +444,7 @@
 
     <string name="settings_section_about">About</string>
     <string name="setting_health_guide">Health Calculation Guide</string>
-    <string name="setting_app_version">Battery Analysis (Battery App)</string>
+    <string name="setting_app_version">Battery Analysis</string>
 
     <!-- Language Selection -->
     <string name="lang_follow_system">🌐 Follow System</string>
@@ -602,6 +602,16 @@
     <string name="charging_guide_archive_title">💾 Modes &amp; Automatic Archiving</string>
     <string name="charging_guide_archive_mode">Smart Dual Mode: Plug in to monitor charging; unplug to auto-archive and return to discharge view.</string>
     <string name="charging_guide_archive_screen">Keep Screen On: Option to keep screen awake while charging to observe curve trends.</string>
+    <string name="setting_charging_keep_screen_on">Keep screen on while charging</string>
+    <string name="charging_annotation_avg_power">• Average Charging Power (W)\n• Time-weighted average power since connecting charger, reflecting energy delivery efficiency and thermal control.</string>
+    <string name="charging_annotation_max_power">• Peak Instant Power (W)\n• Maximum recorded instant peak during charging session, reflecting fast charge protocol capability.</string>
+    <string name="charging_annotation_temp">• Battery Cell Temperature (℃)\n• Real-time sampling by internal NTC thermistor sensor reflecting thermal load. Temperatures above 42℃ trigger safety protection.</string>
+    <string name="charging_annotation_max_temp">• Maximum Temperature (℃)\n• Highest temperature recorded during current charging session to evaluate thermal performance.</string>
+    <string name="charging_annotation_current">• Battery Current (mA)\n• Real-time sampling by coulomb counter / charge sensor. Higher during fast charge, tapering down during constant voltage phase.</string>
+    <string name="charging_annotation_voltage">• Battery Terminal Voltage (V)\n• Operating range typically 3.4V~4.45V. Rises with charge until cutoff voltage, then enters trickle phase.</string>
+    <string name="charging_annotation_capacity_energy">• Battery Capacity &amp; Total Energy\n• Charge capacity (mAh) and physical energy reserve based on nominal voltage (Wh = mAh × V ÷ 1000).</string>
+    <string name="charging_annotation_battery_power">• Battery Terminal Power (W)\n• Real-time rate of energy flow at cell terminals (Voltage × Current). Positive (+) indicates charging, negative (-) discharging.</string>
+    <string name="charging_annotation_usb_power">• Charger USB Input Power (W)\n• Real-time physical power delivered from charger to Type-C port. Requires hardware sensor support.</string>
 
     <!-- Charging History & Details -->
     <string name="clear_history">Clear History</string>
@@ -710,5 +720,487 @@
     <string name="btn_copy_adb_stop_cmd">Copy ADB Stop Command</string>
     <string name="toast_daemon_started">Privileged daemon started</string>
     <string name="toast_daemon_stopped">Privileged daemon stopped</string>
+    <string name="settings_daemon_btn_starting">Starting...</string>
+    <string name="toast_daemon_timeout">Privileged daemon timeout, retry or check ADB guide</string>
+
+    <!-- Accessibility Self-Healing (Solution 1: Root-free / ADB-free) -->
+    <string name="accessibility_service_name">Battery Statistics</string>
+    <string name="accessibility_service_description">Provides root-free background self-healing protection to ensure records and notifications stay uninterrupted.</string>
+    <string name="settings_accessibility_title">Accessibility Self-Healing</string>
+    <string name="settings_accessibility_desc">Root/ADB-free instant self-healing when killed by system</string>
+    <string name="settings_accessibility_status_enabled">Enabled</string>
+    <string name="settings_accessibility_status_disabled">Disabled</string>
+    <string name="settings_accessibility_btn_enable">Enable</string>
+    <string name="settings_accessibility_btn_manage">Manage</string>
+
+    <!-- Chart & Timeline Metrics -->
+    <string name="metric_power">Power</string>
+    <string name="metric_level">Level</string>
+    <string name="metric_energy">Energy</string>
+    <string name="metric_temp">Temp</string>
+    <string name="metric_voltage">Volt</string>
+    <string name="metric_app">App</string>
+
+    <!-- Sort & Units -->
+    <string name="power_sort_mah">Energy (mAh)</string>
+    <string name="power_sort_wh">Energy (Wh)</string>
+    <string name="power_unit_label_wh">Wh (Energy)</string>
+    <string name="power_unit_label_mah">mAh (Charge)</string>
+    <string name="power_toast_unit_switched">Switched to %s</string>
+    <string name="power_toast_unit_guide_hint">Long press unit button anytime for explanation</string>
+
+    <!-- Confirmations & Deletion -->
+    <string name="dialog_delete_snapshot_title">Delete snapshot?</string>
+    <string name="dialog_delete_snapshot_desc">This discharge snapshot will be permanently deleted.</string>
+    <string name="dialog_delete_charge_title">Delete record?</string>
+    <string name="dialog_delete_charge_desc">This charging record will be permanently deleted.</string>
+    <string name="dialog_delete_multi_snapshots_title">Delete %d records?</string>
+    <string name="dialog_delete_multi_snapshots_desc">Selected discharge snapshots will be permanently removed.</string>
+    <string name="dialog_delete_sample_title">Delete sample?</string>
+    <string name="dialog_delete_sample_desc">Delete session sample with capacity %s? Model will recalculate immediately.</string>
+
+    <!-- Toast Feedback -->
+    <string name="toast_saved">Saved</string>
+    <string name="toast_no_records_to_delete">No records to delete</string>
+    <string name="toast_select_records_first">Select records first</string>
+    <string name="toast_selection_inverted">Inverted</string>
+    <string name="toast_deleted_count">Deleted %d records</string>
+    <string name="toast_service_stop_failed">Stop failed</string>
+    <string name="toast_service_root_start_failed">Root start failed</string>
+    <string name="toast_service_shizuku_start_failed">Shizuku start failed</string>
+    <string name="toast_threshold_updated">Threshold set to %s, model updated</string>
+
+    <!-- History & Selection -->
+    <string name="history_selected_count_format">%d selected</string>
+    <string name="history_select_records">Select records</string>
+    <string name="power_history_filter_empty_title">No matching records</string>
+    <string name="power_history_filter_empty_desc">No records for %s</string>
+    <string name="charging_history_empty_filtered_desc">No records for %s</string>
+    <string name="charging_history_filter_empty_title">No matching records</string>
+    <string name="power_history_stats_range_format">📊 Range: %1$d records%2$s</string>
+    <string name="power_history_total_drop_format"> · Drop -%d%%</string>
+    <string name="power_history_baseline_energy_format">🔋 Baseline: %.2f Wh</string>
+
+    <!-- Chart State & Hover Labels -->
+    <string name="chart_waiting_charge_data">Waiting for samples...</string>
+    <string name="chart_collecting_charge_data">Collecting data...</string>
+    <string name="chart_point_level_format">Level: %1$d%% (%2$s)</string>
+    <string name="chart_point_time_temp_format">Time: %1$s | %2$d℃</string>
+    <string name="chart_point_app_prefix">App: </string>
+
+    <!-- App Usage Badges & Details -->
+    <string name="app_status_fg_resident">Fg + Resident</string>
+    <string name="app_status_fg_bg">Fg + Bg</string>
+    <string name="app_status_foreground">Foreground</string>
+    <string name="app_status_resident">Resident</string>
+    <string name="app_status_background">Background</string>
+    <string name="app_status_bg_standby">Bg Standby</string>
+    <string name="app_metric_fg_prefix">Fg: %s</string>
+    <string name="app_metric_bg_empty">Bg: --</string>
+    <string name="app_metric_avg_temp_format">Avg: %.1f ℃</string>
+    <string name="app_metric_avg_temp_empty">Avg: --</string>
+    <string name="app_metric_max_temp_format">Max: %.1f ℃</string>
+    <string name="app_metric_max_temp_empty">Max: --</string>
+    <string name="app_bg_energy_unified_notice">-- (Screen-off Total)</string>
+    <string name="app_source_batterystats_uninstalled">BatteryStats (Uninstalled)</string>
+    <string name="app_source_usagestats_uninstalled">UsageStats (Uninstalled)</string>
+    <string name="app_source_batterystats_system">BatteryStats (System)</string>
+    <string name="app_source_usagestats_system">UsageStats (System Events)</string>
+    <string name="app_lock_gps_format">Wake: %1$s | GPS: %2$s</string>
+    <string name="app_confidence_format">Confidence: %s</string>
+    <string name="app_confidence_high">High</string>
+    <string name="app_confidence_medium">Mid</string>
+    <string name="app_confidence_low">Low</string>
+    <string name="app_energy_source_estimated">Estimated</string>
+
+    <!-- Capacity Diagnostics & Sessions -->
+    <string name="capacity_est_prefix">Est. Capacity: </string>
+    <string name="capacity_learning">Learning</string>
+    <string name="capacity_initializing">Initializing</string>
+    <string name="capacity_awaiting_data">Awaiting data</string>
+    <string name="capacity_nominal_voltage">Nominal Voltage</string>
+    <string name="capacity_not_ready">Not Ready</string>
+    <string name="capacity_learning_progress_format">Learning (%d/5)</string>
+    <string name="capacity_physical_charge_format">Charge · %d%%</string>
+    <string name="capacity_physical_charge">Charge</string>
+    <string name="capacity_nominal_energy">Nominal Energy</string>
+    <string name="capacity_status_converged">🛡️ Converged</string>
+    <string name="capacity_status_observing">⏳ Observing</string>
+    <string name="capacity_status_pending">🌱 Learning</string>
+    <string name="capacity_tier_hardware">Hardware Meter</string>
+    <string name="capacity_tier_learned">Learned</string>
+    <string name="capacity_tier_spec">Design Spec</string>
+    <string name="capacity_maturity_pending">Learning</string>
+    <string name="capacity_maturity_observation">Observing</string>
+    <string name="capacity_maturity_converged">Converged</string>
+    <string name="capacity_maturity_tracking">Tracking</string>
+    <string name="capacity_session_subtitle_format">%1$d records · %2$d in model (limit &gt; %3$d%%)</string>
+    <string name="capacity_session_tab_all_format">All (%d)</string>
+    <string name="capacity_session_tab_charge_format">⚡ Charge (%d)</string>
+    <string name="capacity_session_tab_discharge_format">🔋 Discharge (%d)</string>
+    <string name="capacity_session_badge_charge">⚡ Charge</string>
+    <string name="capacity_session_badge_discharge">🔋 Discharge</string>
+    <string name="capacity_session_status_outlier">Outlier</string>
+    <string name="capacity_session_status_below_threshold">Below Limit</string>
+    <string name="capacity_session_status_included">✓ Included</string>
+    <string name="capacity_session_net_charge">Net In</string>
+    <string name="capacity_session_net_discharge">Net Out</string>
+    <string name="capacity_session_avg_temp_format">Avg: %.1f℃</string>
+    <string name="capacity_diag_zero_times">0 times</string>
+    <string name="capacity_diag_accumulating">Accumulating</string>
+    <string name="capacity_diag_source_format">Source: %s</string>
+    <string name="capacity_diag_counts_format">Charge: %1$d | Discharge: %2$d</string>
+    <string name="capacity_diag_consistency_good">%.2f%% (Good)</string>
+    <string name="capacity_diag_consistency_diff">%.2f%% (Observing)</string>
+    <string name="capacity_diag_no_conflict">Single direction</string>
+
+    <!-- Threshold Options Subtitles -->
+    <string name="capacity_thresh_desc_10">Fast · Low span</string>
+    <string name="capacity_thresh_desc_15">Daily balanced</string>
+    <string name="capacity_thresh_desc_20">Recommended · Best balance</string>
+    <string name="capacity_thresh_desc_25">Standard span</string>
+    <string name="capacity_thresh_desc_30">High precision</string>
+    <string name="capacity_thresh_desc_40">Deep learning</string>
+    <string name="capacity_thresh_desc_50">Half cycle · High confidence</string>
+    <string name="capacity_thresh_desc_60">Large span</string>
+    <string name="capacity_thresh_desc_70">Full span calibration</string>
+    <string name="capacity_thresh_desc_80">Deep cycle · High accuracy</string>
+    <string name="capacity_thresh_desc_90">Ultra deep cycle</string>
+    <string name="capacity_thresh_desc_100" formatted="false">Full 0%~100% deep cycle</string>
+
+    <!-- Power & Charging Tooltips -->
+    <string name="power_bubble_screen_on_summary">Screen On: Time, Power, Rate, Energy</string>
+    <string name="power_bubble_screen_off_summary">Screen Off: Time, Power, Rate, Energy</string>
+    <string name="power_bubble_global_summary">Global: Time, Power, Rate, Energy</string>
+    <string name="charging_record_label">Charge Record</string>
+    <string name="power_mode_system">System</string>
+    <string name="charging_card_charged_duration_format">Charged: %s</string>
+    <string name="charging_detail_dialog_title_format">Charge Details (%s)</string>
+    <string name="charging_detail_port_format">Port: %s\n</string>
+    <string name="charging_detail_total_dur_format">Total Time: %s\n</string>
+    <string name="charging_detail_screen_on_dur_format">Screen On: %s\n</string>
+    <string name="charging_detail_screen_off_dur_format">Screen Off: %s\n</string>
+    <string name="charging_detail_level_change_format">Level: %1$d%% → %2$d%% (+%3$d%%)\n</string>
+    <string name="charging_detail_charged_energy_format">Energy: +%.2f Wh\n</string>
+    <string name="charging_detail_avg_power_format">Avg Power: %.2f W\n</string>
+    <string name="charging_detail_max_power_format">Max Power: %.2f W\n</string>
+    <string name="charging_detail_max_temp_format">Max Temp: %.1f ℃</string>
+
+    <!-- Settings & Status Bar Monitor -->
+    <string name="settings_bar_pos_status_bar">Status Bar</string>
+    <string name="settings_bar_pos_custom">Custom</string>
+    <string name="settings_bar_sp_font">sp</string>
+    <string name="settings_bar_opacity_suffix">% Opacity</string>
+    <string name="settings_bar_regular_font"> · Regular</string>
+    <string name="settings_bar_no_border"> · No Border</string>
+    <string name="settings_bar_no_unit"> · No Unit</string>
+    <string name="settings_bar_custom_y_format">Y: %d px (Status Bar)</string>
+
+    <!-- ViewModel & Snapshots -->
+    <string name="bugreport_status_not_imported">No bugreport imported. Tap button below to select bugreport.zip or txt.</string>
+        <string name="category_all">All</string>
+    <string name="bugreport_snapshot_header_format">[History Snapshot]\nTime: %1$s\nSource: Bugreport Snapshot\n</string>
+
+    <!-- Duration Formatting -->
+    <string name="dur_zero_min">0 min</string>
+    <string name="dur_secs_format">%d s</string>
+    <string name="dur_mins_format">%d min</string>
+    <string name="dur_hours_mins_format">%1$d h %2$d m</string>
+    <string name="dur_hours_format">%d h</string>
+
+    <!-- Bugreport Table Items -->
+    <string name="table_item_charging_status">⚡ Status</string>
+    <string name="table_item_level">🔋 Level</string>
+    <string name="table_item_voltage">🔋 Voltage</string>
+    <string name="table_item_current">⚡ Current</string>
+    <string name="table_item_power">⚡ Power</string>
+    <string name="table_item_temperature">🌡️ Temp</string>
+    <string name="table_item_cycle_count">🔄 Cycles</string>
+    <string name="table_item_design_capacity">🔋 Design Cap</string>
+    <string name="table_item_full_capacity">🔋 Full Cap</string>
+    <string name="table_item_current_capacity">🔋 Current Cap</string>
+    <string name="table_item_health_ratio">❤️ Health</string>
+    <string name="table_item_battery_tech">🔋 Tech</string>
+    <string name="table_item_health_state">🩺 Health State</string>
+    <string name="table_item_report_time">⏱️ Time</string>
+    <string name="table_desc_charging_status">Current state</string>
+    <string name="table_desc_level">Current level</string>
+    <string name="table_desc_voltage">Terminal voltage</string>
+    <string name="table_desc_current">Current flow</string>
+    <string name="table_desc_power">Working power</string>
+    <string name="table_desc_temperature">Current temp</string>
+    <string name="table_desc_cycle_count">Full cycles</string>
+    <string name="table_desc_design_capacity">Design capacity</string>
+    <string name="table_desc_full_capacity">Estimated FCC</string>
+    <string name="table_desc_current_capacity">Remaining cap</string>
+    <string name="table_desc_battery_tech">Li-ion</string>
+    <string name="table_desc_health_state_normal">Android Good</string>
+    <string name="table_desc_report_time">Bugreport time</string>
+    <string name="status_val_charging">Charging</string>
+    <string name="status_val_discharging">Discharging</string>
+    <string name="status_val_not_charging">Not Charging</string>
+    <string name="status_val_full">Full</string>
+    <string name="status_val_unknown">Unknown</string>
+    <string name="health_val_overheat">OVERHEAT</string>
+    <string name="health_val_dead">DEAD</string>
+    <string name="health_val_over_voltage">OVER_VOLTAGE</string>
+    <string name="health_val_cold">COLD</string>
+    <string name="capacity_source_direct_hardware">Hardware Meter</string>
+    <string name="capacity_source_charge_counter">Charge Counter</string>
+    <string name="capacity_source_effective_capacity">Effective Cap</string>
+    <string name="capacity_source_design_capacity">Design Cap</string>
+    <string name="capacity_source_unknown">Unknown</string>
+    <string name="capacity_source_unobtained">N/A</string>
+
+    <string name="service_notification_default_desc">⚡ Battery monitor active</string>
+    <string name="charging_history_stats_range_format">📊 Range: %1$d sessions%2$s</string>
+    <string name="charging_history_gain_format"> · +%d%% gained</string>
+    <string name="charging_peak_power_format">⚡ Peak Power: %.1f W</string>
+    <string name="charging_peak_temp_format">🌡️ Max Temp: %.1f ℃</string>
+    <string name="history_snapshot_suffix"> (Snapshot)</string>
+    <string name="history_snapshot_in_progress"> · Active</string>
+    <string name="app_usage_resident_format"> (Resident: %s)</string>
+    <string name="capacity_session_soc_span_format">%1$d%% → %2$d%% (span %3$d%%)</string>
+    <string name="power_avg_screen_on_power">Screen-on Avg Power</string>
+    <string name="power_avg_discharge_power">Avg Discharge Power</string>
+    <string name="charging_avg_power_label">Avg Charging Power</string>
+    <!-- About Project Dialog -->
+    <string name="about_dialog_title">About Project</string>
+    <string name="about_dialog_subtitle">Lightweight · Precise · Modern Battery Analysis Tool</string>
+    <string name="about_app_summary_title">📖 Project Overview &amp; Principles</string>
+    <string name="about_app_summary_desc">A professional Android utility crafted for precise power consumption analysis, battery health diagnosis, and real-time charging monitoring. Strictly adheres to absolute data authenticity, completely eliminating fabricated, dirty, or mocked readings.</string>
+    <string name="about_core_features_title">🌟 Core Technical Highlights</string>
+    <string name="about_feature_power_title">📊 Power Usage &amp; Breakdown</string>
+    <string name="about_feature_power_desc">Auto-senses discharge sessions, separates screen-on, screen-off, and deep sleep power metrics with real Wh integration, calculates full-charge endurance from 7-day benchmarks, and provides hardware-accelerated timeline canvas with per-app ranking.</string>
+    <string name="about_feature_charging_title">⚡ Fast Charging &amp; Thermal Trends</string>
+    <string name="about_feature_charging_desc">Displays authentic cell and USB port wattage, computes net Wh energy intake via trapezoidal integration, and dynamically tracks power, battery percentage, and temperature in a 3-in-1 chart.</string>
+    <string name="about_feature_health_title">🩺 Multi-Source Battery Health</string>
+    <string name="about_feature_health_desc">Combines standard Android APIs, Shizuku direct Linux sysfs power supply penetration with fuel gauge IC registers, and stream-parsed Bugreport health dumps for accurate FCC and cycle count diagnosis.</string>
+    <string name="about_feature_daemon_title">🛡️ Background Persistence &amp; Floating Overlay</string>
+    <string name="about_feature_daemon_desc">Features persistent foreground service, accessibility auto-healing, PID 1 daemon watcher, and desktop/status bar floating windows for continuous power monitoring.</string>
+    <string name="about_license_title">📄 Open Source License &amp; Credits</string>
+    <string name="about_license_desc">Fully open source under the MIT License. Sincere gratitude to Shizuku, MPAndroidChart, Google Material Components, and the entire open-source community.</string>
+    <string name="about_repo_title">🔗 Open Source Repository</string>
+    <string name="about_repo_url">https://github.com/zhyang18/Battery</string>
+    <string name="about_author_title">👤 Author</string>
+    <string name="about_author_name">zhyang18</string>
+
+    <!-- Battery Capacity Card & Diagnostics -->
+    <string name="capacity_remaining_charge_title">Remaining Charge</string>
+    <string name="capacity_remaining_energy_title">Remaining Energy</string>
+    <string name="capacity_fcc_baseline_label">Baseline FCC: </string>
+    <string name="capacity_open_diagnosis">Diagnostics ›</string>
+    <string name="capacity_diag_title">Capacity Diagnostics &amp; Learning Profile</string>
+    <string name="capacity_diag_subtitle">Estimated via charge calculus &amp; session self-learning</string>
+    <string name="capacity_diag_overview_title">Capacity &amp; Health Overview</string>
+    <string name="capacity_diag_remaining_charge_label">Current Remaining Charge</string>
+    <string name="capacity_diag_method_diff">Measured: Differential</string>
+    <string name="capacity_diag_remaining_energy_label">Available Energy</string>
+    <string name="capacity_diag_platform_baseline">Baseline: 3.85V Nominal Platform</string>
+    <string name="capacity_diag_fcc_label">Full Charge Capacity (FCC)</string>
+    <string name="capacity_diag_design_cap_label">Factory Design Capacity</string>
+    <string name="capacity_diag_spec_power_profile">Spec: PowerProfile</string>
+    <string name="capacity_diag_soh_label">Battery Health (SOH): </string>
+    <string name="capacity_diag_sample_profile_title">Learning Sample Profile</string>
+    <string name="capacity_diag_sessions_label">Valid Learning Sessions</string>
+    <string name="capacity_diag_threshold_label">Effective Data Threshold</string>
+    <string name="capacity_diag_threshold_hint">Session span must meet threshold to be included</string>
+    <string name="capacity_diag_soc_span_label">Cumulative SOC Span</string>
+    <string name="capacity_diag_dispersion_label">Sample Dispersion (CV)</string>
+    <string name="capacity_diag_confidence_interval_label">Model Confidence Interval</string>
+    <string name="capacity_diag_audit_title">Data Source Audit &amp; Cross-Check</string>
+    <string name="capacity_diag_conflict_d_label">Charge/Discharge Difference D</string>
+    <string name="capacity_diag_cycle_protection_label">Cycle Calibration Protection</string>
+    <string name="capacity_diag_cycle_protection_desc">Net physical charge (power model isolated)</string>
+    <string name="capacity_diag_statement_title">⚠️ Physics &amp; Operating Statements</string>
+    <string name="capacity_diag_statement_1">1. Electrochemical temperature and internal resistance models for this device are not calibrated via test benches. The system faithfully displays baseline physical capacity without uncalibrated discounts.</string>
+    <string name="capacity_diag_statement_2">2. Confidence level and dispersion indicate internal statistical consistency across samples, not a commercial guarantee of absolute measurement accuracy.</string>
+    <string name="capacity_diag_guide_title">💡 Daily Use &amp; Self-Learning Guide</string>
+    <string name="capacity_diag_guide_desc" formatted="false">No intentional 0%–100% deep cycling needed. In daily use, having 1–2 natural sessions spanning > 20% will automatically update the profile incrementally.</string>
+    <string name="capacity_session_list_title">Learning Session Sample Details</string>
+    <string name="capacity_session_empty_title">No Session Samples Yet</string>
+    <string name="capacity_session_empty_desc">Natural charge/discharge reaching the threshold will auto-generate learning samples.</string>
+    <string name="capacity_threshold_picker_title">Set Valid Learning Threshold</string>
+    <string name="capacity_item_fcc_label">Estimated FCC</string>
+
+    <!-- Discharge Speed & Runtime Prediction Popups -->
+    <string name="prediction_title_screen_on">[Screen-On Battery Life Prediction]</string>
+    <string name="prediction_title_screen_off">[Screen-Off Battery Life Prediction]</string>
+    <string name="prediction_title_global">[Overall Battery Life Prediction]</string>
+    <string name="prediction_session_drain_rate">• Current session drain rate: %s</string>
+    <string name="prediction_session_sub_screen_on">(Screen-on %s)</string>
+    <string name="prediction_session_sub_screen_off">(Screen-off %s)</string>
+    <string name="prediction_session_sub_discharge">(Discharging %s)</string>
+    <string name="prediction_seven_days_drain_rate">• Past 7-day drain rate: %s</string>
+    <string name="prediction_full_screen_on_runtime">• Full screen-on runtime: %s</string>
+    <string name="prediction_full_screen_off_runtime">• Full standby duration: %s</string>
+    <string name="prediction_model_v2_tag_2_2">Upgraded Model (v2.2)</string>
+    <string name="prediction_model_v2_tag_2_1">Upgraded Model (v2.1)</string>
+    <string name="prediction_model_stat_range">"  Time Range: %s"</string>
+    <string name="prediction_window_past_7_days">Past 7 Days</string>
+    <string name="prediction_window_adaptive_format">Adaptively extended to past %.1f days</string>
+    <string name="prediction_eff_screen_on_format">"  Effective Drain: Screen-on cumulative %1$s (%2$s)"</string>
+    <string name="prediction_eff_screen_off_format">"  Effective Drain: Screen-off cumulative %1$s (%2$s)"</string>
+    <string name="prediction_eff_global_format">"  Effective Drain: Cumulative used %1$s (%2$s)"</string>
+    <string name="prediction_screen_on_workload">"  Screen-on Workload: Light %1$s · Normal %2$s · Heavy %3$s"</string>
+    <string name="prediction_screen_on_workload_power">"  Workload Power: %s"</string>
+    <string name="prediction_light_load_format">Light %s</string>
+    <string name="prediction_normal_load_format">Normal %s</string>
+    <string name="prediction_heavy_load_format">Heavy %s</string>
+    <string name="prediction_typical_power">"  Typical Power: %s"</string>
+    <string name="prediction_standby_workload">"  Standby Workload: Sleep %1$s · Awake %2$s"</string>
+    <string name="prediction_sleep_load_format">Sleep %s</string>
+    <string name="prediction_awake_load_format">Awake %s</string>
+    <string name="prediction_typical_standby_power">"  Typical Standby Power: %s"</string>
+    <string name="prediction_two_state_distribution">"  Two-state Distribution: On %1$s · Off %2$s"</string>
+    <string name="prediction_workload_model_format">"  Workload Model: Estimated based on %s"</string>
+    <string name="prediction_model_desc_regime">Conditional Typical Workload Model</string>
+    <string name="prediction_model_desc_fallback">Global Physical Baseline Fallback</string>
+    <string name="prediction_baseline_drain_rate">• Predicted baseline drain rate: %s</string>
+    <string name="prediction_current_remaining_runtime">• Current remaining runtime: %s</string>
+    <string name="prediction_current_remaining_runtime_with_conf">• Current remaining runtime: %1$s (%2$s)</string>
+    <string name="prediction_current_standby_runtime_with_conf">• Current remaining standby: %1$s (%2$s)</string>
+    <string name="prediction_range_screen_on">"  Expected Range: %1$s (Heavy) ~ %2$s (Light)"</string>
+    <string name="prediction_range_screen_off">"  Expected Range: %1$s (Frequent Wakeup) ~ %2$s (Deep Sleep)"</string>
+    <string name="prediction_range_global">"  Expected Range: %1$s (Heavy-leaning) ~ %2$s (Light-leaning)"</string>
+    <string name="prediction_pred_discharge_power">"  Predicted Discharge Power: %1$s%2$s%3$s"</string>
+    <string name="prediction_pred_standby_power">"  Predicted Standby Power: %1$s%2$s%3$s"</string>
+    <string name="prediction_pred_overall_power">"  Predicted Overall Power: %1$s%2$s%3$s"</string>
+    <string name="prediction_avail_energy_suffix"> (Available %s)</string>
+    <string name="prediction_real_capacity">• Predicted real capacity: %s</string>
+    <string name="prediction_full_estimates_header">\n📊 Full Charge Runtime Estimates:\n</string>
+    <string name="prediction_mode_1_title">• Mode 1 (Global Weighted): %s</string>
+    <string name="prediction_mode_1_desc">"  Linear estimate based on 7-day total power"</string>
+    <string name="prediction_mode_2_title">• Mode 2 (Scenario Fusion): %s</string>
+    <string name="prediction_mode_2_desc">"  Weighted by typical habit: %1$s on + %2$s off"</string>
+    <string name="prediction_notes_header">\n💡 Notes:\n</string>
+    <string name="prediction_note_screen_on_1">• Session drain rate reflects actual average consumption since unplugging;\n</string>
+    <string name="prediction_note_screen_on_2">• Predicted baseline rate reflects recent steady workloads for remaining runtime estimation;\n</string>
+    <string name="prediction_note_screen_on_3">• Full runtime is weighted based on 7-day actual screen-on usage;\n</string>
+    <string name="prediction_note_screen_on_4">• Upgraded model adaptively optimizes history window and decay weighting;\n</string>
+    <string name="prediction_note_screen_on_5">• Remaining runtime is computed via physical energy and multi-timescale models.</string>
+    <string name="prediction_note_screen_off_1">• Session drain rate reflects screen-off standby consumption since unplugging;\n</string>
+    <string name="prediction_note_screen_off_2">• Predicted baseline rate reflects recent steady standby baseline;\n</string>
+    <string name="prediction_note_screen_off_3">• Standby duration is weighted by actual 7-day standby history;\n</string>
+    <string name="prediction_note_screen_off_4">• Upgraded model decomposes deep sleep noise and background wakeups;\n</string>
+    <string name="prediction_note_screen_off_5">• Standby runtime is estimated from physical energy and multi-timescale steady models.</string>
+    <string name="prediction_note_global_1">• Session drain rate reflects overall power consumption since unplugging;\n</string>
+    <string name="prediction_note_global_2">• Predicted baseline rate reflects recent steady workloads for total remaining runtime;\n</string>
+    <string name="prediction_note_global_3">• Mode 1 faithfully integrates total energy over the full history cycle;\n</string>
+    <string name="prediction_note_global_4">• Mode 2 decomposes the proportion of screen-on and standby states;\n</string>
+    <string name="prediction_note_global_5">• Upgraded model adaptively models history windows and workload profiles;\n</string>
+    <string name="prediction_note_global_6">• Remaining runtime is comprehensively computed via physical energy and multi-timescale models.</string>
+
+    <!-- Confidence & Sufficiency -->
+    <string name="conf_level_high">High Confidence</string>
+    <string name="conf_level_medium">Medium Confidence</string>
+    <string name="conf_level_low">Low Confidence</string>
+    <string name="conf_level_unavailable">Insufficient Data</string>
+    <string name="data_sufficiency_sufficient">Sufficient</string>
+    <string name="data_sufficiency_moderate">Usable</string>
+    <string name="data_sufficiency_insufficient">Limited Samples</string>
+
+    <!-- App Usage & Energy Details -->
+    <string name="app_detail_consumed_energy">Energy Consumed</string>
+    <string name="app_detail_avg_power">Avg Power</string>
+    <string name="app_detail_peak_power">Peak Power</string>
+    <string name="app_detail_active_time">Active Time</string>
+    <string name="app_detail_cpu_time">CPU Runtime</string>
+    <string name="app_detail_network_traffic">Network Traffic</string>
+    <string name="app_detail_wakelock_location">Wakelock / Location</string>
+    <string name="app_detail_data_source">Data Source</string>
+    <string name="app_detail_temp">Operating Temp</string>
+    <string name="app_detail_runtime_section">Operating Runtime</string>
+    <string name="app_detail_fg_screen_on_time">Foreground Screen-on</string>
+    <string name="app_detail_bg_time">Background Runtime</string>
+    <string name="app_detail_total_runtime">Total Runtime</string>
+    <string name="app_detail_drain_allocation">Power Allocation</string>
+    <string name="app_detail_fg_drain">Foreground Drain</string>
+    <string name="app_detail_bg_drain">Background Drain</string>
+    <string name="app_detail_total_drain">Total Drain</string>
+    <string name="app_detail_hardware_overhead">Hardware Overhead</string>
+    <string name="app_detail_cpu_calc_time">CPU Compute Time</string>
+    <string name="app_detail_net_transfer">Network Transfer</string>
+    <string name="app_detail_record_source">Records &amp; Source</string>
+    <string name="app_detail_time_range">Time Interval</string>
+    <string name="app_detail_last_used">Last Used Time</string>
+
+    <!-- Charge & Power History Summary -->
+    <string name="history_summary_metric">Metric</string>
+    <string name="history_summary_col_time">⏱️ Time</string>
+    <string name="history_summary_col_energy">⚡ Energy(Wh)</string>
+    <string name="history_summary_col_power">💡 Power(W)</string>
+    <string name="history_summary_col_rate">📈 Rate(%/h)</string>
+    <string name="charging_summary_desc">📌 Note: All metrics strictly integrate low-level hardware physics and charging sessions.</string>
+    <string name="power_summary_desc">📌 Note: All metrics strictly integrate hardware physical conservation laws, reflecting authentic discharge losses.</string>
+
+
+    <!-- Current Calibration & Settings -->
+    <string name="current_calib_raw_hw">Raw Hardware Current</string>
+    <string name="current_calib_instant">Calibrated Current</string>
+    <string name="current_calib_steps_10x">10x Multiplier Gear</string>
+    <string name="unit_seconds">sec</string>
+
+    <!-- Unit Switch Dialog -->
+    <string name="power_unit_dialog_formula_title">Conversion Formula (Standard 3.85V)</string>
+    <string name="power_unit_dialog_def_title">Physical Definition</string>
+    <string name="power_unit_dialog_science_title">Scientific Conservation</string>
+    <string name="power_unit_dialog_dont_show_again">Don\'t show again (Long press unit badge to review)</string>
+    <string name="power_unit_dialog_formula_desc">Formula</string>
+
+    <!-- Snapshot Dialog -->
+    <string name="snapshot_dialog_title">Save Battery Snapshot</string>
+    <string name="snapshot_category_label">Snapshot Category</string>
+    <string name="snapshot_tag_daily">Daily</string>
+    <string name="snapshot_tag_full">Full</string>
+    <string name="snapshot_tag_low">Low</string>
+    <string name="snapshot_tag_charging">Charging</string>
+    <string name="snapshot_tag_thermal">Heavy Load</string>
+    <string name="snapshot_tag_standby">Standby</string>
+    <string name="snapshot_name_hint">Category name (Type or select a quick tag above)</string>
+    <string name="snapshot_note_hint">Notes (Optional, e.g. 67W fast charge/Gaming test)</string>
+    <string name="charging_screen_always_on">Keep screen on while charging</string>
+    <string name="filter_charge">⚡ Charge</string>
+    <string name="filter_discharge">🔋 Discharge</string>
+    <!-- Charging Type Localized Display -->
+    <string name="charge_type_ac_fast">AC Fast Charge</string>
+    <string name="charge_type_usb">USB Charging</string>
+    <string name="charge_type_wireless">Wireless Charging</string>
+    <string name="charge_type_external">External Power</string>
+    <string name="charge_type_none">Discharging</string>
+
+    <!-- Screen Off Decomposed Metrics Popups -->
+    <string name="screen_off_detail_title">[Screen-Off Drain]\n</string>
+    <string name="screen_off_detail_drain_format">• Screen-off drain: %1$s (Standby %2$s)\n</string>
+    <string name="screen_off_detail_rate_format">• Drain rate: %s\n</string>
+    <string name="screen_off_detail_energy_format">• Energy consumed: %1$s (Equiv. %2$s)\n</string>
+    <string name="screen_off_detail_power_format">• Avg power: %s\n\n</string>
+    <string name="screen_off_detail_screen_on_title">[Screen-On Comparison]\n</string>
+    <string name="screen_off_detail_on_drain_format">• Screen-on drain: %1$s (Duration %2$s)\n</string>
+    <string name="screen_off_detail_on_rate_format">• Screen-on drain rate: %s\n</string>
+    <string name="screen_off_detail_notes">💡 Notes:\n• Ratio is calculated based on total battery full capacity;\n• Screen-off drain consists of background wakeups and deep sleep noise.</string>
+
+    <string name="awake_detail_title">[Screen-Off Awake]\n</string>
+    <string name="awake_detail_drain_format">• Awake drain: %1$s (Active %2$s)\n</string>
+    <string name="awake_detail_freq_format">• Wakeup frequency: %s\n</string>
+    <string name="awake_freq_with_rate_format">%1$d times (~%2$.1f times/hr)</string>
+    <string name="awake_freq_only_format">%d times</string>
+    <string name="awake_detail_ratio_format">• Awake ratio: %s (of screen-off time)\n\n</string>
+    <string name="awake_detail_notes">💡 Notes:\n• Active state awakened by system broadcasts, pushes, or alarms after screen off;\n• Excessive wakeups or long durations are the primary cause of standby drain.</string>
+
+    <string name="deep_sleep_detail_title">[Deep Sleep]\n</string>
+    <string name="deep_sleep_detail_drain_format">• Deep sleep drain: %1$s (Cumulative %2$s)\n</string>
+    <string name="deep_sleep_detail_power_format">• Sleep power: %s\n</string>
+    <string name="deep_sleep_detail_ratio_format">• Deep sleep ratio: %s\n</string>
+    <string name="deep_sleep_detail_count_format">• Sleep entries: %s\n\n</string>
+    <string name="deep_sleep_count_val_format">%d times</string>
+    <string name="deep_sleep_detail_note_1">💡 Notes:\n• Ultra-low power mode where CPU suspends, leaving only hardware floor noise;\n</string>
+    <string name="deep_sleep_detail_note_high_power">• High deep sleep power (> 0.20W) is typically caused by dual 5G paging, weak signal RF, hardware leakage, or background wakeups;\n</string>
+    <string name="deep_sleep_detail_note_high_ratio_format">• Deep sleep accounts for %s of screen-off time; most standby energy is consumed by floor noise, obeying energy conservation;\n</string>
+    <string name="deep_sleep_detail_note_ratio_summary">• A sleep ratio closer to 100% indicates fuller rest and more stable consumption.</string>
+
+    <string name="rate_percent_and_mah_format">%1$s (~%2$s)</string>
+    <string name="rate_mah_only_format">~%s</string>
 </resources>
+
 

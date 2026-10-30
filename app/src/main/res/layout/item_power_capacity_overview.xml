@@ -117,7 +117,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="当前剩余可用电荷"
+                        android:text="@string/capacity_remaining_charge_title"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="10sp" />
 
@@ -155,7 +155,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="可用剩余能量"
+                        android:text="@string/capacity_remaining_energy_title"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="10sp" />
 
@@ -191,7 +191,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="基准满充(FCC): "
+                    android:text="@string/capacity_fcc_baseline_label"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="11sp" />
 
@@ -232,7 +232,7 @@
                     android:foreground="?attr/selectableItemBackground"
                     android:paddingHorizontal="8dp"
                     android:paddingVertical="3dp"
-                    android:text="诊断档案 ›"
+                    android:text="@string/capacity_open_diagnosis"
                     android:textColor="#10b981"
                     android:textSize="10sp"
                     android:textStyle="bold" />

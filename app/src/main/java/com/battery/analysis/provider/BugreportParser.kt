@@ -6,7 +6,9 @@ import android.util.Log
 import com.battery.analysis.model.BatteryInfo
 import com.battery.analysis.model.BugreportResult
 import com.battery.analysis.model.HealthInfoItem
+import com.battery.analysis.R
 import com.battery.analysis.util.BatteryEnergyCalculator
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
@@ -66,7 +68,7 @@ class BugreportParser {
                 parseZipViaZipFile(context, uri, initialCaptureTime, onProgress)
             } else {
                 val rawStream = context.contentResolver.openInputStream(uri) ?: return@withContext null
-                val res = scanStreamForHealthInfo(rawStream, initialCaptureTime)
+                val res = scanStreamForHealthInfo(rawStream, initialCaptureTime, context)
                 rawStream.close()
                 res
             }
@@ -157,7 +159,7 @@ class BugreportParser {
             onProgress(75)
 
             val entryStream = zipFile.getInputStream(targetEntry)
-            val result = scanStreamForHealthInfo(entryStream, preciseTime)
+            val result = scanStreamForHealthInfo(entryStream, preciseTime, context)
 
             entryStream.close()
             zipFile.close()
@@ -176,9 +178,14 @@ class BugreportParser {
      *
      * @param stream 输入流
      * @param captureTime 报告抓取日期时间
+     * @param context 应用程序上下文，用于解析国际化多语言文本
      * @return 解析得到的 [BugreportResult] 对象
      */
-    internal suspend fun scanStreamForHealthInfo(stream: InputStream, captureTime: String): BugreportResult {
+    internal suspend fun scanStreamForHealthInfo(
+        stream: InputStream,
+        captureTime: String,
+        context: Context? = null
+    ): BugreportResult {
         val buffer = ByteArray(BUFFER_SIZE)
         var overlapLen = 0
         var totalBytesRead = 0L
@@ -202,7 +209,7 @@ class BugreportParser {
 
                 val sliceLength = minOf(16384, totalInChunk - matchIdx)
                 val textSlice = String(buffer, matchIdx, sliceLength, StandardCharsets.UTF_8)
-                val candidateResult = parseHealthInfoText(textSlice, captureTime)
+                val candidateResult = parseHealthInfoText(textSlice, captureTime, context)
                 val score = calculateQualityScore(candidateResult)
 
                 if (score > bestScore) {
@@ -312,9 +319,14 @@ class BugreportParser {
      *
      * @param text 包含 HealthInfo 的切片文本
      * @param captureTime 报告抓取日期时间
+     * @param context 应用程序上下文，用于读取国际化多语言字符串
      * @return 结构化结果
      */
-    internal fun parseHealthInfoText(text: String, captureTime: String): BugreportResult {
+    internal fun parseHealthInfoText(
+        text: String,
+        captureTime: String,
+        context: Context? = null
+    ): BugreportResult {
         var chargerAcOnline: Boolean? = null
         var chargerUsbOnline: Boolean? = null
         var chargerWirelessOnline: Boolean? = null
@@ -450,6 +462,9 @@ class BugreportParser {
 
         // 3. 构建表格项
         val tableItems = mutableListOf<HealthInfoItem>()
+        val isZh = context?.resources?.configuration?.locales?.get(0)?.language?.startsWith("zh")
+            ?: Locale.getDefault().language.startsWith("zh")
+        val unknownStr = context?.getString(R.string.unknown) ?: if (isZh) "未知" else "Unknown"
 
         val statusVal = when {
             batteryStatus?.contains("CHARGING", ignoreCase = true) == true && !batteryStatus!!.contains("NOT_CHARGING", ignoreCase = true) && !batteryStatus!!.contains("DISCHARGING", ignoreCase = true) -> "Charging"
@@ -461,17 +476,25 @@ class BugreportParser {
             else -> "Discharging"
         }
         val statusDesc = when (statusVal) {
-            "Charging" -> "正在充电"
-            "Discharging" -> "放电中"
-            "Not Charging" -> "未充电"
-            "Full" -> "已充满"
-            else -> "状态未知"
+            "Charging" -> context?.getString(R.string.status_val_charging) ?: if (isZh) "正在充电" else "Charging"
+            "Discharging" -> context?.getString(R.string.status_val_discharging) ?: if (isZh) "放电中" else "Discharging"
+            "Not Charging" -> context?.getString(R.string.status_val_not_charging) ?: if (isZh) "未充电" else "Not Charging"
+            "Full" -> context?.getString(R.string.status_val_full) ?: if (isZh) "已充满" else "Full"
+            else -> context?.getString(R.string.status_val_unknown) ?: if (isZh) "状态未知" else "Unknown"
         }
-        tableItems.add(HealthInfoItem("⚡ 充电状态", statusVal, statusDesc))
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_charging_status) ?: if (isZh) "⚡ 充电状态" else "⚡ Status",
+            statusVal,
+            statusDesc
+        ))
 
         val levelVal = batteryLevel
-        val levelDisplay = if (levelVal != null) "$levelVal%" else "未知"
-        tableItems.add(HealthInfoItem("🔋 电量", levelDisplay, "当前剩余电量"))
+        val levelDisplay = if (levelVal != null) "$levelVal%" else unknownStr
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_level) ?: if (isZh) "🔋 电量" else "🔋 Level",
+            levelDisplay,
+            context?.getString(R.string.table_desc_level) ?: if (isZh) "当前剩余电量" else "Current level"
+        ))
 
         val voltVal = batteryVoltage
         val voltDisplay = if (voltVal != null) {
@@ -482,15 +505,23 @@ class BugreportParser {
                 else -> voltVal.toFloat()
             }
             String.format("%.3f V", mv / 1000f)
-        } else "未知"
-        tableItems.add(HealthInfoItem("🔋 电池电压", voltDisplay, "当前电池端电压"))
+        } else unknownStr
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_voltage) ?: if (isZh) "🔋 电池电压" else "🔋 Voltage",
+            voltDisplay,
+            context?.getString(R.string.table_desc_voltage) ?: if (isZh) "当前电池端电压" else "Terminal voltage"
+        ))
 
         val curVal = batteryCurrent
         val curDisplay = if (curVal != null) {
             val ma = if (Math.abs(curVal) >= 10000L) curVal / 1000f else curVal.toFloat()
             String.format("%.0f mA", ma)
-        } else "未知"
-        tableItems.add(HealthInfoItem("⚡ 电流", curDisplay, "当前电池电流"))
+        } else unknownStr
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_current) ?: if (isZh) "⚡ 电流" else "⚡ Current",
+            curDisplay,
+            context?.getString(R.string.table_desc_current) ?: if (isZh) "当前电池电流" else "Current flow"
+        ))
 
         val powerDisplay = if (voltVal != null && curVal != null) {
             val mv = when {
@@ -502,71 +533,111 @@ class BugreportParser {
             val ma = if (Math.abs(curVal) >= 10000L) Math.abs(curVal) / 1000f else Math.abs(curVal).toFloat()
             val w = (mv / 1000f) * (ma / 1000f)
             String.format("%.2f W", w)
-        } else "未知"
-        tableItems.add(HealthInfoItem("⚡ 电池功率", powerDisplay, "电池瞬时工作功率"))
+        } else unknownStr
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_power) ?: if (isZh) "⚡ 电池功率" else "⚡ Power",
+            powerDisplay,
+            context?.getString(R.string.table_desc_power) ?: if (isZh) "电池瞬时工作功率" else "Working power"
+        ))
 
         val tempVal = batteryTemperature
         val tempDisplay = if (tempVal != null) {
             val degC = if (tempVal > 200f) tempVal / 10f else tempVal
             String.format("%.1f℃", degC)
-        } else "未知"
-        tableItems.add(HealthInfoItem("🌡️ 电池温度", tempDisplay, "当前温度"))
+        } else unknownStr
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_temperature) ?: if (isZh) "🌡️ 电池温度" else "🌡️ Temp",
+            tempDisplay,
+            context?.getString(R.string.table_desc_temperature) ?: if (isZh) "当前温度" else "Current temp"
+        ))
 
-        val cycleDisplay = if (batteryCycleCount != null) "$batteryCycleCount" else "未知"
-        tableItems.add(HealthInfoItem("🔄 循环次数", cycleDisplay, "等效完整循环"))
+        val cycleDisplay = if (batteryCycleCount != null) "$batteryCycleCount" else unknownStr
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_cycle_count) ?: if (isZh) "🔄 循环次数" else "🔄 Cycles",
+            cycleDisplay,
+            context?.getString(R.string.table_desc_cycle_count) ?: if (isZh) "等效完整循环" else "Full cycles"
+        ))
 
         val designVal = batteryFullChargeDesign
         val designDisplay = if (designVal != null) {
             val mah = if (designVal < 100000L) designVal.toFloat() else designVal / 1000f
-            BatteryEnergyCalculator.formatCapacityWithNominalWh(mah) ?: "未知"
-        } else "未知"
-        tableItems.add(HealthInfoItem("🔋 设计容量", designDisplay, "出厂设计容量"))
+            BatteryEnergyCalculator.formatCapacityWithNominalWh(mah) ?: unknownStr
+        } else unknownStr
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_design_capacity) ?: if (isZh) "🔋 设计容量" else "🔋 Design Cap",
+            designDisplay,
+            context?.getString(R.string.table_desc_design_capacity) ?: if (isZh) "出厂设计容量" else "Design capacity"
+        ))
 
         val fccVal = batteryFullCharge
         val fccDisplay = if (fccVal != null) {
             val mah = if (fccVal < 100000L) fccVal.toFloat() else fccVal / 1000f
-            BatteryEnergyCalculator.formatCapacityWithNominalWh(mah) ?: "未知"
-        } else "未知"
-        tableItems.add(HealthInfoItem("🔋 充满容量", fccDisplay, "电量计估算 FCC"))
+            BatteryEnergyCalculator.formatCapacityWithNominalWh(mah) ?: unknownStr
+        } else unknownStr
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_full_capacity) ?: if (isZh) "🔋 充满容量" else "🔋 Full Cap",
+            fccDisplay,
+            context?.getString(R.string.table_desc_full_capacity) ?: if (isZh) "电量计估算 FCC" else "Estimated FCC"
+        ))
 
         val chargeVal = batteryChargeCounter
         val chargeDisplay = when {
             chargeVal != null -> {
                 val mah = if (chargeVal >= 100000L) chargeVal / 1000f else chargeVal.toFloat()
-                BatteryEnergyCalculator.formatCapacityWithNominalWh(mah) ?: "未知"
+                BatteryEnergyCalculator.formatCapacityWithNominalWh(mah) ?: unknownStr
             }
             fccVal != null && levelVal != null -> {
                 val fMah = if (fccVal < 100000L) fccVal.toFloat() else fccVal / 1000f
                 val mah = (fMah * levelVal) / 100f
-                BatteryEnergyCalculator.formatCapacityWithNominalWh(mah) ?: "未知"
+                BatteryEnergyCalculator.formatCapacityWithNominalWh(mah) ?: unknownStr
             }
-            else -> "未知"
+            else -> unknownStr
         }
-        tableItems.add(HealthInfoItem("🔋 当前容量", chargeDisplay, "当前剩余容量"))
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_current_capacity) ?: if (isZh) "🔋 当前容量" else "🔋 Current Cap",
+            chargeDisplay,
+            context?.getString(R.string.table_desc_current_capacity) ?: if (isZh) "当前剩余容量" else "Remaining cap"
+        ))
 
         val healthDisplay = if (fccVal != null && designVal != null && designVal > 0L) {
             val fMah = if (fccVal < 100000L) fccVal.toFloat() else fccVal / 1000f
             val dMah = if (designVal < 100000L) designVal.toFloat() else designVal / 1000f
             val healthPercent = (fMah / dMah) * 100f
             String.format("%.2f%%", healthPercent)
-        } else "未知"
-        tableItems.add(HealthInfoItem("❤️ 健康度", healthDisplay, "FCC / Design Capacity"))
+        } else unknownStr
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_health_ratio) ?: if (isZh) "❤️ 健康度" else "❤️ Health",
+            healthDisplay,
+            "FCC / Design Capacity"
+        ))
 
         val techDisplay = batteryTechnology ?: "Li-ion"
-        tableItems.add(HealthInfoItem("🔋 电池类型", techDisplay, "锂离子"))
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_battery_tech) ?: if (isZh) "🔋 电池类型" else "🔋 Tech",
+            techDisplay,
+            context?.getString(R.string.table_desc_battery_tech) ?: if (isZh) "锂离子" else "Li-ion"
+        ))
 
         val healthStatusVal = when {
             batteryHealth?.contains("GOOD", ignoreCase = true) == true || batteryHealth == "2" -> "GOOD"
-            batteryHealth?.contains("OVERHEAT", ignoreCase = true) == true || batteryHealth == "3" -> "OVERHEAT (过热)"
-            batteryHealth?.contains("DEAD", ignoreCase = true) == true || batteryHealth == "4" -> "DEAD (损坏)"
-            batteryHealth?.contains("OVER_VOLTAGE", ignoreCase = true) == true || batteryHealth == "5" -> "OVER_VOLTAGE (电压过高)"
-            batteryHealth?.contains("COLD", ignoreCase = true) == true || batteryHealth == "7" -> "COLD (过冷)"
+            batteryHealth?.contains("OVERHEAT", ignoreCase = true) == true || batteryHealth == "3" -> context?.getString(R.string.health_val_overheat) ?: if (isZh) "OVERHEAT (过热)" else "OVERHEAT"
+            batteryHealth?.contains("DEAD", ignoreCase = true) == true || batteryHealth == "4" -> context?.getString(R.string.health_val_dead) ?: if (isZh) "DEAD (损坏)" else "DEAD"
+            batteryHealth?.contains("OVER_VOLTAGE", ignoreCase = true) == true || batteryHealth == "5" -> context?.getString(R.string.health_val_over_voltage) ?: if (isZh) "OVER_VOLTAGE (电压过高)" else "OVER_VOLTAGE"
+            batteryHealth?.contains("COLD", ignoreCase = true) == true || batteryHealth == "7" -> context?.getString(R.string.health_val_cold) ?: if (isZh) "COLD (过冷)" else "COLD"
             else -> batteryHealth ?: "GOOD"
         }
-        tableItems.add(HealthInfoItem("🩺 电池健康", healthStatusVal, "Android 判断正常"))
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_health_state) ?: if (isZh) "🩺 电池健康" else "🩺 Health State",
+            healthStatusVal,
+            context?.getString(R.string.table_desc_health_state_normal) ?: if (isZh) "Android 判断正常" else "Android Good"
+        ))
 
         // 增加抓取/报告日期时间
-        tableItems.add(HealthInfoItem("⏱️ 报告时间", captureTime, "错误报告生成/抓取时间"))
+        tableItems.add(HealthInfoItem(
+            context?.getString(R.string.table_item_report_time) ?: if (isZh) "⏱️ 报告时间" else "⏱️ Time",
+            captureTime,
+            context?.getString(R.string.table_desc_report_time) ?: if (isZh) "错误报告生成/抓取时间" else "Bugreport time"
+        ))
 
         val hasRealData = (batteryLevel != null || batteryVoltage != null || batteryFullCharge != null || batteryCycleCount != null || batteryTemperature != null)
         val rawText = healthInfoRawLines.joinToString("\n").trim()

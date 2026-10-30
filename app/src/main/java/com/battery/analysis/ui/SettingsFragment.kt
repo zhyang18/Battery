@@ -548,7 +548,7 @@ class SettingsFragment : Fragment() {
 
             updateCurrentCalibrationDisplay()
             dialog.dismiss()
-            Toast.makeText(ctx, getString(R.string.setting_current_calibration) + "已保存", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, "${getString(R.string.setting_current_calibration)}: ${getString(R.string.toast_saved)}", Toast.LENGTH_SHORT).show()
         }
 
         showAndTrackDialog(dialog)
@@ -822,21 +822,21 @@ class SettingsFragment : Fragment() {
         val showBackground = com.battery.analysis.manager.FloatingWindowManager.isShowBackground(ctx)
         val summary = buildString {
             if (isStatusBar && currentY < sbHeight) {
-                append("状态栏位置")
+                append(getString(R.string.settings_bar_pos_status_bar))
             } else {
-                append("自定义位置")
+                append(getString(R.string.settings_bar_pos_custom))
             }
-            append(" · ").append(fontSize).append("sp字号")
-            append(" · ").append(opacity).append("%透明度")
+            append(" · ").append(fontSize).append(getString(R.string.settings_bar_sp_font))
+            append(" · ").append(opacity).append(getString(R.string.settings_bar_opacity_suffix))
             val isBold = com.battery.analysis.manager.FloatingWindowManager.isFontBold(ctx)
             if (!isBold) {
-                append(" · 常规体")
+                append(getString(R.string.settings_bar_regular_font))
             }
             if (!showBackground) {
-                append(" · 无边框")
+                append(getString(R.string.settings_bar_no_border))
             }
             if (!showUnit) {
-                append(" · 无单位")
+                append(getString(R.string.settings_bar_no_unit))
             }
         }
         binding.tvFloatingPositionSummary.text = summary
@@ -967,7 +967,7 @@ class SettingsFragment : Fragment() {
         val updateVerticalText = { y: Int ->
             val inSb = y < statusBarHeight
             tvVerticalValue.text = if (inSb) {
-                "Y: $y px (状态栏)"
+                getString(R.string.settings_bar_custom_y_format, y)
             } else {
                 "Y: $y px"
             }
@@ -1411,9 +1411,9 @@ class SettingsFragment : Fragment() {
             30000L -> getString(R.string.interval_30s)
             else -> {
                 if (intervalMs % 1000L == 0L) {
-                    "${intervalMs / 1000L} 秒"
+                    getString(R.string.dur_secs_format, intervalMs / 1000L)
                 } else {
-                    String.format(Locale.getDefault(), "%.1f 秒", intervalMs / 1000.0)
+                    String.format(Locale.getDefault(), "%.1fs", intervalMs / 1000.0)
                 }
             }
         }
@@ -1728,8 +1728,9 @@ class SettingsFragment : Fragment() {
 
 
     /**
-     * 初始化关于信息与应用版本号展示。
-     * 动态读取 PackageManager 中的 versionName 字段进行展示。
+     * 初始化关于信息与应用版本号展示并绑定点击交互事件。
+     * 动态读取 PackageManager 中的 versionName 字段展示于界面，
+     * 并为整行条目添加点击监听器，触发展示美观统一的项目详情弹窗。
      */
     private fun setupAboutSection() {
         val versionName = try {
@@ -1739,6 +1740,48 @@ class SettingsFragment : Fragment() {
             "1.0.0"
         }
         binding.tvAppVersion.text = "v$versionName"
+
+        binding.llAppVersion.setOnClickListener {
+            showAboutAppDialog(versionName)
+        }
+    }
+
+    /**
+     * 显示关于此项目的详情弹窗。
+     * 采用统一自适应弹窗样式展示项目定位、核心技术矩阵、开源许可协议及开源仓库主页，
+     * 支持点击直接跳转访问 GitHub 仓库主页。
+     *
+     * @param versionName 当前应用的版本号字符串
+     */
+    private fun showAboutAppDialog(versionName: String) {
+        val ctx = context ?: return
+        val dialogView = layoutInflater.inflate(R.layout.dialog_about_app, null)
+
+        val tvVersionBadge = dialogView.findViewById<TextView>(R.id.tv_about_version_badge)
+        val layoutGithub = dialogView.findViewById<View>(R.id.layout_about_github)
+        val btnClose = dialogView.findViewById<View>(R.id.btn_about_close)
+
+        tvVersionBadge.text = "v$versionName · MIT License"
+
+        val dialog = AlertDialog.Builder(ctx)
+            .setView(dialogView)
+            .create()
+
+        layoutGithub.setOnClickListener {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(getString(R.string.about_repo_url)))
+                startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(ctx, getString(R.string.about_repo_url), Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        btnClose.setOnClickListener {
+            dialog.dismiss()
+        }
+
+        showAndTrackDialog(dialog)
+        applyLongContentDialogStyle(dialog, dialogView)
     }
 
     /**
@@ -1837,7 +1880,7 @@ class SettingsFragment : Fragment() {
                     Toast.makeText(requireContext(), getString(R.string.toast_daemon_stopped), Toast.LENGTH_SHORT).show()
                     updateDaemonStatusDisplay()
                 }.onFailure { err ->
-                    Toast.makeText(requireContext(), err.message ?: "停止失败", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(requireContext(), err.message ?: getString(R.string.toast_service_stop_failed), Toast.LENGTH_SHORT).show()
                 }
             } else {
                 // 当前未运行，尝试智能提权拉起
@@ -1848,7 +1891,7 @@ class SettingsFragment : Fragment() {
                         view?.postDelayed({ updateDaemonStatusDisplay() }, 1000L)
                         view?.postDelayed({ updateDaemonStatusDisplay() }, 2500L)
                     }.onFailure { err ->
-                        Toast.makeText(requireContext(), err.message ?: "Root 启动失败", Toast.LENGTH_LONG).show()
+                        Toast.makeText(requireContext(), err.message ?: getString(R.string.toast_service_root_start_failed), Toast.LENGTH_LONG).show()
                     }
                 } else if (DaemonManager.isShizukuAvailable()) {
                     val result = DaemonManager.startWithShizuku(requireContext())
@@ -1857,7 +1900,7 @@ class SettingsFragment : Fragment() {
                         view?.postDelayed({ updateDaemonStatusDisplay() }, 1000L)
                         view?.postDelayed({ updateDaemonStatusDisplay() }, 2500L)
                     }.onFailure { err ->
-                        Toast.makeText(requireContext(), err.message ?: "Shizuku 启动失败", Toast.LENGTH_LONG).show()
+                        Toast.makeText(requireContext(), err.message ?: getString(R.string.toast_service_shizuku_start_failed), Toast.LENGTH_LONG).show()
                     }
                 } else {
                     // 既无 Root 也无可用 Shizuku，弹出 ADB 指南引导

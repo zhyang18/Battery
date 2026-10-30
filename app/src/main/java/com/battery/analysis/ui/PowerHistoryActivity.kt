@@ -207,14 +207,14 @@ class PowerHistoryActivity : AppCompatActivity() {
         binding.btnClearAll.setOnClickListener {
             if (!adapter.isSelectionMode) {
                 if (allRecordList.isEmpty()) {
-                    Toast.makeText(this, "暂无记录可删除", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.toast_no_records_to_delete), Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
                 enterSelectionMode()
             } else {
                 val selectedIds = adapter.getSelectedIdSet()
                 if (selectedIds.isEmpty()) {
-                    Toast.makeText(this, "请先选择要删除的记录", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, getString(R.string.toast_select_records_first), Toast.LENGTH_SHORT).show()
                 } else {
                     showBatchDeleteConfirmDialog(selectedIds)
                 }
@@ -238,7 +238,7 @@ class PowerHistoryActivity : AppCompatActivity() {
             val visibleIds = adapter.currentList.map { it.id }
             if (visibleIds.isNotEmpty()) {
                 adapter.invertSelection(visibleIds)
-                Toast.makeText(this, "已反选", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.toast_selection_inverted), Toast.LENGTH_SHORT).show()
             }
             true
         }
@@ -363,8 +363,8 @@ class PowerHistoryActivity : AppCompatActivity() {
                 binding.tvEmptyTitle.text = getString(R.string.power_history_empty_title)
                 binding.tvEmptyDesc.text = getString(R.string.power_history_empty_desc)
             } else {
-                binding.tvEmptyTitle.text = "未找到符合条件的放电记录"
-                binding.tvEmptyDesc.text = "暂无亮屏时长 ${filter?.label} 的记录"
+                binding.tvEmptyTitle.text = getString(R.string.power_history_filter_empty_title)
+                binding.tvEmptyDesc.text = getString(R.string.power_history_filter_empty_desc, filter?.label)
             }
         } else {
             binding.rvPowerHistory.visibility = View.VISIBLE
@@ -412,7 +412,7 @@ class PowerHistoryActivity : AppCompatActivity() {
      */
     private fun updateSelectionUI(selectedCount: Int, totalCount: Int) {
         if (adapter.isSelectionMode) {
-            binding.tvTitle.text = if (selectedCount > 0) "已选 ${selectedCount} 项" else "选择记录"
+            binding.tvTitle.text = if (selectedCount > 0) getString(R.string.history_selected_count_format, selectedCount) else getString(R.string.history_select_records)
             val visibleIds = adapter.currentList.map { it.id }
             binding.cbSelectAll.isChecked = adapter.isAllSelected(visibleIds)
         } else {
@@ -530,11 +530,11 @@ class PowerHistoryActivity : AppCompatActivity() {
         val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
         val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
 
-        tvTitle.text = "确认删除此耗电快照？"
-        tvDesc.text = "删除后该条放电快照记录将从本地永久移除，无法找回。"
-        tvPreviewCat.text = if (record.isShizukuRealData) "Shizuku" else "系统模式"
+        tvTitle.text = getString(R.string.dialog_delete_snapshot_title)
+        tvDesc.text = getString(R.string.dialog_delete_snapshot_desc)
+        tvPreviewCat.text = if (record.isShizukuRealData) "Shizuku" else getString(R.string.power_mode_system)
         tvPreviewTime.text = record.recordTime
-        tvPreviewSummary.text = "🔋 终止电量 ${record.levelPercent}%   •   ⏱️ 持续 ${record.totalDurationText}"
+        tvPreviewSummary.text = "🔋 ${record.levelPercent}%   •   ⏱️ ${record.totalDurationText}"
 
         val dialog = AlertDialog.Builder(this)
             .setView(dialogView)
@@ -568,8 +568,8 @@ class PowerHistoryActivity : AppCompatActivity() {
         val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
         val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
 
-        tvTitle.text = "确认删除选中的 ${selectedIds.size} 条记录？"
-        tvDesc.text = "删除后所选的放电快照记录将从本地永久移除，无法找回。"
+        tvTitle.text = getString(R.string.dialog_delete_multi_snapshots_title, selectedIds.size)
+        tvDesc.text = getString(R.string.dialog_delete_multi_snapshots_desc)
         layoutPreview.visibility = View.GONE
 
         val dialog = AlertDialog.Builder(this)
@@ -584,7 +584,7 @@ class PowerHistoryActivity : AppCompatActivity() {
                     exitSelectionMode()
                     loadHistoryList()
                     dialog.dismiss()
-                    Toast.makeText(this@PowerHistoryActivity, "已删除 ${selectedIds.size} 条记录", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@PowerHistoryActivity, getString(R.string.toast_deleted_count, selectedIds.size), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -609,8 +609,8 @@ class PowerHistoryActivity : AppCompatActivity() {
         tvTitle.text = getString(R.string.power_history_summary_dialog_title)
 
         // 1. 范围与累计掉电百分比
-        val dropText = if (summary.totalLevelDropPercent > 0) " · 累计掉电 -${summary.totalLevelDropPercent}%" else ""
-        tvSubtitle.setUnitText("📊 统计范围：共 ${summary.recordCount} 条放电记录$dropText")
+        val dropText = if (summary.totalLevelDropPercent > 0) getString(R.string.power_history_total_drop_format, summary.totalLevelDropPercent) else ""
+        tvSubtitle.setUnitText(getString(R.string.power_history_stats_range_format, summary.recordCount, dropText))
 
         // 2. 时长行（纯数字时间简写与占比）
         val onDurPct = if (summary.totalDurationMs > 0L) {
@@ -664,7 +664,7 @@ class PowerHistoryActivity : AppCompatActivity() {
         // 6. 底部计算基准总能量
         val tvBaseline = dialogView.findViewById<TextView>(R.id.tv_dialog_baseline_energy)
         summary.batteryCapacityWh?.let { capWh ->
-            tvBaseline.setUnitText(String.format(java.util.Locale.getDefault(), "🔋 计算基准总能量：%.2f Wh", capWh))
+            tvBaseline.setUnitText(String.format(java.util.Locale.getDefault(), getString(R.string.power_history_baseline_energy_format), capWh))
             tvBaseline.visibility = View.VISIBLE
         } ?: run {
             tvBaseline.visibility = View.GONE

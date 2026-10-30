@@ -172,6 +172,26 @@ Compiled APK artifacts are located in the `app/build/outputs/apk/` directory.
 
 ---
 
-## 📄 License
+## 📄 License & Terms
 
-This project is licensed under the [MIT License](LICENSE).
+This project is open-source software licensed under the **[MIT License](LICENSE)**.
+
+### 1. Terms of Use & Redistribution
+* **Freedom of Use**: Individuals and developers are free to use, modify, study, fork, or incorporate this software into personal or academic solutions.
+* **Attribution Requirement**: All substantial copies or redistributions of the source code or binary distributions must include the original copyright notice (`Copyright (c) 2024-2026 zhyang18`) and the [MIT License](LICENSE) text.
+
+### 2. Disclaimer & Limitation of Liability
+* The software is provided **"AS IS"**, without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and non-infringement.
+* Real-time metrics and battery statistics rely on Android public APIs, low-level Linux kernel `sysfs` power supply nodes (`/sys/class/power_supply`), Shizuku privileged interfaces, and Android Bugreport parsing. Due to architectural heterogeneity across different device manufacturers (HONOR, Xiaomi, OPPO, vivo, Huawei, Samsung, etc.), chipsets, and firmware versions, the authors and contributors **make no warranties regarding absolute precision**, and shall not be held liable for any claims, damages, hardware/software malfunctions, or data discrepancies arising from the use of this application.
+
+### 3. Data Authenticity Principle
+* This project strictly adheres to the principle of **authenticity, objectivity, and transparency**. Generating fabricated, dirty, mocked, or artificially clamped fallback data is strictly prohibited.
+* If a sensor or kernel driver does not supply a specific metric (e.g., USB input wattage, precise NTC cell temperature, physical FCC), the app will honestly display it as unknown or unacquired rather than producing deceptive mock readings.
+
+### 4. Third-Party Acknowledgements
+We express our sincere appreciation to the open-source community and the following key libraries that make this project possible:
+* **[Shizuku](https://shizuku.rikka.app/) / [Shizuku-API](https://github.com/RikkaApps/Shizuku-API)**: Rootless privileged system API execution framework (Apache License 2.0).
+* **[MPAndroidChart](https://github.com/PhilJay/MPAndroidChart)**: High-performance and flexible Android charting library (Apache License 2.0).
+* **[Material Components for Android](https://github.com/material-components/material-components-android)**: Modern Material Design 3 UI component system (Apache License 2.0).
+* **[Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines)**: Reactive asynchronous concurrency framework (Apache License 2.0).
+* **[AndroidX](https://developer.android.com/jetpack/androidx)**: Official Android Jetpack architecture and foundation libraries (Apache License 2.0).

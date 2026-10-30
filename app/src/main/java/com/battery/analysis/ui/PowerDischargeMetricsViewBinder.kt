@@ -55,17 +55,17 @@ object PowerDischargeMetricsViewBinder {
     /**
      * 升级模型满电续航时长数值匹配正则表达式（如匹配 "• 升级模型(v2.2)：15h41m53s (可信度高)" 中的 "15h41m53s"）。
      */
-    val REGEX_V2_MODEL_DURATION = Regex("""•\s*升级模型\([^)]+\)[：:]\s*([^\s(]+)""")
+    val REGEX_V2_MODEL_DURATION = Regex("""•\s*(?:升级模型|Upgraded Model)\s*\([^)]+\)[：:]\s*([^\s(]+)""", RegexOption.IGNORE_CASE)
 
     /**
      * 预测基准放电速度数值匹配正则表达式（如匹配 "• 预测基准放电速度：7.4%/h" 中的 "7.4%/h"）。
      */
-    val REGEX_PREDICTION_BENCHMARK_RATE = Regex("""•\s*预测基准放电速度[：:]\s*([^\s\n]+)""")
+    val REGEX_PREDICTION_BENCHMARK_RATE = Regex("""•\s*(?:预测基准放电速度|Predicted baseline drain rate)[：:]\s*([^\s\n]+)""", RegexOption.IGNORE_CASE)
 
     /**
      * 当前剩余续航或当前待机续航时长数值匹配正则表达式（如匹配 "• 当前剩余续航：07h22m44s (可信度高)" 中的 "07h22m44s"）。
      */
-    val REGEX_CURRENT_REMAINING_DURATION = Regex("""•\s*(?:当前剩余续航|当前待机续航)[：:]\s*([^\s(]+)""")
+    val REGEX_CURRENT_REMAINING_DURATION = Regex("""•\s*(?:当前剩余续航|当前待机续航|Current remaining runtime|Current remaining standby)[：:]\s*([^\s(]+)""", RegexOption.IGNORE_CASE)
 
     /**
      * 将放电速度矩阵（亮屏、息屏、全局）数据绑定至对应的视图组件并配置点击回调。

@@ -265,7 +265,7 @@ class AppUsageDetailBottomSheetDialog(
         }
         return try {
             context.packageManager.getApplicationInfo(pkgName, 0).uid
-        } catch (_: PackageManager.NameNotFoundException) {
+        } catch (_: Throwable) {
             -1
         }
     }

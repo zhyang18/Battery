@@ -468,15 +468,15 @@ class ShizukuBatteryStatsParser(private val context: Context) {
 
                     // 只要产生了有效放电记录（> 0.001 mAh），即纳入统计
                     if ((uid > 0 || isExplicitlyUninstalled) && drainMah > 0.001f) {
-                        // 优先提取 dumpsys 直接携带的包名，次查当前 UID 映射表，次查持久化历史 UID 缓存（跨卸载重装溯源），次查本地持久化仓库，次选系统 pm 及 Shizuku 特权兜底
+                        // 优先提取 dumpsys 直接携带的包名，次查当前 UID 映射表，次查持久化历史 UID 缓存（跨卸载重装溯源），次查本地持久化仓库，次选多用户换算与系统 pm 及 Shizuku 特权兜底
                         val resolvedPkg = if (!directPkg.isNullOrEmpty() && directPkg.contains(".") && !isExplicitlyUninstalled) {
                             directPkg
                         } else {
                             uidPkgMap[uid]
                                 ?: (if (uid > 0) cachedUidPkgMap[uid] else null)
                                 ?: (if (uid > 0) AppIconCacheManager.getPackageNameByUid(context, uid) else null)
-                                ?: (if (uid > 0) pm.getPackagesForUid(uid)?.firstOrNull() else null)
-                                ?: (if (uid > 0) pm.getNameForUid(uid)?.let { if (it.contains(":")) it.substringAfter(":") else it } else null)
+                                ?: (if (uid >= 100000) uidPkgMap[uid % 100000] ?: cachedUidPkgMap[uid % 100000] ?: AppIconCacheManager.getPackageNameByUid(context, uid % 100000) else null)
+                                ?: (if (uid > 0) getPackagesForUidSafely(pm, uid) else null)
                                 ?: (if (uid > 0) resolvePackageNameForUid(uid) else null)
                         }
 
@@ -815,7 +815,11 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     private fun loadUidPackageMapViaShizukuAsync() {
         ioScope.launch {
             try {
-                val output = executeShizukuCommand("pm list packages -U")
+                // 优先使用 --user all 完整获取所有用户空间（多用户、双开分身、工作资料等）下的应用 UID 映射
+                var output = executeShizukuCommand("pm list packages -U --user all")
+                if (output.isBlank() || output.contains("Error", ignoreCase = true) || output.contains("Unknown option", ignoreCase = true)) {
+                    output = executeShizukuCommand("pm list packages -U")
+                }
                 if (output.isNotBlank()) {
                     val pattern = Pattern.compile("package:([^\\s]+)\\s+uid:(\\d+)")
                     for (line in output.split('\n')) {
@@ -1292,7 +1296,10 @@ class ShizukuBatteryStatsParser(private val context: Context) {
                 val bgWorkMs = maxOf(totalCpu, bgCpu) + wakeMs
                 if (bgWorkMs <= 0L) continue
 
-                val pkgName = uidPkg[uid] ?: try { pm.getPackagesForUid(uid)?.firstOrNull() } catch (_: Exception) { null }
+                val pkgName = uidPkg[uid]
+                    ?: (if (uid > 0) cachedUidPkgMap[uid] else null)
+                    ?: (if (uid >= 100000) uidPkg[uid % 100000] ?: cachedUidPkgMap[uid % 100000] else null)
+                    ?: (if (uid > 0) getPackagesForUidSafely(pm, uid) else null)
                 if (pkgName.isNullOrBlank() || existingMap.containsKey(pkgName)) continue
 
                 if (!isUserInstalledApp(pkgName)) continue
@@ -1806,7 +1813,78 @@ class ShizukuBatteryStatsParser(private val context: Context) {
     }
 
     /**
-     * 当常规 PackageManager 查询失效时，通过 Shizuku 特权命令查询特定 UID 对应的包名。
+     * 安全地根据系统 UID 查询对应的应用程序包名，彻底杜绝跨用户查询时抛出 SecurityException 导致应用崩溃。
+     * 当应用运行在 User 0 且无 INTERACT_ACROSS_USERS 等系统特权时，直接查询跨用户 UID（如 User 100 的分身应用或工作资料）
+     * 会被系统 PackageManagerService 拒绝并抛出 SecurityException。
+     * 本方法首先对系统 API 进行安全调用与全异常捕获；若目标 UID 属于跨用户多空间（uid >= 100000），
+     * 则按 Android 多用户架构规范换算为主用户对应 appId 进行二次溯源查询。
+     *
+     * @param pm 系统的 [PackageManager] 实例
+     * @param uid 目标应用系统的 UID
+     * @return 解析成功的真实包名，若无法获取或未安装则返回 null
+     */
+    private fun getPackagesForUidSafely(pm: PackageManager, uid: Int): String? {
+        if (uid <= 0) return null
+
+        // 1. 优先尝试直接通过 PackageManager 查询目标 UID
+        try {
+            val pkgs = pm.getPackagesForUid(uid)
+            val first = pkgs?.firstOrNull()
+            if (!first.isNullOrBlank()) {
+                return first
+            }
+        } catch (_: Throwable) {
+            // 捕获跨用户访问抛出的 SecurityException 及各类 IPC 异常
+        }
+
+        // 2. 若目标 UID 属于跨用户多空间（User 100、工作资料、分身应用等，uid >= 100000），换算为主用户对应 appId 进行溯源查询
+        if (uid >= 100000) {
+            val appId = uid % 100000
+            if (appId >= android.os.Process.FIRST_APPLICATION_UID) {
+                val cached = cachedUidPkgMap[appId]
+                    ?: AppIconCacheManager.getPackageNameByUid(context, appId)
+                if (!cached.isNullOrBlank()) {
+                    return cached
+                }
+                try {
+                    val pkgs = pm.getPackagesForUid(appId)
+                    val first = pkgs?.firstOrNull()
+                    if (!first.isNullOrBlank()) {
+                        return first
+                    }
+                } catch (_: Throwable) {
+                }
+            }
+        }
+
+        // 3. 尝试通过 getNameForUid 查询
+        try {
+            val name = pm.getNameForUid(uid)
+            if (!name.isNullOrBlank()) {
+                return if (name.contains(":")) name.substringAfter(":") else name
+            }
+        } catch (_: Throwable) {
+        }
+
+        // 4. 若为跨用户多空间，尝试通过主用户 appId 的 getNameForUid 查询
+        if (uid >= 100000) {
+            val appId = uid % 100000
+            if (appId > 0) {
+                try {
+                    val name = pm.getNameForUid(appId)
+                    if (!name.isNullOrBlank()) {
+                        return if (name.contains(":")) name.substringAfter(":") else name
+                    }
+                } catch (_: Throwable) {
+                }
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * 当常规 PackageManager 查询失效时，通过内存缓存或跨用户换算查询特定 UID 对应的包名。
      *
      * @param uid 目标应用系统 UID
      * @return 解析出的包名，失败返回 null
@@ -1816,6 +1894,14 @@ class ShizukuBatteryStatsParser(private val context: Context) {
         if (unresolvedUidSet.contains(uid)) return null
         val cached = cachedUidPkgMap[uid]
         if (!cached.isNullOrEmpty()) return cached
+        if (uid >= 100000) {
+            val appId = uid % 100000
+            val appCached = cachedUidPkgMap[appId]
+            if (!appCached.isNullOrEmpty()) {
+                cachedUidPkgMap[uid] = appCached
+                return appCached
+            }
+        }
         unresolvedUidSet.add(uid)
         return null
     }

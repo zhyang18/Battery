@@ -39,6 +39,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
 
     private var allCandidates: List<CapacityCandidate> = emptyList()
     private var currentThreshold: Int = 15
+    private var isOnlyMeetsThreshold: Boolean = false
     private lateinit var sessionPageAdapter: SessionPageAdapter
     private var viewPager: ViewPager2? = null
 
@@ -143,6 +144,11 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             dismissWithSlideDownAnimation()
         }
 
+        view.findViewById<TextView>(R.id.btn_filter_meets_threshold)?.setOnClickListener {
+            toggleThresholdFilter()
+        }
+        updateThresholdFilterButtonUI()
+
         val vp = view.findViewById<ViewPager2>(R.id.vp_capacity_sessions)
         viewPager = vp
         sessionPageAdapter = SessionPageAdapter(
@@ -217,6 +223,33 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
     }
 
     /**
+     * 切换“已达门限”单项快速过滤开关，并联动刷新列表数据与胶囊按钮状态。
+     */
+    private fun toggleThresholdFilter() {
+        isOnlyMeetsThreshold = !isOnlyMeetsThreshold
+        updateThresholdFilterButtonUI()
+        applyDataToPages()
+    }
+
+    /**
+     * 刷新顶部“已达门限”切换胶囊按钮的高亮背景、边框、文案与文本粗细样式。
+     */
+    private fun updateThresholdFilterButtonUI() {
+        val btnFilter = view?.findViewById<TextView>(R.id.btn_filter_meets_threshold) ?: return
+        if (isOnlyMeetsThreshold) {
+            btnFilter.text = getString(R.string.capacity_session_filter_meets_threshold_active)
+            btnFilter.setTextColor(Color.parseColor("#10b981"))
+            btnFilter.setBackgroundResource(R.drawable.bg_session_filter_chip_selected)
+            btnFilter.paint.isFakeBoldText = true
+        } else {
+            btnFilter.text = getString(R.string.capacity_session_filter_meets_threshold)
+            btnFilter.setTextColor(Color.parseColor("#94a3b8"))
+            btnFilter.setBackgroundResource(R.drawable.bg_session_filter_chip_unselected)
+            btnFilter.paint.isFakeBoldText = false
+        }
+    }
+
+    /**
      * 异步从本地数据库加载所有充放电候选样本数据，并同步有效电量跨度阈值。
      */
     private fun loadData() {
@@ -234,28 +267,34 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
     }
 
     /**
-     * 将候选样本数据按分类（全部、充电、放电）分发至 ViewPager2 的各个子页面，并同步更新副标题统计和 Tab 数量。
+     * 将候选样本数据按分类（全部、充电、放电）及当前门限过滤状态分发至 ViewPager2 的各个子页面，并同步更新副标题统计和 Tab 数量。
      */
     private fun applyDataToPages() {
-        val chargeList = allCandidates.filter { it.sessionType == CandidateSessionType.CHARGE }
-        val dischargeList = allCandidates.filter { it.sessionType == CandidateSessionType.DISCHARGE }
+        val filteredCandidates = if (isOnlyMeetsThreshold) {
+            allCandidates.filter { !it.isExcluded && it.socSpanPercent >= currentThreshold }
+        } else {
+            allCandidates
+        }
+        val chargeList = filteredCandidates.filter { it.sessionType == CandidateSessionType.CHARGE }
+        val dischargeList = filteredCandidates.filter { it.sessionType == CandidateSessionType.DISCHARGE }
 
         sessionPageAdapter.updateAllPages(
-            allData = allCandidates,
+            allData = filteredCandidates,
             chargeData = chargeList,
             dischargeData = dischargeList,
             threshold = currentThreshold
         )
 
+        val totalCount = allCandidates.size
         val validCount = allCandidates.count { !it.isExcluded && it.socSpanPercent >= currentThreshold }
         val subtitle = view?.findViewById<TextView>(R.id.tv_session_list_subtitle)
-        subtitle?.text = getString(R.string.capacity_session_subtitle_format, allCandidates.size, validCount, currentThreshold)
+        subtitle?.text = getString(R.string.capacity_session_subtitle_format, totalCount, validCount, currentThreshold)
 
         val tabAll = view?.findViewById<TextView>(R.id.tab_session_all)
         val tabCharge = view?.findViewById<TextView>(R.id.tab_session_charge)
         val tabDischarge = view?.findViewById<TextView>(R.id.tab_session_discharge)
 
-        tabAll?.text = getString(R.string.capacity_session_tab_all_format, allCandidates.size)
+        tabAll?.text = getString(R.string.capacity_session_tab_all_format, filteredCandidates.size)
         tabCharge?.text = getString(R.string.capacity_session_tab_charge_format, chargeList.size)
         tabDischarge?.text = getString(R.string.capacity_session_tab_discharge_format, dischargeList.size)
     }

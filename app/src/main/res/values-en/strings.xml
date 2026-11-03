@@ -835,7 +835,9 @@
     <string name="capacity_maturity_observation">Observing</string>
     <string name="capacity_maturity_converged">Converged</string>
     <string name="capacity_maturity_tracking">Tracking</string>
-    <string name="capacity_session_subtitle_format">%1$d records · %2$d in model (limit &gt; %3$d%%)</string>
+    <string name="capacity_session_subtitle_format">%1$d total · %2$d valid (&gt; %3$d%%)</string>
+    <string name="capacity_session_filter_meets_threshold">🎯 Valid Only</string>
+    <string name="capacity_session_filter_meets_threshold_active">✓ Valid Only</string>
     <string name="capacity_session_tab_all_format">All (%d)</string>
     <string name="capacity_session_tab_charge_format">⚡ Charge (%d)</string>
     <string name="capacity_session_tab_discharge_format">🔋 Discharge (%d)</string>

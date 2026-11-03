@@ -836,7 +836,9 @@
     <string name="capacity_maturity_observation">初步建模中</string>
     <string name="capacity_maturity_converged">高置信度 · 样本自洽</string>
     <string name="capacity_maturity_tracking">长期稳定追踪</string>
-    <string name="capacity_session_subtitle_format">累计 %1$d 次记录 · %2$d 次纳入有效模型 (门限 &gt; %3$d%%)</string>
+    <string name="capacity_session_subtitle_format">共 %1$d 次 · %2$d 次达标 (跨度 &gt; %3$d%%)</string>
+    <string name="capacity_session_filter_meets_threshold">🎯 仅看达标</string>
+    <string name="capacity_session_filter_meets_threshold_active">✓ 仅看达标</string>
     <string name="capacity_session_tab_all_format">全部 (%d)</string>
     <string name="capacity_session_tab_charge_format">⚡ 充电 (%d)</string>
     <string name="capacity_session_tab_discharge_format">🔋 放电 (%d)</string>

@@ -582,6 +582,85 @@ class ChargingHistoryRecordTest {
         val realDuration = secondHalf.last().timestamp - secondHalf.first().timestamp
         assertEquals(1800_000L, realDuration)
     }
+
+    /**
+     * 测试通过采样点时序梯形安时积分计算充电真实净电荷量（mAh）的准确性。
+     */
+    @Test
+    fun testRecordNetChargeMahCalculation() {
+        val baseTime = 1700000000000L
+        // 模拟正常充电采样点（切片间隔 60 秒，完全处于允许的 180 秒窗口内）：
+        // t0: 0s, 4000mA (息屏)
+        // t1: 60s, 4000mA (息屏)
+        // t2: 120s, 2000mA (亮屏)
+        // 预期安时积分计算：
+        // 0~60s 切片 (1/60 h)：(4000 + 4000) / 2 * (1/60) = 66.6667 mAh (息屏)
+        // 60~120s 切片 (1/60 h)：(4000 + 2000) / 2 * (1/60) = 50.0000 mAh
+        // 总计：116.6667 mAh
+        val points = listOf(
+            ChargingSamplePoint(baseTime, 16.0f, 30, 32.0f, 4.0f, 4000f, isScreenOn = false),
+            ChargingSamplePoint(baseTime + 60_000L, 16.4f, 31, 32.5f, 4.1f, 4000f, isScreenOn = false),
+            ChargingSamplePoint(baseTime + 120_000L, 8.6f, 32, 33.0f, 4.3f, 2000f, isScreenOn = true)
+        )
+        val json = ChargingHistoryRecord.pointsToJson(points)
+        val record = ChargingHistoryRecord(
+            id = baseTime + 120_000L,
+            recordTime = "2026-11-03 08:00:00",
+            startTimestamp = baseTime,
+            endTimestamp = baseTime + 120_000L,
+            durationMs = 120_000L,
+            startLevel = 30,
+            endLevel = 32,
+            levelGain = 2,
+            chargedEnergyWh = 0.5f,
+            avgPowerWatts = 15.0f,
+            maxPowerWatts = 16.4f,
+            maxTemperature = 33.0f,
+            chargeType = "交流快充",
+            samplePointsJson = json
+        )
+
+        val totalMah = record.getNetChargeMah()
+        org.junit.Assert.assertNotNull(totalMah)
+        assertEquals(116.67f, totalMah!!, 0.1f)
+
+        // 测试仅息屏部分：前 60 秒息屏，预期 66.67 mAh
+        val screenOffMah = record.getNetChargeMah(screenOffOnly = true)
+        org.junit.Assert.assertNotNull(screenOffMah)
+        assertEquals(66.67f, screenOffMah!!, 0.1f)
+    }
+
+    /**
+     * 测试当采样点序列为空或不足两个点时，getNetChargeMah 如实返回 null，绝不合成或保底伪造数据。
+     */
+    @Test
+    fun testRecordNetChargeMahWithMissingOrFewPoints() {
+        // 无采样点
+        val recordEmpty = ChargingHistoryRecord(
+            id = 1700000000000L,
+            recordTime = "2026-11-03 08:00:00",
+            startTimestamp = 1700000000000L,
+            endTimestamp = 1700000060000L,
+            durationMs = 60000L,
+            startLevel = 30,
+            endLevel = 35,
+            levelGain = 5,
+            chargedEnergyWh = 2.0f,
+            avgPowerWatts = 15.0f,
+            maxPowerWatts = 18.0f,
+            maxTemperature = 33.0f,
+            chargeType = "交流快充",
+            samplePointsJson = ""
+        )
+        org.junit.Assert.assertNull(recordEmpty.getNetChargeMah())
+
+        // 仅有一个采样点
+        val singlePoint = listOf(
+            ChargingSamplePoint(1700000000000L, 16.0f, 30, 32.0f, 4.0f, 4000f)
+        )
+        val recordSingle = recordEmpty.copy(samplePointsJson = ChargingHistoryRecord.pointsToJson(singlePoint))
+        org.junit.Assert.assertNull(recordSingle.getNetChargeMah())
+    }
 }
 
 

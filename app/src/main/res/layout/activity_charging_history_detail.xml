@@ -124,13 +124,14 @@
                         android:layout_marginVertical="12dp"
                         android:background="#14888888" />
 
-                    <!-- 2. 电量与充入能量（置于时长上方，无小标题） -->
+                    <!-- 2. 电量与充入能量（拆分为：电量变化、充入电量、充入能量三列网格） -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:gravity="center_vertical"
                         android:orientation="horizontal">
 
+                        <!-- 左列：电量变化 -->
                         <LinearLayout
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
@@ -150,14 +151,44 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="4dp"
                                 android:textColor="#00C853"
-                                android:textSize="17sp"
+                                android:textSize="16sp"
                                 android:textStyle="bold"
                                 tools:text="20% → 85% (+65%)" />
                         </LinearLayout>
 
+                        <!-- 中列：充入电量 (纯物理净电荷，安时微积分) -->
                         <LinearLayout
-                            android:layout_width="wrap_content"
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:gravity="center"
+                                android:text="@string/charging_detail_charged_charge"
+                                android:textColor="?android:attr/textColorSecondary"
+                                android:textSize="12sp" />
+
+                            <TextView
+                                android:id="@+id/tv_charged_charge"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:gravity="center"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="16sp"
+                                android:textStyle="bold"
+                                tools:text="+3235 mAh" />
+                        </LinearLayout>
+
+                        <!-- 右列：充入能量 (电源实际做功，瓦时微积分) -->
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
                             android:gravity="end"
                             android:orientation="vertical">
 
@@ -174,7 +205,7 @@
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="4dp"
                                 android:textColor="?android:attr/textColorPrimary"
-                                android:textSize="17sp"
+                                android:textSize="16sp"
                                 android:textStyle="bold"
                                 tools:text="+6.85 Wh" />
                         </LinearLayout>

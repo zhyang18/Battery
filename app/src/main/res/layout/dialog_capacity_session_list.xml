@@ -85,7 +85,7 @@
             android:layout_height="32dp"
             android:layout_marginEnd="4dp"
             android:layout_weight="1"
-            android:background="@drawable/bg_diag_pill_badge"
+            android:background="@drawable/bg_session_tab_selected"
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
@@ -101,7 +101,7 @@
             android:layout_height="32dp"
             android:layout_marginHorizontal="4dp"
             android:layout_weight="1"
-            android:background="@drawable/bg_diag_pill_badge"
+            android:background="@drawable/bg_session_tab_unselected"
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
@@ -116,7 +116,7 @@
             android:layout_height="32dp"
             android:layout_marginStart="4dp"
             android:layout_weight="1"
-            android:background="@drawable/bg_diag_pill_badge"
+            android:background="@drawable/bg_session_tab_unselected"
             android:clickable="true"
             android:focusable="true"
             android:gravity="center"
@@ -126,47 +126,12 @@
             android:textSize="11.5sp" />
     </LinearLayout>
 
-    <!-- 样本列表与空视图 -->
-    <FrameLayout
+    <!-- 样本列表与空视图 ViewPager2 左右横滑容器 -->
+    <androidx.viewpager2.widget.ViewPager2
+        android:id="@+id/vp_capacity_sessions"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:minHeight="220dp">
+        android:minHeight="220dp" />
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/rv_capacity_sessions"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:clipToPadding="false"
-            android:overScrollMode="never"
-            android:paddingBottom="16dp" />
-
-        <LinearLayout
-            android:id="@+id/layout_capacity_empty"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:padding="24dp"
-            android:visibility="gone">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/capacity_session_empty_title"
-                android:textColor="?android:attr/textColorPrimary"
-                android:textSize="14sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:gravity="center"
-                android:text="@string/capacity_session_empty_desc"
-                android:textColor="?android:attr/textColorSecondary"
-                android:textSize="11sp" />
-        </LinearLayout>
-    </FrameLayout>
 </LinearLayout>

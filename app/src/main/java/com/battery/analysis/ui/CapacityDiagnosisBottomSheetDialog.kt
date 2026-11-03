@@ -17,6 +17,10 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.google.android.material.button.MaterialButton
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import java.util.regex.Pattern
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -205,10 +209,12 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
             tvFcc?.text = "-- mAh"
             tvDesignCap?.text = "-- mAh"
             tvSoh?.text = "--%"
+            val pendingColor = Color.parseColor("#64748b")
             tvMaturityBadge?.text = getString(R.string.capacity_maturity_pending)
-            tvMaturityBadge?.setTextColor(Color.parseColor("#64748b"))
-            tvMaturityBadge?.let { setRoundedBadgeBackground(it, Color.parseColor("#64748b"), 6f) }
-            tvSessionCounts?.text = getString(R.string.capacity_diag_zero_times)
+            tvMaturityBadge?.setTextColor(pendingColor)
+            tvMaturityBadge?.let { setRoundedBadgeBackground(it, pendingColor, 6f) }
+            val zeroText = getString(R.string.capacity_diag_zero_times)
+            tvSessionCounts?.text = formatSessionCountsWithColor(zeroText, pendingColor)
             tvSocSpan?.text = "0%"
             tvDispersion?.text = "--"
             tvConfidenceInterval?.text = "--"
@@ -236,7 +242,8 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
         tvMaturityBadge?.text = result.maturityLevel.getDisplayName(requireContext())
         tvMaturityBadge?.setTextColor(badgeColor)
         tvMaturityBadge?.let { setRoundedBadgeBackground(it, badgeColor, 6f) }
-        tvSessionCounts?.text = getString(R.string.capacity_diag_counts_format, result.chargeSessionCount, result.dischargeSessionCount)
+        val countsText = getString(R.string.capacity_diag_counts_format, result.chargeSessionCount, result.dischargeSessionCount)
+        tvSessionCounts?.text = formatSessionCountsWithColor(countsText, badgeColor)
         tvSocSpan?.text = "${result.totalSocSpanCovered}%"
         tvDispersion?.text = result.dispersionCoefficientPercent?.let {
             String.format(Locale.getDefault(), "±%.2f%%", it)
@@ -271,5 +278,26 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
             setCornerRadius(cornerRadiusDp * density)
         }
         view.background = drawable
+    }
+
+    /**
+     * 将格式化后的会话次数字符串中的数字部分渲染为指定的高亮主题色。
+     *
+     * @param text 包含会话次数的原始文本（如 "充电 3 次 ｜ 放电 4 次" 或 "0 次"）
+     * @param highlightColor 用于高亮展示数字的颜色值
+     * @return 包含颜色样式区间的 [CharSequence]
+     */
+    private fun formatSessionCountsWithColor(text: String, highlightColor: Int): CharSequence {
+        val spannable = SpannableStringBuilder(text)
+        val matcher = Pattern.compile("\\d+").matcher(text)
+        while (matcher.find()) {
+            spannable.setSpan(
+                ForegroundColorSpan(highlightColor),
+                matcher.start(),
+                matcher.end(),
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+        }
+        return spannable
     }
 }

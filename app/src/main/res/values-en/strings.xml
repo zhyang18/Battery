@@ -626,6 +626,7 @@
     <string name="charging_detail_screen_off_duration">Screen-off Duration</string>
     <string name="charging_detail_battery_section">Battery &amp; Energy</string>
     <string name="charging_detail_level_change">Level Change</string>
+    <string name="charging_detail_charged_charge">Charged Capacity</string>
     <string name="charging_detail_charged_energy">Charged Energy</string>
     <string name="charging_detail_power_section">Power &amp; Temperature</string>
     <string name="charging_detail_avg_power">Average Power</string>

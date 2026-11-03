@@ -163,10 +163,18 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
         val unit = PowerDisplayUnit.fromId(prefs.getInt(PowerDisplayUnit.PREF_KEY_POWER_DISPLAY_UNIT, PowerDisplayUnit.WH.id))
         binding.chargingChartView.setDisplayUnit(unit)
 
-        binding.tvChargedEnergy.setUnitText(BatteryEnergyCalculator.formatChargingDetailEnergy(
-            record.chargedEnergyWh,
-            unit
-        ))
+        // 真实充入电量（纯物理净电荷，安时微积分），口径与容量自学习系统 100% 统一
+        val netChargeMah = record.getNetChargeMah()
+        val chargeText = if (netChargeMah != null) {
+            String.format(Locale.getDefault(), "+%.0f mAh", netChargeMah)
+        } else {
+            "--"
+        }
+        binding.tvChargedCharge.setUnitText(chargeText)
+
+        // 充入能量（电源做功，瓦时微积分）
+        val energyText = String.format(Locale.getDefault(), "+%.2f Wh", record.chargedEnergyWh)
+        binding.tvChargedEnergy.setUnitText(energyText)
 
         binding.tvAvgPower.setUnitText(String.format(
             Locale.getDefault(),
@@ -194,10 +202,8 @@ class ChargingHistoryDetailActivity : AppCompatActivity() {
             binding.layoutScreenOffSpecial.visibility = View.VISIBLE
             val screenOffSign = if (record.screenOffLevelGain >= 0) "+${record.screenOffLevelGain}%" else "${record.screenOffLevelGain}%"
             binding.tvScreenOffLevelGain.setUnitText(screenOffSign)
-            binding.tvScreenOffEnergy.setUnitText(BatteryEnergyCalculator.formatChargingDetailEnergy(
-                record.screenOffEnergyWh,
-                unit
-            ))
+            val screenOffEnergyText = String.format(Locale.getDefault(), "+%.2f Wh", record.screenOffEnergyWh)
+            binding.tvScreenOffEnergy.setUnitText(screenOffEnergyText)
         } else {
             binding.layoutScreenOffSpecial.visibility = View.GONE
         }

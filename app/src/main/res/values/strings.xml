@@ -628,6 +628,7 @@
     <string name="charging_detail_screen_off_duration">息屏充电时长</string>
     <string name="charging_detail_battery_section">电量与充入能量</string>
     <string name="charging_detail_level_change">电量变化</string>
+    <string name="charging_detail_charged_charge">充入电量</string>
     <string name="charging_detail_charged_energy">充入能量</string>
     <string name="charging_detail_power_section">充电功率与温度</string>
     <string name="charging_detail_avg_power">平均功率</string>

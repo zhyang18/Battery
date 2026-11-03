@@ -1,6 +1,5 @@
 package com.battery.analysis.ui
 
-import android.app.AlertDialog
 import android.graphics.Color
 import android.os.Bundle
 import android.view.KeyEvent
@@ -10,14 +9,17 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.ViewPager2
 import com.battery.analysis.R
 import com.battery.analysis.db.CapacityCandidateDbHelper
 import com.battery.analysis.manager.BatteryCapacityManager
 import com.battery.analysis.model.CandidateSessionType
 import com.battery.analysis.model.CapacityCandidate
+import com.battery.analysis.util.DialogWindowHelper
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
@@ -30,19 +32,27 @@ import java.util.Locale
 
 /**
  * 自学习充放电样本明细列表底部抽屉弹窗（CapacitySessionListBottomSheetDialog）。
- * 展示所有参与或历史归档的充放电样本，直观呈现起止电量、净电量、推算容量与模型纳入状态。
+ * 展示所有参与或历史归档的充放电样本，支持顶部 Tab 点击与列表区域左右手势滑动切换（全部/充电/放电），
+ * 直观呈现起止电量、净电量、推算容量与模型纳入状态。
  */
 class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
 
-    private enum class SessionTabFilter {
-        ALL, CHARGE, DISCHARGE
-    }
-
-    private var currentFilter = SessionTabFilter.ALL
     private var allCandidates: List<CapacityCandidate> = emptyList()
     private var currentThreshold: Int = 15
-    private lateinit var adapter: CandidateSessionAdapter
+    private lateinit var sessionPageAdapter: SessionPageAdapter
+    private var viewPager: ViewPager2? = null
 
+    private val dateFormat = SimpleDateFormat("MM-dd", Locale.getDefault())
+    private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+
+    /**
+     * 创建并返回底部抽屉弹窗的根视图。
+     *
+     * @param inflater 布局填充器实例
+     * @param container 父容器视图（若有）
+     * @param savedInstanceState 状态保存数据包
+     * @return 抽屉弹窗的根视图 [View]
+     */
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -51,6 +61,9 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
         return inflater.inflate(R.layout.dialog_capacity_session_list, container, false)
     }
 
+    /**
+     * 在抽屉弹窗启动展示时配置窗口属性，消除背景遮罩叠层，并固定统一高度。
+     */
     override fun onStart() {
         super.onStart()
         val dialog = dialog as? BottomSheetDialog ?: return
@@ -102,6 +115,9 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
         }
     }
 
+    /**
+     * 触发抽屉平滑向下滑出收起动效并安全关闭弹窗。
+     */
     private fun dismissWithSlideDownAnimation() {
         val dialog = dialog as? BottomSheetDialog
         val bottomSheet = dialog?.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
@@ -114,6 +130,12 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
         }
     }
 
+    /**
+     * 视图构建完成后初始化事件监听、ViewPager2 左右手势滑动切换、分类 Tab 与数据绑定。
+     *
+     * @param view 弹窗根视图 [View]
+     * @param savedInstanceState 状态保存数据包
+     */
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
@@ -121,56 +143,82 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             dismissWithSlideDownAnimation()
         }
 
-        val rv = view.findViewById<RecyclerView>(R.id.rv_capacity_sessions)
-        rv.layoutManager = LinearLayoutManager(context)
-        adapter = CandidateSessionAdapter(
+        val vp = view.findViewById<ViewPager2>(R.id.vp_capacity_sessions)
+        viewPager = vp
+        sessionPageAdapter = SessionPageAdapter(
+            formatTimeRange = { start, end -> formatTimeRange(start, end) },
             onDeleteClicked = { candidate ->
                 showDeleteConfirmDialog(candidate)
             }
         )
-        rv.adapter = adapter
+        vp.adapter = sessionPageAdapter
+        // 预加载并常驻相邻页签，保障左右滑动手势极致顺畅无白屏
+        vp.offscreenPageLimit = 2
+
+        vp.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) {
+                super.onPageSelected(position)
+                updateTabStyles(position)
+            }
+        })
 
         setupTabs(view)
         loadData()
     }
 
+    /**
+     * 初始化顶部分类选项卡（全部、充电、放电）的点击切换联动。
+     *
+     * @param root 弹窗根视图 [View]
+     */
     private fun setupTabs(root: View) {
         val tabAll = root.findViewById<TextView>(R.id.tab_session_all)
         val tabCharge = root.findViewById<TextView>(R.id.tab_session_charge)
         val tabDischarge = root.findViewById<TextView>(R.id.tab_session_discharge)
 
-        fun updateTabStyles() {
-            val activeColor = Color.parseColor("#10b981")
-            val inactiveColor = Color.parseColor("#64748b")
-
-            tabAll.setTextColor(if (currentFilter == SessionTabFilter.ALL) activeColor else inactiveColor)
-            tabCharge.setTextColor(if (currentFilter == SessionTabFilter.CHARGE) activeColor else inactiveColor)
-            tabDischarge.setTextColor(if (currentFilter == SessionTabFilter.DISCHARGE) activeColor else inactiveColor)
-
-            tabAll.paint.isFakeBoldText = currentFilter == SessionTabFilter.ALL
-            tabCharge.paint.isFakeBoldText = currentFilter == SessionTabFilter.CHARGE
-            tabDischarge.paint.isFakeBoldText = currentFilter == SessionTabFilter.DISCHARGE
-        }
-
         tabAll.setOnClickListener {
-            currentFilter = SessionTabFilter.ALL
-            updateTabStyles()
-            applyFilterAndSubmit()
+            viewPager?.setCurrentItem(0, true)
         }
         tabCharge.setOnClickListener {
-            currentFilter = SessionTabFilter.CHARGE
-            updateTabStyles()
-            applyFilterAndSubmit()
+            viewPager?.setCurrentItem(1, true)
         }
         tabDischarge.setOnClickListener {
-            currentFilter = SessionTabFilter.DISCHARGE
-            updateTabStyles()
-            applyFilterAndSubmit()
+            viewPager?.setCurrentItem(2, true)
         }
 
-        updateTabStyles()
+        val currentPos = viewPager?.currentItem ?: 0
+        updateTabStyles(currentPos)
     }
 
+    /**
+     * 根据当前选中的页签索引更新顶部全部、充电、放电三大 Tab 的高亮胶囊背景、文本颜色及粗体样式。
+     *
+     * @param selectedIndex 当前选中的页签下标（0：全部，1：充电，2：放电）
+     */
+    private fun updateTabStyles(selectedIndex: Int) {
+        val tabAll = view?.findViewById<TextView>(R.id.tab_session_all) ?: return
+        val tabCharge = view?.findViewById<TextView>(R.id.tab_session_charge) ?: return
+        val tabDischarge = view?.findViewById<TextView>(R.id.tab_session_discharge) ?: return
+
+        val activeColor = Color.parseColor("#10b981")
+        val inactiveColor = Color.parseColor("#64748b")
+
+        tabAll.setTextColor(if (selectedIndex == 0) activeColor else inactiveColor)
+        tabCharge.setTextColor(if (selectedIndex == 1) activeColor else inactiveColor)
+        tabDischarge.setTextColor(if (selectedIndex == 2) activeColor else inactiveColor)
+
+        tabAll.setBackgroundResource(if (selectedIndex == 0) R.drawable.bg_session_tab_selected else R.drawable.bg_session_tab_unselected)
+        tabCharge.setBackgroundResource(if (selectedIndex == 1) R.drawable.bg_session_tab_selected else R.drawable.bg_session_tab_unselected)
+        tabDischarge.setBackgroundResource(if (selectedIndex == 2) R.drawable.bg_session_tab_selected else R.drawable.bg_session_tab_unselected)
+
+        tabAll.paint.isFakeBoldText = (selectedIndex == 0)
+        tabCharge.paint.isFakeBoldText = (selectedIndex == 1)
+        tabDischarge.paint.isFakeBoldText = (selectedIndex == 2)
+    }
+
+    /**
+     * 异步从本地数据库加载所有充放电候选样本数据，并同步有效电量跨度阈值。
+     */
     private fun loadData() {
         val ctx = context ?: return
         viewLifecycleOwner.lifecycleScope.launch {
@@ -181,26 +229,23 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             allCandidates = withContext(Dispatchers.IO) {
                 dbHelper.getAllCandidates()
             }
-            applyFilterAndSubmit()
+            applyDataToPages()
         }
     }
 
-    private fun applyFilterAndSubmit() {
-        val filtered = when (currentFilter) {
-            SessionTabFilter.ALL -> allCandidates
-            SessionTabFilter.CHARGE -> allCandidates.filter { it.sessionType == CandidateSessionType.CHARGE }
-            SessionTabFilter.DISCHARGE -> allCandidates.filter { it.sessionType == CandidateSessionType.DISCHARGE }
-        }
+    /**
+     * 将候选样本数据按分类（全部、充电、放电）分发至 ViewPager2 的各个子页面，并同步更新副标题统计和 Tab 数量。
+     */
+    private fun applyDataToPages() {
+        val chargeList = allCandidates.filter { it.sessionType == CandidateSessionType.CHARGE }
+        val dischargeList = allCandidates.filter { it.sessionType == CandidateSessionType.DISCHARGE }
 
-        val emptyView = view?.findViewById<View>(R.id.layout_capacity_empty)
-        val rv = view?.findViewById<RecyclerView>(R.id.rv_capacity_sessions)
-        if (filtered.isEmpty()) {
-            emptyView?.visibility = View.VISIBLE
-            rv?.visibility = View.GONE
-        } else {
-            emptyView?.visibility = View.GONE
-            rv?.visibility = View.VISIBLE
-        }
+        sessionPageAdapter.updateAllPages(
+            allData = allCandidates,
+            chargeData = chargeList,
+            dischargeData = dischargeList,
+            threshold = currentThreshold
+        )
 
         val validCount = allCandidates.count { !it.isExcluded && it.socSpanPercent >= currentThreshold }
         val subtitle = view?.findViewById<TextView>(R.id.tv_session_list_subtitle)
@@ -210,71 +255,275 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
         val tabCharge = view?.findViewById<TextView>(R.id.tab_session_charge)
         val tabDischarge = view?.findViewById<TextView>(R.id.tab_session_discharge)
 
-        val chargeTotal = allCandidates.count { it.sessionType == CandidateSessionType.CHARGE }
-        val dischargeTotal = allCandidates.count { it.sessionType == CandidateSessionType.DISCHARGE }
         tabAll?.text = getString(R.string.capacity_session_tab_all_format, allCandidates.size)
-        tabCharge?.text = getString(R.string.capacity_session_tab_charge_format, chargeTotal)
-        tabDischarge?.text = getString(R.string.capacity_session_tab_discharge_format, dischargeTotal)
-
-        adapter.submitList(filtered, currentThreshold)
+        tabCharge?.text = getString(R.string.capacity_session_tab_charge_format, chargeList.size)
+        tabDischarge?.text = getString(R.string.capacity_session_tab_discharge_format, dischargeList.size)
     }
 
+    /**
+     * 将候选样本的起止时间戳格式化为易读的字符串。
+     * 同一天内自动合并日期显示，避免多余重复文本。
+     *
+     * @param startTimestamp 会话开始绝对时间戳（毫秒）
+     * @param endTimestamp 会话结束绝对时间戳（毫秒）
+     * @return 格式化后的时间跨度字符串
+     */
+    private fun formatTimeRange(startTimestamp: Long, endTimestamp: Long): String {
+        if (startTimestamp <= 0L && endTimestamp <= 0L) return "--"
+        if (startTimestamp <= 0L) return timeFormat.format(Date(endTimestamp))
+        if (endTimestamp <= 0L) return timeFormat.format(Date(startTimestamp))
+
+        val startDate = dateFormat.format(Date(startTimestamp))
+        val endDate = dateFormat.format(Date(endTimestamp))
+        val startTime = timeFormat.format(Date(startTimestamp))
+        val endTime = timeFormat.format(Date(endTimestamp))
+
+        return if (startDate == endDate) {
+            "$startDate $startTime ~ $endTime"
+        } else {
+            "$startDate $startTime ~ $endDate $endTime"
+        }
+    }
+
+    /**
+     * 弹出确认删除指定容量会话样本的统一现代化高颜值对话框。
+     * 采用与系统各模块一致的圆角卡片布局、红色危险操作警告图标及双色功能按钮，
+     * 并清晰预览待删除样本的类型徽章、起止时间、推算容量与电量变化。
+     *
+     * @param candidate 待删除的候选容量样本数据实体 [CapacityCandidate]
+     */
     private fun showDeleteConfirmDialog(candidate: CapacityCandidate) {
         val ctx = context ?: return
-        AlertDialog.Builder(ctx)
-            .setTitle(R.string.dialog_delete_sample_title)
-            .setMessage(getString(R.string.dialog_delete_sample_desc, String.format(Locale.getDefault(), "%.0f mAh", candidate.fccObservedMah)))
-            .setNegativeButton(R.string.cancel, null)
-            .setPositiveButton(R.string.delete) { _, _ ->
-                viewLifecycleOwner.lifecycleScope.launch {
-                    withContext(Dispatchers.IO) {
-                        CapacityCandidateDbHelper.getInstance(ctx).deleteCandidate(candidate.id)
-                    }
-                    BatteryCapacityManager.getInstance(ctx).refreshEstimateAsync()
-                    loadData()
+        val dialogView = layoutInflater.inflate(R.layout.dialog_custom_delete_confirm, null)
+
+        val tvTitle = dialogView.findViewById<TextView>(R.id.tv_dialog_delete_title)
+        val tvDesc = dialogView.findViewById<TextView>(R.id.tv_dialog_delete_desc)
+        val tvPreviewCat = dialogView.findViewById<TextView>(R.id.tv_preview_cat)
+        val tvPreviewTime = dialogView.findViewById<TextView>(R.id.tv_preview_time)
+        val tvPreviewSummary = dialogView.findViewById<TextView>(R.id.tv_preview_summary)
+        val btnCancel = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_cancel)
+        val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_dialog_delete_confirm)
+
+        tvTitle.text = getString(R.string.dialog_delete_sample_title)
+        tvDesc.text = getString(
+            R.string.dialog_delete_sample_desc,
+            String.format(Locale.getDefault(), "%.0f mAh", candidate.fccObservedMah)
+        )
+
+        // 配置待删除样本卡片预览信息
+        val isCharge = candidate.sessionType == CandidateSessionType.CHARGE
+        tvPreviewCat.text = if (isCharge) {
+            getString(R.string.capacity_session_badge_charge)
+        } else {
+            getString(R.string.capacity_session_badge_discharge)
+        }
+        tvPreviewCat.setTextColor(
+            if (isCharge) Color.parseColor("#10b981") else Color.parseColor("#38bdf8")
+        )
+        tvPreviewTime.text = formatTimeRange(candidate.startTimestamp, candidate.endTimestamp)
+
+        val fccStr = String.format(Locale.getDefault(), "%.0f mAh", candidate.fccObservedMah)
+        val socStr = getString(
+            R.string.capacity_session_soc_span_format,
+            candidate.startSoc,
+            candidate.endSoc,
+            candidate.socSpanPercent
+        )
+        tvPreviewSummary.text = "🔋 $fccStr   •   $socStr"
+
+        val dialog = AlertDialog.Builder(ctx)
+            .setView(dialogView)
+            .create()
+
+        btnCancel.setOnClickListener {
+            dialog.dismiss()
+        }
+        btnConfirm.setOnClickListener {
+            viewLifecycleOwner.lifecycleScope.launch {
+                withContext(Dispatchers.IO) {
+                    CapacityCandidateDbHelper.getInstance(ctx).deleteCandidate(candidate.id)
                 }
+                BatteryCapacityManager.getInstance(ctx).refreshEstimateAsync()
+                loadData()
+                dialog.dismiss()
             }
-            .show()
+        }
+
+        dialog.show()
+        DialogWindowHelper.applyAdaptiveDialogWindowStyle(
+            dialog = dialog,
+            dialogView = dialogView,
+            widthRatio = 0.92,
+            maxHeightRatio = 0.90f
+        )
     }
 
+    /**
+     * ViewPager2 承载全部、充电、放电三大分类样本列表的分页适配器。
+     *
+     * @property formatTimeRange 起止时间格式化委托函数
+     * @property onDeleteClicked 样本删除按钮点击事件回调
+     */
+    private class SessionPageAdapter(
+        private val formatTimeRange: (Long, Long) -> String,
+        private val onDeleteClicked: (CapacityCandidate) -> Unit
+    ) : RecyclerView.Adapter<SessionPageViewHolder>() {
+
+        private val candidateAdapters = Array(3) {
+            CandidateSessionAdapter(formatTimeRange, onDeleteClicked)
+        }
+        private val pageDataList = Array<List<CapacityCandidate>>(3) { emptyList() }
+        private val attachedHolders = mutableMapOf<Int, SessionPageViewHolder>()
+        private var currentThreshold: Int = 15
+
+        /**
+         * 更新所有页面的数据并触发子列表渲染。
+         *
+         * @param allData 全部样本列表
+         * @param chargeData 充电样本列表
+         * @param dischargeData 放电样本列表
+         * @param threshold 当前有效电量跨度门限
+         */
+        fun updateAllPages(
+            allData: List<CapacityCandidate>,
+            chargeData: List<CapacityCandidate>,
+            dischargeData: List<CapacityCandidate>,
+            threshold: Int
+        ) {
+            currentThreshold = threshold
+            pageDataList[0] = allData
+            pageDataList[1] = chargeData
+            pageDataList[2] = dischargeData
+
+            for (i in 0..2) {
+                candidateAdapters[i].submitList(pageDataList[i], threshold)
+                attachedHolders[i]?.let { holder ->
+                    bindPageHolder(holder, i)
+                }
+            }
+        }
+
+        /**
+         * 创建分页 ViewHolder 容器。
+         *
+         * @param parent 父容器视图组 [ViewGroup]
+         * @param viewType 视图类型编号
+         * @return 初始化后的 [SessionPageViewHolder] 实例
+         */
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): SessionPageViewHolder {
+            val view = LayoutInflater.from(parent.context)
+                .inflate(R.layout.item_capacity_session_page, parent, false)
+            return SessionPageViewHolder(view)
+        }
+
+        /**
+         * 绑定对应页签的 RecyclerView 与空视图状态。
+         *
+         * @param holder 页面 ViewHolder [SessionPageViewHolder]
+         * @param position 页面下标索引（0：全部，1：充电，2：放电）
+         */
+        override fun onBindViewHolder(holder: SessionPageViewHolder, position: Int) {
+            attachedHolders[position] = holder
+            if (holder.rv.adapter != candidateAdapters[position]) {
+                holder.rv.layoutManager = LinearLayoutManager(holder.itemView.context)
+                holder.rv.adapter = candidateAdapters[position]
+            }
+            bindPageHolder(holder, position)
+        }
+
+        /**
+         * 当页面 ViewHolder 从窗口解绑时移除持有，防止内存泄漏。
+         *
+         * @param holder 页面 ViewHolder [SessionPageViewHolder]
+         */
+        override fun onViewRecycled(holder: SessionPageViewHolder) {
+            super.onViewRecycled(holder)
+            val pos = holder.bindingAdapterPosition
+            if (pos != RecyclerView.NO_POSITION) {
+                attachedHolders.remove(pos)
+            }
+        }
+
+        /**
+         * 刷新指定 ViewHolder 的空状态与列表可见性。
+         *
+         * @param holder 页面 ViewHolder [SessionPageViewHolder]
+         * @param position 页面下标索引
+         */
+        private fun bindPageHolder(holder: SessionPageViewHolder, position: Int) {
+            val data = pageDataList[position]
+            if (data.isEmpty()) {
+                holder.layoutEmpty.visibility = View.VISIBLE
+                holder.rv.visibility = View.GONE
+            } else {
+                holder.layoutEmpty.visibility = View.GONE
+                holder.rv.visibility = View.VISIBLE
+            }
+        }
+
+        /**
+         * 获取 ViewPager2 总页签数量。
+         *
+         * @return 页面总数（固定为 3）
+         */
+        override fun getItemCount(): Int = 3
+    }
+
+    /**
+     * 单个分类页面的 ViewHolder 容器。
+     *
+     * @param view 分页根视图 [View]
+     */
+    private class SessionPageViewHolder(view: View) : RecyclerView.ViewHolder(view) {
+        val rv: RecyclerView = view.findViewById(R.id.rv_page_sessions)
+        val layoutEmpty: View = view.findViewById(R.id.layout_page_empty)
+    }
+
+    /**
+     * 候选容量会话 RecyclerView 列表适配器。
+     *
+     * @property formatTimeRange 时间范围格式化函数
+     * @property onDeleteClicked 删除按钮点击回调监听器
+     */
     private class CandidateSessionAdapter(
+        private val formatTimeRange: (Long, Long) -> String,
         private val onDeleteClicked: (CapacityCandidate) -> Unit
     ) : RecyclerView.Adapter<CandidateSessionViewHolder>() {
 
         private var items: List<CapacityCandidate> = emptyList()
         private var threshold: Int = 15
-        private val dateFormat = SimpleDateFormat("MM-dd", Locale.getDefault())
-        private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 
-        private fun formatTimeRange(startTimestamp: Long, endTimestamp: Long): String {
-            if (startTimestamp <= 0L && endTimestamp <= 0L) return "--"
-            if (startTimestamp <= 0L) return timeFormat.format(Date(endTimestamp))
-            if (endTimestamp <= 0L) return timeFormat.format(Date(startTimestamp))
-
-            val startDate = dateFormat.format(Date(startTimestamp))
-            val endDate = dateFormat.format(Date(endTimestamp))
-            val startTime = timeFormat.format(Date(startTimestamp))
-            val endTime = timeFormat.format(Date(endTimestamp))
-
-            return if (startDate == endDate) {
-                "$startDate $startTime ~ $endTime"
-            } else {
-                "$startDate $startTime ~ $endDate $endTime"
-            }
-        }
-
+        /**
+         * 提交最新的候选样本列表并更新当前电量门限。
+         *
+         * @param list 待展示的候选样本列表集合
+         * @param currentThreshold 当前生效的电量跨度最低门限百分比
+         */
         fun submitList(list: List<CapacityCandidate>, currentThreshold: Int) {
             items = list
             threshold = currentThreshold
             notifyDataSetChanged()
         }
 
+        /**
+         * 创建候选会话列表条目的 ViewHolder 实例。
+         *
+         * @param parent 列表条目的父级容器 [ViewGroup]
+         * @param viewType 视图类型整型标识
+         * @return 初始化后的 [CandidateSessionViewHolder] 实例
+         */
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CandidateSessionViewHolder {
             val view = LayoutInflater.from(parent.context)
                 .inflate(R.layout.item_capacity_candidate_session, parent, false)
             return CandidateSessionViewHolder(view)
         }
 
+        /**
+         * 将指定索引位置的候选样本数据绑定至 ViewHolder 对应视图元素。
+         *
+         * @param holder 列表条目视图持有者 [CandidateSessionViewHolder]
+         * @param position 列表条目索引位置
+         */
         override fun onBindViewHolder(holder: CandidateSessionViewHolder, position: Int) {
             val item = items[position]
             val isCharge = item.sessionType == CandidateSessionType.CHARGE
@@ -336,9 +585,19 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             }
         }
 
+        /**
+         * 获取当前列表展示的数据项总数量。
+         *
+         * @return 候选样本条目数量
+         */
         override fun getItemCount(): Int = items.size
     }
 
+    /**
+     * 单个候选会话条目的视图容器 ViewHolder。
+     *
+     * @param view 单个条目的根视图 [View]
+     */
     private class CandidateSessionViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val tvTypeBadge: TextView = view.findViewById(R.id.tv_item_session_type_badge)
         val tvTime: TextView = view.findViewById(R.id.tv_item_session_time)

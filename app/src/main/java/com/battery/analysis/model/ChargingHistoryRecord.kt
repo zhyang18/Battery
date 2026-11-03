@@ -2,6 +2,8 @@ package com.battery.analysis.model
 
 import android.content.Context
 import com.battery.analysis.R
+import com.battery.analysis.domain.estimator.BatteryChargeIntegrator
+import com.battery.analysis.domain.estimator.IntegrablePoint
 import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
@@ -267,6 +269,30 @@ data class ChargingHistoryRecord(
             }
         }
         return result
+    }
+
+    /**
+     * 基于本次充电全量真实物理采样点执行高精度梯形安时微积分，计算流入电芯的真实物理净电荷量（单位：mAh）。
+     * 遵循严格电荷守恒原理与库仑计规范，计算口径与容量自学习诊断系统完全一致，绝不经过电压转换。
+     * 若未持久化有效采样点序列或有效点不足 2 个，如实返回 null，绝不合成或虚构替补数据。
+     *
+     * @param screenOffOnly 是否仅统计息屏充电期间的净电荷量，默认为 false（统计全过程）
+     * @return 真实梯形安时微积分计算得出的净充入电荷量（单位：mAh），数据缺失或点不足时返回 null
+     */
+    fun getNetChargeMah(screenOffOnly: Boolean = false): Float? {
+        val points = getSamplePoints()
+        if (points.size < 2) return null
+        val targetPoints = if (screenOffOnly) points.filter { !it.isScreenOn } else points
+        if (targetPoints.size < 2) return null
+
+        val integrablePoints = targetPoints.map { pt ->
+            object : IntegrablePoint {
+                override val elapsedRealtimeMs: Long = pt.timestamp
+                override val netCurrentMa: Float = pt.currentMa
+            }
+        }
+        val mah = BatteryChargeIntegrator.integrateChargeMah(integrablePoints)
+        return if (mah > 0.0) mah.toFloat() else null
     }
 
     /**

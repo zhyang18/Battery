@@ -115,11 +115,14 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="0.95"
+                android:gravity="end"
                 android:orientation="vertical">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:layout_gravity="end"
                     android:singleLine="true"
                     android:text="@string/capacity_item_fcc_label"
                     android:textColor="?android:attr/textColorSecondary"
@@ -130,6 +133,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
+                    android:gravity="end"
+                    android:layout_gravity="end"
                     android:singleLine="true"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="14sp"

@@ -304,18 +304,16 @@ class PowerDischargeMetricsViewBinderTest {
 
     /**
      * 测试气泡弹窗关键预测数据正则表达式匹配。
-     * 验证能够精准提取升级模型满电续航时长、预测基准放电速度数值以及当前剩余（或待机）续航数值，且不包含多余标签或括号。
+     * 验证能够精准提取升级模型/满电续航时长（亮屏/待机/综合）、预测基准放电速度数值以及当前剩余（或待机）续航数值，且不包含多余标签或括号。
      */
     @Test
     fun testFormatDischargeSpeedBubbleMessage_RegexMatchesExpectedFields() {
         val sampleText = """
             【亮屏续航预测】
             • 当前会话放电速度：5.6%/h (亮屏 05h36m44s)
-            • 近7天放电速度：5.6%/h (亮屏 02d22h)
-            • 满电亮屏续航：17h41m59s
-            • 升级模型(v2.2)：15h41m53s (可信度高)
             • 预测基准放电速度：7.4%/h
             • 当前剩余续航：07h22m44s (可信度高)
+            • 满电亮屏续航：15h41m53s (可信度高)
         """.trimIndent()
 
         val v2Match = PowerDischargeMetricsViewBinder.REGEX_V2_MODEL_DURATION.find(sampleText)
@@ -332,9 +330,9 @@ class PowerDischargeMetricsViewBinderTest {
 
         val sampleOffText = """
             【息屏续航预测】
-            • 升级模型(v2.2)：01d01h00m00s (可信度高)
             • 预测基准放电速度：2.8%/h
             • 当前待机续航：01d01h00m00s (可信度高)
+            • 满电待机时长：01d01h00m00s (可信度高)
         """.trimIndent()
 
         val offV2Match = PowerDischargeMetricsViewBinder.REGEX_V2_MODEL_DURATION.find(sampleOffText)
@@ -351,16 +349,39 @@ class PowerDischargeMetricsViewBinderTest {
     }
 
     /**
-     * 测试气泡弹窗预测数据格式化方法，验证空串安全返回且非空输入返回非空富文本对象。
+     * 测试气泡弹窗预测数据格式化方法，验证文本完整保留以及高/中/差置信度与数据充分性状态正则的精准匹配。
      */
     @Test
-    fun testFormatDischargeSpeedBubbleMessage_PreservesTextContent() {
+    fun testFormatDischargeSpeedBubbleMessage_PreservesTextContentAndAppliesStatusColors() {
         val emptyResult = PowerDischargeMetricsViewBinder.formatDischargeSpeedBubbleMessage("")
         assertEquals("", emptyResult.toString())
 
-        val rawText = "【亮屏续航预测】\n• 预测基准放电速度：7.4%/h\n• 当前剩余续航：07h22m44s"
+        val rawText = """
+            【亮屏续航预测】
+            • 当前会话放电速度：5.2%/h (亮屏 23m50s)
+            • 预测基准放电速度：6.4%/h
+            • 当前剩余续航：08h37m51s (可信度中等)
+            • 满电亮屏续航：15h42m01s (可信度高)
+              统计范围：最近 7 天
+              有效放电：累计亮屏 03d05h19m (数据充足)
+            • 备选状态：(可信度较低) (基本可用) (样本较少) (数据不足)
+        """.trimIndent()
+
         val formatted = PowerDischargeMetricsViewBinder.formatDischargeSpeedBubbleMessage(rawText)
         org.junit.Assert.assertNotNull(formatted)
+
+        val highMatches = PowerDischargeMetricsViewBinder.REGEX_STATUS_HIGH.findAll(rawText).map { it.value }.toSet()
+        assertTrue("必须匹配可信度高", highMatches.contains("可信度高"))
+        assertTrue("必须匹配数据充足", highMatches.contains("数据充足"))
+
+        val mediumMatches = PowerDischargeMetricsViewBinder.REGEX_STATUS_MEDIUM.findAll(rawText).map { it.value }.toSet()
+        assertTrue("必须匹配可信度中等", mediumMatches.contains("可信度中等"))
+        assertTrue("必须匹配基本可用", mediumMatches.contains("基本可用"))
+
+        val lowMatches = PowerDischargeMetricsViewBinder.REGEX_STATUS_LOW.findAll(rawText).map { it.value }.toSet()
+        assertTrue("必须匹配可信度较低", lowMatches.contains("可信度较低"))
+        assertTrue("必须匹配样本较少", lowMatches.contains("样本较少"))
+        assertTrue("必须匹配数据不足", lowMatches.contains("数据不足"))
     }
 
     /**
@@ -440,5 +461,64 @@ class PowerDischargeMetricsViewBinderTest {
         val standbyMatch = PowerDischargeMetricsViewBinder.REGEX_CURRENT_REMAINING_DURATION.find(standbyText)
         org.junit.Assert.assertNotNull(standbyMatch)
         org.junit.Assert.assertEquals("01d12h35m58s", standbyMatch!!.groups[1]?.value)
+    }
+
+    /**
+     * 验证根据剩余续航稳态基准放电功率换算基准放电速度百分比速率的逻辑。
+     * 当提供基准功率（例如 1.90W）与总能量（例如 29.79Wh）时，精确换算为 6.4%/h；
+     * 当基准功率或总能量缺失时，平滑降级采用 fallbackRate，绝不捏造假数据。
+     */
+    @Test
+    fun testCalculateBenchmarkDischargeRate() {
+        // Double 重载：1.90W / 29.79Wh * 100 = 6.3779...% -> 6.4%
+        val rate1 = PowerDischargeMetricsViewBinder.calculateBenchmarkDischargeRate(
+            benchmarkPowerWatts = 1.90,
+            totalCapacityWh = 29.79,
+            fallbackRate = 3.5f
+        )
+        org.junit.Assert.assertEquals(6.4f, rate1 ?: 0f, 0.05f)
+
+        // Float 重载：1.90W / 29.79f * 100 -> 6.4%
+        val rate1Float = PowerDischargeMetricsViewBinder.calculateBenchmarkDischargeRate(
+            benchmarkPowerWatts = 1.90,
+            totalCapacityWh = 29.79f,
+            fallbackRate = 3.5f
+        )
+        org.junit.Assert.assertEquals(6.4f, rate1Float ?: 0f, 0.05f)
+
+        // 基准功率缺失 -> 降级 fallbackRate (3.5%)
+        val rate2 = PowerDischargeMetricsViewBinder.calculateBenchmarkDischargeRate(
+            benchmarkPowerWatts = null,
+            totalCapacityWh = 29.79f,
+            fallbackRate = 3.5f
+        )
+        org.junit.Assert.assertEquals(3.5f, rate2 ?: 0f, 0.001f)
+
+        // 总容量缺失 -> 降级 fallbackRate
+        val rate3 = PowerDischargeMetricsViewBinder.calculateBenchmarkDischargeRate(
+            benchmarkPowerWatts = 1.90,
+            totalCapacityWh = null as Float?,
+            fallbackRate = 3.5f
+        )
+        org.junit.Assert.assertEquals(3.5f, rate3 ?: 0f, 0.001f)
+    }
+
+    /**
+     * 验证各行类型滑动窗口默认有效时长的提取。
+     * 亮屏标准切片 2 小时 (7200_000L)，息屏标准切片 12 小时 (43200_000L)，全局标准切片 24 小时 (86400_000L)。
+     */
+    @Test
+    fun testGetRollingDischargeDurationMs() {
+        val durOn = PowerDischargeMetricsViewBinder.getRollingDischargeDurationMs(BatteryEnergyCalculator.ROW_SCREEN_ON)
+        org.junit.Assert.assertEquals(7200_000L, durOn)
+
+        val durOff = PowerDischargeMetricsViewBinder.getRollingDischargeDurationMs(BatteryEnergyCalculator.ROW_SCREEN_OFF)
+        org.junit.Assert.assertEquals(43200_000L, durOff)
+
+        val durGlobal = PowerDischargeMetricsViewBinder.getRollingDischargeDurationMs(BatteryEnergyCalculator.ROW_GLOBAL)
+        org.junit.Assert.assertEquals(86400_000L, durGlobal)
+
+        val durInvalid = PowerDischargeMetricsViewBinder.getRollingDischargeDurationMs(999)
+        org.junit.Assert.assertNull(durInvalid)
     }
 }

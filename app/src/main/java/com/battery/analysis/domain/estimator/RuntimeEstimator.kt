@@ -932,41 +932,41 @@ class RuntimeEstimator(
             hasAuthoritativeLongTerm = hasAuthoritativeLongGlobal
         )
 
-        val finalOnEstimate = if (smoothedOnMs != null && smoothedOnMs != onEstimate.remainingMs) {
-            val safeMin = onEstimate.minRemainingMs?.let { kotlin.math.min(it, smoothedOnMs) } ?: smoothedOnMs
-            val safeMax = onEstimate.maxRemainingMs?.let { kotlin.math.max(it, smoothedOnMs) } ?: smoothedOnMs
-            onEstimate.copy(
-                remainingMs = smoothedOnMs,
-                minRemainingMs = safeMin,
-                maxRemainingMs = safeMax
-            )
-        } else {
-            onEstimate
-        }
+        val effectiveSmoothedOnMs = smoothedOnMs ?: onEstimate.remainingMs
+        val safeMinOn = onEstimate.minRemainingMs?.let { minOf(it, effectiveSmoothedOnMs ?: it) } ?: effectiveSmoothedOnMs
+        val safeMaxOn = onEstimate.maxRemainingMs?.let { maxOf(it, effectiveSmoothedOnMs ?: it) } ?: effectiveSmoothedOnMs
+        val finalOnEstimate = onEstimate.copy(
+            remainingMs = effectiveSmoothedOnMs,
+            minRemainingMs = safeMinOn,
+            maxRemainingMs = safeMaxOn,
+            benchmarkPowerWatts = baseOnPower,
+            actualFastPowerWatts = actualOnPower,
+            drainRateMultiplier = onDrainRate
+        )
 
-        val finalOffEstimate = if (smoothedOffMs != null && smoothedOffMs != offEstimate.remainingMs) {
-            val safeMin = offEstimate.minRemainingMs?.let { kotlin.math.min(it, smoothedOffMs) } ?: smoothedOffMs
-            val safeMax = offEstimate.maxRemainingMs?.let { kotlin.math.max(it, smoothedOffMs) } ?: smoothedOffMs
-            offEstimate.copy(
-                remainingMs = smoothedOffMs,
-                minRemainingMs = safeMin,
-                maxRemainingMs = safeMax
-            )
-        } else {
-            offEstimate
-        }
+        val effectiveSmoothedOffMs = smoothedOffMs ?: offEstimate.remainingMs
+        val safeMinOff = offEstimate.minRemainingMs?.let { minOf(it, effectiveSmoothedOffMs ?: it) } ?: effectiveSmoothedOffMs
+        val safeMaxOff = offEstimate.maxRemainingMs?.let { maxOf(it, effectiveSmoothedOffMs ?: it) } ?: effectiveSmoothedOffMs
+        val finalOffEstimate = offEstimate.copy(
+            remainingMs = effectiveSmoothedOffMs,
+            minRemainingMs = safeMinOff,
+            maxRemainingMs = safeMaxOff,
+            benchmarkPowerWatts = baseOffPower,
+            actualFastPowerWatts = actualOffPower,
+            drainRateMultiplier = offDrainRate
+        )
 
-        val finalGlobalEstimate = if (smoothedGlobalMs != null && smoothedGlobalMs != globalEstimate.remainingMs) {
-            val safeMin = globalEstimate.minRemainingMs?.let { kotlin.math.min(it, smoothedGlobalMs) } ?: smoothedGlobalMs
-            val safeMax = globalEstimate.maxRemainingMs?.let { kotlin.math.max(it, smoothedGlobalMs) } ?: smoothedGlobalMs
-            globalEstimate.copy(
-                remainingMs = smoothedGlobalMs,
-                minRemainingMs = safeMin,
-                maxRemainingMs = safeMax
-            )
-        } else {
-            globalEstimate
-        }
+        val effectiveSmoothedGlobalMs = smoothedGlobalMs ?: globalEstimate.remainingMs
+        val safeMinGlobal = globalEstimate.minRemainingMs?.let { minOf(it, effectiveSmoothedGlobalMs ?: it) } ?: effectiveSmoothedGlobalMs
+        val safeMaxGlobal = globalEstimate.maxRemainingMs?.let { maxOf(it, effectiveSmoothedGlobalMs ?: it) } ?: effectiveSmoothedGlobalMs
+        val finalGlobalEstimate = globalEstimate.copy(
+            remainingMs = effectiveSmoothedGlobalMs,
+            minRemainingMs = safeMinGlobal,
+            maxRemainingMs = safeMaxGlobal,
+            benchmarkPowerWatts = baseGlobalPower,
+            actualFastPowerWatts = actualGlobalPower,
+            drainRateMultiplier = globalDrainRate
+        )
 
         return TripleRuntimeResult(
             screenOnEstimate = finalOnEstimate,

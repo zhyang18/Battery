@@ -584,6 +584,15 @@
                 android:text="@string/capacity_diag_statement_2"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="10.5sp" />
+                
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:lineSpacingExtra="2dp"
+                    android:text="@string/capacity_diag_statement_3"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="10.5sp" />
         </LinearLayout>
 
         <!-- 【板块五：快速校准指南与关闭按钮】 -->

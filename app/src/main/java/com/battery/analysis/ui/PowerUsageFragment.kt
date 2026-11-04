@@ -1428,7 +1428,7 @@ class PowerUsageFragment : Fragment() {
     /**
      * 弹出放电速度卡片（亮屏、息屏、全局）的详细信息说明气泡弹框。
      * 呈现当前放电速度、最近7天内统计放电速度与有效时长、满电可用时长、当前剩余续航（精确到秒）以及对应原理说明；
-     * 并在亮屏卡片弹框中特别呈现预测真实容量（单位：Wh 与 mAh）。气泡弹窗不自动超时关闭，需用户手动轻触关闭。
+     * 并在亮屏卡片弹框中特别呈现预测基于容量（单位：Wh 与 mAh）。气泡弹窗不自动超时关闭，需用户手动轻触关闭。
      *
      * @param anchorView 触发气泡弹窗的目标锚点卡片视图
      * @param rowType 行分类标识（[ROW_SCREEN_ON] 为亮屏行，[ROW_SCREEN_OFF] 为息屏行，[ROW_GLOBAL] 为全局行）
@@ -1489,6 +1489,13 @@ class PowerUsageFragment : Fragment() {
         }
         val remDurationMs = remEstimate?.remainingMs
 
+        val benchmarkRate = PowerDischargeMetricsViewBinder.calculateBenchmarkDischargeRate(
+            benchmarkPowerWatts = remEstimate?.benchmarkPowerWatts,
+            totalCapacityWh = totalCapacityWh,
+            fallbackRate = currentRate
+        )
+        val rollingDurationMs = PowerDischargeMetricsViewBinder.getRollingDischargeDurationMs(rowType)
+
         val (sessionRate, sessionDurationMs) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
             rowType = rowType,
             totalCapacityWh = totalCapacityWh,
@@ -1497,7 +1504,9 @@ class PowerUsageFragment : Fragment() {
 
         val message = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
             rowType = rowType,
-            currentRatePercentPerHour = currentRate,
+            currentRatePercentPerHour = benchmarkRate,
+            rollingRatePercentPerHour = currentRate,
+            rollingDurationMs = rollingDurationMs,
             sevenDaysRatePercentPerHour = sevenDaysRate,
             sevenDaysDurationMs = sevenDaysDurationMs,
             fullDurationMs = fullDurationMs,

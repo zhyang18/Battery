@@ -1,5 +1,6 @@
 package com.battery.analysis.ui
 
+import android.content.Context
 import android.graphics.Color
 import android.os.Bundle
 import android.view.KeyEvent
@@ -140,6 +141,9 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        // 从本地持久化偏好设置中读取上次记忆的“仅看达标”筛选状态
+        isOnlyMeetsThreshold = loadFilterMeetsThresholdPreference()
+
         view.findViewById<ImageView>(R.id.btn_close_session_list)?.setOnClickListener {
             dismissWithSlideDownAnimation()
         }
@@ -224,11 +228,36 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
 
     /**
      * 切换“已达门限”单项快速过滤开关，并联动刷新列表数据与胶囊按钮状态。
+     * 同步将最新筛选状态永久记忆至本地持久化偏好设置中。
      */
     private fun toggleThresholdFilter() {
         isOnlyMeetsThreshold = !isOnlyMeetsThreshold
+        saveFilterMeetsThresholdPreference(isOnlyMeetsThreshold)
         updateThresholdFilterButtonUI()
         applyDataToPages()
+    }
+
+    /**
+     * 从本地偏好配置中加载“仅看达标”筛选开关历史记录。
+     * 若此前未设置则返回默认值 false（展示全部样本）。
+     *
+     * @return 上次记忆的筛选状态布尔值
+     */
+    private fun loadFilterMeetsThresholdPreference(): Boolean {
+        val ctx = context ?: return false
+        val sp = ctx.getSharedPreferences(BatteryCapacityManager.PREFS_NAME, Context.MODE_PRIVATE)
+        return sp.getBoolean(PREF_KEY_FILTER_MEETS_THRESHOLD, false)
+    }
+
+    /**
+     * 将用户当前选择的“仅看达标”筛选状态持久化保存至本地偏好配置。
+     *
+     * @param meetsThreshold 待持久化保存的筛选状态布尔值
+     */
+    private fun saveFilterMeetsThresholdPreference(meetsThreshold: Boolean) {
+        val ctx = context ?: return
+        val sp = ctx.getSharedPreferences(BatteryCapacityManager.PREFS_NAME, Context.MODE_PRIVATE)
+        sp.edit().putBoolean(PREF_KEY_FILTER_MEETS_THRESHOLD, meetsThreshold).apply()
     }
 
     /**
@@ -648,5 +677,16 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
         val tvDuration: TextView = view.findViewById(R.id.tv_item_session_duration)
         val tvTemp: TextView = view.findViewById(R.id.tv_item_session_temp)
         val tvReason: TextView = view.findViewById(R.id.tv_item_session_reason)
+    }
+
+    /**
+     * 自学习会话样本明细弹窗伴生对象。
+     * 维护弹窗相关的持久化键值常量。
+     */
+    companion object {
+        /**
+         * 记忆“仅看达标”筛选开关持久化状态的偏好设置键名。
+         */
+        const val PREF_KEY_FILTER_MEETS_THRESHOLD = "pref_capacity_session_filter_meets_threshold"
     }
 }

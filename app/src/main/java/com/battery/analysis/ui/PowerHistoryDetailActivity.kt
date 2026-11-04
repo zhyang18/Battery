@@ -949,6 +949,13 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         }
         val remDurationMs = remEstimate?.remainingMs
 
+        val benchmarkRate = PowerDischargeMetricsViewBinder.calculateBenchmarkDischargeRate(
+            benchmarkPowerWatts = remEstimate?.benchmarkPowerWatts,
+            totalCapacityWh = totalCapacityWh,
+            fallbackRate = currentRate
+        )
+        val rollingDurationMs = PowerDischargeMetricsViewBinder.getRollingDischargeDurationMs(rowType)
+
         val (sessionRate, sessionDurationMs) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
             rowType = rowType,
             totalCapacityWh = totalCapacityWh,
@@ -957,7 +964,9 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
 
         val message = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
             rowType = rowType,
-            currentRatePercentPerHour = currentRate,
+            currentRatePercentPerHour = benchmarkRate,
+            rollingRatePercentPerHour = currentRate,
+            rollingDurationMs = rollingDurationMs,
             sevenDaysRatePercentPerHour = sevenDaysRate,
             sevenDaysDurationMs = sevenDaysDurationMs,
             fullDurationMs = fullDurationMs,

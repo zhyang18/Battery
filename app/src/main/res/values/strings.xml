@@ -825,7 +825,7 @@
     <string name="capacity_learning_progress_format">自学习中(%d/5)</string>
     <string name="capacity_physical_charge_format">物理电荷 · %d%%</string>
     <string name="capacity_physical_charge">物理电荷</string>
-    <string name="capacity_nominal_energy">标称电压物理能量</string>
+    <string name="capacity_nominal_energy">标称基准能量 (3.85V)</string>
     <string name="capacity_status_converged">🛡️ 收敛</string>
     <string name="capacity_status_observing">⏳ 观察</string>
     <string name="capacity_status_pending">🌱 自学习中</string>
@@ -1019,6 +1019,7 @@
     <string name="capacity_diag_statement_title">⚠️ 严谨物理与工况声明</string>
     <string name="capacity_diag_statement_1">1. 本机型电化学温度与内阻模型未进行外部硬件测试台架标定，系统忠实展示电芯基准物理容量，杜绝未经实测的硬编码折减。</string>
     <string name="capacity_diag_statement_2">2. 模型置信度与离散度仅代表多次采样在统计模型内部的数据自洽度，不作为绝对测量精度的商业担保。</string>
+    <string name="capacity_diag_statement_3" formatted="false">3. 可用剩余能量基于锂电池行业 0.2C/25℃ 标称放电平台（3.85V）基准推算。实际放电做功能量受负载大小（重载内阻压降发热增加，有效输出能量略低；轻载待机接近标称值）与电芯温度影响呈现动态浮动；且因充电输入时端电压较高（~4.18V），充入能量通常高于释放能量，此为电池充放电能量循环效率（约 88%~92%）的物理必然规律。</string>
     <string name="capacity_diag_guide_title">💡 日常使用与自学习校准指南</string>
     <string name="capacity_diag_guide_desc" formatted="false">无需刻意进行 0%~100% 深度充放电。在日常使用中，只要产生 1~2 次单次电量跨度大于 20% 的自然充放电，系统将自动增量更新档案。</string>
     <string name="capacity_session_list_title">自学习会话样本明细</string>
@@ -1037,7 +1038,11 @@
     <string name="prediction_session_sub_discharge">(放电 %s)</string>
     <string name="prediction_seven_days_drain_rate">• 近7天放电速度：%s</string>
     <string name="prediction_full_screen_on_runtime">• 满电亮屏续航：%s</string>
+    <string name="prediction_full_screen_on_runtime_with_conf">• 满电亮屏续航：%1$s (%2$s)</string>
     <string name="prediction_full_screen_off_runtime">• 满电待机时长：%s</string>
+    <string name="prediction_full_screen_off_runtime_with_conf">• 满电待机时长：%1$s (%2$s)</string>
+    <string name="prediction_full_global_runtime">• 满电综合续航：%s</string>
+    <string name="prediction_full_global_runtime_with_conf">• 满电综合续航：%1$s (%2$s)</string>
     <string name="prediction_model_v2_tag_2_2">升级模型(v2.2)</string>
     <string name="prediction_model_v2_tag_2_1">升级模型(v2.1)</string>
     <string name="prediction_model_stat_range">"  统计范围：%s"</string>
@@ -1052,7 +1057,7 @@
     <string name="prediction_normal_load_format">普通 %s</string>
     <string name="prediction_heavy_load_format">重载 %s</string>
     <string name="prediction_typical_power">"  典型功耗：%s"</string>
-    <string name="prediction_standby_workload">"  待机工况：休眠 %1$s · 唤醒 %2$s"</string>
+    <string name="prediction_standby_workload">"  待机工况：唤醒 %1$s · 休眠 %2$s"</string>
     <string name="prediction_sleep_load_format">休眠 %s</string>
     <string name="prediction_awake_load_format">唤醒 %s</string>
     <string name="prediction_typical_standby_power">"  典型待机功耗：%s"</string>
@@ -1061,17 +1066,20 @@
     <string name="prediction_model_desc_regime">工况条件化典型模型</string>
     <string name="prediction_model_desc_fallback">全局物理基准降级</string>
     <string name="prediction_baseline_drain_rate">• 预测基准放电速度：%s</string>
+    <string name="prediction_rolling_drain_rate">• 近期滑动放电速度：%s</string>
     <string name="prediction_current_remaining_runtime">• 当前剩余续航：%s</string>
     <string name="prediction_current_remaining_runtime_with_conf">• 当前剩余续航：%1$s (%2$s)</string>
     <string name="prediction_current_standby_runtime_with_conf">• 当前待机续航：%1$s (%2$s)</string>
     <string name="prediction_range_screen_on">"  工况预期范围：%1$s(重载) ~ %2$s(轻载)"</string>
-    <string name="prediction_range_screen_off">"  工况预期范围：%1$s(频繁唤醒) ~ %2$s(深度休眠)"</string>
-    <string name="prediction_range_global">"  工况预期范围：%1$s(偏重载) ~ %2$s(偏轻载)"</string>
+    <string name="prediction_range_screen_off">"  工况预期范围：%1$s(唤醒) ~ %2$s(休眠)"</string>
+    <string name="prediction_range_global">"  工况预期范围：%1$s(重载) ~ %2$s(轻载)"</string>
     <string name="prediction_pred_discharge_power">"  预测放电功耗：%1$s%2$s%3$s"</string>
     <string name="prediction_pred_standby_power">"  预测待机功耗：%1$s%2$s%3$s"</string>
     <string name="prediction_pred_overall_power">"  预测综合功耗：%1$s%2$s%3$s"</string>
+    <string name="prediction_instant_power">"  即时融合功耗：%1$s%2$s%3$s"</string>
+    <string name="prediction_drain_multiplier_suffix"> (流速 %1$s)</string>
     <string name="prediction_avail_energy_suffix"> (可用 %s)</string>
-    <string name="prediction_real_capacity">• 预测真实容量：%s</string>
+    <string name="prediction_real_capacity">• 预测基于容量：%s</string>
     <string name="prediction_full_estimates_header">\n📊 满电综合续航推算：\n</string>
     <string name="prediction_mode_1_title">• 模式1（全局加权）：%s</string>
     <string name="prediction_mode_1_desc">"  基于7天全局真实功耗线性推算"</string>
@@ -1079,20 +1087,20 @@
     <string name="prediction_mode_2_desc">"  按日常习惯 %1$s 亮屏 + %2$s 息屏加权"</string>
     <string name="prediction_notes_header">\n💡 说明：\n</string>
     <string name="prediction_note_screen_on_1">• 会话放电速度反映本次拔电以来的实际平均耗电表现；\n</string>
-    <string name="prediction_note_screen_on_2">• 预测基准放电速度反映近期稳态工况，作为推算当前剩余续航的基准；\n</string>
-    <string name="prediction_note_screen_on_3">• 满电续航按7天实际亮屏加权推算；\n</string>
+    <string name="prediction_note_screen_on_2">• 预测基准放电速度基于大样本历史稳态工况推算，作为当前剩余续航的基准；\n</string>
+    <string name="prediction_note_screen_on_3">• 满电亮屏续航自适应历史窗口与衰减权重；\n</string>
     <string name="prediction_note_screen_on_4">• 升级模型自适应历史窗口与衰减权重；\n</string>
     <string name="prediction_note_screen_on_5">• 剩余续航基于物理能量与自适应多时间尺度推算。</string>
     <string name="prediction_note_screen_off_1">• 会话放电速度反映本次拔电以来的息屏待机耗电表现；\n</string>
-    <string name="prediction_note_screen_off_2">• 预测基准放电速度反映近期稳态工况，作为推算待机续航的基准；\n</string>
-    <string name="prediction_note_screen_off_3">• 待机时长按7天实际待机时间加权推算；\n</string>
+    <string name="prediction_note_screen_off_2">• 预测基准放电速度基于大样本历史稳态工况推算，作为推算待机续航的基准；\n</string>
+    <string name="prediction_note_screen_off_3">• 满电待机时长解构深睡底噪与后台唤醒；\n</string>
     <string name="prediction_note_screen_off_4">• 升级模型解构深睡底噪与后台唤醒；\n</string>
     <string name="prediction_note_screen_off_5">• 待机续航基于物理能量与多时间尺度稳态推算。</string>
     <string name="prediction_note_global_1">• 会话放电速度反映本次拔电以来的全局综合耗电表现；\n</string>
-    <string name="prediction_note_global_2">• 预测基准放电速度反映近期稳态工况，作为推算综合剩余续航的基准；\n</string>
+    <string name="prediction_note_global_2">• 预测基准放电速度基于大样本历史稳态工况推算，作为推算综合剩余续航的基准；\n</string>
     <string name="prediction_note_global_3">• 模式1忠实反映历史全周期能量总积分；\n</string>
     <string name="prediction_note_global_4">• 模式2解构亮屏与待机两态比例；\n</string>
-    <string name="prediction_note_global_5">• 升级模型自适应历史窗口与工况建模；\n</string>
+    <string name="prediction_note_global_5">• 满电综合续航自适应历史窗口与工况建模；\n</string>
     <string name="prediction_note_global_6">• 剩余续航基于物理能量与多时间尺度综合推算。</string>
 
     <!-- 置信度与数据充分性 -->

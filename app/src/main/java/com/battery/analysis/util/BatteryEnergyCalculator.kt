@@ -823,6 +823,8 @@ object BatteryEnergyCalculator {
      * @param nominalVoltageVolts 电池标称电压（单位：V，默认 3.85V）
      * @param sessionRatePercentPerHour 自本次拔电以来的会话放电速度（单位：%/h，缺失时为 null）
      * @param sessionDurationMs 自本次拔电以来的会话有效统计时长（单位：毫秒，缺失时为 null）
+     * @param rollingRatePercentPerHour 近期连续滑动放电切片实测速度（单位：%/h，缺失时为 null）
+     * @param rollingDurationMs 近期连续滑动放电切片有效统计时长（单位：毫秒，缺失时为 null）
      * @param context 界面上下文对象（可选，用于读取当前语言的多语言文案；为 null 时保留默认展示文案）
      * @return 格式化后的详细气泡说明字符串
      */
@@ -843,6 +845,8 @@ object BatteryEnergyCalculator {
         nominalVoltageVolts: Float = DEFAULT_NOMINAL_VOLTAGE_VOLTS,
         sessionRatePercentPerHour: Float? = null,
         sessionDurationMs: Long? = null,
+        rollingRatePercentPerHour: Float? = null,
+        rollingDurationMs: Long? = null,
         context: Context? = null
     ): String {
         val currentRateStr = if (currentRatePercentPerHour != null && currentRatePercentPerHour > 0f) {
@@ -895,9 +899,6 @@ object BatteryEnergyCalculator {
                         append(context.getString(R.string.prediction_title_screen_on) + "\n")
                         val subText = if (sessionDurStr.isNotBlank()) " " + context.getString(R.string.prediction_session_sub_screen_on, sessionDurStr) else ""
                         append(context.getString(R.string.prediction_session_drain_rate, "$sessionRateStr$subText") + "\n")
-                        val sub7Text = if (sevenDaysDurStr.isNotBlank()) " " + context.getString(R.string.prediction_session_sub_screen_on, sevenDaysDurStr) else ""
-                        append(context.getString(R.string.prediction_seven_days_drain_rate, "$sevenDaysRateStr$sub7Text") + "\n")
-                        append(context.getString(R.string.prediction_full_screen_on_runtime, fullDurationStr) + "\n")
                     } else {
                         append("【亮屏续航预测】\n")
                         if (sessionDurStr.isNotBlank()) {
@@ -905,12 +906,84 @@ object BatteryEnergyCalculator {
                         } else {
                             append("• 当前会话放电速度：$sessionRateStr\n")
                         }
-                        if (sevenDaysDurStr.isNotBlank()) {
-                            append("• 近7天放电速度：$sevenDaysRateStr (亮屏 $sevenDaysDurStr)\n")
+                    }
+
+                    if (context != null) {
+                        append(context.getString(R.string.prediction_baseline_drain_rate, currentRateStr) + "\n")
+                    } else {
+                        append("• 预测基准放电速度：$currentRateStr\n")
+                    }
+
+                    if (remainingEstimate != null && remainingEstimate.remainingMs != null) {
+                        val remStr = formatDurationWithSeconds(remainingEstimate.remainingMs)
+                        val effectiveConf = getBoundedRemainingConfidence(
+                            rowType = ROW_SCREEN_ON,
+                            remainingEstimate = remainingEstimate,
+                            accumulatedDurationMs = v2Result?.screenOnEffectiveMs ?: sevenDaysDurationMs
+                        )
+                        val confText = effectiveConf.getDescription(context)
+                        if (context != null) {
+                            append(context.getString(R.string.prediction_current_remaining_runtime_with_conf, remStr, confText) + "\n")
                         } else {
-                            append("• 近7天放电速度：$sevenDaysRateStr\n")
+                            append("• 当前剩余续航：$remStr ($confText)\n")
                         }
-                        append("• 满电亮屏续航：$fullDurationStr\n")
+                        if (remainingEstimate.minRemainingMs != null && remainingEstimate.maxRemainingMs != null) {
+                            val minStr = formatExpectedRangeDuration(remainingEstimate.minRemainingMs)
+                            val maxStr = formatExpectedRangeDuration(remainingEstimate.maxRemainingMs)
+                            if (context != null) {
+                                appendSubItem(context.getString(R.string.prediction_range_screen_on, minStr, maxStr))
+                            } else {
+                                appendSubItem("工况预期范围：$minStr(重载) ~ $maxStr(轻载)")
+                            }
+                        }
+                        val baseWatts = remainingEstimate.benchmarkPowerWatts?.takeIf { it > 0.0 } ?: remainingEstimate.predictedPowerWatts
+                        if (baseWatts != null && baseWatts > 0.0) {
+                            val pStr = String.format(Locale.US, "%.2fW", baseWatts)
+                            val remEnergyWh = remainingEstimate.remainingEnergyWh
+                            val eSuffix = if (remEnergyWh != null && remEnergyWh > 0.0) {
+                                val energyText = if (displayUnit == PowerDisplayUnit.MAH) {
+                                    val safeV = if (nominalVoltageVolts > 0f) nominalVoltageVolts.toDouble() else DEFAULT_NOMINAL_VOLTAGE_VOLTS.toDouble()
+                                    val mah = (remEnergyWh * 1000.0) / safeV
+                                    String.format(Locale.US, "%.1fmAh", mah)
+                                } else {
+                                    String.format(Locale.US, "%.2fWh", remEnergyWh)
+                                }
+                                if (context != null) context.getString(R.string.prediction_avail_energy_suffix, energyText) else " (可用 $energyText)"
+                            } else ""
+                            val rateSuffix = if (predictedCapacityWh != null && predictedCapacityWh > 0f) {
+                                val predRate = (baseWatts / predictedCapacityWh) * 100.0
+                                String.format(Locale.US, " · %.1f%%/h", predRate)
+                            } else ""
+                            if (context != null) {
+                                appendSubItem(context.getString(R.string.prediction_pred_discharge_power, pStr, eSuffix, rateSuffix))
+                            } else {
+                                appendSubItem("预测放电功耗：$pStr$eSuffix$rateSuffix")
+                            }
+
+                            val actWatts = remainingEstimate.actualFastPowerWatts
+                            if (actWatts != null && actWatts > 0.0 && kotlin.math.abs(actWatts - baseWatts) >= 0.01) {
+                                val actStr = String.format(Locale.US, "%.2fW", actWatts)
+                                val multSuffix = remainingEstimate.drainRateMultiplier?.let {
+                                    val mStr = String.format(Locale.US, "%.2fx", it)
+                                    if (context != null) context.getString(R.string.prediction_drain_multiplier_suffix, mStr) else " (流速 $mStr)"
+                                } ?: ""
+                                val actRateSuffix = if (predictedCapacityWh != null && predictedCapacityWh > 0f) {
+                                    val actRate = (actWatts / predictedCapacityWh) * 100.0
+                                    String.format(Locale.US, " · %.1f%%/h", actRate)
+                                } else ""
+                                if (context != null) {
+                                    appendSubItem(context.getString(R.string.prediction_instant_power, actStr, multSuffix, actRateSuffix))
+                                } else {
+                                    appendSubItem("即时融合功耗：$actStr$multSuffix$actRateSuffix")
+                                }
+                            }
+                        }
+                    } else {
+                        if (context != null) {
+                            append(context.getString(R.string.prediction_current_remaining_runtime, remainingDurStr) + "\n")
+                        } else {
+                            append("• 当前剩余续航：$remainingDurStr\n")
+                        }
                     }
 
                     if (v2Result != null && v2Result.screenOnFullRuntimeMs != null) {
@@ -923,20 +996,15 @@ object BatteryEnergyCalculator {
                             if (context != null) context.getString(R.string.prediction_window_past_7_days) else "最近 7 天"
                         }
                         val effOnStr = v2Result.screenOnEffectiveMs?.let { formatFullDuration(it) } ?: formatFullDuration(v2Result.effectiveDischargeDurationMs)
-                        val isV22 = v2Result.modelVersion == com.battery.analysis.domain.estimator.model.RuntimeModelVersion.FULL_RUNTIME_V2_2
-                        val v2Tag = if (context != null) {
-                            if (isV22) context.getString(R.string.prediction_model_v2_tag_2_2) else context.getString(R.string.prediction_model_v2_tag_2_1)
-                        } else {
-                            if (isV22) "升级模型(v2.2)" else "升级模型(v2.1)"
-                        }
                         val confDesc = v2Result.screenOnConfidenceLevel.getDescription(context)
                         val suffDesc = v2Result.screenOnDataSufficiency.getDescription(context)
 
-                        append("• $v2Tag：$v2OnDurStr ($confDesc)\n")
                         if (context != null) {
+                            append(context.getString(R.string.prediction_full_screen_on_runtime_with_conf, v2OnDurStr, confDesc) + "\n")
                             appendSubItem(context.getString(R.string.prediction_model_stat_range, windowStr))
                             appendSubItem(context.getString(R.string.prediction_eff_screen_on_format, effOnStr, suffDesc))
                         } else {
+                            append("• 满电亮屏续航：$v2OnDurStr ($confDesc)\n")
                             appendSubItem("统计范围：$windowStr")
                             appendSubItem("有效放电：累计亮屏 $effOnStr ($suffDesc)")
                         }
@@ -975,83 +1043,27 @@ object BatteryEnergyCalculator {
                                 appendSubItem("典型功耗：$pOnStr")
                             }
                         }
-                    }
-
-                    if (context != null) {
-                        append(context.getString(R.string.prediction_baseline_drain_rate, currentRateStr) + "\n")
-                    } else {
-                        append("• 预测基准放电速度：$currentRateStr\n")
-                    }
-
-                    if (remainingEstimate != null && remainingEstimate.remainingMs != null) {
-                        val remStr = formatDurationWithSeconds(remainingEstimate.remainingMs)
-                        val effectiveConf = getBoundedRemainingConfidence(
-                            rowType = ROW_SCREEN_ON,
-                            remainingEstimate = remainingEstimate,
-                            accumulatedDurationMs = v2Result?.screenOnEffectiveMs ?: sevenDaysDurationMs
-                        )
-                        val confText = effectiveConf.getDescription(context)
-                        if (context != null) {
-                            append(context.getString(R.string.prediction_current_remaining_runtime_with_conf, remStr, confText) + "\n")
-                        } else {
-                            append("• 当前剩余续航：$remStr ($confText)\n")
-                        }
-                        if (remainingEstimate.minRemainingMs != null && remainingEstimate.maxRemainingMs != null) {
-                            val minStr = formatFullDuration(remainingEstimate.minRemainingMs)
-                            val maxStr = formatFullDuration(remainingEstimate.maxRemainingMs)
-                            if (context != null) {
-                                appendSubItem(context.getString(R.string.prediction_range_screen_on, minStr, maxStr))
-                            } else {
-                                appendSubItem("工况预期范围：$minStr(重载) ~ $maxStr(轻载)")
-                            }
-                        }
-                        if (remainingEstimate.predictedPowerWatts != null && remainingEstimate.predictedPowerWatts > 0.0) {
-                            val predWatts = remainingEstimate.predictedPowerWatts
-                            val pStr = String.format(Locale.US, "%.2fW", predWatts)
-                            val remEnergyWh = remainingEstimate.remainingEnergyWh
-                            val eSuffix = if (remEnergyWh != null && remEnergyWh > 0.0) {
-                                val energyText = if (displayUnit == PowerDisplayUnit.MAH) {
-                                    val safeV = if (nominalVoltageVolts > 0f) nominalVoltageVolts.toDouble() else DEFAULT_NOMINAL_VOLTAGE_VOLTS.toDouble()
-                                    val mah = (remEnergyWh * 1000.0) / safeV
-                                    String.format(Locale.US, "%.1fmAh", mah)
-                                } else {
-                                    String.format(Locale.US, "%.2fWh", remEnergyWh)
-                                }
-                                if (context != null) context.getString(R.string.prediction_avail_energy_suffix, energyText) else " (可用 $energyText)"
-                            } else ""
-                            val rateSuffix = if (predictedCapacityWh != null && predictedCapacityWh > 0f) {
-                                val predRate = (predWatts / predictedCapacityWh) * 100.0
-                                String.format(Locale.US, " · %.1f%%/h", predRate)
-                            } else ""
-                            if (context != null) {
-                                appendSubItem(context.getString(R.string.prediction_pred_discharge_power, pStr, eSuffix, rateSuffix))
-                            } else {
-                                appendSubItem("预测放电功耗：$pStr$eSuffix$rateSuffix")
-                            }
-                        }
                     } else {
                         if (context != null) {
-                            append(context.getString(R.string.prediction_current_remaining_runtime, remainingDurStr) + "\n")
+                            append(context.getString(R.string.prediction_full_screen_on_runtime, fullDurationStr) + "\n")
                         } else {
-                            append("• 当前剩余续航：$remainingDurStr\n")
+                            append("• 满电亮屏续航：$fullDurationStr\n")
                         }
                     }
 
                     if (context != null) {
-                        append(context.getString(R.string.prediction_real_capacity, capacityStr) + "\n\n")
+                        append(context.getString(R.string.prediction_real_capacity, capacityStr) + "\n")
                         append(context.getString(R.string.prediction_notes_header))
                         append(context.getString(R.string.prediction_note_screen_on_1))
                         append(context.getString(R.string.prediction_note_screen_on_2))
                         append(context.getString(R.string.prediction_note_screen_on_3))
-                        append(context.getString(R.string.prediction_note_screen_on_4))
                         append(context.getString(R.string.prediction_note_screen_on_5))
                     } else {
-                        append("• 预测真实容量：$capacityStr\n\n")
+                        append("• 预测基于容量：$capacityStr\n\n")
                         append("💡 说明：\n")
                         append("• 会话放电速度反映本次拔电以来的实际平均耗电表现；\n")
-                        append("• 预测基准放电速度反映近期稳态工况，作为推算当前剩余续航的基准；\n")
-                        append("• 满电续航按7天实际亮屏加权推算；\n")
-                        append("• 升级模型自适应历史窗口与衰减权重；\n")
+                        append("• 预测基准放电速度基于大样本历史稳态工况推算，作为当前剩余续航的基准；\n")
+                        append("• 满电亮屏续航自适应历史窗口与衰减权重；\n")
                         append("• 剩余续航基于物理能量与自适应多时间尺度推算。")
                     }
                 }
@@ -1062,82 +1074,12 @@ object BatteryEnergyCalculator {
                         append(context.getString(R.string.prediction_title_screen_off) + "\n")
                         val subText = if (sessionDurStr.isNotBlank()) " " + context.getString(R.string.prediction_session_sub_screen_off, sessionDurStr) else ""
                         append(context.getString(R.string.prediction_session_drain_rate, "$sessionRateStr$subText") + "\n")
-                        val sub7Text = if (sevenDaysDurStr.isNotBlank()) " " + context.getString(R.string.prediction_session_sub_screen_off, sevenDaysDurStr) else ""
-                        append(context.getString(R.string.prediction_seven_days_drain_rate, "$sevenDaysRateStr$sub7Text") + "\n")
-                        append(context.getString(R.string.prediction_full_screen_off_runtime, fullDurationStr) + "\n")
                     } else {
                         append("【息屏续航预测】\n")
                         if (sessionDurStr.isNotBlank()) {
                             append("• 当前会话放电速度：$sessionRateStr (息屏 $sessionDurStr)\n")
                         } else {
                             append("• 当前会话放电速度：$sessionRateStr\n")
-                        }
-                        if (sevenDaysDurStr.isNotBlank()) {
-                            append("• 近7天放电速度：$sevenDaysRateStr (息屏 $sevenDaysDurStr)\n")
-                        } else {
-                            append("• 近7天放电速度：$sevenDaysRateStr\n")
-                        }
-                        append("• 满电待机时长：$fullDurationStr\n")
-                    }
-
-                    if (v2Result != null && v2Result.screenOffFullRuntimeMs != null) {
-                        val v2OffDurStr = formatDurationWithSeconds(v2Result.screenOffFullRuntimeMs)
-                        val pOffStr = v2Result.predictedScreenOffPowerWatts?.let { String.format(Locale.US, "%.2fW", it) }
-                        val windowStr = if (v2Result.historyWindowDays > 7.1) {
-                            if (context != null) String.format(Locale.getDefault(), context.getString(R.string.prediction_window_adaptive_format), v2Result.historyWindowDays)
-                            else String.format(Locale.US, "自适应扩展至近 %.1f 天", v2Result.historyWindowDays)
-                        } else {
-                            if (context != null) context.getString(R.string.prediction_window_past_7_days) else "最近 7 天"
-                        }
-                        val effOffStr = v2Result.screenOffEffectiveMs?.let { formatFullDuration(it) } ?: formatFullDuration(v2Result.effectiveDischargeDurationMs)
-                        val isV22 = v2Result.modelVersion == com.battery.analysis.domain.estimator.model.RuntimeModelVersion.FULL_RUNTIME_V2_2
-                        val v2Tag = if (context != null) {
-                            if (isV22) context.getString(R.string.prediction_model_v2_tag_2_2) else context.getString(R.string.prediction_model_v2_tag_2_1)
-                        } else {
-                            if (isV22) "升级模型(v2.2)" else "升级模型(v2.1)"
-                        }
-                        val confDesc = v2Result.screenOffConfidenceLevel.getDescription(context)
-                        val suffDesc = v2Result.screenOffDataSufficiency.getDescription(context)
-
-                        append("• $v2Tag：$v2OffDurStr ($confDesc)\n")
-                        if (context != null) {
-                            appendSubItem(context.getString(R.string.prediction_model_stat_range, windowStr))
-                            appendSubItem(context.getString(R.string.prediction_eff_screen_off_format, effOffStr, suffDesc))
-                        } else {
-                            appendSubItem("统计范围：$windowStr")
-                            appendSubItem("有效放电：累计息屏 $effOffStr ($suffDesc)")
-                        }
-
-                        val prof = v2Result.profile
-                        if (prof != null && prof.screenOffMs > 0L) {
-                            val lowPct = String.format(Locale.US, "%.1f%%", prof.offLowRatio * 100.0)
-                            val highPct = String.format(Locale.US, "%.1f%%", prof.offHighRatio * 100.0)
-                            if (context != null) {
-                                appendSubItem(context.getString(R.string.prediction_standby_workload, lowPct, highPct))
-                            } else {
-                                appendSubItem("待机工况：休眠 $lowPct · 唤醒 $highPct")
-                            }
-                            val pDetails = mutableListOf<String>()
-                            if (context != null) {
-                                prof.offLowPowerW?.let { pDetails.add(context.getString(R.string.prediction_sleep_load_format, String.format(Locale.US, "%.2fW", it))) }
-                                prof.offHighPowerW?.let { pDetails.add(context.getString(R.string.prediction_awake_load_format, String.format(Locale.US, "%.2fW", it))) }
-                                if (pDetails.isNotEmpty()) {
-                                    appendSubItem(context.getString(R.string.prediction_screen_on_workload_power, pDetails.joinToString(" · ")))
-                                }
-                            } else {
-                                prof.offLowPowerW?.let { pDetails.add("休眠 ${String.format(Locale.US, "%.2fW", it)}") }
-                                prof.offHighPowerW?.let { pDetails.add("唤醒 ${String.format(Locale.US, "%.2fW", it)}") }
-                                if (pDetails.isNotEmpty()) {
-                                    appendSubItem("工况功耗：${pDetails.joinToString(" · ")}")
-                                }
-                            }
-                        }
-                        if (pOffStr != null) {
-                            if (context != null) {
-                                appendSubItem(context.getString(R.string.prediction_typical_standby_power, pOffStr))
-                            } else {
-                                appendSubItem("典型待机功耗：$pOffStr")
-                            }
                         }
                     }
 
@@ -1161,17 +1103,17 @@ object BatteryEnergyCalculator {
                             append("• 当前待机续航：$remStr ($confText)\n")
                         }
                         if (remainingEstimate.minRemainingMs != null && remainingEstimate.maxRemainingMs != null) {
-                            val minStr = formatFullDuration(remainingEstimate.minRemainingMs)
-                            val maxStr = formatFullDuration(remainingEstimate.maxRemainingMs)
+                            val minStr = formatExpectedRangeDuration(remainingEstimate.minRemainingMs)
+                            val maxStr = formatExpectedRangeDuration(remainingEstimate.maxRemainingMs)
                             if (context != null) {
                                 appendSubItem(context.getString(R.string.prediction_range_screen_off, minStr, maxStr))
                             } else {
-                                appendSubItem("工况预期范围：$minStr(频繁唤醒) ~ $maxStr(深度休眠)")
+                                appendSubItem("工况预期范围：$minStr(唤醒) ~ $maxStr(休眠)")
                             }
                         }
-                        if (remainingEstimate.predictedPowerWatts != null && remainingEstimate.predictedPowerWatts > 0.0) {
-                            val predWatts = remainingEstimate.predictedPowerWatts
-                            val pStr = String.format(Locale.US, "%.2fW", predWatts)
+                        val baseWatts = remainingEstimate.benchmarkPowerWatts?.takeIf { it > 0.0 } ?: remainingEstimate.predictedPowerWatts
+                        if (baseWatts != null && baseWatts > 0.0) {
+                            val pStr = String.format(Locale.US, "%.2fW", baseWatts)
                             val remEnergyWh = remainingEstimate.remainingEnergyWh
                             val eSuffix = if (remEnergyWh != null && remEnergyWh > 0.0) {
                                 val energyText = if (displayUnit == PowerDisplayUnit.MAH) {
@@ -1184,13 +1126,31 @@ object BatteryEnergyCalculator {
                                 if (context != null) context.getString(R.string.prediction_avail_energy_suffix, energyText) else " (可用 $energyText)"
                             } else ""
                             val rateSuffix = if (predictedCapacityWh != null && predictedCapacityWh > 0f) {
-                                val predRate = (predWatts / predictedCapacityWh) * 100.0
+                                val predRate = (baseWatts / predictedCapacityWh) * 100.0
                                 String.format(Locale.US, " · %.1f%%/h", predRate)
                             } else ""
                             if (context != null) {
                                 appendSubItem(context.getString(R.string.prediction_pred_standby_power, pStr, eSuffix, rateSuffix))
                             } else {
                                 appendSubItem("预测待机功耗：$pStr$eSuffix$rateSuffix")
+                            }
+
+                            val actWatts = remainingEstimate.actualFastPowerWatts
+                            if (actWatts != null && actWatts > 0.0 && kotlin.math.abs(actWatts - baseWatts) >= 0.01) {
+                                val actStr = String.format(Locale.US, "%.2fW", actWatts)
+                                val multSuffix = remainingEstimate.drainRateMultiplier?.let {
+                                    val mStr = String.format(Locale.US, "%.2fx", it)
+                                    if (context != null) context.getString(R.string.prediction_drain_multiplier_suffix, mStr) else " (流速 $mStr)"
+                                } ?: ""
+                                val actRateSuffix = if (predictedCapacityWh != null && predictedCapacityWh > 0f) {
+                                    val actRate = (actWatts / predictedCapacityWh) * 100.0
+                                    String.format(Locale.US, " · %.1f%%/h", actRate)
+                                } else ""
+                                if (context != null) {
+                                    appendSubItem(context.getString(R.string.prediction_instant_power, actStr, multSuffix, actRateSuffix))
+                                } else {
+                                    appendSubItem("即时融合功耗：$actStr$multSuffix$actRateSuffix")
+                                }
                             }
                         }
                     } else {
@@ -1201,33 +1161,89 @@ object BatteryEnergyCalculator {
                         }
                     }
 
+                    if (v2Result != null && v2Result.screenOffFullRuntimeMs != null) {
+                        val v2OffDurStr = formatDurationWithSeconds(v2Result.screenOffFullRuntimeMs)
+                        val pOffStr = v2Result.predictedScreenOffPowerWatts?.let { String.format(Locale.US, "%.2fW", it) }
+                        val windowStr = if (v2Result.historyWindowDays > 7.1) {
+                            if (context != null) String.format(Locale.getDefault(), context.getString(R.string.prediction_window_adaptive_format), v2Result.historyWindowDays)
+                            else String.format(Locale.US, "自适应扩展至近 %.1f 天", v2Result.historyWindowDays)
+                        } else {
+                            if (context != null) context.getString(R.string.prediction_window_past_7_days) else "最近 7 天"
+                        }
+                        val effOffStr = v2Result.screenOffEffectiveMs?.let { formatFullDuration(it) } ?: formatFullDuration(v2Result.effectiveDischargeDurationMs)
+                        val confDesc = v2Result.screenOffConfidenceLevel.getDescription(context)
+                        val suffDesc = v2Result.screenOffDataSufficiency.getDescription(context)
+
+                        if (context != null) {
+                            append(context.getString(R.string.prediction_full_screen_off_runtime_with_conf, v2OffDurStr, confDesc) + "\n")
+                            appendSubItem(context.getString(R.string.prediction_model_stat_range, windowStr))
+                            appendSubItem(context.getString(R.string.prediction_eff_screen_off_format, effOffStr, suffDesc))
+                        } else {
+                            append("• 满电待机时长：$v2OffDurStr ($confDesc)\n")
+                            appendSubItem("统计范围：$windowStr")
+                            appendSubItem("有效放电：累计息屏 $effOffStr ($suffDesc)")
+                        }
+
+                        val prof = v2Result.profile
+                        if (prof != null && prof.screenOffMs > 0L) {
+                            val lowPct = String.format(Locale.US, "%.1f%%", prof.offLowRatio * 100.0)
+                            val highPct = String.format(Locale.US, "%.1f%%", prof.offHighRatio * 100.0)
+                            if (context != null) {
+                                appendSubItem(context.getString(R.string.prediction_standby_workload, highPct, lowPct))
+                            } else {
+                                appendSubItem("待机工况：唤醒 $highPct · 休眠 $lowPct")
+                            }
+                            val pDetails = mutableListOf<String>()
+                            if (context != null) {
+                                prof.offHighPowerW?.let { pDetails.add(context.getString(R.string.prediction_awake_load_format, String.format(Locale.US, "%.2fW", it))) }
+                                prof.offLowPowerW?.let { pDetails.add(context.getString(R.string.prediction_sleep_load_format, String.format(Locale.US, "%.2fW", it))) }
+                                if (pDetails.isNotEmpty()) {
+                                    appendSubItem(context.getString(R.string.prediction_screen_on_workload_power, pDetails.joinToString(" · ")))
+                                }
+                            } else {
+                                prof.offHighPowerW?.let { pDetails.add("唤醒 ${String.format(Locale.US, "%.2fW", it)}") }
+                                prof.offLowPowerW?.let { pDetails.add("休眠 ${String.format(Locale.US, "%.2fW", it)}") }
+                                if (pDetails.isNotEmpty()) {
+                                    appendSubItem("工况功耗：${pDetails.joinToString(" · ")}")
+                                }
+                            }
+                        }
+                        if (pOffStr != null) {
+                            if (context != null) {
+                                appendSubItem(context.getString(R.string.prediction_typical_standby_power, pOffStr))
+                            } else {
+                                appendSubItem("典型待机功耗：$pOffStr")
+                            }
+                        }
+                    } else {
+                        if (context != null) {
+                            append(context.getString(R.string.prediction_full_screen_off_runtime, fullDurationStr) + "\n")
+                        } else {
+                            append("• 满电待机时长：$fullDurationStr\n")
+                        }
+                    }
+
                     if (context != null) {
-                        append("\n" + context.getString(R.string.prediction_notes_header))
+                        append(context.getString(R.string.prediction_notes_header))
                         append(context.getString(R.string.prediction_note_screen_off_1))
                         append(context.getString(R.string.prediction_note_screen_off_2))
                         append(context.getString(R.string.prediction_note_screen_off_3))
-                        append(context.getString(R.string.prediction_note_screen_off_4))
                         append(context.getString(R.string.prediction_note_screen_off_5))
                     } else {
                         append("\n💡 说明：\n")
                         append("• 会话放电速度反映本次拔电以来的息屏待机耗电表现；\n")
-                        append("• 预测基准放电速度反映近期稳态工况，作为推算待机续航的基准；\n")
-                        append("• 待机时长按7天实际待机时间加权推算；\n")
-                        append("• 升级模型解构深睡底噪与后台唤醒；\n")
+                        append("• 预测基准放电速度基于大样本历史稳态工况推算，作为推算待机续航的基准；\n")
+                        append("• 满电待机时长解构深睡底噪与后台唤醒；\n")
                         append("• 待机续航基于物理能量与多时间尺度稳态推算。")
                     }
                 }
             }
             ROW_GLOBAL -> {
-                val sceneFullDurationStr = formatDurationWithSeconds(sceneFullDurationMs)
                 buildString {
                     if (context != null) {
                         append(context.getString(R.string.prediction_title_global) + "\n")
                         val subText = if (sessionDurStr.isNotBlank()) " " + context.getString(R.string.prediction_session_sub_discharge, sessionDurStr) else ""
                         append(context.getString(R.string.prediction_session_drain_rate, "$sessionRateStr$subText") + "\n")
-                        val sub7Text = if (sevenDaysDurStr.isNotBlank()) " " + context.getString(R.string.prediction_session_sub_discharge, sevenDaysDurStr) else ""
-                        append(context.getString(R.string.prediction_seven_days_drain_rate, "$sevenDaysRateStr$sub7Text") + "\n")
-                        append(context.getString(R.string.prediction_baseline_drain_rate, currentRateStr) + "\n")
                     } else {
                         append("【全局续航预测】\n")
                         if (sessionDurStr.isNotBlank()) {
@@ -1235,11 +1251,11 @@ object BatteryEnergyCalculator {
                         } else {
                             append("• 当前会话放电速度：$sessionRateStr\n")
                         }
-                        if (sevenDaysDurStr.isNotBlank()) {
-                            append("• 近7天放电速度：$sevenDaysRateStr (放电 $sevenDaysDurStr)\n")
-                        } else {
-                            append("• 近7天放电速度：$sevenDaysRateStr\n")
-                        }
+                    }
+
+                    if (context != null) {
+                        append(context.getString(R.string.prediction_baseline_drain_rate, currentRateStr) + "\n")
+                    } else {
                         append("• 预测基准放电速度：$currentRateStr\n")
                     }
 
@@ -1257,17 +1273,17 @@ object BatteryEnergyCalculator {
                             append("• 当前剩余续航：$remStr ($confText)\n")
                         }
                         if (remainingEstimate.minRemainingMs != null && remainingEstimate.maxRemainingMs != null) {
-                            val minStr = formatFullDuration(remainingEstimate.minRemainingMs)
-                            val maxStr = formatFullDuration(remainingEstimate.maxRemainingMs)
+                            val minStr = formatExpectedRangeDuration(remainingEstimate.minRemainingMs)
+                            val maxStr = formatExpectedRangeDuration(remainingEstimate.maxRemainingMs)
                             if (context != null) {
                                 appendSubItem(context.getString(R.string.prediction_range_global, minStr, maxStr))
                             } else {
-                                appendSubItem("工况预期范围：$minStr(偏重载) ~ $maxStr(偏轻载)")
+                                appendSubItem("工况预期范围：$minStr(重载) ~ $maxStr(轻载)")
                             }
                         }
-                        if (remainingEstimate.predictedPowerWatts != null && remainingEstimate.predictedPowerWatts > 0.0) {
-                            val predWatts = remainingEstimate.predictedPowerWatts
-                            val pStr = String.format(Locale.US, "%.2fW", predWatts)
+                        val baseWatts = remainingEstimate.benchmarkPowerWatts?.takeIf { it > 0.0 } ?: remainingEstimate.predictedPowerWatts
+                        if (baseWatts != null && baseWatts > 0.0) {
+                            val pStr = String.format(Locale.US, "%.2fW", baseWatts)
                             val remEnergyWh = remainingEstimate.remainingEnergyWh
                             val eSuffix = if (remEnergyWh != null && remEnergyWh > 0.0) {
                                 val energyText = if (displayUnit == PowerDisplayUnit.MAH) {
@@ -1280,7 +1296,7 @@ object BatteryEnergyCalculator {
                                 if (context != null) context.getString(R.string.prediction_avail_energy_suffix, energyText) else " (可用 $energyText)"
                             } else ""
                             val rateSuffix = if (predictedCapacityWh != null && predictedCapacityWh > 0f) {
-                                val predRate = (predWatts / predictedCapacityWh) * 100.0
+                                val predRate = (baseWatts / predictedCapacityWh) * 100.0
                                 String.format(Locale.US, " · %.1f%%/h", predRate)
                             } else ""
                             if (context != null) {
@@ -1288,38 +1304,30 @@ object BatteryEnergyCalculator {
                             } else {
                                 appendSubItem("预测综合功耗：$pStr$eSuffix$rateSuffix")
                             }
+
+                            val actWatts = remainingEstimate.actualFastPowerWatts
+                            if (actWatts != null && actWatts > 0.0 && kotlin.math.abs(actWatts - baseWatts) >= 0.01) {
+                                val actStr = String.format(Locale.US, "%.2fW", actWatts)
+                                val multSuffix = remainingEstimate.drainRateMultiplier?.let {
+                                    val mStr = String.format(Locale.US, "%.2fx", it)
+                                    if (context != null) context.getString(R.string.prediction_drain_multiplier_suffix, mStr) else " (流速 $mStr)"
+                                } ?: ""
+                                val actRateSuffix = if (predictedCapacityWh != null && predictedCapacityWh > 0f) {
+                                    val actRate = (actWatts / predictedCapacityWh) * 100.0
+                                    String.format(Locale.US, " · %.1f%%/h", actRate)
+                                } else ""
+                                if (context != null) {
+                                    appendSubItem(context.getString(R.string.prediction_instant_power, actStr, multSuffix, actRateSuffix))
+                                } else {
+                                    appendSubItem("即时融合功耗：$actStr$multSuffix$actRateSuffix")
+                                }
+                            }
                         }
                     } else {
                         if (context != null) {
                             append(context.getString(R.string.prediction_current_remaining_runtime, remainingDurStr) + "\n")
                         } else {
                             append("• 当前剩余续航：$remainingDurStr\n")
-                        }
-                    }
-
-                    if (context != null) {
-                        append(context.getString(R.string.prediction_full_estimates_header))
-                        append(context.getString(R.string.prediction_mode_1_title, fullDurationStr) + "\n")
-                        appendSubItem(context.getString(R.string.prediction_mode_1_desc))
-                        if (sceneFullDurationMs != null && sceneFullDurationMs > 0L && sceneScreenOnRatio != null) {
-                            val ratioOnStr = String.format(Locale.getDefault(), "%.1f%%", sceneScreenOnRatio * 100f)
-                            val ratioOffStr = String.format(Locale.getDefault(), "%.1f%%", (1.0f - sceneScreenOnRatio) * 100f)
-                            append(context.getString(R.string.prediction_mode_2_title, sceneFullDurationStr) + "\n")
-                            appendSubItem(context.getString(R.string.prediction_mode_2_desc, ratioOnStr, ratioOffStr))
-                        } else {
-                            append(context.getString(R.string.prediction_mode_2_title, sceneFullDurationStr) + "\n")
-                        }
-                    } else {
-                        append("\n📊 满电综合续航推算：\n")
-                        append("• 模式1（全局加权）：$fullDurationStr\n")
-                        appendSubItem("基于7天全局真实功耗线性推算")
-                        if (sceneFullDurationMs != null && sceneFullDurationMs > 0L && sceneScreenOnRatio != null) {
-                            val ratioOnStr = String.format(Locale.getDefault(), "%.1f%%", sceneScreenOnRatio * 100f)
-                            val ratioOffStr = String.format(Locale.getDefault(), "%.1f%%", (1.0f - sceneScreenOnRatio) * 100f)
-                            append("• 模式2（场景融合）：$sceneFullDurationStr\n")
-                            appendSubItem("按日常习惯 $ratioOnStr 亮屏 + $ratioOffStr 息屏加权")
-                        } else {
-                            append("• 模式2（场景融合）：$sceneFullDurationStr\n")
                         }
                     }
 
@@ -1337,20 +1345,15 @@ object BatteryEnergyCalculator {
                             if (context != null) context.getString(R.string.prediction_window_past_7_days) else "最近 7 天"
                         }
                         val effTotalStr = formatFullDuration(v2Result.effectiveDischargeDurationMs)
-                        val isV22 = v2Result.modelVersion == com.battery.analysis.domain.estimator.model.RuntimeModelVersion.FULL_RUNTIME_V2_2
-                        val v2Tag = if (context != null) {
-                            if (isV22) context.getString(R.string.prediction_model_v2_tag_2_2) else context.getString(R.string.prediction_model_v2_tag_2_1)
-                        } else {
-                            if (isV22) "升级模型(v2.2)" else "升级模型(v2.1)"
-                        }
                         val confDesc = v2Result.confidenceLevel.getDescription(context)
                         val suffDesc = v2Result.dataSufficiency.getDescription(context)
 
-                        append("• $v2Tag：$v2DurStr ($confDesc)\n")
                         if (context != null) {
+                            append(context.getString(R.string.prediction_full_global_runtime_with_conf, v2DurStr, confDesc) + "\n")
                             appendSubItem(context.getString(R.string.prediction_model_stat_range, windowStr))
                             appendSubItem(context.getString(R.string.prediction_eff_global_format, effTotalStr, suffDesc))
                         } else {
+                            append("• 满电综合续航：$v2DurStr ($confDesc)\n")
                             appendSubItem("统计范围：$windowStr")
                             appendSubItem("有效放电：实际参与累计 $effTotalStr ($suffDesc)")
                         }
@@ -1370,23 +1373,25 @@ object BatteryEnergyCalculator {
                         } else {
                             appendSubItem("工况建模：基于 $modelDesc 推算")
                         }
+                    } else {
+                        if (context != null) {
+                            append(context.getString(R.string.prediction_full_global_runtime, fullDurationStr) + "\n")
+                        } else {
+                            append("• 满电综合续航：$fullDurationStr\n")
+                        }
                     }
 
                     if (context != null) {
-                        append("\n" + context.getString(R.string.prediction_notes_header))
+                        append(context.getString(R.string.prediction_notes_header))
                         append(context.getString(R.string.prediction_note_global_1))
                         append(context.getString(R.string.prediction_note_global_2))
-                        append(context.getString(R.string.prediction_note_global_3))
-                        append(context.getString(R.string.prediction_note_global_4))
                         append(context.getString(R.string.prediction_note_global_5))
                         append(context.getString(R.string.prediction_note_global_6))
                     } else {
                         append("\n💡 说明：\n")
                         append("• 会话放电速度反映本次拔电以来的全局综合耗电表现；\n")
-                        append("• 预测基准放电速度反映近期稳态工况，作为推算综合剩余续航的基准；\n")
-                        append("• 模式1忠实反映历史全周期能量总积分；\n")
-                        append("• 模式2解构亮屏与待机两态比例；\n")
-                        append("• 升级模型自适应历史窗口与工况建模；\n")
+                        append("• 预测基准放电速度基于大样本历史稳态工况推算，作为推算综合剩余续航的基准；\n")
+                        append("• 满电综合续航自适应历史窗口与工况建模；\n")
                         append("• 剩余续航基于物理能量与多时间尺度综合推算。")
                     }
                 }
@@ -1430,11 +1435,11 @@ object BatteryEnergyCalculator {
     }
 
     /**
-     * 将预测真实容量格式化为“多少Wh（多少mAh）”标准展示文本。
+     * 将预测基于容量格式化为“多少Wh（多少mAh）”标准展示文本。
      * 忠实反映系统底层硬件数据，缺失时如实返回“未获取”，严禁捏造假数据。
      *
-     * @param capacityWh 预测真实能量容量（单位：Wh，若缺失传入 null）
-     * @param capacityMah 预测真实电荷容量（单位：mAh，若缺失传入 null）
+     * @param capacityWh 预测基于容量能量值（单位：Wh，若缺失传入 null）
+     * @param capacityMah 预测基于容量电荷值（单位：mAh，若缺失传入 null）
      * @param nominalVoltageVolts 电池标称电压（单位：V，默认 3.85V）
      * @return 格式化后的容量说明字符串，例如 "19.25 Wh (5000 mAh)" 或 "未获取"
      */
@@ -1492,6 +1497,30 @@ object BatteryEnergyCalculator {
     }
 
     /**
+     * 将工况预期范围的续航时长格式化为规范的 "00x00x" 紧凑字符串。
+     * 严格遵循统一时间格式规则：
+     * 1. 当时长大于等于 1 天时，仅精确到小时（如 "03d05h"）；
+     * 2. 当时长小于 1 天且大于等于 1 小时时，精确到分钟（如 "17h07m"）；
+     * 3. 当时长小于 1 小时时，统一保持两段制格式补齐展示（如 "00h25m"）；
+     * 4. 时长为 null 或非正数时如实返回 "--"。
+     *
+     * @param ms 工况预期可用物理时长毫秒数（可为 null）
+     * @return 格式化后的规范时长字符串（如 "03d05h"、"17h07m"、"00h25m"），无数据时返回 "--"
+     */
+    fun formatExpectedRangeDuration(ms: Long?): String {
+        if (ms == null || ms <= 0L) return "--"
+        val totalSec = ms / 1000L
+        val days = totalSec / 86400L
+        val hours = (totalSec % 86400L) / 3600L
+        val minutes = (totalSec % 3600L) / 60L
+        return when {
+            days > 0L -> String.format(Locale.getDefault(), "%02dd%02dh", days, hours)
+            hours > 0L -> String.format(Locale.getDefault(), "%02dh%02dm", hours, minutes)
+            else -> String.format(Locale.getDefault(), "00h%02dm", minutes.coerceAtLeast(1L))
+        }
+    }
+
+    /**
      * 将满电推算可用时长格式化为友好紧凑字符串，精确到分钟（如 "17h07m"、"01d07h15m"）。
      *
      * @param ms 充满电可用物理时长毫秒数
@@ -1508,6 +1537,21 @@ object BatteryEnergyCalculator {
             hours > 0L -> String.format(Locale.getDefault(), "%02dh%02dm", hours, minutes)
             else -> String.format(Locale.getDefault(), "%02dm", minutes)
         }
+    }
+
+    /**
+     * 将滑动窗口切片时长格式化为易读的紧凑时分格式（如 "02h00m"、"12h00m"、"24h00m"）。
+     * 针对亮屏（2小时切片）、息屏（12小时切片）与全局（24小时切片）滑动窗口，提供标准规范的时分展示。
+     *
+     * @param ms 滑动窗口有效物理时长毫秒数
+     * @return 格式化后的时分字符串（如 "02h00m"），数据无效或非正数时返回空字符串
+     */
+    fun formatRollingWindowDuration(ms: Long?): String {
+        if (ms == null || ms <= 0L) return ""
+        val totalMin = ms / 60000L
+        val hours = totalMin / 60L
+        val minutes = totalMin % 60L
+        return String.format(Locale.getDefault(), "%02dh%02dm", hours, minutes)
     }
 
     /**

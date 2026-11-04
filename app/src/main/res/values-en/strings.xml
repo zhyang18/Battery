@@ -824,7 +824,7 @@
     <string name="capacity_learning_progress_format">Learning (%d/5)</string>
     <string name="capacity_physical_charge_format">Charge · %d%%</string>
     <string name="capacity_physical_charge">Charge</string>
-    <string name="capacity_nominal_energy">Nominal Energy</string>
+    <string name="capacity_nominal_energy">Nominal Baseline (3.85V)</string>
     <string name="capacity_status_converged">🛡️ Converged</string>
     <string name="capacity_status_observing">⏳ Observing</string>
     <string name="capacity_status_pending">🌱 Learning</string>
@@ -1018,6 +1018,7 @@
     <string name="capacity_diag_statement_title">⚠️ Physics &amp; Operating Statements</string>
     <string name="capacity_diag_statement_1">1. Electrochemical temperature and internal resistance models for this device are not calibrated via test benches. The system faithfully displays baseline physical capacity without uncalibrated discounts.</string>
     <string name="capacity_diag_statement_2">2. Confidence level and dispersion indicate internal statistical consistency across samples, not a commercial guarantee of absolute measurement accuracy.</string>
+    <string name="capacity_diag_statement_3" formatted="false">3. Available remaining energy is estimated from the lithium battery standard nominal platform (3.85V at 0.2C/25°C). Actual discharged energy varies dynamically with load (higher loads cause internal resistance heat losses and slightly lower usable energy, while light standby approaches nominal) and temperature. Due to higher charging voltages (~4.18V), charged energy naturally exceeds discharged energy, reflecting normal battery cycle energy efficiency (~88%–92%).</string>
     <string name="capacity_diag_guide_title">💡 Daily Use &amp; Self-Learning Guide</string>
     <string name="capacity_diag_guide_desc" formatted="false">No intentional 0%–100% deep cycling needed. In daily use, having 1–2 natural sessions spanning > 20% will automatically update the profile incrementally.</string>
     <string name="capacity_session_list_title">Learning Session Sample Details</string>
@@ -1036,7 +1037,11 @@
     <string name="prediction_session_sub_discharge">(Discharging %s)</string>
     <string name="prediction_seven_days_drain_rate">• Past 7-day drain rate: %s</string>
     <string name="prediction_full_screen_on_runtime">• Full screen-on runtime: %s</string>
+    <string name="prediction_full_screen_on_runtime_with_conf">• Full screen-on runtime: %1$s (%2$s)</string>
     <string name="prediction_full_screen_off_runtime">• Full standby duration: %s</string>
+    <string name="prediction_full_screen_off_runtime_with_conf">• Full standby duration: %1$s (%2$s)</string>
+    <string name="prediction_full_global_runtime">• Full overall runtime: %s</string>
+    <string name="prediction_full_global_runtime_with_conf">• Full overall runtime: %1$s (%2$s)</string>
     <string name="prediction_model_v2_tag_2_2">Upgraded Model (v2.2)</string>
     <string name="prediction_model_v2_tag_2_1">Upgraded Model (v2.1)</string>
     <string name="prediction_model_stat_range">"  Time Range: %s"</string>
@@ -1051,7 +1056,7 @@
     <string name="prediction_normal_load_format">Normal %s</string>
     <string name="prediction_heavy_load_format">Heavy %s</string>
     <string name="prediction_typical_power">"  Typical Power: %s"</string>
-    <string name="prediction_standby_workload">"  Standby Workload: Sleep %1$s · Awake %2$s"</string>
+    <string name="prediction_standby_workload">"  Standby Workload: Awake %1$s · Sleep %2$s"</string>
     <string name="prediction_sleep_load_format">Sleep %s</string>
     <string name="prediction_awake_load_format">Awake %s</string>
     <string name="prediction_typical_standby_power">"  Typical Standby Power: %s"</string>
@@ -1060,17 +1065,20 @@
     <string name="prediction_model_desc_regime">Conditional Typical Workload Model</string>
     <string name="prediction_model_desc_fallback">Global Physical Baseline Fallback</string>
     <string name="prediction_baseline_drain_rate">• Predicted baseline drain rate: %s</string>
+    <string name="prediction_rolling_drain_rate">• Recent rolling drain rate: %s</string>
     <string name="prediction_current_remaining_runtime">• Current remaining runtime: %s</string>
     <string name="prediction_current_remaining_runtime_with_conf">• Current remaining runtime: %1$s (%2$s)</string>
     <string name="prediction_current_standby_runtime_with_conf">• Current remaining standby: %1$s (%2$s)</string>
     <string name="prediction_range_screen_on">"  Expected Range: %1$s (Heavy) ~ %2$s (Light)"</string>
-    <string name="prediction_range_screen_off">"  Expected Range: %1$s (Frequent Wakeup) ~ %2$s (Deep Sleep)"</string>
-    <string name="prediction_range_global">"  Expected Range: %1$s (Heavy-leaning) ~ %2$s (Light-leaning)"</string>
+    <string name="prediction_range_screen_off">"  Expected Range: %1$s (Awake) ~ %2$s (Sleep)"</string>
+    <string name="prediction_range_global">"  Expected Range: %1$s (Heavy) ~ %2$s (Light)"</string>
     <string name="prediction_pred_discharge_power">"  Predicted Discharge Power: %1$s%2$s%3$s"</string>
     <string name="prediction_pred_standby_power">"  Predicted Standby Power: %1$s%2$s%3$s"</string>
     <string name="prediction_pred_overall_power">"  Predicted Overall Power: %1$s%2$s%3$s"</string>
+    <string name="prediction_instant_power">"  Instant Fused Power: %1$s%2$s%3$s"</string>
+    <string name="prediction_drain_multiplier_suffix"> (Rate %1$s)</string>
     <string name="prediction_avail_energy_suffix"> (Available %s)</string>
-    <string name="prediction_real_capacity">• Predicted real capacity: %s</string>
+    <string name="prediction_real_capacity">• Prediction based capacity: %s</string>
     <string name="prediction_full_estimates_header">\n📊 Full Charge Runtime Estimates:\n</string>
     <string name="prediction_mode_1_title">• Mode 1 (Global Weighted): %s</string>
     <string name="prediction_mode_1_desc">"  Linear estimate based on 7-day total power"</string>
@@ -1078,20 +1086,20 @@
     <string name="prediction_mode_2_desc">"  Weighted by typical habit: %1$s on + %2$s off"</string>
     <string name="prediction_notes_header">\n💡 Notes:\n</string>
     <string name="prediction_note_screen_on_1">• Session drain rate reflects actual average consumption since unplugging;\n</string>
-    <string name="prediction_note_screen_on_2">• Predicted baseline rate reflects recent steady workloads for remaining runtime estimation;\n</string>
-    <string name="prediction_note_screen_on_3">• Full runtime is weighted based on 7-day actual screen-on usage;\n</string>
+    <string name="prediction_note_screen_on_2">• Predicted baseline drain rate is based on historical steady-state workload, serving as the benchmark for remaining runtime;\n</string>
+    <string name="prediction_note_screen_on_3">• Full screen-on runtime adaptively optimizes history window and decay weighting;\n</string>
     <string name="prediction_note_screen_on_4">• Upgraded model adaptively optimizes history window and decay weighting;\n</string>
     <string name="prediction_note_screen_on_5">• Remaining runtime is computed via physical energy and multi-timescale models.</string>
     <string name="prediction_note_screen_off_1">• Session drain rate reflects screen-off standby consumption since unplugging;\n</string>
-    <string name="prediction_note_screen_off_2">• Predicted baseline rate reflects recent steady standby baseline;\n</string>
-    <string name="prediction_note_screen_off_3">• Standby duration is weighted by actual 7-day standby history;\n</string>
+    <string name="prediction_note_screen_off_2">• Predicted baseline drain rate is based on historical steady-state workload, serving as the benchmark for standby runtime;\n</string>
+    <string name="prediction_note_screen_off_3">• Full standby duration decomposes deep sleep noise and background wakeups;\n</string>
     <string name="prediction_note_screen_off_4">• Upgraded model decomposes deep sleep noise and background wakeups;\n</string>
     <string name="prediction_note_screen_off_5">• Standby runtime is estimated from physical energy and multi-timescale steady models.</string>
     <string name="prediction_note_global_1">• Session drain rate reflects overall power consumption since unplugging;\n</string>
-    <string name="prediction_note_global_2">• Predicted baseline rate reflects recent steady workloads for total remaining runtime;\n</string>
+    <string name="prediction_note_global_2">• Predicted baseline drain rate is based on historical steady-state workload, serving as the benchmark for total remaining runtime;\n</string>
     <string name="prediction_note_global_3">• Mode 1 faithfully integrates total energy over the full history cycle;\n</string>
     <string name="prediction_note_global_4">• Mode 2 decomposes the proportion of screen-on and standby states;\n</string>
-    <string name="prediction_note_global_5">• Upgraded model adaptively models history windows and workload profiles;\n</string>
+    <string name="prediction_note_global_5">• Full overall runtime adaptively models history windows and workload profiles;\n</string>
     <string name="prediction_note_global_6">• Remaining runtime is comprehensively computed via physical energy and multi-timescale models.</string>
 
     <!-- Confidence & Sufficiency -->

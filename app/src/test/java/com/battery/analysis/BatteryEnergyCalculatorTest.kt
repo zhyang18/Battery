@@ -2,6 +2,7 @@ package com.battery.analysis
 
 import com.battery.analysis.util.BatteryEnergyCalculator
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -345,7 +346,8 @@ class BatteryEnergyCalculatorTest {
     }
 
     /**
-     * 测试亮屏放电速度卡片弹框详细格式化，验证包含“累积7天亮屏放电速度”、满电续航、精确到秒的“当前剩余续航”及“预测真实容量：多少Wh（多少mAh）”。
+     * 测试亮屏放电速度卡片弹框详细格式化，验证包含“累积7天亮屏放电速度”、满电续航、精确到秒的“当前剩余续航”及“预测基于容量：多少Wh（多少mAh）”，
+     * 且当前剩余续航显示区域位于满电亮屏续航前方。
      */
     @Test
     fun testFormatScreenOnDischargeSpeedDetailMessage() {
@@ -364,19 +366,23 @@ class BatteryEnergyCalculatorTest {
 
         assertTrue("标题包含亮屏续航预测", message.contains("【亮屏续航预测】"))
         assertTrue("包含当前会话放电速度", message.contains("• 当前会话放电速度：6.5%/h (亮屏 02h00m00s)"))
-        assertTrue("包含近7天放电速度与实际时长", message.contains("• 近7天放电速度：6.1%/h (亮屏 02d05h)"))
-        assertTrue("包含满电亮屏续航且精确到秒", message.contains("• 满电亮屏续航：16h24m00s"))
+        assertFalse("不应包含近7天放电速度", message.contains("• 近7天放电速度："))
+        assertFalse("不应包含近期滑动放电速度", message.contains("• 近期滑动放电速度："))
         assertTrue("包含预测基准放电速度", message.contains("• 预测基准放电速度：6.3%/h"))
         assertTrue("包含当前剩余续航且精确到秒", message.contains("• 当前剩余续航：09h15m30s"))
+        assertTrue("包含满电亮屏续航且精确到秒", message.contains("• 满电亮屏续航：16h24m00s"))
         val speedIndex = message.indexOf("• 预测基准放电速度：6.3%/h")
         val remainingIndex = message.indexOf("• 当前剩余续航：09h15m30s")
+        val fullRuntimeIndex = message.indexOf("• 满电亮屏续航：16h24m00s")
         assertTrue("预测基准放电速度必须在当前剩余续航上方", speedIndex in 0 until remainingIndex)
-        assertTrue("包含预测真实容量（多少Wh（多少mAh））", message.contains("• 预测真实容量：19.25 Wh (5000 mAh)"))
+        assertTrue("当前剩余续航必须在满电亮屏续航上方", remainingIndex in 0 until fullRuntimeIndex)
+        assertTrue("包含预测基于容量（多少Wh（多少mAh））", message.contains("• 预测基于容量：19.25 Wh (5000 mAh)"))
         assertTrue("包含说明模块", message.contains("💡 说明："))
     }
 
     /**
-     * 测试息屏放电速度卡片弹框详细格式化，验证包含“当前会话放电速度”、“近7天放电速度”、满电待机时长及精确到秒的“当前剩余续航”。
+     * 测试息屏放电速度卡片弹框详细格式化，验证包含“当前会话放电速度”、满电待机时长及精确到秒的“当前剩余续航”，且不含冗余历史项，
+     * 且当前待机续航显示区域位于满电待机时长前方。
      */
     @Test
     fun testFormatScreenOffDischargeSpeedDetailMessage() {
@@ -391,15 +397,22 @@ class BatteryEnergyCalculatorTest {
 
         assertTrue("标题包含息屏续航预测", message.contains("【息屏续航预测】"))
         assertTrue("当前会话暂无数据展示--", message.contains("• 当前会话放电速度：--"))
-        assertTrue("包含近7天放电速度与实际时长", message.contains("• 近7天放电速度：1.0%/h (息屏 04d01h)"))
-        assertTrue("包含满电待机时长且精确到秒", message.contains("• 满电待机时长：04d01h00m00s"))
+        assertFalse("不应包含近7天放电速度", message.contains("• 近7天放电速度："))
+        assertFalse("不应包含近期滑动放电速度", message.contains("• 近期滑动放电速度："))
         assertTrue("预测基准放电速度暂无展示--", message.contains("• 预测基准放电速度：--"))
         assertTrue("包含当前剩余续航且精确到秒", message.contains("• 当前剩余续航：02d03h40m15s"))
+        assertTrue("包含满电待机时长且精确到秒", message.contains("• 满电待机时长：04d01h00m00s"))
+        val speedIndex = message.indexOf("• 预测基准放电速度：--")
+        val remainingIndex = message.indexOf("• 当前剩余续航：02d03h40m15s")
+        val fullRuntimeIndex = message.indexOf("• 满电待机时长：04d01h00m00s")
+        assertTrue("预测基准放电速度必须在当前剩余续航上方", speedIndex in 0 until remainingIndex)
+        assertTrue("当前剩余续航必须在满电待机时长上方", remainingIndex in 0 until fullRuntimeIndex)
         assertTrue("包含说明模块", message.contains("💡 说明："))
     }
 
     /**
-     * 测试全局放电速度卡片弹框详细格式化，验证包含“当前会话放电速度”、“7天全局放电速度”、精确到秒的“当前剩余续航”、模式1（全局加权）与模式2（场景融合）双模型推算（精确到秒）。
+     * 测试全局放电速度卡片弹框详细格式化，验证包含“当前会话放电速度”、精确到秒的“当前剩余续航”、模式1（全局加权）与模式2（场景融合）双模型推算（精确到秒），
+     * 且当前剩余续航显示区域位于满电综合续航前方。
      */
     @Test
     fun testFormatGlobalDischargeSpeedDetailMessage() {
@@ -418,16 +431,18 @@ class BatteryEnergyCalculatorTest {
 
         assertTrue("标题包含全局续航预测", message.contains("【全局续航预测】"))
         assertTrue("包含当前会话放电速度", message.contains("• 当前会话放电速度：4.2%/h (放电 05h00m00s)"))
-        assertTrue("包含近7天放电速度与实际时长", message.contains("• 近7天放电速度：2.8%/h (放电 06d07h)"))
+        assertFalse("不应包含近7天放电速度", message.contains("• 近7天放电速度："))
+        assertFalse("不应包含近期滑动放电速度", message.contains("• 近期滑动放电速度："))
         assertTrue("包含预测基准放电速度", message.contains("• 预测基准放电速度：6.3%/h"))
         assertTrue("包含当前剩余续航且精确到秒", message.contains("• 当前剩余续航：01d02h10m05s"))
+        assertTrue("包含满电综合续航结果（精确到秒）", message.contains("• 满电综合续航：01d11h12m00s"))
+        val sessionIndex = message.indexOf("• 当前会话放电速度：4.2%/h")
         val speedIndex = message.indexOf("• 预测基准放电速度：6.3%/h")
         val remainingIndex = message.indexOf("• 当前剩余续航：01d02h10m05s")
-        assertTrue("预测基准放电速度必须在当前剩余续航上方", speedIndex in 0 until remainingIndex)
-        assertTrue("包含双模型标题", message.contains("📊 满电综合续航推算"))
-        assertTrue("包含模式1全局加权结果（精确到秒）", message.contains("• 模式1（全局加权）：01d11h12m00s"))
-        assertTrue("包含模式2场景融合结果（精确到秒）", message.contains("• 模式2（场景融合）：01d15h35m00s"))
-        assertTrue("包含模式2动态加权说明", message.contains("按日常习惯 25.0% 亮屏 + 75.0% 息屏加权"))
+        val fullRuntimeIndex = message.indexOf("• 满电综合续航：01d11h12m00s")
+        assertTrue("预测基准放电速度必须在当前会话放电速度下方", sessionIndex in 0 until speedIndex)
+        assertTrue("当前剩余续航必须在预测基准放电速度下方", speedIndex in 0 until remainingIndex)
+        assertTrue("满电综合续航必须在当前剩余续航下方", remainingIndex in 0 until fullRuntimeIndex)
         assertTrue("包含说明模块", message.contains("💡 说明："))
     }
 
@@ -493,8 +508,7 @@ class BatteryEnergyCalculatorTest {
             v2Result = v2Result
         )
 
-        assertTrue("必须包含升级模型v2.1标题", msg.contains("• 升级模型(v2.1)："))
-        assertTrue("升级模型推算精确到秒", msg.contains("• 升级模型(v2.1)：05h00m00s (可信度高)"))
+        assertTrue("必须包含满电亮屏续航", msg.contains("• 满电亮屏续航：05h00m00s (可信度高)"))
         assertTrue("必须包含统计范围且展示自适应扩展天数", msg.contains("统计范围：自适应扩展至近 18.5 天"))
         assertTrue("必须包含实际有效放电时长", msg.contains("有效放电：累计亮屏 06h00m"))
         assertTrue("必须包含数据充分性评级", msg.contains("数据充足"))
@@ -548,8 +562,7 @@ class BatteryEnergyCalculatorTest {
             nominalVoltageVolts = 3.85f
         )
 
-        assertTrue("Wh模式下满电亮屏续航精确到秒", msgWh.contains("• 满电亮屏续航：18h53m24s"))
-        assertTrue("Wh模式下升级模型(v2.2)精确到秒", msgWh.contains("• 升级模型(v2.2)：18h53m24s (可信度高)"))
+        assertTrue("Wh模式下满电亮屏续航精确到秒", msgWh.contains("• 满电亮屏续航：18h53m24s (可信度高)"))
         assertTrue("Wh模式下预测放电功耗括号显示 7.19Wh", msgWh.contains("预测放电功耗：1.47W (可用 7.19Wh)"))
 
         // 2. mAh 单位下测试：7.19 Wh * 1000 / 3.85V ≈ 1867.5 mAh
@@ -565,8 +578,7 @@ class BatteryEnergyCalculatorTest {
             nominalVoltageVolts = 3.85f
         )
 
-        assertTrue("mAh模式下满电亮屏续航精确到秒", msgMah.contains("• 满电亮屏续航：18h53m24s"))
-        assertTrue("mAh模式下升级模型(v2.2)精确到秒", msgMah.contains("• 升级模型(v2.2)：18h53m24s (可信度高)"))
+        assertTrue("mAh模式下满电亮屏续航精确到秒", msgMah.contains("• 满电亮屏续航：18h53m24s (可信度高)"))
         assertTrue("mAh模式下预测放电功耗括号显示 1867.5mAh", msgMah.contains("预测放电功耗：1.47W (可用 1867.5mAh)"))
     }
 
@@ -666,7 +678,7 @@ class BatteryEnergyCalculatorTest {
     }
 
     /**
-     * 测试预测真实容量在数据缺失时如实展示“未获取”，绝不虚构数据。
+     * 测试预测基于容量在数据缺失时如实展示“未获取”，绝不虚构数据。
      */
     @Test
     fun testFormatPredictedCapacityWhenDataMissing() {
@@ -1078,7 +1090,7 @@ class BatteryEnergyCalculatorTest {
             v2Result = v2OnLow,
             remainingEstimate = remHigh
         )
-        assertTrue("亮屏12h升级模型必须显示可信度较低", msgOnLow.contains("• 升级模型(v2.1)：10h00m00s (可信度较低)"))
+        assertTrue("亮屏12h升级模型必须显示可信度较低", msgOnLow.contains("• 满电亮屏续航：10h00m00s (可信度较低)"))
         assertTrue("亮屏12h当前剩余续航置信度受限为较低", msgOnLow.contains("• 当前剩余续航：10h00m00s (可信度较低)"))
 
         // 2. 亮屏弹框在 36 小时（24h~72h 之间，必须为中等）
@@ -1104,7 +1116,7 @@ class BatteryEnergyCalculatorTest {
             v2Result = v2OnMed,
             remainingEstimate = remHigh
         )
-        assertTrue("亮屏36h升级模型必须显示可信度中等", msgOnMed.contains("• 升级模型(v2.1)：10h00m00s (可信度中等)"))
+        assertTrue("亮屏36h升级模型必须显示可信度中等", msgOnMed.contains("• 满电亮屏续航：10h00m00s (可信度中等)"))
         assertTrue("亮屏36h当前剩余续航置信度受限为中等", msgOnMed.contains("• 当前剩余续航：10h00m00s (可信度中等)"))
 
         // 3. 亮屏弹框在 80 小时（>72h，必须为高）
@@ -1130,7 +1142,7 @@ class BatteryEnergyCalculatorTest {
             v2Result = v2OnHigh,
             remainingEstimate = remHigh
         )
-        assertTrue("亮屏80h升级模型必须显示可信度高", msgOnHigh.contains("• 升级模型(v2.1)：10h00m00s (可信度高)"))
+        assertTrue("亮屏80h升级模型必须显示可信度高", msgOnHigh.contains("• 满电亮屏续航：10h00m00s (可信度高)"))
         assertTrue("亮屏80h当前剩余续航必须显示可信度高", msgOnHigh.contains("• 当前剩余续航：10h00m00s (可信度高)"))
 
         // 4. 息屏弹框在 30 小时（24h~72h 之间，必须为中等）
@@ -1156,7 +1168,7 @@ class BatteryEnergyCalculatorTest {
             v2Result = v2OffMed,
             remainingEstimate = remHigh
         )
-        assertTrue("息屏30h升级模型必须显示可信度中等", msgOffMed.contains("• 升级模型(v2.1)：01d16h00m00s (可信度中等)"))
+        assertTrue("息屏30h升级模型必须显示可信度中等", msgOffMed.contains("• 满电待机时长：01d16h00m00s (可信度中等)"))
         assertTrue("息屏30h当前待机续航置信度受限为中等", msgOffMed.contains("• 当前待机续航：10h00m00s (可信度中等)"))
 
         // 5. 全局弹框在 60 小时（48h~120h 之间，必须为中等）
@@ -1180,7 +1192,7 @@ class BatteryEnergyCalculatorTest {
             v2Result = v2GlobalMed,
             remainingEstimate = remHigh
         )
-        assertTrue("全局60h升级模型必须显示可信度中等", msgGlobalMed.contains("• 升级模型(v2.1)：01d01h00m00s (可信度中等)"))
+        assertTrue("全局60h升级模型必须显示可信度中等", msgGlobalMed.contains("• 满电综合续航：01d01h00m00s (可信度中等)"))
         assertTrue("全局60h当前剩余续航置信度受限为中等", msgGlobalMed.contains("• 当前剩余续航：10h00m00s (可信度中等)"))
 
         // 6. 全局弹框在 130 小时（>120h，必须为高）
@@ -1204,7 +1216,7 @@ class BatteryEnergyCalculatorTest {
             v2Result = v2GlobalHigh,
             remainingEstimate = remHigh
         )
-        assertTrue("全局130h升级模型必须显示可信度高", msgGlobalHigh.contains("• 升级模型(v2.1)：01d01h00m00s (可信度高)"))
+        assertTrue("全局130h升级模型必须显示可信度高", msgGlobalHigh.contains("• 满电综合续航：01d01h00m00s (可信度高)"))
         assertTrue("全局130h当前剩余续航必须显示可信度高", msgGlobalHigh.contains("• 当前剩余续航：10h00m00s (可信度高)"))
     }
 
@@ -1308,10 +1320,11 @@ class BatteryEnergyCalculatorTest {
         )
         assertTrue("息屏统计范围必须以双空格缩进开头", msgOff.contains("\n  统计范围：最近 7 天\n"))
         assertTrue("息屏有效放电必须以双空格缩进开头", msgOff.contains("\n  有效放电：累计息屏"))
-        assertTrue("息屏待机工况必须以双空格缩进开头", msgOff.contains("\n  待机工况：休眠"))
-        assertTrue("息屏工况功耗必须以双空格缩进开头", msgOff.contains("\n  工况功耗：休眠"))
+        assertTrue("息屏待机工况必须以双空格缩进开头", msgOff.contains("\n  待机工况：唤醒"))
+        assertTrue("息屏工况功耗必须以双空格缩进开头", msgOff.contains("\n  工况功耗：唤醒"))
         assertTrue("息屏典型待机功耗必须以双空格缩进开头", msgOff.contains("\n  典型待机功耗：0.08W\n"))
         assertTrue("息屏工况预期范围必须以双空格缩进开头", msgOff.contains("\n  工况预期范围："))
+        assertTrue("息屏工况预期范围必须包含唤醒与休眠括号", msgOff.contains("(唤醒)") && msgOff.contains("(休眠)"))
         assertTrue("息屏预测待机功耗必须以双空格缩进开头", msgOff.contains("\n  预测待机功耗："))
 
         // 3. 验证全局弹窗 (ROW_GLOBAL) 中的子项规范
@@ -1328,12 +1341,223 @@ class BatteryEnergyCalculatorTest {
             remainingEstimate = remEstimate
         )
         assertTrue("全局工况预期范围必须以双空格缩进开头", msgGlobal.contains("\n  工况预期范围："))
+        assertTrue("全局工况预期范围必须包含重载与轻载括号", msgGlobal.contains("(重载)") && msgGlobal.contains("(轻载)"))
         assertTrue("全局预测综合功耗必须以双空格缩进开头", msgGlobal.contains("\n  预测综合功耗："))
-        assertTrue("模式1说明必须以双空格缩进开头", msgGlobal.contains("\n  基于7天全局真实功耗线性推算\n"))
-        assertTrue("模式2说明必须以双空格缩进开头", msgGlobal.contains("\n  按日常习惯 40.0% 亮屏 + 60.0% 息屏加权\n"))
         assertTrue("全局统计范围必须以双空格缩进开头", msgGlobal.contains("\n  统计范围：最近 7 天\n"))
         assertTrue("全局有效放电必须以双空格缩进开头", msgGlobal.contains("\n  有效放电：实际参与累计"))
         assertTrue("全局两态分布必须以双空格缩进开头", msgGlobal.contains("\n  两态分布：亮屏"))
         assertTrue("全局工况建模必须以双空格缩进开头", msgGlobal.contains("\n  工况建模：基于"))
+        assertTrue("全局弹窗必须包含满电综合续航", msgGlobal.contains("• 满电综合续航："))
+        val globalSessionIndex = msgGlobal.indexOf("• 当前会话放电速度：")
+        val globalSpeedIndex = msgGlobal.indexOf("• 预测基准放电速度：")
+        val globalRemainingIndex = msgGlobal.indexOf("• 当前剩余续航：")
+        val globalFullIndex = msgGlobal.indexOf("• 满电综合续航：")
+        assertTrue("全局预测基准放电速度必须在当前会话放电速度下方", globalSessionIndex in 0 until globalSpeedIndex)
+        assertTrue("全局当前剩余续航必须在预测基准放电速度下方", globalSpeedIndex in 0 until globalRemainingIndex)
+        assertTrue("全局满电综合续航必须在当前剩余续航下方", globalRemainingIndex in 0 until globalFullIndex)
+    }
+
+    /**
+     * 验证当存在权威稳态基准功率与即时做功功率时，
+     * 放电速度卡片详情弹窗能够严格呈现“预测放电功耗（推算基准）”与“即时融合功耗（流速与即时速率）”的闭环展示。
+     */
+    @Test
+    fun testFormatDischargeSpeedDetailMessage_BenchmarkPowerAndInstantFusedPowerDisplayed() {
+        val remEstimate = com.battery.analysis.domain.estimator.model.RuntimeEstimate(
+            remainingMs = 23532_000L, // 06h32m12s
+            predictedPowerWatts = 1.42,
+            remainingEnergyWh = 12.44,
+            confidence = 0.90,
+            modelType = com.battery.analysis.domain.estimator.model.RuntimeModelType.MULTI_TIMESCALE,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            benchmarkPowerWatts = 1.90,
+            actualFastPowerWatts = 1.42,
+            drainRateMultiplier = 0.747
+        )
+
+        // 1. 验证亮屏卡片弹窗闭环展示
+        val msgOn = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_ON,
+            currentRatePercentPerHour = 5.1f,
+            sevenDaysRatePercentPerHour = 5.7f,
+            sevenDaysDurationMs = 77L * 3600_000L,
+            fullDurationMs = 15L * 3600_000L,
+            predictedCapacityWh = 29.61f,
+            remainingEstimate = remEstimate
+        )
+
+        assertTrue("亮屏弹窗必须包含当前剩余续航 06h32m12s", msgOn.contains("• 当前剩余续航：06h32m12s (可信度高)"))
+        assertTrue("亮屏弹窗第一行必须展示基准预测放电功耗 1.90W 与可用 12.44Wh", msgOn.contains("预测放电功耗：1.90W (可用 12.44Wh) · 6.4%/h"))
+        assertTrue("亮屏弹窗第二行必须展示即时融合功耗 1.42W 与流速 0.75x", msgOn.contains("即时融合功耗：1.42W (流速 0.75x) · 4.8%/h"))
+
+        // 2. 验证息屏待机弹窗闭环展示
+        val offEstimate = remEstimate.copy(
+            remainingMs = 65 * 3600_000L,
+            benchmarkPowerWatts = 0.18,
+            actualFastPowerWatts = 0.15,
+            drainRateMultiplier = 0.833
+        )
+        val msgOff = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_OFF,
+            currentRatePercentPerHour = 1.7f,
+            sevenDaysRatePercentPerHour = 1.5f,
+            sevenDaysDurationMs = 80L * 3600_000L,
+            fullDurationMs = 100L * 3600_000L,
+            predictedCapacityWh = 29.61f,
+            remainingEstimate = offEstimate
+        )
+        assertTrue("息屏弹窗第一行必须展示基准预测待机功耗 0.18W", msgOff.contains("预测待机功耗：0.18W (可用 12.44Wh) · 0.6%/h"))
+        assertTrue("息屏弹窗第二行必须展示即时融合功耗 0.15W 与流速 0.83x", msgOff.contains("即时融合功耗：0.15W (流速 0.83x) · 0.5%/h"))
+
+        // 3. 验证全局综合弹窗闭环展示
+        val globalEstimate = remEstimate.copy(
+            remainingMs = 20 * 3600_000L,
+            benchmarkPowerWatts = 0.60,
+            actualFastPowerWatts = 0.50,
+            drainRateMultiplier = 0.833
+        )
+        val msgGlobal = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_GLOBAL,
+            currentRatePercentPerHour = 4.4f,
+            sevenDaysRatePercentPerHour = 4.0f,
+            sevenDaysDurationMs = 150L * 3600_000L,
+            fullDurationMs = 22L * 3600_000L,
+            predictedCapacityWh = 29.61f,
+            remainingEstimate = globalEstimate
+        )
+        assertTrue("全局弹窗第一行必须展示基准预测综合功耗 0.60W", msgGlobal.contains("预测综合功耗：0.60W (可用 12.44Wh) · 2.0%/h"))
+        assertTrue("全局弹窗第二行必须展示即时融合功耗 0.50W 与流速 0.83x", msgGlobal.contains("即时融合功耗：0.50W (流速 0.83x) · 1.7%/h"))
+    }
+
+    /**
+     * 验证方案2中放电速度卡片弹窗同时展示【预测基准放电速度】（与卡片大字、剩余续航推算口径一致）
+     * 与【近期滑动放电速度】（反映近2h/12h/24h短窗滑动实测表现），且说明文案如实更新为“基于大样本历史稳态工况推算”。
+     */
+    @Test
+    fun testFormatDischargeSpeedDetailMessage_Scheme2RollingRateAndUpdatedNotes() {
+        val remEstimate = com.battery.analysis.domain.estimator.model.RuntimeEstimate(
+            remainingMs = 33315_000L, // 09h15m15s
+            predictedPowerWatts = 1.42,
+            remainingEnergyWh = 17.58,
+            confidence = 0.90,
+            modelType = com.battery.analysis.domain.estimator.model.RuntimeModelType.MULTI_TIMESCALE,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            benchmarkPowerWatts = 1.90,
+            actualFastPowerWatts = 1.42,
+            drainRateMultiplier = 0.747
+        )
+
+        // 1. 亮屏弹窗：基准放电速度为 6.4%/h，近期滑动放电速度为 3.5%/h (亮屏 02h00m)
+        val msgOn = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_ON,
+            currentRatePercentPerHour = 6.4f,
+            rollingRatePercentPerHour = 3.5f,
+            rollingDurationMs = 7200_000L,
+            sevenDaysRatePercentPerHour = 5.7f,
+            sevenDaysDurationMs = 77L * 3600_000L,
+            fullDurationMs = 15L * 3600_000L,
+            predictedCapacityWh = 29.79f,
+            remainingEstimate = remEstimate
+        )
+
+        assertTrue("亮屏弹窗必须包含预测基准放电速度 6.4%/h", msgOn.contains("• 预测基准放电速度：6.4%/h"))
+        assertFalse("亮屏弹窗不应包含近期滑动放电速度", msgOn.contains("• 近期滑动放电速度："))
+        assertFalse("亮屏弹窗不应包含近7天放电速度", msgOn.contains("• 近7天放电速度："))
+        assertTrue("亮屏弹窗必须包含当前剩余续航 09h15m15s", msgOn.contains("• 当前剩余续航：09h15m15s (可信度高)"))
+        assertTrue("亮屏弹窗说明必须澄清基于大样本历史稳态工况推算", msgOn.contains("• 预测基准放电速度基于大样本历史稳态工况推算，作为当前剩余续航的基准；"))
+        assertTrue("亮屏弹窗说明必须澄清满电亮屏续航自适应", msgOn.contains("• 满电亮屏续航自适应历史窗口与衰减权重；"))
+
+        // 2. 息屏待机弹窗：精简与说明展示
+        val offEstimate = remEstimate.copy(
+            remainingMs = 65 * 3600_000L,
+            benchmarkPowerWatts = 0.18,
+            actualFastPowerWatts = 0.15
+        )
+        val msgOff = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_OFF,
+            currentRatePercentPerHour = 0.6f,
+            rollingRatePercentPerHour = 0.4f,
+            rollingDurationMs = 43200_000L,
+            sevenDaysRatePercentPerHour = 1.5f,
+            sevenDaysDurationMs = 80L * 3600_000L,
+            fullDurationMs = 100L * 3600_000L,
+            predictedCapacityWh = 29.79f,
+            remainingEstimate = offEstimate
+        )
+
+        assertTrue("息屏弹窗必须包含预测基准放电速度 0.6%/h", msgOff.contains("• 预测基准放电速度：0.6%/h"))
+        assertFalse("息屏弹窗不应包含近期滑动放电速度", msgOff.contains("• 近期滑动放电速度："))
+        assertFalse("息屏弹窗不应包含近7天放电速度", msgOff.contains("• 近7天放电速度："))
+        assertTrue("息屏弹窗说明必须澄清基于大样本历史稳态工况推算", msgOff.contains("• 预测基准放电速度基于大样本历史稳态工况推算，作为推算待机续航的基准；"))
+        assertTrue("息屏弹窗说明必须澄清满电待机时长解构深睡底噪与后台唤醒", msgOff.contains("• 满电待机时长解构深睡底噪与后台唤醒；"))
+
+        // 3. 全局综合弹窗：精简与说明展示
+        val globalEstimate = remEstimate.copy(
+            remainingMs = 20 * 3600_000L,
+            benchmarkPowerWatts = 0.60,
+            actualFastPowerWatts = 0.50
+        )
+        val msgGlobal = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_GLOBAL,
+            currentRatePercentPerHour = 2.0f,
+            rollingRatePercentPerHour = 1.8f,
+            rollingDurationMs = 86400_000L,
+            sevenDaysRatePercentPerHour = 4.0f,
+            sevenDaysDurationMs = 150L * 3600_000L,
+            fullDurationMs = 22L * 3600_000L,
+            predictedCapacityWh = 29.79f,
+            remainingEstimate = globalEstimate
+        )
+
+        assertTrue("全局弹窗必须包含预测基准放电速度 2.0%/h", msgGlobal.contains("• 预测基准放电速度：2.0%/h"))
+        assertFalse("全局弹窗不应包含近期滑动放电速度", msgGlobal.contains("• 近期滑动放电速度："))
+        assertFalse("全局弹窗不应包含近7天放电速度", msgGlobal.contains("• 近7天放电速度："))
+        assertTrue("全局弹窗说明必须澄清基于大样本历史稳态工况推算", msgGlobal.contains("• 预测基准放电速度基于大样本历史稳态工况推算，作为推算综合剩余续航的基准；"))
+        assertTrue("全局弹窗说明必须澄清满电综合续航自适应", msgGlobal.contains("• 满电综合续航自适应历史窗口与工况建模；"))
+    }
+
+    /**
+     * 验证滑动窗口切片时长的格式化：2小时输出 02h00m，12小时输出 12h00m，24小时输出 24h00m，无效值返回空串。
+     */
+    @Test
+    fun testFormatRollingWindowDuration() {
+        assertEquals("02h00m", BatteryEnergyCalculator.formatRollingWindowDuration(7200_000L))
+        assertEquals("12h00m", BatteryEnergyCalculator.formatRollingWindowDuration(43200_000L))
+        assertEquals("24h00m", BatteryEnergyCalculator.formatRollingWindowDuration(86400_000L))
+        assertEquals("01h30m", BatteryEnergyCalculator.formatRollingWindowDuration(5400_000L))
+        assertEquals("", BatteryEnergyCalculator.formatRollingWindowDuration(null))
+        assertEquals("", BatteryEnergyCalculator.formatRollingWindowDuration(0L))
+        assertEquals("", BatteryEnergyCalculator.formatRollingWindowDuration(-1000L))
+    }
+
+    /**
+     * 验证工况预期范围专用时间格式化函数 formatExpectedRangeDuration 的多尺度格式化规范：
+     * 1. 超过1天（如 3天5小时27分）精确到小时，格式输出为 "03d05h"；
+     * 2. 小于1天且超过1小时（如 17小时7分）精确到分钟，格式输出为 "17h07m"；
+     * 3. 小于1小时（如 25分钟）统一保持两段制规范补齐为 "00h25m"；
+     * 4. 空值与非正数值如实返回 "--"。
+     */
+    @Test
+    fun testFormatExpectedRangeDuration() {
+        // 3天 5小时 27分 30秒 -> 03d05h
+        val overOneDayMs = ((3L * 24L + 5L) * 3600L + 27L * 60L + 30L) * 1000L
+        assertEquals("03d05h", BatteryEnergyCalculator.formatExpectedRangeDuration(overOneDayMs))
+
+        // 17小时 7分 12秒 -> 17h07m
+        val underOneDayMs = (17L * 3600L + 7L * 60L + 12L) * 1000L
+        assertEquals("17h07m", BatteryEnergyCalculator.formatExpectedRangeDuration(underOneDayMs))
+
+        // 25分 10秒 -> 00h25m
+        val underOneHourMs = (25L * 60L + 10L) * 1000L
+        assertEquals("00h25m", BatteryEnergyCalculator.formatExpectedRangeDuration(underOneHourMs))
+
+        // 50秒 -> 00h01m（至少1分钟保底）
+        val underOneMinuteMs = 50L * 1000L
+        assertEquals("00h01m", BatteryEnergyCalculator.formatExpectedRangeDuration(underOneMinuteMs))
+
+        // 无效值返回 "--"
+        assertEquals("--", BatteryEnergyCalculator.formatExpectedRangeDuration(null))
+        assertEquals("--", BatteryEnergyCalculator.formatExpectedRangeDuration(0L))
+        assertEquals("--", BatteryEnergyCalculator.formatExpectedRangeDuration(-1000L))
     }
 }

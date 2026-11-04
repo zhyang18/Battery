@@ -99,6 +99,9 @@ data class ConfidenceBreakdown(
  * @property qualityReasons 预测数据质量与降级原因列表（用于解释置信度与模型依据）
  * @property unavailableReason 数据不可用时的明确物理原因（当 remainingMs 为 null 时说明原因）
  * @property confidenceBreakdown 多因素置信度细分评估实体 [ConfidenceBreakdown]（可选）
+ * @property benchmarkPowerWatts 计算该剩余续航实际采用的稳态基准放电功率（单位：W，若无独立基准则为 null）
+ * @property actualFastPowerWatts 当前物理采集与即时多时间尺度融合做功功率（单位：W，若无独立基准则为 null）
+ * @property drainRateMultiplier 动态能耗流速倍率（即时做功功率 / 稳态基准功率，如 0.75x，若无独立基准则为 null）
  */
 data class RuntimeEstimate(
     val remainingMs: Long?,
@@ -113,5 +116,8 @@ data class RuntimeEstimate(
     val maxRemainingMs: Long? = null,
     val qualityReasons: List<String> = emptyList(),
     val unavailableReason: String? = null,
-    val confidenceBreakdown: ConfidenceBreakdown? = null
+    val confidenceBreakdown: ConfidenceBreakdown? = null,
+    val benchmarkPowerWatts: Double? = null,
+    val actualFastPowerWatts: Double? = null,
+    val drainRateMultiplier: Double? = null
 )

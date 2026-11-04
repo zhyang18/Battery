@@ -8,6 +8,7 @@ import android.text.style.AbsoluteSizeSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.view.View
+import androidx.annotation.ColorInt
 import androidx.core.text.HtmlCompat
 import com.battery.analysis.R
 import com.battery.analysis.databinding.ItemPowerDischargeSpeedBinding
@@ -53,9 +54,24 @@ object PowerDischargeMetricsViewBinder {
     const val COLOR_PREDICTION_HIGHLIGHT = 0xFFAA5AB6.toInt()
 
     /**
-     * 升级模型满电续航时长数值匹配正则表达式（如匹配 "• 升级模型(v2.2)：15h41m53s (可信度高)" 中的 "15h41m53s"）。
+     * 高置信度与数据充分状态强调色彩（绿色，十六进制代码 #10B981）。
      */
-    val REGEX_V2_MODEL_DURATION = Regex("""•\s*(?:升级模型|Upgraded Model)\s*\([^)]+\)[：:]\s*([^\s(]+)""", RegexOption.IGNORE_CASE)
+    const val COLOR_STATUS_HIGH = 0xFF10B981.toInt()
+
+    /**
+     * 中等置信度与基本可用状态强调色彩（橙黄色，十六进制代码 #F59E0B）。
+     */
+    const val COLOR_STATUS_MEDIUM = 0xFFF59E0B.toInt()
+
+    /**
+     * 较低(差)置信度、样本较少与数据不足状态强调色彩（珊瑚红，十六进制代码 #EF4444）。
+     */
+    const val COLOR_STATUS_LOW = 0xFFEF4444.toInt()
+
+    /**
+     * 升级模型与满电续航时长数值匹配正则表达式（如匹配 "• 升级模型(v2.2)：15h41m53s (可信度高)" 或 "• 满电亮屏续航：15h41m53s (可信度高)" 中的 "15h41m53s"）。
+     */
+    val REGEX_V2_MODEL_DURATION = Regex("""•\s*(?:升级模型|Upgraded Model|满电亮屏续航|Full screen-on runtime|满电待机时长|Full standby duration|满电综合续航|Full overall runtime)\s*(?:\([^)]+\))?[：:]\s*([^\s(]+)""", RegexOption.IGNORE_CASE)
 
     /**
      * 预测基准放电速度数值匹配正则表达式（如匹配 "• 预测基准放电速度：7.4%/h" 中的 "7.4%/h"）。
@@ -66,6 +82,21 @@ object PowerDischargeMetricsViewBinder {
      * 当前剩余续航或当前待机续航时长数值匹配正则表达式（如匹配 "• 当前剩余续航：07h22m44s (可信度高)" 中的 "07h22m44s"）。
      */
     val REGEX_CURRENT_REMAINING_DURATION = Regex("""•\s*(?:当前剩余续航|当前待机续航|Current remaining runtime|Current remaining standby)[：:]\s*([^\s(]+)""", RegexOption.IGNORE_CASE)
+
+    /**
+     * 高置信度与数据充分匹配正则表达式（如 "可信度高"、"数据充足"、"High Confidence"、"Sufficient Data"）。
+     */
+    val REGEX_STATUS_HIGH = Regex("""(?:\b|(?<=[\s(（]))(?:可信度高|数据充足|High Confidence|Sufficient Data)(?=(?:[\s)）]|\b))""", RegexOption.IGNORE_CASE)
+
+    /**
+     * 中等置信度与基本可用匹配正则表达式（如 "可信度中等"、"可信度中"、"基本可用"、"Medium Confidence"、"Moderate Data"）。
+     */
+    val REGEX_STATUS_MEDIUM = Regex("""(?:\b|(?<=[\s(（]))(?:可信度中等|可信度中|基本可用|Medium Confidence|Moderate Data)(?=(?:[\s)）]|\b))""", RegexOption.IGNORE_CASE)
+
+    /**
+     * 较低(差)置信度、样本较少与数据不足匹配正则表达式（如 "可信度较低"、"可信度差"、"可信度低"、"样本较少"、"数据不足"、"Low Confidence"、"Insufficient Data"）。
+     */
+    val REGEX_STATUS_LOW = Regex("""(?:\b|(?<=[\s(（]))(?:可信度较低|可信度差|可信度低|样本较少|数据不足|Low Confidence|Insufficient Data)(?=(?:[\s)）]|\b))""", RegexOption.IGNORE_CASE)
 
     /**
      * 将放电速度矩阵（亮屏、息屏、全局）数据绑定至对应的视图组件并配置点击回调。
@@ -102,12 +133,7 @@ object PowerDischargeMetricsViewBinder {
             val offEffectiveRate = getEffectiveDischargeRate(BatteryEnergyCalculator.ROW_SCREEN_OFF, totalCapacityWh, overview, sevenDaysStats)
             val globalEffectiveRate = getEffectiveDischargeRate(BatteryEnergyCalculator.ROW_GLOBAL, totalCapacityWh, overview, sevenDaysStats)
 
-            // --- 1. 第一行：预测基准放电速度百分比速率 ---
-            tvScreenOnSpeed.setUnitText(formatDischargeRateSpannable(onEffectiveRate))
-            tvScreenOffSpeed.setUnitText(formatDischargeRateSpannable(offEffectiveRate))
-            tvGlobalSpeed.setUnitText(formatDischargeRateSpannable(globalEffectiveRate))
-
-            // --- 2. 第二行：剩余续航时间（优先消费外部传入的预计算缓存结果；若无则降级现场估算，保障严格跟随下拉刷新机制） ---
+            // --- 优先获取/计算三维度剩余续航结果实体，提取稳态基准放电功率与剩余续航 ---
             val tripleResult = precalculatedRuntimeResult ?: BatteryEnergyCalculator.estimateTripleRuntimes(
                 overview = overview,
                 sevenDaysStats = sevenDaysStats,
@@ -118,6 +144,28 @@ object PowerDischargeMetricsViewBinder {
                 currentTrendPoints = currentTrendPoints
             )
 
+            // --- 1. 第一行：预测基准放电速度百分比速率（与第二行剩余续航口径严格对齐，彻底消除数值打架） ---
+            val onBenchmarkRate = calculateBenchmarkDischargeRate(
+                benchmarkPowerWatts = tripleResult.screenOnEstimate.benchmarkPowerWatts,
+                totalCapacityWh = totalCapacityWh,
+                fallbackRate = onEffectiveRate
+            )
+            val offBenchmarkRate = calculateBenchmarkDischargeRate(
+                benchmarkPowerWatts = tripleResult.screenOffEstimate.benchmarkPowerWatts,
+                totalCapacityWh = totalCapacityWh,
+                fallbackRate = offEffectiveRate
+            )
+            val globalBenchmarkRate = calculateBenchmarkDischargeRate(
+                benchmarkPowerWatts = tripleResult.globalEstimate.benchmarkPowerWatts,
+                totalCapacityWh = totalCapacityWh,
+                fallbackRate = globalEffectiveRate
+            )
+
+            tvScreenOnSpeed.setUnitText(formatDischargeRateSpannable(onBenchmarkRate))
+            tvScreenOffSpeed.setUnitText(formatDischargeRateSpannable(offBenchmarkRate))
+            tvGlobalSpeed.setUnitText(formatDischargeRateSpannable(globalBenchmarkRate))
+
+            // --- 2. 第二行：剩余续航时间 ---
             val remOnMs = tripleResult.screenOnEstimate.remainingMs
             val remOffMs = tripleResult.screenOffEstimate.remainingMs
             val remGlobalMs = tripleResult.globalEstimate.remainingMs
@@ -158,22 +206,27 @@ object PowerDischargeMetricsViewBinder {
     /**
      * 将放电速度与续航预测气泡弹窗的详细说明文案进行关键预测数据高亮强调格式化。
      * 将弹框中的升级模型满电续航时长数值、预测基准放电速度数值以及当前剩余（或待机）续航数值着色为统一的高亮强调色（#AA5AB6），
-     * 辅助用户在信息密集的说明弹窗中快速聚焦核心算法预测结论。
+     * 同时将可信度等级（高/中/差）与数据充分性（数据充足/基本可用/样本较少）按工业级语义状态色彩（绿/橙/红）着色呈现，
+     * 辅助用户在信息密集的说明弹窗中快速聚焦核心算法预测结论与置信健康度。
      *
      * @param rawMessage 原始详细说明文案字符串
-     * @return 包含关键预测数据高亮颜色 Span 的富文本对象 [CharSequence]
+     * @return 包含关键预测数据与置信度高亮颜色 Span 的富文本对象 [CharSequence]
      */
     fun formatDischargeSpeedBubbleMessage(rawMessage: String): CharSequence {
         if (rawMessage.isBlank()) return rawMessage
 
         val spannable = SpannableString(rawMessage)
 
-        fun highlightMatch(regex: Regex) {
+        fun highlightMatch(regex: Regex, @ColorInt color: Int) {
             regex.findAll(rawMessage).forEach { matchResult ->
-                val group = matchResult.groups[1]
+                val group = if (matchResult.groups.size > 1 && matchResult.groups[1] != null) {
+                    matchResult.groups[1]
+                } else {
+                    matchResult.groups[0]
+                }
                 if (group != null && group.range.first <= group.range.last) {
                     spannable.setSpan(
-                        ForegroundColorSpan(COLOR_PREDICTION_HIGHLIGHT),
+                        ForegroundColorSpan(color),
                         group.range.first,
                         group.range.last + 1,
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
@@ -182,9 +235,15 @@ object PowerDischargeMetricsViewBinder {
             }
         }
 
-        highlightMatch(REGEX_V2_MODEL_DURATION)
-        highlightMatch(REGEX_PREDICTION_BENCHMARK_RATE)
-        highlightMatch(REGEX_CURRENT_REMAINING_DURATION)
+        // 核心预测数据数值高亮（紫色）
+        highlightMatch(REGEX_V2_MODEL_DURATION, COLOR_PREDICTION_HIGHLIGHT)
+        highlightMatch(REGEX_PREDICTION_BENCHMARK_RATE, COLOR_PREDICTION_HIGHLIGHT)
+        highlightMatch(REGEX_CURRENT_REMAINING_DURATION, COLOR_PREDICTION_HIGHLIGHT)
+
+        // 可信度与数据充分性语义状态色彩高亮（高/充足: 绿色；中/基本可用: 橙黄色；差/较少/不足: 珊瑚红）
+        highlightMatch(REGEX_STATUS_HIGH, COLOR_STATUS_HIGH)
+        highlightMatch(REGEX_STATUS_MEDIUM, COLOR_STATUS_MEDIUM)
+        highlightMatch(REGEX_STATUS_LOW, COLOR_STATUS_LOW)
 
         return spannable
     }
@@ -565,6 +624,33 @@ object PowerDischargeMetricsViewBinder {
                     if (totalPct > 0f && hrs > 0.05f) totalPct / hrs else null
                 } else null
                 powerRate ?: win?.dischargeRatePercentPerHour ?: sessionPercentRate
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * 获取指定维度的近期滑动窗口实际有效时长（单位：毫秒）。
+     * 优先提取滑动窗口切片的有效监测时长，若切片已提取则返回实际时长（若已满窗则为名义窗口时长 2h/12h/24h），
+     * 若切片尚未生成但有滑动速率，则回退为对应维度的标准滑动切片时长（亮屏 2 小时、息屏 12 小时、全局 24 小时）。
+     *
+     * @param rowType 行分类标识（[BatteryEnergyCalculator.ROW_SCREEN_ON] 等）
+     * @return 滑动窗口有效时长（单位：毫秒），未知或非法行类型时返回 null
+     */
+    fun getRollingDischargeDurationMs(rowType: Int): Long? {
+        val rollingBuffer = RollingDischargeBuffer.getInstanceOrNull()
+        return when (rowType) {
+            BatteryEnergyCalculator.ROW_SCREEN_ON -> {
+                val win = rollingBuffer?.extractRollingScreenOnWindow(7200_000L)
+                win?.effectiveDurationMs?.takeIf { it > 0L } ?: 7200_000L
+            }
+            BatteryEnergyCalculator.ROW_SCREEN_OFF -> {
+                val win = rollingBuffer?.extractRollingScreenOffWindow(43200_000L)
+                win?.effectiveDurationMs?.takeIf { it > 0L } ?: 43200_000L
+            }
+            BatteryEnergyCalculator.ROW_GLOBAL -> {
+                val win = rollingBuffer?.extractRollingGlobalWindow(86400_000L)
+                win?.effectiveDurationMs?.takeIf { it > 0L } ?: 86400_000L
             }
             else -> null
         }
@@ -1244,5 +1330,47 @@ object PowerDischargeMetricsViewBinder {
                 }
             }
         }
+    }
+
+    /**
+     * 根据剩余续航推算的稳态基准放电功率与电池总能量容量，计算出严格对应的基准放电速率（单位：%/h）。
+     * 若基准功率不存在或不可用，则平滑降级采用实测滑动放电速率 [fallbackRate]。
+     * 严格遵循物理做功守恒与零假数据原则。
+     *
+     * @param benchmarkPowerWatts 剩余续航实际采用的稳态基准放电功率（单位：W，可选）
+     * @param totalCapacityWh 电池满充总能量容量（单位：Wh，可选）
+     * @param fallbackRate 实测滑动放电速率（单位：%/h，可选）
+     * @return 与剩余续航口径完全一致的基准放电速度（单位：%/h，缺失时返回 fallbackRate 或 null）
+     */
+    fun calculateBenchmarkDischargeRate(
+        benchmarkPowerWatts: Double?,
+        totalCapacityWh: Float?,
+        fallbackRate: Float?
+    ): Float? {
+        if (benchmarkPowerWatts != null && benchmarkPowerWatts > 0.0 && totalCapacityWh != null && totalCapacityWh > 0f) {
+            val rate = (benchmarkPowerWatts / totalCapacityWh) * 100.0
+            if (rate.isFinite() && rate > 0.0) return rate.toFloat()
+        }
+        return fallbackRate
+    }
+
+    /**
+     * 重载支持 Double 类型的电池满充总能量容量换算。
+     *
+     * @param benchmarkPowerWatts 稳态基准放电功率（单位：W，可选）
+     * @param totalCapacityWh 设备满充总能量容量（单位：Wh，Double 类型，可选）
+     * @param fallbackRate 实测滑动放电速率（单位：%/h，可选）
+     * @return 与剩余续航口径完全一致的基准放电速度（单位：%/h，缺失时返回 fallbackRate 或 null）
+     */
+    fun calculateBenchmarkDischargeRate(
+        benchmarkPowerWatts: Double?,
+        totalCapacityWh: Double?,
+        fallbackRate: Float?
+    ): Float? {
+        return calculateBenchmarkDischargeRate(
+            benchmarkPowerWatts = benchmarkPowerWatts,
+            totalCapacityWh = totalCapacityWh?.toFloat(),
+            fallbackRate = fallbackRate
+        )
     }
 }

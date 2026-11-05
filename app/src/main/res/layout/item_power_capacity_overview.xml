@@ -221,6 +221,23 @@
                     android:layout_height="1dp"
                     android:layout_weight="1" />
 
+                <!-- 进入放电能量模型学习抽屉按钮 -->
+                <TextView
+                    android:id="@+id/btn_open_energy_model"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:background="#14888888"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackground"
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="3dp"
+                    android:text="@string/capacity_open_energy_model"
+                    android:textColor="#3b82f6"
+                    android:textSize="10sp"
+                    android:textStyle="bold" />
+
                 <!-- 进入全景科学诊断抽屉按钮 -->
                 <TextView
                     android:id="@+id/btn_open_diagnosis"

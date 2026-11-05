@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginVertical="3dp"
+    android:background="@drawable/bg_diag_sub_card"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingHorizontal="12dp"
+    android:paddingVertical="9dp">
+
+    <!-- 区间电量范围 -->
+    <TextView
+        android:id="@+id/tv_bin_range_label"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:textColor="?android:attr/textColorPrimary"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        tools:text="95% - 100%" />
+
+    <!-- 样本统计状态 -->
+    <TextView
+        android:id="@+id/tv_bin_sample_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="12dp"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="10.5sp"
+        tools:text="样本: 8 次" />
+
+    <!-- 实测释放能量数值 -->
+    <TextView
+        android:id="@+id/tv_bin_energy_val"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="end"
+        android:textColor="#10b981"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        tools:text="1.42 Wh" />
+
+</LinearLayout>

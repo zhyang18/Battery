@@ -10,6 +10,8 @@ import com.battery.analysis.R
  * @property description 能量来源的可读描述
  */
 enum class EnergySource(val description: String) {
+    /** 基于 5% SOC 历史放电端电压与电流梯形微积分学习曲线 */
+    LEARNED_SOC_CURVE("实测放电学习曲线"),
     /** 硬件电量计底层原生能量计数器读取推算 (nWh -> Wh) */
     NATIVE_FULL_ENERGY("硬件原生能量计数器"),
     /** 真实满充容量 FCC × 标称工作电压 (Ah * V -> Wh，FCC 已反映电池实际老化衰减) */

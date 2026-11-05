@@ -36,6 +36,8 @@ enum class RuntimeModelType {
  * @property powerWatts 采样周期内的放电功率（单位：瓦特 W）
  * @property batteryLevelPercent 采样时刻的电池电量百分比（取值 0.0f ~ 100.0f）
  * @property state 采样时刻的屏幕与供电状态 [ScreenPowerState]
+ * @property temperatureCelsius 采样时刻的电池温度（单位：摄氏度 ℃，可选）
+ * @property monotonicTimestampNs 采样时刻的单调时钟纳秒数（防系统时间跳变，可选）
  */
 data class PowerSample(
     val timestampMs: Long,
@@ -43,7 +45,9 @@ data class PowerSample(
     val currentAmperes: Float? = null,
     val powerWatts: Float,
     val batteryLevelPercent: Float,
-    val state: ScreenPowerState
+    val state: ScreenPowerState,
+    val temperatureCelsius: Float? = null,
+    val monotonicTimestampNs: Long? = null
 )
 
 /**

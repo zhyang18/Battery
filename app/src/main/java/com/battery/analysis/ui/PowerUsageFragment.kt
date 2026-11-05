@@ -684,6 +684,7 @@ class PowerUsageFragment : Fragment() {
         lastAppBarVerticalOffset = 0
         // 清空 RecyclerView Adapter 持有的应用列表，避免 Adapter 阻止列表数据被 GC 回收
         adapter.submitList(emptyList())
+        adapter.onOpenEnergyModelListener = null
         adapter.onOpenCapacityDiagnosisListener = null
         _binding = null
     }
@@ -868,6 +869,10 @@ class PowerUsageFragment : Fragment() {
             restoreLivePowerData()
         }
 
+        adapter.onOpenEnergyModelListener = {
+            val dialog = DischargeEnergyModelBottomSheetDialog()
+            dialog.show(childFragmentManager, "DischargeEnergyModelBottomSheetDialog")
+        }
         adapter.onOpenCapacityDiagnosisListener = {
             val dialog = CapacityDiagnosisBottomSheetDialog()
             dialog.show(childFragmentManager, "CapacityDiagnosisBottomSheetDialog")

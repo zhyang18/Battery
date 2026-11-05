@@ -2044,6 +2044,122 @@ class PowerUsageManager private constructor(private val context: Context) {
     private var lastDischargeCheckpointLevel: Int = -1
 
     /**
+     * 当前放电会话在放电过程中已完成增量学习的 5% SOC 区间集合，防止重复学习。
+     */
+    private val currentSessionLearnedBins = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
+
+    @Volatile
+    private var sessionLearnedBinsLoadedSessionId: Long = 0L
+
+    /**
+     * 确保已加载指定会话已完成增量学习的区间集合。
+     *
+     * @param sessionId 放电会话 ID（通常为拔电时间戳）
+     */
+    private fun ensureSessionLearnedBinsLoaded(sessionId: Long) {
+        if (sessionId <= 0L) return
+        if (sessionLearnedBinsLoadedSessionId == sessionId) return
+        synchronized(currentSessionLearnedBins) {
+            if (sessionLearnedBinsLoadedSessionId == sessionId) return
+            currentSessionLearnedBins.clear()
+            val savedStr = prefs.getString("pref_learned_bins_$sessionId", null)
+            if (!savedStr.isNullOrBlank()) {
+                savedStr.split(",").mapNotNull { it.trim().toIntOrNull() }.forEach {
+                    currentSessionLearnedBins.add(it)
+                }
+            }
+            sessionLearnedBinsLoadedSessionId = sessionId
+        }
+    }
+
+    /**
+     * 将当前会话已学习的区间集合持久化至本地轻量存储。
+     *
+     * @param sessionId 放电会话 ID
+     */
+    private fun saveSessionLearnedBinsToPrefs(sessionId: Long) {
+        if (sessionId <= 0L) return
+        val str = synchronized(currentSessionLearnedBins) {
+            currentSessionLearnedBins.joinToString(",")
+        }
+        prefs.edit().putString("pref_learned_bins_$sessionId", str).apply()
+    }
+
+    /**
+     * 清理指定会话的已学习区间记录。
+     *
+     * @param sessionId 放电会话 ID
+     */
+    private fun clearSessionLearnedBins(sessionId: Long) {
+        synchronized(currentSessionLearnedBins) {
+            currentSessionLearnedBins.clear()
+            sessionLearnedBinsLoadedSessionId = 0L
+        }
+        if (sessionId > 0L) {
+            prefs.edit().remove("pref_learned_bins_$sessionId").apply()
+        }
+    }
+
+    /**
+     * 在放电进行中实时评估并学习已完成闭环的 5% SOC 物理区间（In-flight Learning）。
+     * 避免用户在单次长周期放电过程中无法及时看到学习成果，且杜绝重复学习。
+     *
+     * @return 本次评估中新学习的 5% 区间数量
+     */
+    @Synchronized
+    fun evaluateInFlightSocLearning(): Int {
+        ensureDischargeSamplesLoaded()
+        if (dischargeRealtimeSamples.size < 2) return 0
+        val status = getCurrentBatteryStatus()
+        if (status.isCharging) return 0
+
+        val sessionId = if (currentDischargeSessionId > 0L) currentDischargeSessionId else getLastUnplugTime()
+        if (sessionId <= 0L) return 0
+
+        ensureSessionLearnedBinsLoaded(sessionId)
+
+        val powerSamples = dischargeRealtimeSamples.map { point ->
+            com.battery.analysis.domain.estimator.model.PowerSample(
+                timestampMs = point.timestamp,
+                voltageVolts = point.voltageVolts,
+                powerWatts = point.powerWatts,
+                batteryLevelPercent = point.batteryLevel.toFloat(),
+                state = if (point.isScreenOn) {
+                    com.battery.analysis.domain.estimator.model.ScreenPowerState.SCREEN_ON
+                } else {
+                    com.battery.analysis.domain.estimator.model.ScreenPowerState.SCREEN_OFF
+                }
+            )
+        }
+
+        // 1. 调用带深睡未观测断层审计的微积分引擎
+        val integrationResult = com.battery.analysis.domain.estimator.DischargeEnergyIntegrator.integrateDischargeSession(powerSamples)
+
+        // 2. 调用会话校验器执行完整性门限（覆盖率 >= 90% 且无深睡断层）与工况标签化
+        val (fccMah, _) = getEffectiveDeviceCapacityWithSource()
+        val validation = com.battery.analysis.domain.estimator.DischargeSessionValidator.validateDischargeSession(
+            integrationResult = integrationResult,
+            sessionId = sessionId.toString(),
+            effectiveCapacityMah = fccMah?.toDouble()
+        )
+
+        // 3. 过滤出尚未学习过的合格完整样本
+        val newCompleteSamples = validation.validCompleteSamples.filter { !currentSessionLearnedBins.contains(it.binIndex) }
+        if (newCompleteSamples.isEmpty()) return 0
+
+        // 4. 增量吸收合格样本（不递增总会话计数）
+        com.battery.analysis.domain.estimator.SocEnergyCurveLearner.getInstance(context)
+            .recordValidatedSamples(newCompleteSamples, incrementSessionCount = false)
+
+        for (sample in newCompleteSamples) {
+            currentSessionLearnedBins.add(sample.binIndex)
+        }
+        saveSessionLearnedBinsToPrefs(sessionId)
+
+        return newCompleteSamples.size
+    }
+
+    /**
      * 游戏应用包名内存缓存，避免高频重复调用 PackageManager 进行 IPC Binder 查询。
      */
     private val gameAppCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
@@ -2300,6 +2416,10 @@ class PowerUsageManager private constructor(private val context: Context) {
         if (unsavedDischargeSamplesCount >= 600 || (now - lastDischargeSaveTimeMs >= 600_000L && unsavedDischargeSamplesCount >= 60)) {
             unsavedDischargeSamplesCount = 0
             saveDischargeSamplesToPrefsAsync()
+            evaluateInFlightSocLearning()
+        }
+        if (lastPoint != null && safeLevel != lastPoint.batteryLevel && (safeLevel % 5 == 0 || lastPoint.batteryLevel % 5 == 0)) {
+            evaluateInFlightSocLearning()
         }
     }
 
@@ -3019,6 +3139,11 @@ class PowerUsageManager private constructor(private val context: Context) {
                 .putInt("pref_last_discharge_checkpoint_level", lastDischargeCheckpointLevel)
                 .apply()
 
+            if (!isFinal) {
+                try {
+                    evaluateInFlightSocLearning()
+                } catch (_: Exception) {}
+            }
             powerRecord
         } catch (e: Exception) {
             e.printStackTrace()
@@ -3175,6 +3300,46 @@ class PowerUsageManager private constructor(private val context: Context) {
                 .putLong("pref_last_archived_unplug_time", lastUnplugTime)
                 .putLong("pref_current_discharge_session_id", 0L)
                 .apply()
+            // 6. 将已归档放电周期的时序点送入校验器与 5% SOC 历史能量曲线自学习器
+            try {
+                if (dischargeRealtimeSamples.size >= 2) {
+                    val sessionId = if (currentDischargeSessionId > 0L) currentDischargeSessionId else lastUnplugTime
+                    ensureSessionLearnedBinsLoaded(sessionId)
+
+                    val powerSamples = dischargeRealtimeSamples.map { point ->
+                        com.battery.analysis.domain.estimator.model.PowerSample(
+                            timestampMs = point.timestamp,
+                            voltageVolts = point.voltageVolts,
+                            powerWatts = point.powerWatts,
+                            batteryLevelPercent = point.batteryLevel.toFloat(),
+                            state = if (point.isScreenOn) {
+                                com.battery.analysis.domain.estimator.model.ScreenPowerState.SCREEN_ON
+                            } else {
+                                com.battery.analysis.domain.estimator.model.ScreenPowerState.SCREEN_OFF
+                            },
+                            temperatureCelsius = point.temperature
+                        )
+                    }
+
+                    val integrationResult = com.battery.analysis.domain.estimator.DischargeEnergyIntegrator.integrateDischargeSession(powerSamples)
+                    val (fccMah, _) = getEffectiveDeviceCapacityWithSource()
+                    val validation = com.battery.analysis.domain.estimator.DischargeSessionValidator.validateDischargeSession(
+                        integrationResult = integrationResult,
+                        sessionId = sessionId.toString(),
+                        effectiveCapacityMah = fccMah?.toDouble()
+                    )
+
+                    val learner = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.getInstance(context)
+                    val remainingComplete = validation.validCompleteSamples.filter { !currentSessionLearnedBins.contains(it.binIndex) }
+
+                    if (remainingComplete.isNotEmpty()) {
+                        learner.recordValidatedSamples(remainingComplete, incrementSessionCount = true)
+                    } else if (currentSessionLearnedBins.isNotEmpty() || validation.validCompleteSamples.isNotEmpty()) {
+                        learner.incrementSessionCount()
+                    }
+                    clearSessionLearnedBins(sessionId)
+                }
+            } catch (_: Exception) {}
         }
         try {
             dbHelper.deleteRunningRecords()
@@ -6523,6 +6688,10 @@ class PowerUsageManager private constructor(private val context: Context) {
      */
     fun resetPowerStats(explicitIsCharging: Boolean? = null) {
         val now = System.currentTimeMillis()
+        try {
+            clearSessionLearnedBins(currentDischargeSessionId)
+            clearSessionLearnedBins(getLastUnplugTime())
+        } catch (_: Exception) {}
         val curStatus = getCurrentBatteryStatus()
         val isCharging = explicitIsCharging ?: curStatus.isCharging
 

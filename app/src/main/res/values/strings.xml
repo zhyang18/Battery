@@ -993,6 +993,22 @@
     <string name="capacity_remaining_charge_title">当前剩余可用电荷</string>
     <string name="capacity_remaining_energy_title">可用剩余能量</string>
     <string name="capacity_fcc_baseline_label">基准满充(FCC): </string>
+    <string name="capacity_open_energy_model">放电能量学习 ›</string>
+    <string name="energy_model_dialog_title">放电能量模型与实测学习档案</string>
+    <string name="energy_model_dialog_subtitle" formatted="false">基于端电压与电流微积分 · 5% SOC 历史能量曲线学习</string>
+    <string name="energy_model_overview_title">三源能量对比与学习状态</string>
+    <string name="energy_model_learned_energy_label" formatted="false">实测学习剩余可用能量 (5% SOC 曲线积分)</string>
+    <string name="energy_model_hardware_energy_label">硬件电量计原生直读 (ENERGY_COUNTER)</string>
+    <string name="energy_model_nominal_energy_label">传统标称工作平台推算 (3.85V 标压)</string>
+    <string name="energy_model_coverage_label">SOC 曲线学习覆盖率</string>
+    <string name="energy_model_sessions_label">累计放电学习会话样本</string>
+    <string name="energy_model_theory_title">核心物理原理与放电测量建模</string>
+    <string name="energy_model_theory_p1">1. 独立能量数值微积分：系统基于电量计上报的电池端电压 V(t) 与瞬时放电电流 I(t) 实施梯形数值微积分与时间边界插值，真实统计外部释放电能，摆脱单一固定标称电压粗算限制。</string>
+    <string name="energy_model_theory_p2" formatted="false">2. 动态放电平台自适应学习：针对锂电池放电电压平台随 SOC 和负载动态变化的物理特性，算法将 0%~100% 细分为 20 个 5% SOC 微分区间，结合历史独立放电会话持续校准各区间可用能量。</string>
+    <string name="energy_model_bins_title" formatted="false">20 段 SOC (5% Bin) 实测能量释放分布</string>
+    <string name="energy_model_bin_unlearned">待采集</string>
+    <string name="energy_model_statement_title">⚠️ 零假数据与工况声明</string>
+    <string name="energy_model_statement_desc">未产生放电样本的 SOC 区间忠实展示“待采集”，绝不凭空捏造或硬编码补齐；息屏休眠大于 120 秒的时间断层自动丢弃，杜绝虚夸能耗。</string>
     <string name="capacity_open_diagnosis">诊断档案 ›</string>
     <string name="capacity_diag_title">电池容量科学诊断与学习档案</string>
     <string name="capacity_diag_subtitle">基于电荷微积分与充放电会话自学习 · 预估数据</string>

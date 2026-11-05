@@ -223,6 +223,11 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     /**
      * 点击进入全景科学诊断 BottomSheet 的回调监听器。
      */
+    /**
+     * 点击进入放电能量模型与实测学习档案 BottomSheet 的回调监听器。
+     */
+    var onOpenEnergyModelListener: (() -> Unit)? = null
+
     var onOpenCapacityDiagnosisListener: (() -> Unit)? = null
 
     // 当前最新的容量与自学习结果
@@ -630,6 +635,9 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         binding.root.setOnClickListener(toggleListener)
 
         // 3. 绑定全景科学诊断 BottomSheet 弹窗入口
+        binding.btnOpenEnergyModel.setOnClickListener {
+            onOpenEnergyModelListener?.invoke()
+        }
         binding.btnOpenDiagnosis.setOnClickListener {
             onOpenCapacityDiagnosisListener?.invoke()
         }

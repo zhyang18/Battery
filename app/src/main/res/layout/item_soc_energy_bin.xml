@@ -10,28 +10,55 @@
     android:paddingHorizontal="12dp"
     android:paddingVertical="9dp">
 
-    <!-- 区间电量范围 -->
+    <!-- 区间电量范围（固定宽度 74dp 确保每一行第一列绝对等宽，后续列垂直绝对对齐） -->
     <TextView
         android:id="@+id/tv_bin_range_label"
-        android:layout_width="0dp"
+        android:layout_width="74dp"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
+        android:gravity="start|center_vertical"
+        android:singleLine="true"
         android:textColor="?android:attr/textColorPrimary"
         android:textSize="12sp"
         android:textStyle="bold"
         tools:text="95% - 100%" />
 
-    <!-- 样本统计状态 -->
+    <!-- 数据源类型徽章列（固定列宽 48dp 并居中对齐，确保上下多行完全居中垂直对齐） -->
+    <FrameLayout
+        android:layout_width="48dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp">
+
+        <TextView
+            android:id="@+id/tv_bin_source_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:background="@drawable/bg_diag_pill_badge"
+            android:gravity="center"
+            android:paddingHorizontal="6dp"
+            android:paddingVertical="2dp"
+            android:textSize="9.5sp"
+            android:textStyle="bold"
+            tools:text="实测" />
+    </FrameLayout>
+
+    <!-- 弹性占位空间 -->
+    <View
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <!-- 样本统计状态或依据说明 -->
     <TextView
         android:id="@+id/tv_bin_sample_count"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginEnd="12dp"
+        android:layout_marginEnd="10dp"
         android:textColor="?android:attr/textColorSecondary"
         android:textSize="10.5sp"
-        tools:text="样本: 8 次" />
+        tools:text="容量先验模型" />
 
-    <!-- 实测释放能量数值 -->
+    <!-- 释放能量数值 -->
     <TextView
         android:id="@+id/tv_bin_energy_val"
         android:layout_width="wrap_content"
@@ -40,6 +67,6 @@
         android:textColor="#10b981"
         android:textSize="12sp"
         android:textStyle="bold"
-        tools:text="1.42 Wh" />
+        tools:text="~1.264 Wh" />
 
 </LinearLayout>

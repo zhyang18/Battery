@@ -140,10 +140,17 @@ class RemainingEnergyEstimator {
 
         // 策略 3：实测放电历史学习曲线累加推算（绕开厂商锁容与固化标压黑盒）
         if (learnedCurve != null && batteryLevelPercent != null && batteryLevelPercent > 0f) {
-            val learnedWh = learnedCurve.estimateRemainingEnergyWh(batteryLevelPercent)
+            val hybrid = learnedCurve.estimateHybridRemainingEnergy(
+                currentSocPercent = batteryLevelPercent,
+                effectiveCapacityMah = effectiveCapacityMah?.toDouble(),
+                nominalVoltageVolts = safeVolt,
+                temperatureCelsius = tempCelsius
+            )
+            val learnedWh = hybrid?.remainingEnergyWh ?: learnedCurve.estimateRemainingEnergyWh(batteryLevelPercent)
             if (learnedWh != null && learnedWh > 0.0 && learnedWh.isFinite()) {
                 val usable = learnedWh * kt
-                val confidenceScore = when (learnedCurve.confidence) {
+                val effectiveConfidence = hybrid?.confidence ?: learnedCurve.confidence
+                val confidenceScore = when (effectiveConfidence) {
                     ConfidenceLevel.HIGH -> 0.95
                     ConfidenceLevel.MEDIUM -> 0.85
                     ConfidenceLevel.LOW -> 0.70
@@ -155,7 +162,15 @@ class RemainingEnergyEstimator {
                     source = EnergySource.LEARNED_SOC_CURVE,
                     quality = if (learnedCurve.maturity == ModelMaturity.CONVERGED) DataQuality.VALID else DataQuality.LOW_QUALITY,
                     temperatureFactor = kt,
-                    notes = setOf("基于 5% SOC 历史放电实测微积分学习模型 (${learnedCurve.maturity.name})"),
+                    notes = setOf(
+                        if (hybrid != null && !hybrid.isFullyLearned) {
+                            val measCov = String.format(java.util.Locale.US, "%.0f%%", hybrid.measuredSocCoverage * 100f)
+                            val modCov = String.format(java.util.Locale.US, "%.0f%%", hybrid.modeledSocCoverage * 100f)
+                            "基于 5% SOC 放电混合估算模型 (实测覆盖 $measCov + 模型推演 $modCov, ${hybrid.maturity.name})"
+                        } else {
+                            "基于 5% SOC 历史放电实测微积分学习模型 (${learnedCurve.maturity.name})"
+                        }
+                    ),
                     energyConfidence = confidenceScore
                 )
             }

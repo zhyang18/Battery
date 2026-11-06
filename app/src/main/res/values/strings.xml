@@ -1002,13 +1002,31 @@
     <string name="energy_model_nominal_energy_label">传统标称工作平台推算 (3.85V 标压)</string>
     <string name="energy_model_coverage_label">SOC 曲线学习覆盖率</string>
     <string name="energy_model_sessions_label">累计放电学习会话样本</string>
+    <string name="energy_model_maturity_cold_start">冷启动</string>
+    <string name="energy_model_maturity_developing">学习中</string>
+    <string name="energy_model_maturity_converged">已收敛</string>
     <string name="energy_model_theory_title">核心物理原理与放电测量建模</string>
-    <string name="energy_model_theory_p1">1. 独立能量数值微积分：系统基于电量计上报的电池端电压 V(t) 与瞬时放电电流 I(t) 实施梯形数值微积分与时间边界插值，真实统计外部释放电能，摆脱单一固定标称电压粗算限制。</string>
-    <string name="energy_model_theory_p2" formatted="false">2. 动态放电平台自适应学习：针对锂电池放电电压平台随 SOC 和负载动态变化的物理特性，算法将 0%~100% 细分为 20 个 5% SOC 微分区间，结合历史独立放电会话持续校准各区间可用能量。</string>
+    <string name="energy_model_theory_p1">独立能量数值微积分：系统基于电量计上报的电池端电压 V(t) 与瞬时放电电流 I(t) 实施梯形数值微积分与时间边界插值，真实统计外部释放电能，摆脱单一固定标称电压粗算限制。</string>
+    <string name="energy_model_theory_p2" formatted="false">动态放电平台自适应学习：针对锂电池放电电压平台随 SOC 和负载动态变化的物理特性，算法将 0%~100% 细分为 20 个 5% SOC 微分区间，结合历史独立放电会话持续校准各区间可用能量。</string>
+    <string name="energy_model_theory_p3" formatted="false">三层混合能量补全（Hybrid Estimation）：未学习的 SOC 区间不直接按 0 Wh 截断；平台区孤立缺失采用相邻放电平均电压插值，拐点陡降区与连续缺失采用基准容量结合电化学电压物理模型补全，并在看板中对各区间来源（实测/插值/模型/待采集）实施四色透明溯源。</string>
+    <string name="energy_source_badge_measured">实测</string>
+    <string name="energy_source_badge_interpolated">插值</string>
+    <string name="energy_source_badge_model">模型</string>
+    <string name="energy_source_badge_unknown">待采集</string>
     <string name="energy_model_bins_title" formatted="false">20 段 SOC (5% Bin) 实测能量释放分布</string>
     <string name="energy_model_bin_unlearned">待采集</string>
     <string name="energy_model_statement_title">⚠️ 零假数据与工况声明</string>
     <string name="energy_model_statement_desc">未产生放电样本的 SOC 区间忠实展示“待采集”，绝不凭空捏造或硬编码补齐；息屏休眠大于 120 秒的时间断层自动丢弃，杜绝虚夸能耗。</string>
+    <!-- 三源能量对比看板标签 -->
+    <string name="energy_col_learned_label">实测学习模型</string>
+    <string name="energy_source_learned_hint">动态微积分做功</string>
+    <string name="energy_col_hardware_label">硬件电量计直读</string>
+    <string name="energy_col_hardware_source">ENERGY_COUNTER 寄存器</string>
+    <string name="energy_col_hardware_unsupported">底层硬件不支持</string>
+    <string name="energy_col_hardware_supported">电量计原生积分做功</string>
+    <string name="energy_col_nominal_label">传统标称平台折算</string>
+    <string name="energy_col_nominal_source">当前电量 × 基准容量 × 3.85V</string>
+    <string name="energy_col_nominal_desc">粗略线性折算</string>
     <string name="capacity_open_diagnosis">诊断档案 ›</string>
     <string name="capacity_diag_title">电池容量科学诊断与学习档案</string>
     <string name="capacity_diag_subtitle">基于电荷微积分与充放电会话自学习 · 预估数据</string>

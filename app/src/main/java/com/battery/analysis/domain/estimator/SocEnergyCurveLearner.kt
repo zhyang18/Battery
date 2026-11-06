@@ -255,12 +255,19 @@ class SocEnergyCurveLearner(private val context: Context) {
 
         /**
          * 纯算法函数：构建三源能量对比看板展示实体。
+         * 实测学习能量采用工业级三层混合估算机制（Hybrid Remaining Energy Estimation）：
+         * 1. 已学习区间采用实测数据；
+         * 2. 平台区孤立缺失采用相邻电压插值；
+         * 3. 拐点区与连续缺失采用基准容量与动态工况先验模型补全；
+         * 4. 无法估计区间如实未知（返回 null），绝不伪造虚假数据。
          *
          * @param curve 当前学习曲线实体 [LearnedSocEnergyCurve]
          * @param currentSocPercent 当前设备电量百分比（0.0f ~ 100.0f）
          * @param hardwareNativeEnergyWh 硬件底层原生能量计数器（Wh，可选）
          * @param effectiveCapacityMah 当前设备基准容量（mAh，可选）
          * @param nominalVoltageVolts 电池标称电压（单位：V，默认 3.85V）
+         * @param currentDischargeCurrentMa 当前实时放电电流（mA，用于动态工况内阻压降微调，可选）
+         * @param temperatureCelsius 当前电池温度（℃，可选）
          * @return 三源对比展示实体 [EnergyComparisonOverview]
          */
         fun buildComparisonOverviewFromCurve(
@@ -268,9 +275,35 @@ class SocEnergyCurveLearner(private val context: Context) {
             currentSocPercent: Float,
             hardwareNativeEnergyWh: Double? = null,
             effectiveCapacityMah: Float? = null,
-            nominalVoltageVolts: Float = 3.85f
+            nominalVoltageVolts: Float = 3.85f,
+            currentDischargeCurrentMa: Double? = null,
+            temperatureCelsius: Float? = null
         ): EnergyComparisonOverview {
-            val learnedEnergyWh = curve.estimateRemainingEnergyWh(currentSocPercent)
+            // 计算每个完整 5% 区间的标称折算能量（Wh），用于兼容旧的 mixedEstimate
+            val nominalWhPerBin: Double? = if (effectiveCapacityMah != null && effectiveCapacityMah > 0f) {
+                (effectiveCapacityMah * nominalVoltageVolts * LearnedSocEnergyCurve.BIN_SOC_STEP / 100.0) / 1000.0
+            } else null
+
+            // 兼容旧模型
+            val mixedEstimate = curve.estimateRemainingEnergyWhMixed(currentSocPercent, nominalWhPerBin)
+
+            // 三层混合估算与 20 段运行时动态解析
+            val resolvedBins = curve.resolveAllBins(
+                effectiveCapacityMah = effectiveCapacityMah?.toDouble(),
+                nominalVoltageVolts = nominalVoltageVolts.toDouble(),
+                currentDischargeCurrentMa = currentDischargeCurrentMa,
+                temperatureCelsius = temperatureCelsius
+            )
+            val hybridEstimate = curve.estimateHybridRemainingEnergy(
+                currentSocPercent = currentSocPercent,
+                effectiveCapacityMah = effectiveCapacityMah?.toDouble(),
+                nominalVoltageVolts = nominalVoltageVolts.toDouble(),
+                currentDischargeCurrentMa = currentDischargeCurrentMa,
+                temperatureCelsius = temperatureCelsius
+            )
+
+            // 最终学习能量优先取用 hybridEstimate.remainingEnergyWh，若不可用平滑降级旧 mixedEstimate
+            val learnedEnergyWh = hybridEstimate?.remainingEnergyWh ?: mixedEstimate?.totalWh
 
             val nominalEnergyWh = if (effectiveCapacityMah != null && effectiveCapacityMah > 0f) {
                 val totalWh = (effectiveCapacityMah * nominalVoltageVolts) / 1000.0
@@ -285,9 +318,12 @@ class SocEnergyCurveLearner(private val context: Context) {
                 curveCoveragePercent = curve.coveragePercent,
                 totalSessionsCount = curve.totalSampleSessions,
                 nominalVoltageVolts = nominalVoltageVolts,
-                confidence = curve.confidence,
+                confidence = hybridEstimate?.confidence ?: curve.confidence,
                 maturity = curve.maturity,
-                estimatedFullUsableEnergyWh = curve.estimatedFullUsableEnergyWh
+                estimatedFullUsableEnergyWh = curve.estimatedFullUsableEnergyWh,
+                mixedEstimate = mixedEstimate,
+                hybridEstimate = hybridEstimate,
+                resolvedBins = resolvedBins
             )
         }
     }
@@ -393,20 +429,26 @@ class SocEnergyCurveLearner(private val context: Context) {
      * @param hardwareNativeEnergyWh 硬件底层原生能量计数器（Wh，可选）
      * @param effectiveCapacityMah 当前设备基准容量（mAh，可选）
      * @param nominalVoltageVolts 电池标称电压（单位：V，默认 3.85V）
+     * @param currentDischargeCurrentMa 当前实时放电电流（mA，可选）
+     * @param temperatureCelsius 当前电池温度（℃，可选）
      * @return 三源对比展示实体 [EnergyComparisonOverview]
      */
     fun buildComparisonOverview(
         currentSocPercent: Float,
         hardwareNativeEnergyWh: Double? = null,
         effectiveCapacityMah: Float? = null,
-        nominalVoltageVolts: Float = 3.85f
+        nominalVoltageVolts: Float = 3.85f,
+        currentDischargeCurrentMa: Double? = null,
+        temperatureCelsius: Float? = null
     ): EnergyComparisonOverview {
         return buildComparisonOverviewFromCurve(
             curve = getLearnedCurve(),
             currentSocPercent = currentSocPercent,
             hardwareNativeEnergyWh = hardwareNativeEnergyWh,
             effectiveCapacityMah = effectiveCapacityMah,
-            nominalVoltageVolts = nominalVoltageVolts
+            nominalVoltageVolts = nominalVoltageVolts,
+            currentDischargeCurrentMa = currentDischargeCurrentMa,
+            temperatureCelsius = temperatureCelsius
         )
     }
 

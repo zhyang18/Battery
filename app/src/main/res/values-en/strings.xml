@@ -1001,9 +1001,13 @@
     <string name="energy_model_nominal_energy_label">Nominal Voltage Calculated (3.85V)</string>
     <string name="energy_model_coverage_label">SOC Curve Learning Coverage</string>
     <string name="energy_model_sessions_label">Total Discharge Learning Sessions</string>
+    <string name="energy_model_maturity_cold_start">Cold Start</string>
+    <string name="energy_model_maturity_developing">Developing</string>
+    <string name="energy_model_maturity_converged">Converged</string>
     <string name="energy_model_theory_title">Core Physical Principles &amp; Discharge Modeling</string>
-    <string name="energy_model_theory_p1">1. Independent Numerical Integration: Terminal voltage V(t) and discharge current I(t) from the gauge IC undergo trapezoidal calculus with boundary time interpolation, measuring true external work instead of assuming a single fixed nominal voltage.</string>
-    <string name="energy_model_theory_p2" formatted="false">2. Dynamic Discharge Platform Learning: To capture non-linear voltage degradation across SOC and load, the algorithm discretizes 0%–100% into 20 distinct 5% bins, calibrating usable energy continuously from qualified discharge sessions.</string>
+    <string name="energy_model_theory_p1">Independent Numerical Integration: Terminal voltage V(t) and discharge current I(t) from the gauge IC undergo trapezoidal calculus with boundary time interpolation, measuring true external work instead of assuming a single fixed nominal voltage.</string>
+    <string name="energy_model_theory_p2" formatted="false">Dynamic Discharge Platform Learning: To capture non-linear voltage degradation across SOC and load, the algorithm discretizes 0%–100% into 20 distinct 5% bins, calibrating usable energy continuously from qualified discharge sessions.</string>
+    <string name="energy_model_theory_p3" formatted="false">Three-Tier Hybrid Estimation: Unmeasured SOC bins are never truncated to 0 Wh; isolated platform gaps use adjacent voltage interpolation, knee zones use prior capacity electrochemical models, and sources are transparently audited with 4 distinct colors.</string>
     <string name="energy_model_bins_title" formatted="false">20-Segment SOC (5% Bin) Energy Distribution</string>
     <string name="energy_model_bin_unlearned">Pending</string>
     <string name="energy_model_statement_title">⚠️ Zero Fake Data &amp; Operational Statement</string>

@@ -826,6 +826,11 @@
     <string name="capacity_physical_charge_format">物理电荷 · %d%%</string>
     <string name="capacity_physical_charge">物理电荷</string>
     <string name="capacity_nominal_energy">标称基准能量 (3.85V)</string>
+    <string name="energy_source_tier_measured">实测放电可用能量</string>
+    <string name="energy_source_tier_hybrid">混合学习估算 (覆盖率 %.0f%%)</string>
+    <string name="energy_source_tier_hybrid_short">混合学习估算</string>
+    <string name="energy_source_tier_hardware">硬件电量计直读</string>
+    <string name="energy_source_tier_nominal">标称基准能量 (3.85V)</string>
     <string name="capacity_status_converged">🛡️ 收敛</string>
     <string name="capacity_status_observing">⏳ 观察</string>
     <string name="capacity_status_pending">🌱 自学习中</string>
@@ -995,11 +1000,11 @@
     <string name="capacity_fcc_baseline_label">基准满充(FCC): </string>
     <string name="capacity_open_energy_model">放电能量学习 ›</string>
     <string name="energy_model_dialog_title">放电能量模型与实测学习档案</string>
-    <string name="energy_model_dialog_subtitle" formatted="false">基于端电压与电流微积分 · 5% SOC 历史能量曲线学习</string>
-    <string name="energy_model_overview_title">三源能量对比与学习状态</string>
-    <string name="energy_model_learned_energy_label" formatted="false">实测学习剩余可用能量 (5% SOC 曲线积分)</string>
-    <string name="energy_model_hardware_energy_label">硬件电量计原生直读 (ENERGY_COUNTER)</string>
-    <string name="energy_model_nominal_energy_label">传统标称工作平台推算 (3.85V 标压)</string>
+    <string name="energy_model_dialog_subtitle" formatted="false">基于端电压与电流微积分 · 满电做功预测与 5% SOC 学习档案</string>
+    <string name="energy_model_overview_title">三源满电能量预测与对比</string>
+    <string name="energy_model_learned_energy_label" formatted="false">实测学习满充可用能量 (5% SOC 曲线积分)</string>
+    <string name="energy_model_hardware_energy_label">硬件电量计满充推算 (ENERGY_COUNTER)</string>
+    <string name="energy_model_nominal_energy_label">出厂标称额定满电 (3.85V 标压)</string>
     <string name="energy_model_coverage_label">SOC 曲线学习覆盖率</string>
     <string name="energy_model_sessions_label">累计放电学习会话样本</string>
     <string name="energy_model_maturity_cold_start">冷启动</string>
@@ -1008,25 +1013,46 @@
     <string name="energy_model_theory_title">核心物理原理与放电测量建模</string>
     <string name="energy_model_theory_p1">独立能量数值微积分：系统基于电量计上报的电池端电压 V(t) 与瞬时放电电流 I(t) 实施梯形数值微积分与时间边界插值，真实统计外部释放电能，摆脱单一固定标称电压粗算限制。</string>
     <string name="energy_model_theory_p2" formatted="false">动态放电平台自适应学习：针对锂电池放电电压平台随 SOC 和负载动态变化的物理特性，算法将 0%~100% 细分为 20 个 5% SOC 微分区间，结合历史独立放电会话持续校准各区间可用能量。</string>
-    <string name="energy_model_theory_p3" formatted="false">三层混合能量补全（Hybrid Estimation）：未学习的 SOC 区间不直接按 0 Wh 截断；平台区孤立缺失采用相邻放电平均电压插值，拐点陡降区与连续缺失采用基准容量结合电化学电压物理模型补全，并在看板中对各区间来源（实测/插值/模型/待采集）实施四色透明溯源。</string>
+    <string name="energy_model_theory_p3" formatted="false">无量纲形态自举补全（Shape Bootstrapping）：未学习的 SOC 区间彻底脱离容量先验推算；系统基于锂电池无量纲电化学形态权重向量，通过已实测区间的单位做功自举反推整机做功标尺，并在看板中对各区间来源（实测/插值/自举/待采集）实施多色透明溯源。</string>
     <string name="energy_source_badge_measured">实测</string>
+    <string name="energy_badge_screen_on_anchored">实测锚定 (高置信)</string>
+    <string name="energy_source_badge_screen_on_anchored">锚定</string>
+    <string name="energy_source_screen_on_anchored_desc">亮屏实测展开</string>
+    <string name="energy_source_sessions_anchored">亮屏连续高频实测锚定</string>
     <string name="energy_source_badge_interpolated">插值</string>
+    <string name="energy_source_badge_bootstrap">自举</string>
+    <string name="energy_source_bootstrap_desc">实测形态自举</string>
     <string name="energy_source_badge_model">模型</string>
     <string name="energy_source_badge_unknown">待采集</string>
     <string name="energy_model_bins_title" formatted="false">20 段 SOC (5% Bin) 实测能量释放分布</string>
     <string name="energy_model_bin_unlearned">待采集</string>
     <string name="energy_model_statement_title">⚠️ 零假数据与工况声明</string>
-    <string name="energy_model_statement_desc">未产生放电样本的 SOC 区间忠实展示“待采集”，绝不凭空捏造或硬编码补齐；息屏休眠大于 120 秒的时间断层自动丢弃，杜绝虚夸能耗。</string>
-    <!-- 三源能量对比看板标签 -->
-    <string name="energy_col_learned_label">实测学习模型</string>
-    <string name="energy_source_learned_hint">动态微积分做功</string>
-    <string name="energy_col_hardware_label">硬件电量计直读</string>
+    <string name="energy_model_statement_desc">未产生放电样本的 SOC 区间忠实展示“待采集”，绝不凭空捏造或硬编码补齐；息屏休眠断层自适应融合待机底噪微积分，确保能量与电量严格守恒，杜绝虚夸与漏记。</string>
+    <!-- 三源满电能量对比看板标签 -->
+    <string name="energy_col_learned_label">实测学习满充预测</string>
+    <string name="energy_source_learned_hint">实测满充做功</string>
+    <string name="energy_source_learned_health_hint">能量健康度 %1$.1f%% (折合 %2$d mAh)</string>
+    <string name="energy_source_learned_efficiency_hint">实测满充做功 · 转化率 %.1f%%</string>
+    <string name="energy_source_learned_efficiency_dual_hint">实测满充做功 · 转化率 %.1f%% (健康基准)</string>
+    <string name="energy_col_hardware_label">硬件电量计满充推算</string>
     <string name="energy_col_hardware_source">ENERGY_COUNTER 寄存器</string>
     <string name="energy_col_hardware_unsupported">底层硬件不支持</string>
-    <string name="energy_col_hardware_supported">电量计原生积分做功</string>
-    <string name="energy_col_nominal_label">传统标称平台折算</string>
-    <string name="energy_col_nominal_source">当前电量 × 基准容量 × 3.85V</string>
-    <string name="energy_col_nominal_desc">粗略线性折算</string>
+    <string name="energy_col_hardware_supported">电量计原生积分推算</string>
+    <string name="energy_col_nominal_label">出厂设计标称满电</string>
+    <string name="energy_col_design_label">出厂设计标称满电</string>
+    <string name="energy_col_health_nominal_label">健康预估标称满电</string>
+    <string name="energy_col_nominal_source">基准容量 × 3.85V 额定满电</string>
+    <string name="energy_col_design_with_health_desc">设计 %1$d mAh · 当前健康基准 %2$.2f Wh (%3$d mAh)</string>
+    <string name="energy_col_design_with_capacity_model_desc">出厂设计 %1$d mAh · 容量模型 %2$.1f%% (%3$d mAh | %4$.2f Wh)</string>
+    <string name="energy_col_capacity_model_health_line">容量模型健康度 %1$.1f%% (%2$d mAh | %3$.2f Wh)</string>
+    <string name="energy_col_design_base_line">出厂设计 %1$d mAh · 理论无损基准</string>
+    <string name="energy_col_nominal_desc">理论无损理想值</string>
+    <!-- 放电能量学习模型重置相关 -->
+    <string name="energy_model_reset_btn">重置模型</string>
+    <string name="energy_model_reset_title">重置放电能量学习模型？</string>
+    <string name="energy_model_reset_message">确定要清空已学习的 20 段 SOC 放电能量微积分曲线与历史样本吗？\n\n重置后系统将进入初始冷启动状态，并在后续放电过程中重新采集各电量区间的真实做功。出厂额定基准容量不受影响。</string>
+    <string name="energy_model_reset_confirm">确认重置</string>
+    <string name="energy_model_reset_toast">放电能量学习模型已重置为初始状态</string>
     <string name="capacity_open_diagnosis">诊断档案 ›</string>
     <string name="capacity_diag_title">电池容量科学诊断与学习档案</string>
     <string name="capacity_diag_subtitle">基于电荷微积分与充放电会话自学习 · 预估数据</string>

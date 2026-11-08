@@ -43,6 +43,9 @@ class SocEnergyCurveLearner(private val context: Context) {
         /** 持久化键：数据协议版本号 */
         private const val KEY_CURVE_VERSION = "key_curve_version"
 
+        /** 当前数据协议与归一化模型版本号（版本 3：支持 5% 满跨度微积分标准化与残缺样本自愈） */
+        const val CURRENT_CURVE_VERSION = 3
+
         /** 单个 Bin 最多保留的历史有效独立样本数（滚动窗口） */
         const val MAX_SAMPLES_PER_BIN = 10
 
@@ -106,18 +109,29 @@ class SocEnergyCurveLearner(private val context: Context) {
             val coveredBins = bins.filter { it.hasLearnedData() }
             val coveredCount = coveredBins.size
             val coverage = coveredCount.toFloat() / LearnedSocEnergyCurve.BIN_COUNT.toFloat()
+            val totalSamples = coveredBins.sumOf { it.sampleCount }
             val avgSamples = if (coveredCount > 0) coveredBins.map { it.sampleCount }.average() else 0.0
 
+            // 严密的成熟度评级准则：必须将“完整放电周期次数”作为硬性前置条件
+            // 杜绝单次放电一口气跑多个区间就草率晋升中/高置信度的问题
             val maturity = when {
-                totalSessions < 2 || coverage < 0.30f -> ModelMaturity.COLD_START
-                coverage >= 0.80f && avgSamples >= 3.0 -> ModelMaturity.CONVERGED
+                // 冷启动：已测区间不足 3 段，或已归档完整放电周期少于 3 次，或覆盖率低于 35%
+                coveredCount < LearnedSocEnergyCurve.MIN_BOOTSTRAP_LEARNED_BINS || totalSessions < 3 || coverage < 0.35f -> ModelMaturity.COLD_START
+                // 成熟收敛：至少 5 次独立完整放电周期，且覆盖率 >= 70% (14段以上)，且平均复测样本 >= 2.5 次
+                totalSessions >= 5 && coverage >= 0.70f && avgSamples >= 2.5 -> ModelMaturity.CONVERGED
+                // 发展收敛中：已满足 >= 3 次完整放电周期且覆盖 >= 35%
                 else -> ModelMaturity.DEVELOPING
             }
 
             val confidence = when (maturity) {
                 ModelMaturity.CONVERGED -> ConfidenceLevel.HIGH
-                ModelMaturity.DEVELOPING -> if (coverage >= 0.50f) ConfidenceLevel.MEDIUM else ConfidenceLevel.LOW
-                ModelMaturity.COLD_START -> if (coveredCount > 0) ConfidenceLevel.LOW else ConfidenceLevel.UNRELIABLE
+                ModelMaturity.DEVELOPING -> {
+                    // 仅当完整放电周期 >= 3 次、覆盖率 >= 50% 且至少累积 6 个样本时才赋予中置信度
+                    if (totalSessions >= 3 && coverage >= 0.50f && totalSamples >= 6) ConfidenceLevel.MEDIUM else ConfidenceLevel.LOW
+                }
+                ModelMaturity.COLD_START -> {
+                    if (coveredCount >= LearnedSocEnergyCurve.MIN_BOOTSTRAP_LEARNED_BINS) ConfidenceLevel.LOW else ConfidenceLevel.UNRELIABLE
+                }
             }
 
             return Pair(maturity, confidence)
@@ -137,7 +151,8 @@ class SocEnergyCurveLearner(private val context: Context) {
             currentCurve: LearnedSocEnergyCurve,
             samples: List<SocEnergyBinSample>,
             updateTimestamp: Long = System.currentTimeMillis(),
-            incrementSessionCount: Boolean = true
+            incrementSessionCount: Boolean = true,
+            allowInFlightReplacement: Boolean = false
         ): LearnedSocEnergyCurve {
             if (samples.isEmpty()) return currentCurve
 
@@ -150,11 +165,14 @@ class SocEnergyCurveLearner(private val context: Context) {
                 if (sample.energyWh <= 0.0 || !sample.energyWh.isFinite()) continue
 
                 val oldBin = updatedBins[binIndex]
-                val newCount = oldBin.sampleCount + 1
+                val isReplacingInFlight = allowInFlightReplacement && !incrementSessionCount && oldBin.hasLearnedData()
+                val newCount = if (isReplacingInFlight) oldBin.sampleCount else oldBin.sampleCount + 1
                 val oldEnergy = oldBin.learnedEnergyWh
 
-                // 鲁棒增量加权更新（若有历史多样本则向中位数平滑收敛）
-                val newLearnedWh = if (oldEnergy != null && oldBin.sampleCount > 0) {
+                // 鲁棒增量加权更新（会话内增量刷新采用最新完整做功，跨会话采用均值平滑收敛）
+                val newLearnedWh = if (isReplacingInFlight) {
+                    sample.energyWh
+                } else if (oldEnergy != null && oldBin.sampleCount > 0) {
                     (oldEnergy * oldBin.sampleCount + sample.energyWh) / newCount
                 } else {
                     sample.energyWh
@@ -164,14 +182,20 @@ class SocEnergyCurveLearner(private val context: Context) {
                 val maxWh = if (oldBin.maxObservedWh != null) max(oldBin.maxObservedWh, sample.energyWh) else sample.energyWh
 
                 val avgTemp = if (sample.temperatureC != null) {
-                    if (oldBin.medianTemperatureC != null) (oldBin.medianTemperatureC * oldBin.sampleCount + sample.temperatureC) / newCount else sample.temperatureC
+                    if (isReplacingInFlight) sample.temperatureC
+                    else if (oldBin.medianTemperatureC != null) (oldBin.medianTemperatureC * oldBin.sampleCount + sample.temperatureC) / newCount
+                    else sample.temperatureC
                 } else oldBin.medianTemperatureC
 
                 val avgCRate = if (sample.averageDischargeCRate != null) {
-                    if (oldBin.medianDischargeCRate != null) (oldBin.medianDischargeCRate * oldBin.sampleCount + sample.averageDischargeCRate) / newCount else sample.averageDischargeCRate
+                    if (isReplacingInFlight) sample.averageDischargeCRate
+                    else if (oldBin.medianDischargeCRate != null) (oldBin.medianDischargeCRate * oldBin.sampleCount + sample.averageDischargeCRate) / newCount
+                    else sample.averageDischargeCRate
                 } else oldBin.medianDischargeCRate
 
-                val newCoverage = if (oldBin.sampleCount > 0) {
+                val newCoverage = if (isReplacingInFlight) {
+                    max(oldBin.coverageFraction, sample.coverageFraction)
+                } else if (oldBin.sampleCount > 0) {
                     (oldBin.coverageFraction * oldBin.sampleCount + sample.coverageFraction) / newCount
                 } else sample.coverageFraction
 
@@ -210,7 +234,7 @@ class SocEnergyCurveLearner(private val context: Context) {
                 estimatedFullUsableEnergyWh = fullEnergy,
                 confidence = confidence,
                 maturity = maturity,
-                curveVersion = 2,
+                curveVersion = CURRENT_CURVE_VERSION,
                 totalSampleSessions = newTotalSessions,
                 lastLearnedTimestamp = updateTimestamp
             )
@@ -254,6 +278,51 @@ class SocEnergyCurveLearner(private val context: Context) {
         }
 
         /**
+         * 纯算法函数：基于高保真连续亮屏实测能量与掉电百分比，结合锂电池无量纲电化学形态向量，
+         * 精准反推整机 100% 满电物理做功能量（Wh）。
+         *
+         * 核心电化学原理：
+         * 1. 黄金采样无损性：亮屏期间 CPU 活跃、屏幕恒亮，采样为稳定的 1~3 秒一次梯形积分，0 丢失、0 睡眠误差；
+         * 2. 无量纲形态投影：通过 calculateTheoreticalShapeWeight 消除高压与低压平台的非线性微差；
+         * 3. 门限与物理边界：要求亮屏有效掉电 >= 1.5%（杜绝单点抖动），推算结果必须落在合理的单电芯物理区间（5Wh ~ 100Wh）。
+         *
+         * @param screenOnEnergyWh 纯亮屏期间实测积分能量（单位：Wh）
+         * @param screenOnDropPercent 纯亮屏期间对应的电池百分比净掉电（如 25.2%）
+         * @param startSoc 亮屏期间的起始电量百分比（可选）
+         * @param endSoc 亮屏期间的终止电量百分比（可选）
+         * @return 推算出的整机满电实测物理做功（Wh），若数据不足或异常返回 null
+         */
+        fun calculateScreenOnAnchoredFullEnergy(
+            screenOnEnergyWh: Float,
+            screenOnDropPercent: Float,
+            startSoc: Float? = null,
+            endSoc: Float? = null
+        ): Double? {
+            if (screenOnEnergyWh <= 0f || screenOnDropPercent <= 0f) return null
+            if (screenOnDropPercent < 1.5f) return null
+
+            val spanPercent = if (startSoc != null && endSoc != null && startSoc > endSoc) {
+                startSoc - endSoc
+            } else null
+
+            // 核心修复：亮屏采样在放电周期中往往是穿插断续进行的（包含息屏待机）
+            // 若起止跨度 spanPercent 显著大于纯亮屏掉电 screenOnDropPercent，
+            // 绝不可直接将整个起止跨度的权重赋给分子，而应提取该跨度内的平均电化学形态密度，
+            // 乘以实际亮屏掉电百分比，彻底消除息屏时间导致的严重分母稀释 Bug。
+            val weight: Double = if (spanPercent != null && spanPercent > 0.5f) {
+                val spanWeight = LearnedSocEnergyCurve.calculateTheoreticalShapeWeight(minSoc = endSoc!!, maxSoc = startSoc!!)
+                val avgDensity = spanWeight / (spanPercent / 100.0)
+                ((screenOnDropPercent / 100.0).toDouble() * avgDensity).coerceIn(0.001, 1.0)
+            } else {
+                (screenOnDropPercent / 100.0).toDouble()
+            }
+
+            if (weight <= 0.005) return null
+            val fullWh = screenOnEnergyWh.toDouble() / weight
+            return if (fullWh in 5.0..100.0) fullWh else null
+        }
+
+        /**
          * 纯算法函数：构建三源能量对比看板展示实体。
          * 实测学习能量采用工业级三层混合估算机制（Hybrid Remaining Energy Estimation）：
          * 1. 已学习区间采用实测数据；
@@ -277,8 +346,23 @@ class SocEnergyCurveLearner(private val context: Context) {
             effectiveCapacityMah: Float? = null,
             nominalVoltageVolts: Float = 3.85f,
             currentDischargeCurrentMa: Double? = null,
-            temperatureCelsius: Float? = null
+            temperatureCelsius: Float? = null,
+            designCapacityMah: Float? = null,
+            screenOnEnergyWh: Float? = null,
+            screenOnDropPercent: Float? = null,
+            screenOnStartSoc: Float? = null,
+            screenOnEndSoc: Float? = null
         ): EnergyComparisonOverview {
+            // 亮屏高精微积分实测物理做功锚定（黄金采样无损展开）
+            val screenOnAnchoredFullWh = if (screenOnEnergyWh != null && screenOnDropPercent != null) {
+                calculateScreenOnAnchoredFullEnergy(
+                    screenOnEnergyWh = screenOnEnergyWh,
+                    screenOnDropPercent = screenOnDropPercent,
+                    startSoc = screenOnStartSoc,
+                    endSoc = screenOnEndSoc
+                )
+            } else null
+
             // 计算每个完整 5% 区间的标称折算能量（Wh），用于兼容旧的 mixedEstimate
             val nominalWhPerBin: Double? = if (effectiveCapacityMah != null && effectiveCapacityMah > 0f) {
                 (effectiveCapacityMah * nominalVoltageVolts * LearnedSocEnergyCurve.BIN_SOC_STEP / 100.0) / 1000.0
@@ -287,19 +371,21 @@ class SocEnergyCurveLearner(private val context: Context) {
             // 兼容旧模型
             val mixedEstimate = curve.estimateRemainingEnergyWhMixed(currentSocPercent, nominalWhPerBin)
 
-            // 三层混合估算与 20 段运行时动态解析
+            // 三层混合估算与 20 段运行时动态解析（融入亮屏实测锚定）
             val resolvedBins = curve.resolveAllBins(
                 effectiveCapacityMah = effectiveCapacityMah?.toDouble(),
                 nominalVoltageVolts = nominalVoltageVolts.toDouble(),
                 currentDischargeCurrentMa = currentDischargeCurrentMa,
-                temperatureCelsius = temperatureCelsius
+                temperatureCelsius = temperatureCelsius,
+                screenOnAnchoredFullEnergyWh = screenOnAnchoredFullWh
             )
             val hybridEstimate = curve.estimateHybridRemainingEnergy(
                 currentSocPercent = currentSocPercent,
                 effectiveCapacityMah = effectiveCapacityMah?.toDouble(),
                 nominalVoltageVolts = nominalVoltageVolts.toDouble(),
                 currentDischargeCurrentMa = currentDischargeCurrentMa,
-                temperatureCelsius = temperatureCelsius
+                temperatureCelsius = temperatureCelsius,
+                screenOnAnchoredFullEnergyWh = screenOnAnchoredFullWh
             )
 
             // 最终学习能量优先取用 hybridEstimate.remainingEnergyWh，若不可用平滑降级旧 mixedEstimate
@@ -310,20 +396,77 @@ class SocEnergyCurveLearner(private val context: Context) {
                 (totalWh * (currentSocPercent / 100.0))
             } else null
 
+            // 核心功能演进：放电能量模型最终预测结果为电池 100% 满电实测做功（满电Wh是多少）
+            val hybridFullEstimate = curve.estimateHybridRemainingEnergy(
+                currentSocPercent = 100f,
+                effectiveCapacityMah = effectiveCapacityMah?.toDouble(),
+                nominalVoltageVolts = nominalVoltageVolts.toDouble(),
+                currentDischargeCurrentMa = currentDischargeCurrentMa,
+                temperatureCelsius = temperatureCelsius,
+                screenOnAnchoredFullEnergyWh = screenOnAnchoredFullWh
+            )
+            val fullLearnedWh = screenOnAnchoredFullWh ?: hybridFullEstimate?.remainingEnergyWh ?: curve.estimatedFullUsableEnergyWh
+
+            val fullNominalWh = if (effectiveCapacityMah != null && effectiveCapacityMah > 0f) {
+                (effectiveCapacityMah * nominalVoltageVolts) / 1000.0
+            } else null
+
+            val fullDesignWh = if (designCapacityMah != null && designCapacityMah > 0f) {
+                (designCapacityMah * nominalVoltageVolts) / 1000.0
+            } else null
+
+            val fullHardwareWh = if (hardwareNativeEnergyWh != null && currentSocPercent in 15f..100f) {
+                (hardwareNativeEnergyWh / currentSocPercent.toDouble()) * 100.0
+            } else null
+
+            val efficiencyPercent = if (fullLearnedWh != null && fullNominalWh != null && fullNominalWh > 0.0) {
+                (fullLearnedWh / fullNominalWh) * 100.0
+            } else null
+
+            val energyHealthPercent = if (fullLearnedWh != null && fullDesignWh != null && fullDesignWh > 0.0) {
+                (fullLearnedWh / fullDesignWh) * 100.0
+            } else null
+
+            // 放电能量模型推算满充做功折合的等效物理容量（mAh）
+            val equivMah = if (fullLearnedWh != null && fullLearnedWh > 0.0 && nominalVoltageVolts > 0f) {
+                (fullLearnedWh * 1000.0) / nominalVoltageVolts
+            } else null
+
+            // 容量算法模型（算法轨 A）对应的独立健康度（SOH）
+            val capSoh = if (effectiveCapacityMah != null && designCapacityMah != null && designCapacityMah > 0f) {
+                (effectiveCapacityMah / designCapacityMah).toDouble() * 100.0
+            } else null
+
+            val isAnchored = screenOnAnchoredFullWh != null
+
             return EnergyComparisonOverview(
                 learnedRemainingEnergyWh = learnedEnergyWh,
                 hardwareNativeEnergyWh = hardwareNativeEnergyWh,
                 nominalCalculatedEnergyWh = nominalEnergyWh,
                 currentSocPercent = currentSocPercent,
-                curveCoveragePercent = curve.coveragePercent,
+                curveCoveragePercent = if (isAnchored) 1.0f else curve.coveragePercent,
                 totalSessionsCount = curve.totalSampleSessions,
                 nominalVoltageVolts = nominalVoltageVolts,
-                confidence = hybridEstimate?.confidence ?: curve.confidence,
-                maturity = curve.maturity,
-                estimatedFullUsableEnergyWh = curve.estimatedFullUsableEnergyWh,
+                confidence = if (isAnchored) ConfidenceLevel.HIGH else (hybridFullEstimate?.confidence ?: hybridEstimate?.confidence ?: curve.confidence),
+                maturity = if (isAnchored) ModelMaturity.CONVERGED else curve.maturity,
+                estimatedFullUsableEnergyWh = fullLearnedWh,
                 mixedEstimate = mixedEstimate,
                 hybridEstimate = hybridEstimate,
-                resolvedBins = resolvedBins
+                resolvedBins = resolvedBins,
+                fullLearnedEnergyWh = fullLearnedWh,
+                fullHardwareEnergyWh = fullHardwareWh,
+                fullNominalEnergyWh = fullNominalWh,
+                hybridFullEstimate = hybridFullEstimate,
+                dischargeEnergyEfficiencyPercent = efficiencyPercent,
+                designCapacityMah = designCapacityMah,
+                fullDesignEnergyWh = fullDesignWh,
+                energyHealthRetentionPercent = energyHealthPercent,
+                equivalentCapacityMah = equivMah,
+                capacityModelSohPercent = capSoh,
+                effectiveCapacityMah = effectiveCapacityMah,
+                isScreenOnAnchored = isAnchored,
+                screenOnMeasuredEnergyWh = screenOnEnergyWh,
+                screenOnDropPercent = screenOnDropPercent
             )
         }
     }
@@ -385,18 +528,39 @@ class SocEnergyCurveLearner(private val context: Context) {
      */
     fun recordValidatedSamples(
         samples: List<SocEnergyBinSample>,
-        incrementSessionCount: Boolean = true
+        incrementSessionCount: Boolean = true,
+        allowInFlightReplacement: Boolean = false
     ): LearnedSocEnergyCurve {
         if (samples.isEmpty()) return getLearnedCurve()
 
         synchronized(this) {
             val currentCurve = getLearnedCurve()
-            val newCurve = updateCurveWithSamples(currentCurve, samples, System.currentTimeMillis(), incrementSessionCount)
+            val newCurve = updateCurveWithSamples(
+                currentCurve = currentCurve,
+                samples = samples,
+                updateTimestamp = System.currentTimeMillis(),
+                incrementSessionCount = incrementSessionCount,
+                allowInFlightReplacement = allowInFlightReplacement
+            )
             if (newCurve !== currentCurve) {
                 saveCurveToDisk(newCurve)
                 cachedCurve = newCurve
             }
             return newCurve
+        }
+    }
+
+    /**
+     * 重置放电能量学习模型为初始全空状态（清除全部 20 个 SOC 区间已学数据与采样计数）。
+     *
+     * @return 全空的初始学习曲线实体 [LearnedSocEnergyCurve]
+     */
+    fun resetCurve(): LearnedSocEnergyCurve {
+        synchronized(this) {
+            val emptyCurve = LearnedSocEnergyCurve.createEmpty()
+            saveCurveToDisk(emptyCurve)
+            cachedCurve = emptyCurve
+            return emptyCurve
         }
     }
 
@@ -439,7 +603,12 @@ class SocEnergyCurveLearner(private val context: Context) {
         effectiveCapacityMah: Float? = null,
         nominalVoltageVolts: Float = 3.85f,
         currentDischargeCurrentMa: Double? = null,
-        temperatureCelsius: Float? = null
+        temperatureCelsius: Float? = null,
+        designCapacityMah: Float? = null,
+        screenOnEnergyWh: Float? = null,
+        screenOnDropPercent: Float? = null,
+        screenOnStartSoc: Float? = null,
+        screenOnEndSoc: Float? = null
     ): EnergyComparisonOverview {
         return buildComparisonOverviewFromCurve(
             curve = getLearnedCurve(),
@@ -448,7 +617,12 @@ class SocEnergyCurveLearner(private val context: Context) {
             effectiveCapacityMah = effectiveCapacityMah,
             nominalVoltageVolts = nominalVoltageVolts,
             currentDischargeCurrentMa = currentDischargeCurrentMa,
-            temperatureCelsius = temperatureCelsius
+            temperatureCelsius = temperatureCelsius,
+            designCapacityMah = designCapacityMah,
+            screenOnEnergyWh = screenOnEnergyWh,
+            screenOnDropPercent = screenOnDropPercent,
+            screenOnStartSoc = screenOnStartSoc,
+            screenOnEndSoc = screenOnEndSoc
         )
     }
 
@@ -540,24 +714,53 @@ class SocEnergyCurveLearner(private val context: Context) {
                 return LearnedSocEnergyCurve.createEmpty()
             }
 
-            val coveredCount = bins.count { it.hasLearnedData() }
+            // 历史数据自愈防御（版本 < 3 升级校准）：
+            // 早期版本中有效跨度在 4.5%~4.9%（coverageFraction 在 0.70~0.995）的样本未执行 5% 满跨度归一化，
+            // 导致历史存储的 learnedEnergyWh 偏低 5%~10%。在此执行一次性无损恢复折算，并固化至新版本。
+            var hasSelfHealed = false
+            val resolvedBins = if (version < CURRENT_CURVE_VERSION) {
+                bins.map { bin ->
+                    if (bin.hasLearnedData() && bin.coverageFraction in 0.70..0.995) {
+                        hasSelfHealed = true
+                        val factor = 1.0 / bin.coverageFraction
+                        bin.copy(
+                            learnedEnergyWh = bin.learnedEnergyWh?.let { it * factor },
+                            coverageFraction = 1.0,
+                            minObservedWh = bin.minObservedWh?.let { it * factor },
+                            maxObservedWh = bin.maxObservedWh?.let { it * factor }
+                        )
+                    } else {
+                        bin
+                    }
+                }
+            } else {
+                bins
+            }
+
+            val coveredCount = resolvedBins.count { it.hasLearnedData() }
             val coverage = coveredCount.toFloat() / LearnedSocEnergyCurve.BIN_COUNT.toFloat()
             val fullEnergy = if (coveredCount == LearnedSocEnergyCurve.BIN_COUNT) {
-                bins.sumOf { it.learnedEnergyWh ?: 0.0 }
+                resolvedBins.sumOf { it.learnedEnergyWh ?: 0.0 }
             } else null
 
-            val (maturity, confidence) = evaluateMaturityAndConfidence(bins, sessions)
+            val (maturity, confidence) = evaluateMaturityAndConfidence(resolvedBins, sessions)
 
-            return LearnedSocEnergyCurve(
-                bins = bins,
+            val loadedCurve = LearnedSocEnergyCurve(
+                bins = resolvedBins,
                 coveragePercent = coverage,
                 estimatedFullUsableEnergyWh = fullEnergy,
                 confidence = confidence,
                 maturity = maturity,
-                curveVersion = version,
+                curveVersion = CURRENT_CURVE_VERSION,
                 totalSampleSessions = sessions,
                 lastLearnedTimestamp = lastTime
             )
+
+            if (hasSelfHealed || version < CURRENT_CURVE_VERSION) {
+                saveCurveToDisk(loadedCurve)
+            }
+
+            return loadedCurve
         } catch (_: Exception) {
             return LearnedSocEnergyCurve.createEmpty()
         }

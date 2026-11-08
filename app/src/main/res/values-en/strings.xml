@@ -825,6 +825,11 @@
     <string name="capacity_physical_charge_format">Charge · %d%%</string>
     <string name="capacity_physical_charge">Charge</string>
     <string name="capacity_nominal_energy">Nominal Baseline (3.85V)</string>
+    <string name="energy_source_tier_measured">Measured Usable Energy</string>
+    <string name="energy_source_tier_hybrid">Hybrid Estimate (Coverage %.0f%%)</string>
+    <string name="energy_source_tier_hybrid_short">Hybrid Estimate</string>
+    <string name="energy_source_tier_hardware">Hardware Meter Direct</string>
+    <string name="energy_source_tier_nominal">Nominal Baseline (3.85V)</string>
     <string name="capacity_status_converged">🛡️ Converged</string>
     <string name="capacity_status_observing">⏳ Observing</string>
     <string name="capacity_status_pending">🌱 Learning</string>
@@ -994,11 +999,11 @@
     <string name="capacity_fcc_baseline_label">Baseline FCC: </string>
     <string name="capacity_open_energy_model">Energy Model ›</string>
     <string name="energy_model_dialog_title">Discharge Energy Model &amp; Profile</string>
-    <string name="energy_model_dialog_subtitle" formatted="false">V×I Calculus &amp; 5% SOC Learned Energy Curve</string>
-    <string name="energy_model_overview_title">Tri-source Energy Comparison</string>
-    <string name="energy_model_learned_energy_label" formatted="false">Learned Usable Energy (5% SOC Integral)</string>
-    <string name="energy_model_hardware_energy_label">Hardware Native Energy Counter</string>
-    <string name="energy_model_nominal_energy_label">Nominal Voltage Calculated (3.85V)</string>
+    <string name="energy_model_dialog_subtitle" formatted="false">V×I Calculus &amp; Full Energy Prediction Profile</string>
+    <string name="energy_model_overview_title">Tri-source Full Energy Prediction &amp; Comparison</string>
+    <string name="energy_model_learned_energy_label" formatted="false">Learned Full Charge Usable Energy (5% SOC Curve)</string>
+    <string name="energy_model_hardware_energy_label">Hardware Native Extrapolated Full Energy (ENERGY_COUNTER)</string>
+    <string name="energy_model_nominal_energy_label">Factory Rated Full Charge Energy (3.85V Baseline)</string>
     <string name="energy_model_coverage_label">SOC Curve Learning Coverage</string>
     <string name="energy_model_sessions_label">Total Discharge Learning Sessions</string>
     <string name="energy_model_maturity_cold_start">Cold Start</string>
@@ -1012,6 +1017,31 @@
     <string name="energy_model_bin_unlearned">Pending</string>
     <string name="energy_model_statement_title">⚠️ Zero Fake Data &amp; Operational Statement</string>
     <string name="energy_model_statement_desc">Unrecorded SOC bins faithfully display \'Pending\' without synthesis; Deep sleep gaps (>120s) are safely filtered to prevent inflated energy calculation.</string>
+    <!-- Tri-source full energy comparison card labels -->
+    <string name="energy_col_learned_label">Learned Full Prediction</string>
+    <string name="energy_source_learned_hint">Measured Full Work</string>
+    <string name="energy_source_learned_health_hint">Energy Health %1$.1f%% (equiv. %2$d mAh)</string>
+    <string name="energy_source_learned_efficiency_hint">Measured Full Work · Efficiency %.1f%%</string>
+    <string name="energy_source_learned_efficiency_dual_hint">Measured Full Work · Efficiency %.1f%% (Health base)</string>
+    <string name="energy_col_hardware_label">Hardware Gauge Full Estimate</string>
+    <string name="energy_col_hardware_source">ENERGY_COUNTER Register</string>
+    <string name="energy_col_hardware_unsupported">Hardware Unsupported</string>
+    <string name="energy_col_hardware_supported">Gauge Native Full Estimate</string>
+    <string name="energy_col_nominal_label">Factory Design Rated Full</string>
+    <string name="energy_col_design_label">Factory Design Rated Full</string>
+    <string name="energy_col_health_nominal_label">Health Rated Baseline Full</string>
+    <string name="energy_col_nominal_source">Baseline Cap × 3.85V Rated</string>
+    <string name="energy_col_design_with_health_desc">Design %1$d mAh · Health base %2$.2f Wh (%3$d mAh)</string>
+    <string name="energy_col_design_with_capacity_model_desc">Design %1$d mAh · Capacity Model %2$.1f%% (%3$d mAh | %4$.2f Wh)</string>
+    <string name="energy_col_capacity_model_health_line">Capacity Model Health %1$.1f%% (%2$d mAh | %3$.2f Wh)</string>
+    <string name="energy_col_design_base_line">Design %1$d mAh · Theoretical Ideal Baseline</string>
+    <string name="energy_col_nominal_desc">Theoretical Ideal Baseline</string>
+    <!-- Discharge energy model reset -->
+    <string name="energy_model_reset_btn">Reset Model</string>
+    <string name="energy_model_reset_title">Reset Discharge Energy Model?</string>
+    <string name="energy_model_reset_message">This will clear all 20-segment SOC learned energy profiles and historical samples. The system will restart learning afresh from cold start. Factory nominal baseline will not be affected.</string>
+    <string name="energy_model_reset_confirm">Reset</string>
+    <string name="energy_model_reset_toast">Discharge energy model has been reset</string>
     <string name="capacity_open_diagnosis">Diagnostics ›</string>
     <string name="capacity_diag_title">Capacity Diagnostics &amp; Learning Profile</string>
     <string name="capacity_diag_subtitle">Estimated via charge calculus &amp; session self-learning</string>
@@ -1232,6 +1262,17 @@
 
     <string name="rate_percent_and_mah_format">%1$s (~%2$s)</string>
     <string name="rate_mah_only_format">~%s</string>
+
+    <string name="energy_source_badge_measured">Measured</string>
+    <string name="energy_badge_screen_on_anchored">Screen-On Anchored (High Conf)</string>
+    <string name="energy_source_badge_screen_on_anchored">Anchored</string>
+    <string name="energy_source_screen_on_anchored_desc">Screen-On Work Anchored</string>
+    <string name="energy_source_sessions_anchored">Continuous Screen-On Meter</string>
+    <string name="energy_source_badge_interpolated">Interp</string>
+    <string name="energy_source_badge_bootstrap">Bootstrap</string>
+    <string name="energy_source_bootstrap_desc">Shape Bootstrap</string>
+    <string name="energy_source_badge_model">Model</string>
+    <string name="energy_source_badge_unknown">Pending</string>
 </resources>
 
 

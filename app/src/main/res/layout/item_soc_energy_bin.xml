@@ -3,17 +3,17 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginVertical="3dp"
+    android:layout_marginVertical="2.5dp"
     android:background="@drawable/bg_diag_sub_card"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingHorizontal="12dp"
-    android:paddingVertical="9dp">
+    android:paddingHorizontal="9dp"
+    android:paddingVertical="8dp">
 
-    <!-- 区间电量范围（固定宽度 74dp 确保每一行第一列绝对等宽，后续列垂直绝对对齐） -->
+    <!-- 区间电量范围（固定宽度 80dp 确保 95% - 100% 绝对不出现省略号截断） -->
     <TextView
         android:id="@+id/tv_bin_range_label"
-        android:layout_width="74dp"
+        android:layout_width="80dp"
         android:layout_height="wrap_content"
         android:gravity="start|center_vertical"
         android:singleLine="true"
@@ -22,11 +22,11 @@
         android:textStyle="bold"
         tools:text="95% - 100%" />
 
-    <!-- 数据源类型徽章列（固定列宽 48dp 并居中对齐，确保上下多行完全居中垂直对齐） -->
+    <!-- 数据源类型徽章列（固定列宽 38dp 并居中对齐，严防换行） -->
     <FrameLayout
-        android:layout_width="48dp"
+        android:layout_width="38dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="4dp">
+        android:layout_marginStart="2dp">
 
         <TextView
             android:id="@+id/tv_bin_source_badge"
@@ -35,38 +35,41 @@
             android:layout_gravity="center"
             android:background="@drawable/bg_diag_pill_badge"
             android:gravity="center"
-            android:paddingHorizontal="6dp"
-            android:paddingVertical="2dp"
+            android:paddingHorizontal="4dp"
+            android:paddingVertical="1.5dp"
+            android:singleLine="true"
+            android:maxLines="1"
             android:textSize="9.5sp"
             android:textStyle="bold"
             tools:text="实测" />
     </FrameLayout>
 
-    <!-- 弹性占位空间 -->
-    <View
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
-
-    <!-- 样本统计状态或依据说明 -->
+    <!-- 样本统计状态或依据说明（占用中间自适应弹性空间，靠右对齐，精简字串防截断） -->
     <TextView
         android:id="@+id/tv_bin_sample_count"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginEnd="10dp"
+        android:layout_weight="1"
+        android:layout_marginStart="4dp"
+        android:layout_marginEnd="6dp"
+        android:gravity="end|center_vertical"
+        android:singleLine="true"
+        android:ellipsize="end"
         android:textColor="?android:attr/textColorSecondary"
         android:textSize="10.5sp"
-        tools:text="容量先验模型" />
+        tools:text="1次 · 25℃" />
 
-    <!-- 释放能量数值 -->
+    <!-- 释放能量数值（固定右侧，设置最小宽度保证 Wh 绝对不被裁切截断） -->
     <TextView
         android:id="@+id/tv_bin_energy_val"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:gravity="end"
+        android:minWidth="58dp"
+        android:gravity="end|center_vertical"
+        android:singleLine="true"
         android:textColor="#10b981"
         android:textSize="12sp"
         android:textStyle="bold"
-        tools:text="~1.264 Wh" />
+        tools:text="~1.370 Wh" />
 
 </LinearLayout>

@@ -53,6 +53,18 @@
             </LinearLayout>
 
             <ImageView
+                android:id="@+id/btn_reset_energy_model_header"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:layout_marginEnd="6dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true"
+                android:padding="4dp"
+                android:src="@drawable/ic_power_reset"
+                app:tint="?android:attr/textColorSecondary" />
+
+            <ImageView
                 android:id="@+id/btn_close_energy_model"
                 android:layout_width="28dp"
                 android:layout_height="28dp"
@@ -129,67 +141,81 @@
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
+                        android:orientation="vertical"
                         android:paddingVertical="3dp">
 
+                        <!-- 主行：标题与大字满充能量值 -->
                         <LinearLayout
-                            android:layout_width="0dp"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
 
                             <TextView
-                                android:layout_width="wrap_content"
+                                android:layout_width="0dp"
                                 android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:singleLine="true"
                                 android:text="@string/energy_col_learned_label"
                                 android:textColor="?android:attr/textColorPrimary"
-                                android:textSize="12.5sp"
+                                android:textSize="13sp"
                                 android:textStyle="bold" />
-
-                            <TextView
-                                android:id="@+id/tv_val_learned_coverage"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="2dp"
-                                android:textColor="?android:attr/textColorSecondary"
-                                android:textSize="10.5sp"
-                                tools:text="42%实测 + 58%模型" />
-
-                            <TextView
-                                android:id="@+id/tv_val_model_sessions"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="1dp"
-                                android:textColor="#64748b"
-                                android:textSize="10sp"
-                                tools:text="已归档 2 次放电 · 当前实时采样中 (各段最高 3 次)" />
-                        </LinearLayout>
-
-                        <LinearLayout
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:gravity="end"
-                            android:orientation="vertical">
 
                             <TextView
                                 android:id="@+id/tv_val_learned_energy"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp"
                                 android:gravity="end"
+                                android:singleLine="true"
                                 android:textColor="#10b981"
-                                android:textSize="15.5sp"
+                                android:textSize="16sp"
                                 android:textStyle="bold"
-                                tools:text="8.70 ± 0.56 Wh" />
+                                tools:text="25.26 ± 0.22 Wh" />
+                        </LinearLayout>
+
+                        <!-- 第二行：能量健康度（独占整行，大字醒目，绝不被截断） -->
+                        <TextView
+                            android:id="@+id/tv_hint_learned_energy"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2.5dp"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:textColor="#10b981"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold"
+                            tools:text="能量健康度 82.0% (折合 6560 mAh)" />
+
+                        <!-- 第三行：实测掉电数据与锚定状态说明（左右并列分布，完整展示） -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
 
                             <TextView
+                                android:id="@+id/tv_val_learned_coverage"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:singleLine="true"
+                                android:ellipsize="end"
+                                android:textColor="?android:attr/textColorSecondary"
+                                android:textSize="10.5sp"
+                                tools:text="亮屏 12.34 Wh (掉电 48.0%)" />
+
+                            <TextView
+                                android:id="@+id/tv_val_model_sessions"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_marginTop="2dp"
+                                android:layout_marginStart="6dp"
                                 android:gravity="end"
-                                android:text="@string/energy_source_learned_hint"
-                                android:textColor="#10b981"
-                                android:textSize="10sp" />
+                                android:singleLine="true"
+                                android:textColor="#64748b"
+                                android:textSize="10sp"
+                                tools:text="亮屏连续高频实测锚定" />
                         </LinearLayout>
                     </LinearLayout>
 
@@ -273,59 +299,64 @@
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
+                        android:orientation="vertical"
                         android:paddingVertical="3dp">
 
+                        <!-- 主行：标题与出厂设计理论值 -->
                         <LinearLayout
-                            android:layout_width="0dp"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
 
                             <TextView
                                 android:id="@+id/tv_label_nominal_energy"
-                                android:layout_width="wrap_content"
+                                android:layout_width="0dp"
                                 android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:singleLine="true"
                                 android:text="@string/energy_col_nominal_label"
                                 android:textColor="?android:attr/textColorPrimary"
-                                android:textSize="12.5sp"
+                                android:textSize="13sp"
                                 android:textStyle="bold" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="2dp"
-                                android:text="@string/energy_col_nominal_source"
-                                android:textColor="?android:attr/textColorSecondary"
-                                android:textSize="10.5sp" />
-                        </LinearLayout>
-
-                        <LinearLayout
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:gravity="end"
-                            android:orientation="vertical">
 
                             <TextView
                                 android:id="@+id/tv_val_nominal_energy"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp"
                                 android:gravity="end"
+                                android:singleLine="true"
                                 android:textColor="?android:attr/textColorSecondary"
-                                android:textSize="15.5sp"
+                                android:textSize="16sp"
                                 android:textStyle="bold"
-                                tools:text="10.36 Wh" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="2dp"
-                                android:gravity="end"
-                                android:text="@string/energy_col_nominal_desc"
-                                android:textColor="?android:attr/textColorSecondary"
-                                android:textSize="10sp" />
+                                tools:text="30.80 Wh" />
                         </LinearLayout>
+
+                        <!-- 第二行：容量模型健康度对照（独占整行，完整展示，绝不截断） -->
+                        <TextView
+                            android:id="@+id/tv_desc_nominal_energy"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2.5dp"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="11.5sp"
+                            tools:text="容量模型健康度 78.1% (6247 mAh | 24.05 Wh)" />
+
+                        <!-- 第三行：出厂设计容量与理论基准说明（独占整行，清晰底注） -->
+                        <TextView
+                            android:id="@+id/tv_hint_nominal_desc"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:gravity="start"
+                            android:singleLine="true"
+                            android:text="@string/energy_col_nominal_desc"
+                            android:textColor="#64748b"
+                            android:textSize="10sp"
+                            tools:text="出厂设计 8000 mAh · 理论无损基准" />
                     </LinearLayout>
                 </LinearLayout>
             </LinearLayout>
@@ -504,17 +535,43 @@
                     android:textSize="10.5sp" />
             </LinearLayout>
 
-            <!-- 底部确认关闭按钮 -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_energy_model_confirm"
+            <!-- 底部操作区：重置模型与确认关闭 -->
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="46dp"
+                android:layout_height="wrap_content"
                 android:layout_marginTop="18dp"
-                android:backgroundTint="#3b82f6"
-                android:text="@string/confirm"
-                android:textColor="#ffffff"
-                android:textSize="14sp"
-                app:cornerRadius="12dp" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_energy_model_reset"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_marginEnd="10dp"
+                    android:layout_weight="1"
+                    android:text="@string/energy_model_reset_btn"
+                    android:textColor="#ef4444"
+                    android:textSize="13.5sp"
+                    app:cornerRadius="12dp"
+                    app:icon="@drawable/ic_power_reset"
+                    app:iconGravity="textStart"
+                    app:iconSize="16dp"
+                    app:iconTint="#ef4444"
+                    app:strokeColor="#50ef4444"
+                    app:strokeWidth="1dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_energy_model_confirm"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1.3"
+                    android:backgroundTint="#3b82f6"
+                    android:text="@string/confirm"
+                    android:textColor="#ffffff"
+                    android:textSize="14sp"
+                    app:cornerRadius="12dp" />
+            </LinearLayout>
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>

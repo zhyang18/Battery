@@ -27,6 +27,35 @@ enum class CapacitySourceTier(val displayName: String) {
 }
 
 /**
+ * 电池物理能量数据来源等级枚举。
+ */
+enum class EnergySourceTier(val displayName: String) {
+    /** 20 段 SOC 历史独立放电会话端电压与电流微积分全量覆盖实测 */
+    MEASURED_LEARNED("实测放电能量"),
+    /** 基于实测微积分、平台相邻插值与物理先验模型的三层混合高精估算 */
+    HYBRID_MODEL("混合学习建模"),
+    /** 硬件电量计原生能量计数器直读（BATTERY_PROPERTY_ENERGY_COUNTER） */
+    HARDWARE_NATIVE("硬件电量计直读"),
+    /** 基于满充容量 FCC 与标称工作电压平台（默认 3.85V）物理折算 */
+    NOMINAL_VOLTAGE("标称基准能量");
+
+    /**
+     * 获取来源等级的多语言展示名称。
+     *
+     * @param context 应用程序上下文
+     * @return 本地化的能量来源展示文本
+     */
+    fun getDisplayName(context: android.content.Context): String {
+        return when (this) {
+            MEASURED_LEARNED -> context.getString(com.battery.analysis.R.string.energy_source_tier_measured)
+            HYBRID_MODEL -> context.getString(com.battery.analysis.R.string.energy_source_tier_hybrid_short)
+            HARDWARE_NATIVE -> context.getString(com.battery.analysis.R.string.energy_source_tier_hardware)
+            NOMINAL_VOLTAGE -> context.getString(com.battery.analysis.R.string.energy_source_tier_nominal)
+        }
+    }
+}
+
+/**
  * 电池容量自学习模型的成熟度与置信收敛等级枚举。
  */
 enum class MaturityLevel(val displayName: String) {
@@ -63,6 +92,9 @@ enum class MaturityLevel(val displayName: String) {
  * @property remainingEnergyWh 当前估算的剩余可用物理能量（单位：Wh，无可靠依据时为 null）
  * @property fullChargeCapacityMah 当前实际满充基准容量 FCC（单位：mAh，无可靠依据时为 null）
  * @property designCapacityMah 电池出厂额定设计容量（单位：mAh，无可靠依据时为 null）
+ * @property fullEnergyWh 当前满充可用总物理能量（单位：Wh，多级融合自适应获取，若无法获取则为 null）
+ * @property energySourceTier 能量数据来源等级 [EnergySourceTier]
+ * @property energyCoveragePercent 放电微积分学习曲线覆盖率（0.0 ~ 1.0，可选）
  * @property sohPercent 真实电池容量健康度百分比（FCC ÷ 设计容量，无可靠依据时为 null）
  * @property currentSoc 当前电池电量百分比（0 至 100，未获取到系统广播时为 null）
  * @property sourceTier 当前采用的数据来源等级 [CapacitySourceTier]
@@ -94,7 +126,10 @@ data class CapacityEstimateResult(
     val conflictRateDPercent: Double?,
     val confidenceIntervalMah: Double?,
     val updateTimestampMs: Long = System.currentTimeMillis(),
-    val isTemperatureModelCalibrated: Boolean = false
+    val isTemperatureModelCalibrated: Boolean = false,
+    val fullEnergyWh: Double? = null,
+    val energySourceTier: EnergySourceTier = EnergySourceTier.NOMINAL_VOLTAGE,
+    val energyCoveragePercent: Float? = null
 ) {
     /**
      * 判断当前是否具备向用户呈现有效数值的最低可信条件。
@@ -128,6 +163,31 @@ data class CapacityEstimateResult(
     }
 
     /**
+     * 格式化输出可用剩余能量的数据源副标题描述。
+     *
+     * @param context 应用程序上下文
+     * @return 本地化的副标题文本（如 "实测放电可用能量"、"混合学习估算 (覆盖率 65%)"、"标称基准能量 (3.85V)"）
+     */
+    fun getFormattedRemainingEnergySubtitle(context: android.content.Context): String {
+        if (remainingEnergyWh == null) {
+            return context.getString(com.battery.analysis.R.string.capacity_nominal_voltage)
+        }
+        return when (energySourceTier) {
+            EnergySourceTier.MEASURED_LEARNED -> context.getString(com.battery.analysis.R.string.energy_source_tier_measured)
+            EnergySourceTier.HYBRID_MODEL -> {
+                val cov = energyCoveragePercent?.let { it * 100f }
+                if (cov != null && cov > 0f) {
+                    context.getString(com.battery.analysis.R.string.energy_source_tier_hybrid, cov)
+                } else {
+                    context.getString(com.battery.analysis.R.string.energy_source_tier_hybrid_short)
+                }
+            }
+            EnergySourceTier.HARDWARE_NATIVE -> context.getString(com.battery.analysis.R.string.energy_source_tier_hardware)
+            EnergySourceTier.NOMINAL_VOLTAGE -> context.getString(com.battery.analysis.R.string.energy_source_tier_nominal)
+        }
+    }
+
+    /**
      * 格式化输出满充基准容量 FCC 的友好文本。
      *
      * @return 格式化后的 FCC 文本（如 "4,980 mAh" 或 "-- mAh"）
@@ -140,14 +200,14 @@ data class CapacityEstimateResult(
 
     /**
      * 格式化输出满充物理可用能量的友好文本。
-     * 基于标称工作平台电压（3.85V）与满充容量 FCC 计算：FullEnergy(Wh) = (FCC * 3.85) / 1000。
+     * 优先采用实测/混合自适应融合能量 [fullEnergyWh]，缺失时平滑回退原有标称折算：(FCC * 3.85) / 1000。
      *
      * @return 格式化后的满充能量文本（如 "19.17 Wh" 或 "-- Wh"）
      */
     fun getFormattedFullEnergy(): String {
-        return fullChargeCapacityMah?.let {
-            val fullEnergyWh = (it * 3.85) / 1000.0
-            String.format(java.util.Locale.getDefault(), "%.2f Wh", fullEnergyWh)
+        val energy = fullEnergyWh ?: fullChargeCapacityMah?.let { (it * 3.85) / 1000.0 }
+        return energy?.let {
+            String.format(java.util.Locale.getDefault(), "%.2f Wh", it)
         } ?: "-- Wh"
     }
 

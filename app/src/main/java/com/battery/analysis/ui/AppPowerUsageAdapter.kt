@@ -722,7 +722,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         }
 
         binding.tvValRemainingEnergy.setUnitText(result.getFormattedRemainingEnergy())
-        binding.tvSubRemainingEnergy.text = binding.root.context.getString(R.string.capacity_nominal_energy)
+        binding.tvSubRemainingEnergy.text = result.getFormattedRemainingEnergySubtitle(binding.root.context)
 
         // 满充基准与诊断标识
         binding.tvValFccBaseline.setUnitText(result.getFormattedFcc())

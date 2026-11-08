@@ -110,6 +110,10 @@ class DischargeSessionValidatorTest {
         val completeBin19 = validation.validCompleteSamples[0]
         assertEquals(19, completeBin19.binIndex)
         assertEquals(SampleQuality.COMPLETE_BIN, completeBin19.quality)
+        // 关键断言：跨度 4.6% 时的微元能量 1.25Wh 应被标准化折算为 5.0% 满区间能量
+        val expectedNormalizedWh = 1.25 * (5.0 / 4.6)
+        assertEquals(expectedNormalizedWh, completeBin19.energyWh, 0.0001)
+
         // 放电倍率: 0.5A / 5.0A = 0.1C
         assertNotNull(completeBin19.averageDischargeCRate)
         assertEquals(0.1, completeBin19.averageDischargeCRate!!, 0.001)
@@ -118,5 +122,53 @@ class DischargeSessionValidatorTest {
         val partialBin18 = validation.partialSamples[0]
         assertEquals(18, partialBin18.binIndex)
         assertEquals(SampleQuality.PARTIAL_BIN, partialBin18.quality)
+    }
+
+    /**
+     * 测试 5% 满跨度归一化折算的精度：
+     * 1. 4.5% 跨度（门限临界值）测得 1.08 Wh，归一化后必须严格为 1.20 Wh；
+     * 2. 5.0% 满跨度测得 1.20 Wh，归一化后保持原值 1.20 Wh。
+     */
+    @Test
+    fun testSpanNormalizationPrecision() {
+        val deltas = mapOf(
+            10 to DischargeEnergyIntegrator.BinEnergyDelta(
+                binIndex = 10,
+                energyWh = 1.08,
+                durationMs = 90_000L,
+                startSocPercent = 54.5f,
+                endSocPercent = 50.0f,
+                coveredSocSpan = 4.5f
+            ),
+            11 to DischargeEnergyIntegrator.BinEnergyDelta(
+                binIndex = 11,
+                energyWh = 1.20,
+                durationMs = 100_000L,
+                startSocPercent = 60.0f,
+                endSocPercent = 55.0f,
+                coveredSocSpan = 5.0f
+            )
+        )
+        val integrationResult = DischargeEnergyIntegrator.DischargeIntegrationResult(
+            binDeltas = deltas,
+            unobservedRanges = emptyList(),
+            totalValidDurationMs = 190_000L,
+            totalIntegratedEnergyWh = 2.28
+        )
+
+        val validation = DischargeSessionValidator.validateDischargeSession(
+            integrationResult = integrationResult,
+            sessionId = "session_norm_test",
+            effectiveCapacityMah = 6247.0
+        )
+
+        assertEquals(2, validation.validCompleteSamples.size)
+        val s10 = validation.validCompleteSamples.find { it.binIndex == 10 }!!
+        val s11 = validation.validCompleteSamples.find { it.binIndex == 11 }!!
+
+        // 1.08 * (5.0 / 4.5) = 1.20
+        assertEquals(1.20, s10.energyWh, 0.0001)
+        // 满 5.0% 跨度无额外倍数
+        assertEquals(1.20, s11.energyWh, 0.0001)
     }
 }

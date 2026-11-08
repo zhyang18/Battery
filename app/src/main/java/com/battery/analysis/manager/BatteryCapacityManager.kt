@@ -9,10 +9,13 @@ import com.battery.analysis.db.ChargingHistoryDbHelper
 import com.battery.analysis.domain.estimator.BatteryChargeIntegrator
 import com.battery.analysis.domain.estimator.IntegrablePoint
 import com.battery.analysis.domain.estimator.RobustFccEstimator
+import com.battery.analysis.domain.estimator.SocEnergyCurveLearner
+import com.battery.analysis.domain.estimator.model.ModelMaturity
 import com.battery.analysis.model.CandidateSessionType
 import com.battery.analysis.model.CapacityCandidate
 import com.battery.analysis.model.CapacityEstimateResult
 import com.battery.analysis.model.CapacitySourceTier
+import com.battery.analysis.model.EnergySourceTier
 import com.battery.analysis.model.ChargingHistoryRecord
 import com.battery.analysis.model.MaturityLevel
 import com.battery.analysis.model.PowerUsageRecord
@@ -202,7 +205,7 @@ class BatteryCapacityManager private constructor(private val context: Context) {
             }
         }
 
-        // 6. 计算剩余电荷量（mAh）与剩余可用能量（Wh）
+        // 6. 计算剩余电荷量（mAh）与多级自适应物理能量（Wh）
         // 允许 safeSoc == 0（完全合法且真实的 0% 状态），仅在 effectiveFcc 或 safeSoc 为 null 时返回 null
         val remainingMah = if (effectiveFcc != null && effectiveFcc > 0.0 && safeSoc != null) {
             effectiveFcc * (safeSoc / 100.0)
@@ -210,11 +213,59 @@ class BatteryCapacityManager private constructor(private val context: Context) {
             null
         }
 
-        val remainingWh = if (remainingMah != null) {
-            (remainingMah * NOMINAL_VOLTAGE_VOLTS) / 1000.0
-        } else {
+        // 获取 20 段 SOC 历史放电实测学习曲线与底层硬件能力
+        val learnedCurve = try {
+            SocEnergyCurveLearner.getInstance(context).getLearnedCurve()
+        } catch (_: Exception) {
             null
         }
+
+
+        // 方案A标准更新：首行满电能量统一基于标称工作电压平台（3.85V）基准计算（如 24.05 Wh），
+        // 严格与出厂设计、FCC 库仑计量、SOH 78.1% 同源闭环，消除标题栏数据认知冲突；
+        // 下方卡片【可用剩余能量】继续保留真实实测微积分（如 17.32 Wh 混合学习估算 (覆盖率 65%)），忠实反映动态做功；
+        // 仅在初始冷启动（0 段已学）无实测依据时，自动按 24.05 Wh 的百分比兜底计算。
+        val nominalFullWh = effectiveFcc?.let { (it * NOMINAL_VOLTAGE_VOLTS) / 1000.0 }
+        val nominalRemainingWh = if (nominalFullWh != null && safeSoc != null) {
+            (nominalFullWh * safeSoc) / 100.0
+        } else {
+            remainingMah?.let { (it * NOMINAL_VOLTAGE_VOLTS) / 1000.0 }
+        }
+
+        val hybridOverview = if (learnedCurve != null && learnedCurve.bins.any { it.hasLearnedData() } && safeSoc != null && safeSoc >= 0) {
+            val learner = SocEnergyCurveLearner.getInstance(context)
+            learner.buildComparisonOverview(
+                currentSocPercent = safeSoc.toFloat(),
+                hardwareNativeEnergyWh = null,
+                effectiveCapacityMah = null, // 方案 1：纯能量自举解耦容量先验
+                nominalVoltageVolts = NOMINAL_VOLTAGE_VOLTS.toFloat(),
+                currentDischargeCurrentMa = null,
+                temperatureCelsius = null
+            )
+        } else null
+
+        val hybridRemainingWh = hybridOverview?.learnedRemainingEnergyWh
+
+        val finalRemainingWh: Double?
+        val energyTier: EnergySourceTier
+        if (hybridRemainingWh != null && hybridRemainingWh >= 0.0) {
+            finalRemainingWh = hybridRemainingWh
+            energyTier = if (hybridOverview.hybridEstimate?.isFullyLearned == true || learnedCurve?.isFullyLearned == true) {
+                EnergySourceTier.MEASURED_LEARNED
+            } else {
+                EnergySourceTier.HYBRID_MODEL
+            }
+        } else {
+            finalRemainingWh = nominalRemainingWh
+            energyTier = EnergySourceTier.NOMINAL_VOLTAGE
+        }
+
+        val energyFusion = EnergyFusionResult(
+            fullEnergyWh = nominalFullWh,
+            remainingEnergyWh = finalRemainingWh,
+            sourceTier = energyTier,
+            coveragePercent = learnedCurve?.coveragePercent
+        )
 
         // 7. 计算容量健康度（SOH）
         val soh = if (effectiveFcc != null && designCapMah != null && designCapMah > 0.0) {
@@ -225,7 +276,7 @@ class BatteryCapacityManager private constructor(private val context: Context) {
 
         val finalResult = CapacityEstimateResult(
             remainingChargeMah = remainingMah,
-            remainingEnergyWh = remainingWh,
+            remainingEnergyWh = energyFusion.remainingEnergyWh,
             fullChargeCapacityMah = effectiveFcc,
             designCapacityMah = designCapMah,
             sohPercent = soh,
@@ -240,12 +291,25 @@ class BatteryCapacityManager private constructor(private val context: Context) {
             conflictRateDPercent = robustResult.chargeDischargeConflictPercent,
             confidenceIntervalMah = robustResult.confidenceIntervalMah,
             updateTimestampMs = System.currentTimeMillis(),
-            isTemperatureModelCalibrated = false
+            isTemperatureModelCalibrated = false,
+            fullEnergyWh = energyFusion.fullEnergyWh,
+            energySourceTier = energyFusion.sourceTier,
+            energyCoveragePercent = energyFusion.coveragePercent
         )
 
         _capacityState.value = finalResult
         return finalResult
     }
+
+    /**
+     * 满充总能量与剩余可用能量同源仲裁结果内部结构体。
+     */
+    private data class EnergyFusionResult(
+        val fullEnergyWh: Double?,
+        val remainingEnergyWh: Double?,
+        val sourceTier: EnergySourceTier,
+        val coveragePercent: Float?
+    )
 
     /**
      * 内部适配类：将充电采样点适配为可积分点接口。

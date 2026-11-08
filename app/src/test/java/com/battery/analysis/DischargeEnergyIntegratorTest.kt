@@ -5,6 +5,7 @@ import com.battery.analysis.domain.estimator.model.LearnedSocEnergyCurve
 import com.battery.analysis.domain.estimator.model.PowerSample
 import com.battery.analysis.domain.estimator.model.ScreenPowerState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -95,7 +96,7 @@ class DischargeEnergyIntegratorTest {
     }
 
     /**
-     * 测试息屏休眠（Deep Sleep）异常大跨度（> 120 秒）跳变被安全丢弃，防止虚报能耗。
+     * 测试超大异常休眠断层（> 4小时，如长期关机挂起）被安全截断，防止虚报能耗。
      */
     @Test
     fun testDeepSleepGapDropped() {
@@ -108,7 +109,7 @@ class DischargeEnergyIntegratorTest {
                 state = ScreenPowerState.SCREEN_OFF
             ),
             PowerSample(
-                timestampMs = 300_000L, // 跨越 5 分钟（300 秒 > 120 秒）
+                timestampMs = 5 * 3600_000L, // 跨越 5 小时（> 4 小时最大待机补偿门限）
                 voltageVolts = 3.98f,
                 powerWatts = 0.2f,
                 batteryLevelPercent = 79.0f,
@@ -118,6 +119,35 @@ class DischargeEnergyIntegratorTest {
 
         val result = DischargeEnergyIntegrator.integrateDischargeSamples(samples)
         assertTrue(result.isEmpty())
+    }
+
+    /**
+     * 测试日常正常息屏休眠区间（120秒 < dt <= 4小时）自适应融合待机底噪微积分，杜绝能量漏记。
+     */
+    @Test
+    fun testNormalStandbyGapCompensated() {
+        val samples = listOf(
+            PowerSample(
+                timestampMs = 0L,
+                voltageVolts = 4.0f,
+                powerWatts = 0.25f,
+                batteryLevelPercent = 80.0f,
+                state = ScreenPowerState.SCREEN_OFF
+            ),
+            PowerSample(
+                timestampMs = 300_000L, // 跨越 5 分钟
+                voltageVolts = 3.98f,
+                powerWatts = 0.25f,
+                batteryLevelPercent = 79.5f,
+                state = ScreenPowerState.SCREEN_OFF
+            )
+        )
+
+        val result = DischargeEnergyIntegrator.integrateDischargeSamples(samples)
+        assertFalse(result.isEmpty())
+        val bin15 = result[15]
+        assertNotNull(bin15)
+        assertTrue(bin15!!.energyWh > 0.0)
     }
 
     /**
@@ -193,7 +223,7 @@ class DischargeEnergyIntegratorTest {
                 state = ScreenPowerState.SCREEN_OFF
             ),
             PowerSample(
-                timestampMs = 300_000L, // 5 分钟断层
+                timestampMs = 5 * 3600_000L, // 5 小时超大断层 (> 4 小时)
                 voltageVolts = 3.95f,
                 powerWatts = 0.2f,
                 batteryLevelPercent = 75.0f,
@@ -207,7 +237,7 @@ class DischargeEnergyIntegratorTest {
         val gap = result.unobservedRanges[0]
         assertEquals(80.0f, gap.startSocPercent)
         assertEquals(75.0f, gap.endSocPercent)
-        assertEquals(300_000L, gap.gapDurationMs)
+        assertEquals(5 * 3600_000L, gap.gapDurationMs)
     }
 
     /**

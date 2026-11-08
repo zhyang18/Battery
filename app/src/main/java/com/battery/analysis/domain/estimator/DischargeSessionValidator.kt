@@ -56,8 +56,8 @@ object DischargeSessionValidator {
             for (binIndex in 0 until LearnedSocEnergyCurve.BIN_COUNT) {
                 val binFloor = binIndex * LearnedSocEnergyCurve.BIN_SOC_STEP
                 val binCeil = binFloor + LearnedSocEnergyCurve.BIN_SOC_STEP
-                // 若断层与该 Bin 存在交集，将该 Bin 列入受损拒绝名单
-                if (maxSoc > binFloor && minSoc < binCeil) {
+                // 若断层与该 Bin 存在交集（含点接触与区间交集），将该 Bin 列入受损拒绝名单
+                if ((maxSoc > binFloor && minSoc < binCeil) || (minSoc == maxSoc && minSoc >= binFloor && minSoc <= binCeil)) {
                     rejectedBins.add(binIndex)
                 }
             }
@@ -74,7 +74,15 @@ object DischargeSessionValidator {
             }
 
             val span = delta.coveredSocSpan
-            val coverage = (span / LearnedSocEnergyCurve.BIN_SOC_STEP).toDouble().coerceIn(0.0, 1.0)
+            val coverage = (span.toDouble() / LearnedSocEnergyCurve.BIN_SOC_STEP.toDouble()).coerceIn(0.0, 1.0)
+
+            // 关键物理归一化：将实际覆盖跨度测得的微元能量严格折算为 5.0% 标准物理区间能量
+            // 彻底杜绝 4.5%~4.9% 跨度的有效样本因未折算而导致该区间能量系统性缩水 5%~10%
+            val normalizedWh = if (span in 0.5f..5.0f) {
+                delta.energyWh * (LearnedSocEnergyCurve.BIN_SOC_STEP.toDouble() / span.toDouble())
+            } else {
+                delta.energyWh
+            }
 
             // 计算该区间的平均放电倍率 C-rate = |I_avg| / FCC
             val cRate = if (effectiveCapacityMah != null && effectiveCapacityMah > 0.0 && delta.averageCurrentAmperes != null) {
@@ -82,9 +90,12 @@ object DischargeSessionValidator {
                 (delta.averageCurrentAmperes / fccAmperes).coerceAtLeast(0.0)
             } else null
 
+            // 施加 0.001 浮点容差（防止 IEEE 754 4.5f / 5.0f = 0.89999997 精度损失误判）
+            val isComplete = coverage >= (MIN_COMPLETE_COVERAGE_FRACTION - 0.001)
+
             val sample = SocEnergyBinSample(
                 binIndex = binIndex,
-                energyWh = delta.energyWh,
+                energyWh = normalizedWh,
                 durationMs = delta.durationMs,
                 startSocPercent = delta.startSocPercent,
                 endSocPercent = delta.endSocPercent,
@@ -92,7 +103,7 @@ object DischargeSessionValidator {
                 temperatureC = delta.averageTemperatureCelsius?.toDouble(),
                 averageDischargeCRate = cRate,
                 sessionId = sessionId,
-                quality = if (coverage >= MIN_COMPLETE_COVERAGE_FRACTION) SampleQuality.COMPLETE_BIN else SampleQuality.PARTIAL_BIN
+                quality = if (isComplete) SampleQuality.COMPLETE_BIN else SampleQuality.PARTIAL_BIN
             )
 
             if (sample.quality == SampleQuality.COMPLETE_BIN) {

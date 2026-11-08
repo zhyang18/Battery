@@ -51,8 +51,12 @@ enum class SampleQuality {
 enum class EnergyEstimateSource {
     /** 历史独立放电会话真实梯形微积分实测统计 */
     MEASURED_LEARNED,
+    /** 基于当前放电会话高频连续亮屏耗电实测锚定与电化学形态展开 */
+    SCREEN_ON_ANCHORED,
     /** 基于双侧相邻稳定区间的放电电压线性插值推算（仅限平台区且具备双侧实测） */
     INTERPOLATED,
+    /** 基于已测区间做功与电化学形态权重的自举外推（脱离容量模型，自适应实际输出做功） */
+    BOOTSTRAP_EXTRAPOLATED,
     /** 基于基准容量与动态工况电压先验物理模型补全 */
     MODEL_PRIOR,
     /** 经设备交叉验证可信的硬件能量计直读折算 */
@@ -222,7 +226,7 @@ data class SocEnergyBin(
  * @property estimatedFullUsableEnergyWh 各区间能量在基准工况下组合推算出的电池满放电总可用能量（单位：Wh，未全覆盖时为 null）
  * @property confidence 当前学习曲线的整体数据置信度评级 [ConfidenceLevel]
  * @property maturity 当前学习曲线的模型成熟度评级 [ModelMaturity]
- * @property curveVersion 数据结构与存储协议版本号（当前为版本 2）
+ * @property curveVersion 数据结构与存储协议版本号（当前为版本 3）
  * @property totalSampleSessions 参与构建曲线的历史独立放电会话总次数
  * @property lastLearnedTimestamp 学习曲线整体最后一次更新的系统时间戳
  */
@@ -232,13 +236,17 @@ data class LearnedSocEnergyCurve(
     val estimatedFullUsableEnergyWh: Double?,
     val confidence: ConfidenceLevel = ConfidenceLevel.LOW,
     val maturity: ModelMaturity = ModelMaturity.COLD_START,
-    val curveVersion: Int = 2,
+    val curveVersion: Int = 3,
     val totalSampleSessions: Int,
     val lastLearnedTimestamp: Long
 ) {
     /** 兼容旧代码的别名属性：满可用能量推算值（Wh） */
     val totalLearnedEnergyWh: Double?
         get() = estimatedFullUsableEnergyWh
+
+    /** 是否 20 个区间全部具备实测放电样本 */
+    val isFullyLearned: Boolean
+        get() = bins.all { it.hasLearnedData() }
 
     /**
      * 根据当前设备的 SOC 电量百分比，累加推算所有小于等于当前 SOC 的区间历史学习可用剩余能量。
@@ -290,21 +298,41 @@ data class LearnedSocEnergyCurve(
      * 优先级仲裁逻辑：
      * 1. 真实实测（MEASURED_LEARNED）：区间已累积合格放电会话样本；
      * 2. 相邻插值（INTERPOLATED）：仅限处于平台稳定区（SOC >= 15.0%，即 binIndex >= 3），且左侧与右侧均具备合格实测数据；低 SOC 拐点区（0%~15%）与首尾单侧边界严禁线性插值；
-     * 3. 物理先验模型（MODEL_PRIOR）：在无法插值但基准容量有效时，基于 FCC、非线性经验放电电压与末端截止裕度推演；
-     * 4. 无法估计（UNKNOWN）：若无实测且基准容量不可用，如实标记为未知。
+     * 3. 无量纲形态自举外推（BOOTSTRAP_EXTRAPOLATED）：当具备 >=1 个实测区间时，基于各区间电化学形态权重中位数投票自举反推满电标尺，彻底脱离充放电容量先验；
+     * 4. 无法估计（UNKNOWN）：纯冷启动（0 段已测）时忠实标记为未知待采集，绝不捏造虚假预测。
      *
-     * @param effectiveCapacityMah 设备有效满充基准容量（单位：mAh，无可用容量时传入 null）
+     * @param effectiveCapacityMah 设备有效满充基准容量（单位：mAh，可选，解耦后不再作为先验）
      * @param nominalVoltageVolts 电池标称电压（单位：V，默认 3.85V）
      * @param currentDischargeCurrentMa 当前实时放电电流（单位：mA，用于动态工况内阻压降微调，可选）
      * @param temperatureCelsius 当前电池温度（单位：℃，可选）
      * @return 20 个区间解析后的实体列表 [List<ResolvedSocEnergyBin>]
      */
+    @Suppress("UNUSED_PARAMETER")
     fun resolveAllBins(
         effectiveCapacityMah: Double? = null,
         nominalVoltageVolts: Double = 3.85,
         currentDischargeCurrentMa: Double? = null,
-        temperatureCelsius: Float? = null
+        temperatureCelsius: Float? = null,
+        screenOnAnchoredFullEnergyWh: Double? = null
     ): List<ResolvedSocEnergyBin> {
+        // 方案 1：基于已测区间做功与电化学形态权重向量，通过中位数投票自举反推整机满充做功标尺
+        // 彻底脱离对充放电预测容量（FCC / mAh）的先验依赖
+        val learnedVotes = bins.mapNotNull { bin ->
+            val wh = bin.learnedEnergyWh
+            if (bin.hasLearnedData() && wh != null && wh > 0.0) {
+                wh / SOC_ENERGY_SHAPE_WEIGHTS[bin.binIndex]
+            } else null
+        }
+        // 方案 B 核心：至少需要已学习 3 个不同 SOC 区间才开启形态自举，杜绝单次极端瞬态负载误导
+        val fullScaleWhFromLearned: Double? = if (learnedVotes.size >= MIN_BOOTSTRAP_LEARNED_BINS) {
+            val sorted = learnedVotes.sorted()
+            val mid = sorted.size / 2
+            if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
+        } else null
+
+        // 核心进化：若外部传入当前会话的高保真连续亮屏实测锚定满电能量，优先作为权威物理标尺
+        val effectiveFullWh = screenOnAnchoredFullEnergyWh?.takeIf { it > 0.0 } ?: fullScaleWhFromLearned
+
         return bins.map { bin ->
             val index = bin.binIndex
             if (bin.hasLearnedData()) {
@@ -351,55 +379,40 @@ data class LearnedSocEnergyCurve(
                         sampleCount = 0,
                         rationale = "双侧实测相邻电压线性插值"
                     )
-                } else if (effectiveCapacityMah != null && effectiveCapacityMah > 0.0 && effectiveCapacityMah.isFinite()) {
-                    // 物理先验模型补全
-                    var deltaQMah = effectiveCapacityMah * (BIN_SOC_STEP / 100.0)
-                    // 0%~5% 拐点区考虑厂商 BMS 锁容与截止保护，施加保守收敛裕度系数 0.90
-                    if (index == 0) {
-                        deltaQMah *= 0.90
-                    }
-
-                    // 电化学经验电压模型
-                    val baseVoltage = when (index) {
-                        0 -> 3.45 // 0%~5% 接近截止电压
-                        1 -> 3.60 // 5%~10% 陡降过渡
-                        2 -> 3.70 // 10%~15% 拐点初段
-                        in 3..5 -> 3.75 // 15%~30% 平台前部
-                        in 6..14 -> nominalVoltageVolts.coerceIn(3.70, 3.90) // 30%~75% 主平坦区
-                        in 15..17 -> 3.95 // 75%~90% 高压区
-                        else -> 4.05 // 90%~100% 满电高压区
-                    }
-
-                    // 动态工况端电压微调（Load-adaptive IR drop，结合温度对电解液活性与内阻的电化学规律）
-                    val adjustedVoltage = if (currentDischargeCurrentMa != null && currentDischargeCurrentMa > 0.0) {
-                        val rInternal = when {
-                            temperatureCelsius == null -> 0.04
-                            temperatureCelsius < 0f -> 0.10 // 零度以下电解液黏度激增，内阻上升至 ~100mΩ
-                            temperatureCelsius < 15f -> 0.06 // 低温过渡区 ~60mΩ
-                            temperatureCelsius > 40f -> 0.035 // 高温活性提升，内阻略微降低至 ~35mΩ
-                            else -> 0.04 // 常温基准 ~40mΩ
-                        }
-                        val irDrop = (currentDischargeCurrentMa / 1000.0) * rInternal
-                        (baseVoltage - irDrop).coerceIn(3.10, 4.35)
-                    } else {
-                        baseVoltage
-                    }
-
-                    val priorWh = (deltaQMah * adjustedVoltage) / 1000.0
+                } else if (screenOnAnchoredFullEnergyWh != null && screenOnAnchoredFullEnergyWh > 0.0) {
+                    // 亮屏高频微积分实测高精锚定展开（黄金无损采样）
+                    val weight = SOC_ENERGY_SHAPE_WEIGHTS[index]
+                    val anchoredWh = screenOnAnchoredFullEnergyWh * weight
                     ResolvedSocEnergyBin(
                         binIndex = index,
                         minSocPercent = bin.minSocPercent,
                         maxSocPercent = bin.maxSocPercent,
                         measuredEnergyWh = null,
-                        modeledEnergyWh = priorWh,
-                        effectiveEnergyWh = priorWh,
-                        source = EnergyEstimateSource.MODEL_PRIOR,
-                        uncertaintyWh = priorWh * 0.10, // 先验模型不确定度保守取 10%
+                        modeledEnergyWh = anchoredWh,
+                        effectiveEnergyWh = anchoredWh,
+                        source = EnergyEstimateSource.SCREEN_ON_ANCHORED,
+                        uncertaintyWh = anchoredWh * 0.03, // 亮屏高精微积分不确定度取 3%
                         sampleCount = 0,
-                        rationale = "物理先验模型 (容量 + 经验电压)"
+                        rationale = String.format(Locale.US, "亮屏微积分实测锚定 (形态占比 %.1f%%)", weight * 100.0)
+                    )
+                } else if (effectiveFullWh != null && effectiveFullWh > 0.0) {
+                    // 电化学形态权重自举外推
+                    val weight = SOC_ENERGY_SHAPE_WEIGHTS[index]
+                    val bootstrapWh = effectiveFullWh * weight
+                    ResolvedSocEnergyBin(
+                        binIndex = index,
+                        minSocPercent = bin.minSocPercent,
+                        maxSocPercent = bin.maxSocPercent,
+                        measuredEnergyWh = null,
+                        modeledEnergyWh = bootstrapWh,
+                        effectiveEnergyWh = bootstrapWh,
+                        source = EnergyEstimateSource.BOOTSTRAP_EXTRAPOLATED,
+                        uncertaintyWh = bootstrapWh * 0.08, // 形态自举外推不确定度取 8%
+                        sampleCount = 0,
+                        rationale = String.format(Locale.US, "实测形态自举 (形态占比 %.1f%%)", weight * 100.0)
                     )
                 } else {
-                    // 无法可靠推算，严格遵循零假数据原则如实返回未知
+                    // 纯冷启动（0 段已学习且无有效亮屏统计）：严格遵循零假数据原则如实返回未知，严禁虚构数据
                     ResolvedSocEnergyBin(
                         binIndex = index,
                         minSocPercent = bin.minSocPercent,
@@ -410,7 +423,7 @@ data class LearnedSocEnergyCurve(
                         source = EnergyEstimateSource.UNKNOWN,
                         uncertaintyWh = null,
                         sampleCount = 0,
-                        rationale = "无有效实测样本且基准容量不可用"
+                        rationale = "冷启动无实测做功样本（待采集）"
                     )
                 }
             }
@@ -437,7 +450,8 @@ data class LearnedSocEnergyCurve(
         effectiveCapacityMah: Double? = null,
         nominalVoltageVolts: Double = 3.85,
         currentDischargeCurrentMa: Double? = null,
-        temperatureCelsius: Float? = null
+        temperatureCelsius: Float? = null,
+        screenOnAnchoredFullEnergyWh: Double? = null
     ): HybridRemainingEnergyEstimate? {
         if (currentSocPercent <= 0.0f) {
             return HybridRemainingEnergyEstimate(
@@ -461,7 +475,8 @@ data class LearnedSocEnergyCurve(
             effectiveCapacityMah = effectiveCapacityMah,
             nominalVoltageVolts = nominalVoltageVolts,
             currentDischargeCurrentMa = currentDischargeCurrentMa,
-            temperatureCelsius = temperatureCelsius
+            temperatureCelsius = temperatureCelsius,
+            screenOnAnchoredFullEnergyWh = screenOnAnchoredFullEnergyWh
         )
 
         var measuredWh = 0.0
@@ -499,12 +514,21 @@ data class LearnedSocEnergyCurve(
                     measuredVarianceSum += (u * u)
                     breakdown[resolved.source] = (breakdown[resolved.source] ?: 0.0) + partWh
                 }
+                EnergyEstimateSource.SCREEN_ON_ANCHORED -> {
+                    val partWh = (resolved.effectiveEnergyWh ?: 0.0) * ratio
+                    measuredWh += partWh
+                    measuredSocSpan += span
+                    val u = (resolved.uncertaintyWh ?: (partWh * 0.03)) * ratio
+                    measuredVarianceSum += (u * u)
+                    breakdown[resolved.source] = (breakdown[resolved.source] ?: 0.0) + partWh
+                }
                 EnergyEstimateSource.INTERPOLATED,
+                EnergyEstimateSource.BOOTSTRAP_EXTRAPOLATED,
                 EnergyEstimateSource.MODEL_PRIOR -> {
                     val partWh = (resolved.effectiveEnergyWh ?: 0.0) * ratio
                     modeledWh += partWh
                     modeledSocSpan += span
-                    val u = (resolved.uncertaintyWh ?: (partWh * 0.10)) * ratio
+                    val u = (resolved.uncertaintyWh ?: (partWh * 0.08)) * ratio
                     modeledLinearUncertaintySum += u
                     breakdown[resolved.source] = (breakdown[resolved.source] ?: 0.0) + partWh
                 }
@@ -531,13 +555,20 @@ data class LearnedSocEnergyCurve(
         val totalWh = if (hasUnknown) null else (measuredWh + modeledWh)
         val uncertainty = if (hasUnknown) null else sqrt(measuredVarianceSum + (modeledLinearUncertaintySum * modeledLinearUncertaintySum))
 
-        // 动态置信度评估
+        // 动态置信度评估：严密结合模型成熟度（包含独立放电周期次数硬门限）、实测 SOC 覆盖率与数据血统
         val evaluatedConfidence = when {
             hasUnknown -> ConfidenceLevel.UNRELIABLE
-            measuredSocCov >= 0.80f && maturity == ModelMaturity.CONVERGED -> ConfidenceLevel.HIGH
-            measuredSocCov >= 0.40f -> ConfidenceLevel.MEDIUM
+            screenOnAnchoredFullEnergyWh != null && screenOnAnchoredFullEnergyWh > 0.0 -> ConfidenceLevel.HIGH
+            maturity == ModelMaturity.CONVERGED && measuredSocCov >= 0.70f -> ConfidenceLevel.HIGH
+            maturity == ModelMaturity.DEVELOPING && measuredSocCov >= 0.40f -> ConfidenceLevel.MEDIUM
             measuredSocCov > 0.0f || modeledSocCov > 0.0f -> ConfidenceLevel.LOW
             else -> ConfidenceLevel.UNRELIABLE
+        }
+
+        val evaluatedMaturity = if (screenOnAnchoredFullEnergyWh != null && screenOnAnchoredFullEnergyWh > 0.0) {
+            ModelMaturity.CONVERGED
+        } else {
+            maturity
         }
 
         return HybridRemainingEnergyEstimate(
@@ -550,7 +581,7 @@ data class LearnedSocEnergyCurve(
             modeledSocCoverage = modeledSocCov,
             unknownSocCoverage = unknownSocCov,
             confidence = evaluatedConfidence,
-            maturity = maturity,
+            maturity = evaluatedMaturity,
             resolvedBins = relevantBins,
             sourceBreakdown = breakdown
         )
@@ -648,6 +679,70 @@ data class LearnedSocEnergyCurve(
         /** 单个区间的 SOC 步长百分比 */
         const val BIN_SOC_STEP = 5.0f
 
+        /** 开启无量纲形态自举外推的最小已测区间门限（固定为 3 段，即至少 15% 跨度，确保中位数滤波具备抗噪能力） */
+        const val MIN_BOOTSTRAP_LEARNED_BINS = 3
+
+        /**
+         * 锂电池放电能量无量纲电化学形态归一化权重向量（20 维，对应 20 个 5% SOC 分段，和严格为 1.000）。
+         *
+         * 电化学机理依据：
+         * 1. 0%~5%：低压截止保护区（端电压陡降至 ~3.45V 截止，厂商防过放关机锁容裕度），做功占比约 4.0%；
+         * 2. 5%~20%：拐点过渡区（电压由 3.60V 上升至 3.73V），做功占比从 4.5% 爬升至 4.8%；
+         * 3. 20%~55%：典型放电平台平坦区（标称工作电压 ~3.80V），每 5% 占比稳定在 4.9%~5.0%；
+         * 4. 55%~85%：主平台平缓抬升区（电压 3.85V~3.95V），每 5% 占比约 5.1%~5.2%；
+         * 5. 85%~100%：高压满电区（电压 ~4.15V~4.35V），做功占比提升至 5.3%~5.4%。
+         *
+         * 严格数学校验：0.040 + 0.045 + 0.047 + 0.048 + 0.049 + 6*0.050 + 3*0.051 + 2*0.052 + 2*0.053 + 2*0.054 = 1.000。
+         */
+        val SOC_ENERGY_SHAPE_WEIGHTS = doubleArrayOf(
+            0.040, // bin 0:   0% -  5% (低压截止保护区)
+            0.045, // bin 1:   5% - 10% (陡降过渡区)
+            0.047, // bin 2:  10% - 15% (拐点初段)
+            0.048, // bin 3:  15% - 20% (平台前沿)
+            0.049, // bin 4:  20% - 25% (平台起步)
+            0.050, // bin 5:  25% - 30%
+            0.050, // bin 6:  30% - 35%
+            0.050, // bin 7:  35% - 40%
+            0.050, // bin 8:  40% - 45%
+            0.050, // bin 9:  45% - 50%
+            0.050, // bin 10: 50% - 55%
+            0.051, // bin 11: 55% - 60%
+            0.051, // bin 12: 60% - 65%
+            0.051, // bin 13: 65% - 70%
+            0.052, // bin 14: 70% - 75%
+            0.052, // bin 15: 75% - 80% (高压初段)
+            0.053, // bin 16: 80% - 85%
+            0.053, // bin 17: 85% - 90%
+            0.054, // bin 18: 90% - 95% (高压满电区)
+            0.054  // bin 19: 95% - 100% (满电最高压区)
+        )
+
+        /**
+         * 计算任意指定 SOC 范围在锂电池无量纲电化学形态向量中的理论权重占比。
+         *
+         * @param minSoc 起始下界电量百分比（0.0f ~ 100.0f）
+         * @param maxSoc 终止上界电量百分比（0.0f ~ 100.0f）
+         * @return 理论形态能量权重（0.0 ~ 1.0），若 maxSoc <= minSoc 返回 0.0
+         */
+        fun calculateTheoreticalShapeWeight(minSoc: Float, maxSoc: Float): Double {
+            val clampedMin = minSoc.coerceIn(0.0f, 100.0f)
+            val clampedMax = maxSoc.coerceIn(0.0f, 100.0f)
+            if (clampedMax <= clampedMin) return 0.0
+
+            var weightSum = 0.0
+            for (i in 0 until BIN_COUNT) {
+                val binMin = i * BIN_SOC_STEP
+                val binMax = binMin + BIN_SOC_STEP
+                val overlapMin = maxOf(clampedMin, binMin)
+                val overlapMax = minOf(clampedMax, binMax)
+                if (overlapMax > overlapMin) {
+                    val fraction = (overlapMax - overlapMin) / BIN_SOC_STEP
+                    weightSum += fraction * SOC_ENERGY_SHAPE_WEIGHTS[i]
+                }
+            }
+            return weightSum
+        }
+
         /**
          * 创建一个初始全空的 20 段 SOC 能量学习曲线实例（用于冷启动初始化）。
          *
@@ -676,7 +771,7 @@ data class LearnedSocEnergyCurve(
                 estimatedFullUsableEnergyWh = null,
                 confidence = ConfidenceLevel.LOW,
                 maturity = ModelMaturity.COLD_START,
-                curveVersion = 2,
+                curveVersion = 3,
                 totalSampleSessions = 0,
                 lastLearnedTimestamp = 0L
             )
@@ -701,6 +796,17 @@ data class LearnedSocEnergyCurve(
  * @property mixedEstimate 旧版本混合估算兼容实体（可选）
  * @property hybridEstimate 最新三层混合估算结果实体，含实测分量、插值/模型推演分量与不确定度（可选）
  * @property resolvedBins 全部 20 个 SOC 区间在当前工况下的动态解析实体列表
+ * @property fullLearnedEnergyWh 模型最终预测的 100% 满充实测做功能量（单位：Wh，如 21.45 Wh）
+ * @property fullHardwareEnergyWh 硬件底层电量计推算的 100% 满电能量（单位：Wh）
+ * @property fullNominalEnergyWh 当前健康容量额定满电理论值（单位：Wh，如 24.05 Wh，基于 FCC）
+ * @property hybridFullEstimate 100% 满充做功状态下的三层混合估算完整实体
+ * @property dischargeEnergyEfficiencyPercent 实测放电做功相对健康满充标称的输出转化效率（fullLearned / fullNominal * 100.0%）
+ * @property designCapacityMah 设备出厂设计容量（单位：mAh，如 8000 mAh）
+ * @property fullDesignEnergyWh 设备出厂设计额定满电理论值（单位：Wh，如 30.80 Wh）
+ * @property energyHealthRetentionPercent 实测满电做功相对出厂设计总能量的保留率/能量健康度（fullLearned / fullDesign * 100.0%）
+ * @property equivalentCapacityMah 放电模型满充做功折合的等效容量（单位：mAh，如 6488 mAh，按标称电压折算）
+ * @property capacityModelSohPercent 容量微积分算法模型测算出的容量健康度 SOH（effectiveCapacity / designCapacity * 100.0%）
+ * @property effectiveCapacityMah 当前算法采用的健康度满充容量（单位：mAh，如 6247 mAh）
  */
 data class EnergyComparisonOverview(
     val learnedRemainingEnergyWh: Double?,
@@ -715,5 +821,19 @@ data class EnergyComparisonOverview(
     val estimatedFullUsableEnergyWh: Double? = null,
     val mixedEstimate: LearnedSocEnergyCurve.MixedEnergyEstimate? = null,
     val hybridEstimate: HybridRemainingEnergyEstimate? = null,
-    val resolvedBins: List<ResolvedSocEnergyBin> = emptyList()
+    val resolvedBins: List<ResolvedSocEnergyBin> = emptyList(),
+    val fullLearnedEnergyWh: Double? = null,
+    val fullHardwareEnergyWh: Double? = null,
+    val fullNominalEnergyWh: Double? = null,
+    val hybridFullEstimate: HybridRemainingEnergyEstimate? = null,
+    val dischargeEnergyEfficiencyPercent: Double? = null,
+    val designCapacityMah: Float? = null,
+    val fullDesignEnergyWh: Double? = null,
+    val energyHealthRetentionPercent: Double? = null,
+    val equivalentCapacityMah: Double? = null,
+    val capacityModelSohPercent: Double? = null,
+    val effectiveCapacityMah: Float? = null,
+    val isScreenOnAnchored: Boolean = false,
+    val screenOnMeasuredEnergyWh: Float? = null,
+    val screenOnDropPercent: Float? = null
 )

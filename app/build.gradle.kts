@@ -13,8 +13,8 @@ android {
         applicationId = "com.battery.analysis"
         minSdk = 24
         targetSdk = 36
-        versionCode = 283
-        versionName = "1.10.0.7"
+        versionCode = 295
+        versionName = "1.10.0.19"
 
         externalNativeBuild {
             cmake {
@@ -154,4 +154,8 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20231013")
+}
+
+tasks.withType<Test> {
+    jvmArgs("-Duser.language=zh", "-Duser.country=CN")
 }

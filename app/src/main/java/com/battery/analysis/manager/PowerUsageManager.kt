@@ -2101,6 +2101,25 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
+     * 重置放电能量学习模型，清空所有 20 个 SOC 区间已学习的数据、当前放电会话锁定区间以及持久化缓存。
+     */
+    fun resetSocEnergyCurve() {
+        val sessionId = if (currentDischargeSessionId > 0L) currentDischargeSessionId else getLastUnplugTime()
+        clearSessionLearnedBins(sessionId)
+        synchronized(currentSessionLearnedBins) {
+            currentSessionLearnedBins.clear()
+            sessionLearnedBinsLoadedSessionId = 0L
+        }
+        val editor = prefs.edit()
+        prefs.all.keys.filter { it.startsWith("pref_learned_bins_") }.forEach {
+            editor.remove(it)
+        }
+        editor.apply()
+        com.battery.analysis.domain.estimator.SocEnergyCurveLearner.getInstance(context).resetCurve()
+        BatteryCapacityManager.getInstance(context).refreshEstimateAsync()
+    }
+
+    /**
      * 在放电进行中实时评估并学习已完成闭环的 5% SOC 物理区间（In-flight Learning）。
      * 避免用户在单次长周期放电过程中无法及时看到学习成果，且杜绝重复学习。
      *
@@ -2140,23 +2159,115 @@ class PowerUsageManager private constructor(private val context: Context) {
         val validation = com.battery.analysis.domain.estimator.DischargeSessionValidator.validateDischargeSession(
             integrationResult = integrationResult,
             sessionId = sessionId.toString(),
-            effectiveCapacityMah = fccMah?.toDouble()
+            effectiveCapacityMah = fccMah.toDouble()
         )
 
-        // 3. 过滤出尚未学习过的合格完整样本
-        val newCompleteSamples = validation.validCompleteSamples.filter { !currentSessionLearnedBins.contains(it.binIndex) }
-        if (newCompleteSamples.isEmpty()) return 0
+        // 3. 过滤出合格完整样本：尚未学习过的全新样本，或者当前会话中已有但新样本能量更高/更完整（待机补偿生效）的样本
+        val curve = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.getInstance(context).getLearnedCurve()
+        val samplesToRecord = validation.validCompleteSamples.filter { sample ->
+            val binIndex = sample.binIndex
+            if (!currentSessionLearnedBins.contains(binIndex)) {
+                true
+            } else {
+                val currentWh = curve.bins.getOrNull(binIndex)?.learnedEnergyWh ?: 0.0
+                sample.energyWh > currentWh * 1.03 // 有显著提升（待机补偿生效）
+            }
+        }
+        if (samplesToRecord.isEmpty()) return 0
 
-        // 4. 增量吸收合格样本（不递增总会话计数）
+        // 4. 增量吸收合格样本（不递增总会话计数，允许当前会话中无损升级替换）
         com.battery.analysis.domain.estimator.SocEnergyCurveLearner.getInstance(context)
-            .recordValidatedSamples(newCompleteSamples, incrementSessionCount = false)
+            .recordValidatedSamples(samplesToRecord, incrementSessionCount = false, allowInFlightReplacement = true)
 
-        for (sample in newCompleteSamples) {
+        for (sample in samplesToRecord) {
             currentSessionLearnedBins.add(sample.binIndex)
         }
         saveSessionLearnedBinsToPrefs(sessionId)
 
-        return newCompleteSamples.size
+        return samplesToRecord.size
+    }
+
+    /**
+     * 获取当前放电会话的高保真纯亮屏实测特征数据（能量做功、掉电跨度与采样规模）。
+     * 用于放电能量模型的【亮屏高精微积分实测锚定】，免除对息屏休眠采样丢包与插值误差的依赖。
+     *
+     * @param samples 瞬时放电采样点集合（默认当前内存中的实时采样点）
+     * @return 亮屏放电特征数据实体 [ScreenOnDischargeMetrics]，若数据不足返回 null
+     */
+    fun getScreenOnDischargeMetrics(samples: List<PowerDischargePoint> = dischargeRealtimeSamples): ScreenOnDischargeMetrics? {
+        ensureDischargeSamplesLoaded()
+        val currentSamples = if (samples.isNotEmpty()) samples else dischargeRealtimeSamples
+        var onEnergyWh = 0.0
+        var onDropPercent = 0.0f
+        var onDurationMs = 0L
+        var onSampleCount = 0
+        var minOnSoc = 100.0f
+        var maxOnSoc = 0.0f
+
+        if (currentSamples.size >= 2) {
+            var prev: PowerDischargePoint? = null
+            for (curr in currentSamples) {
+                val p = prev
+                prev = curr
+                if (p == null) continue
+
+                val dt = curr.timestamp - p.timestamp
+                if (dt <= 0L) continue
+
+                // 若采样切片起始点为亮屏且连续时长在合理门限内（<= 5分钟），归属于连续高保真亮屏做功
+                if (p.isScreenOn && dt <= 300_000L) {
+                    val avgWatts = ((p.powerWatts + curr.powerWatts) / 2.0).coerceAtLeast(0.0)
+                    val segEnergy = avgWatts * (dt.toDouble() / 3600000.0)
+                    onEnergyWh += segEnergy
+                    onDurationMs += dt
+                    onSampleCount++
+
+                    val pLevel = p.batteryLevel.toFloat()
+                    val cLevel = curr.batteryLevel.toFloat()
+                    if (pLevel > cLevel) {
+                        onDropPercent += (pLevel - cLevel)
+                    }
+                    minOnSoc = minOf(minOnSoc, cLevel, pLevel)
+                    maxOnSoc = maxOf(maxOnSoc, cLevel, pLevel)
+                }
+            }
+        }
+
+        // 若时序采样点内的亮屏掉电偏低或点数不足，尝试融合已校验的 overviewStats 聚合数据
+        val cachedOverview = cachedPowerPackage?.overviewStats
+        val effectiveEnergyWh = if (onEnergyWh > 0.05) {
+            onEnergyWh.toFloat()
+        } else {
+            cachedOverview?.screenOnEnergyWh ?: 0f
+        }
+
+        val effectiveDurationMs = if (onDurationMs > 30_000L) {
+            onDurationMs
+        } else {
+            cachedOverview?.screenOnDurationMs ?: 0L
+        }
+
+        val effectiveDropPercent = if (onDropPercent >= 1.5f) {
+            onDropPercent
+        } else if (cachedOverview != null && cachedOverview.screenOnPercent > 0f) {
+            cachedOverview.screenOnPercent
+        } else {
+            onDropPercent
+        }
+
+        if (effectiveEnergyWh <= 0f || effectiveDropPercent < 1.0f) {
+            return null
+        }
+
+        val hasValidSocRange = onSampleCount > 0 && maxOnSoc >= minOnSoc && (maxOnSoc - minOnSoc) >= 0.5f
+        return ScreenOnDischargeMetrics(
+            screenOnEnergyWh = effectiveEnergyWh,
+            screenOnDropPercent = effectiveDropPercent,
+            screenOnDurationMs = effectiveDurationMs,
+            startSoc = if (hasValidSocRange) maxOnSoc else 100f,
+            endSoc = if (hasValidSocRange) minOnSoc else (100f - effectiveDropPercent).coerceAtLeast(0f),
+            sampleCount = onSampleCount
+        )
     }
 
     /**
@@ -3326,7 +3437,7 @@ class PowerUsageManager private constructor(private val context: Context) {
                     val validation = com.battery.analysis.domain.estimator.DischargeSessionValidator.validateDischargeSession(
                         integrationResult = integrationResult,
                         sessionId = sessionId.toString(),
-                        effectiveCapacityMah = fccMah?.toDouble()
+                        effectiveCapacityMah = fccMah.toDouble()
                     )
 
                     val learner = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.getInstance(context)
@@ -8044,5 +8155,24 @@ data class FullPowerDataPackage(
     val trendPoints: List<PowerDischargePoint>,
     val isShizukuRealData: Boolean,
     val startLevelPercent: Int = -1
+)
+
+/**
+ * 放电会话亮屏做功与掉电核心特征数据类。
+ *
+ * @property screenOnEnergyWh 纯亮屏期间实测积分总能量（单位：Wh）
+ * @property screenOnDropPercent 纯亮屏期间对应的电池百分比净掉电（如 25.2%）
+ * @property screenOnDurationMs 纯亮屏累计放电物理时长（毫秒）
+ * @property startSoc 亮屏期间的起始最高电量百分比
+ * @property endSoc 亮屏期间的终止最低电量百分比
+ * @property sampleCount 参与亮屏积分的有效采样点总数
+ */
+data class ScreenOnDischargeMetrics(
+    val screenOnEnergyWh: Float,
+    val screenOnDropPercent: Float,
+    val screenOnDurationMs: Long,
+    val startSoc: Float,
+    val endSoc: Float,
+    val sampleCount: Int
 )
 

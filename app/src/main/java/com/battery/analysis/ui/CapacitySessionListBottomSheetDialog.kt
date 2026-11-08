@@ -335,6 +335,16 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
         val tabAll = view?.findViewById<TextView>(R.id.tab_session_all)
         val tabCharge = view?.findViewById<TextView>(R.id.tab_session_charge)
         val tabDischarge = view?.findViewById<TextView>(R.id.tab_session_discharge)
+        val layoutTabs = view?.findViewById<View>(R.id.layout_session_tabs)
+
+        if (dischargeList.isEmpty()) {
+            layoutTabs?.visibility = View.GONE
+            viewPager?.isUserInputEnabled = false
+            viewPager?.setCurrentItem(0, false)
+        } else {
+            layoutTabs?.visibility = View.VISIBLE
+            viewPager?.isUserInputEnabled = true
+        }
 
         tabAll?.text = getString(R.string.capacity_session_tab_all_format, filteredCandidates.size)
         tabCharge?.text = getString(R.string.capacity_session_tab_charge_format, chargeList.size)

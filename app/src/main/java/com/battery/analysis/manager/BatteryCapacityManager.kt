@@ -86,6 +86,8 @@ class BatteryCapacityManager private constructor(private val context: Context) {
     }
 
     init {
+        // 清理历史遗留的放电容量候选样本（遵循工业级标准，容量自学习仅采用纯净平稳充电样本）
+        cleanLegacyDischargeCandidates()
         // 初始化时回溯历史合格记录并触发异步估算刷新
         syncHistoricalChargingRecordsIfNeeded()
         refreshEstimateAsync()
@@ -156,10 +158,11 @@ class BatteryCapacityManager private constructor(private val context: Context) {
         val allCandidates = candidateDbHelper.getAllCandidates()
 
         // 依据用户设置的有效数据百分比门限与最新有效数据条数进行双重加权样本动态筛选
+        // 遵循工业标准与电化学纯洁性：容量自学习严格采用高纯净度平稳充电样本，彻底排除放电样本的非线性电压平台与动态负载干扰
         val threshold = getEffectiveSocSpanThreshold()
         val countLimit = getEffectiveSampleCountLimit()
         val eligibleCandidates = allCandidates.filter {
-            !it.isExcluded && it.socSpanPercent >= threshold && it.fccObservedMah > 0.0
+            !it.isExcluded && it.sessionType == CandidateSessionType.CHARGE && it.socSpanPercent >= threshold && it.fccObservedMah > 0.0
         }
         val qualifiedCandidates = if (countLimit > 0) eligibleCandidates.take(countLimit) else eligibleCandidates
 
@@ -252,8 +255,8 @@ class BatteryCapacityManager private constructor(private val context: Context) {
 
         // 方案A标准更新：首行满电能量统一基于标称工作电压平台（3.85V）基准计算（如 24.05 Wh），
         // 严格与出厂设计、FCC 库仑计量、SOH 78.1% 同源闭环，消除标题栏数据认知冲突；
-        // 下方卡片【可用剩余能量】继续保留真实实测微积分（如 17.32 Wh 混合学习估算 (覆盖率 65%)），忠实反映动态做功；
-        // 仅在初始冷启动（0 段已学）无实测依据时，自动按 24.05 Wh 的百分比兜底计算。
+        // 下方卡片【可用剩余能量】严格以放电能量模型按用户设定条件（门限 + 条数）测算出的权威结果为准；
+        // 仅在初始冷启动（0 段已学或模型无依据）时，自动按标称基准百分比兜底计算。
         val nominalFullWh = effectiveFcc?.let { (it * NOMINAL_VOLTAGE_VOLTS) / 1000.0 }
         val nominalRemainingWh = if (nominalFullWh != null && safeSoc != null) {
             (nominalFullWh * safeSoc) / 100.0
@@ -261,16 +264,13 @@ class BatteryCapacityManager private constructor(private val context: Context) {
             remainingMah?.let { (it * NOMINAL_VOLTAGE_VOLTS) / 1000.0 }
         }
 
-        val hybridOverview = if (learnedCurve != null && learnedCurve.bins.any { it.hasLearnedData() } && safeSoc != null && safeSoc >= 0) {
-            val learner = SocEnergyCurveLearner.getInstance(context)
-            learner.buildComparisonOverview(
-                currentSocPercent = safeSoc.toFloat(),
-                hardwareNativeEnergyWh = null,
-                effectiveCapacityMah = null, // 方案 1：纯能量自举解耦容量先验
-                nominalVoltageVolts = NOMINAL_VOLTAGE_VOLTS.toFloat(),
-                currentDischargeCurrentMa = null,
-                temperatureCelsius = null
-            )
+        val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(context)
+        val hybridOverview = if (safeSoc != null && safeSoc >= 0) {
+            try {
+                powerManager.getDischargeEnergyOverview()
+            } catch (_: Exception) {
+                null
+            }
         } else null
 
         val hybridRemainingWh = hybridOverview?.learnedRemainingEnergyWh
@@ -293,7 +293,7 @@ class BatteryCapacityManager private constructor(private val context: Context) {
             fullEnergyWh = nominalFullWh,
             remainingEnergyWh = finalRemainingWh,
             sourceTier = energyTier,
-            coveragePercent = learnedCurve?.coveragePercent
+            coveragePercent = hybridOverview?.curveCoveragePercent ?: learnedCurve?.coveragePercent
         )
 
         // 7. 计算容量健康度（SOH）
@@ -434,60 +434,26 @@ class BatteryCapacityManager private constructor(private val context: Context) {
 
     /**
      * 当一次放电会话正式完结归档时调用。
-     * 从整机放电记录中提取电量掉电跨度与积分能量，计算并持久化放电容量候选样本。
+     *
+     * 架构解耦优化：放电会话专注于放电能量模型学习（SocEnergyCurveLearner），不再入库容量候选样本，
+     * 彻底消除放电非线性电压平台（3.85V 粗算）与复杂动态负载内阻发热对电化学满充容量（FCC）和健康度（SOH）的污染。
      *
      * @param record 归档的放电耗电记录实体 [PowerUsageRecord]
      */
     fun onDischargeSessionArchived(record: PowerUsageRecord) {
+        // 放电会话专注于 20 段放电能量微积分学习，不参与电化学满充容量（FCC）模型更新
+    }
+
+    /**
+     * 异步自动清理历史遗留的放电容量候选样本。
+     */
+    private fun cleanLegacyDischargeCandidates() {
         scope.launch {
             try {
-                val start = record.getStartBatteryLevel()
-                val end = record.levelPercent
-                if (start <= end) {
-                    return@launch
+                val deleted = candidateDbHelper.deleteDischargeCandidates()
+                if (deleted > 0) {
+                    refreshEstimateInternal()
                 }
-                val span = start - end
-                if (span < MIN_SOC_SPAN_THRESHOLD) {
-                    return@launch
-                }
-
-                val netDischargeMah = if (record.totalEnergyWh > 0.005f) {
-                    (record.totalEnergyWh.toDouble() / NOMINAL_VOLTAGE_VOLTS) * 1000.0
-                } else {
-                    return@launch
-                }
-
-                val normalizedSpan = span / 100.0
-                val fccObserved = netDischargeMah / normalizedSpan
-                val isRangeDefective = fccObserved <= 500.0 || fccObserved >= 20000.0
-                val isExcluded = isRangeDefective
-                val exclusionReason = if (isRangeDefective) "推算容量超出物理电芯合理界限" else ""
-
-                val startTs = record.id
-                val endTs = if (record.lastCheckpointTime > startTs) record.lastCheckpointTime else (startTs + 60_000L)
-                val duration = (endTs - startTs).coerceAtLeast(60_000L)
-
-                val candidate = CapacityCandidate(
-                    id = record.id,
-                    sessionType = CandidateSessionType.DISCHARGE,
-                    startSoc = start,
-                    endSoc = end,
-                    socSpanPercent = span,
-                    netBatteryChargeMah = netDischargeMah,
-                    fccObservedMah = fccObserved,
-                    startTimestamp = startTs,
-                    endTimestamp = endTs,
-                    durationMs = duration,
-                    avgTemperatureCelsius = record.temperature,
-                    maxTemperatureCelsius = record.temperature,
-                    sampleCount = 1,
-                    qualityScore = 0.85,
-                    isExcluded = isExcluded,
-                    exclusionReason = exclusionReason
-                )
-
-                candidateDbHelper.insertCandidate(candidate)
-                refreshEstimateInternal()
             } catch (e: Exception) {
                 e.printStackTrace()
             }

@@ -2143,6 +2143,8 @@ class PowerUsageManager private constructor(private val context: Context) {
     fun setDischargeSocSpanThreshold(thresholdPercent: Int) {
         val clamped = thresholdPercent.coerceIn(10, 100)
         prefs.edit().putInt(PREF_KEY_DISCHARGE_SOC_THRESHOLD, clamped).apply()
+        recalculateDischargeEnergyModel()
+        BatteryCapacityManager.getInstance(context).refreshEstimateAsync()
     }
 
     /**
@@ -2160,6 +2162,8 @@ class PowerUsageManager private constructor(private val context: Context) {
     fun setDischargeSampleCountLimit(limit: Int) {
         val safeVal = if (limit <= 0) 0 else limit
         prefs.edit().putInt(PREF_KEY_DISCHARGE_SAMPLE_COUNT_LIMIT, safeVal).apply()
+        recalculateDischargeEnergyModel()
+        BatteryCapacityManager.getInstance(context).refreshEstimateAsync()
     }
 
     /**
@@ -2306,8 +2310,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         // 5. 保存并更新内存模型
         learner.saveCurveDirectly(dynamicCurve)
 
-        // 6. 融入当前正在进行的实时放电会话（若满足门限或具备纯亮屏数据）
-        val screenOnMetrics = getScreenOnDischargeMetrics()
+        // 6. 严禁以当前在途放电周期向外推算整机满充标尺，仅基于满足设定条件的合格历史记录与历史宏观中位数进行纯粹建模
         val curStatus = getCurrentBatteryStatus()
         val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? android.os.BatteryManager
         val nativeEnergyNwh = batteryManager?.getLongProperty(android.os.BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER)
@@ -2319,27 +2322,42 @@ class PowerUsageManager private constructor(private val context: Context) {
         val capacityResult = com.battery.analysis.manager.BatteryCapacityManager.getInstance(context).capacityState.value
         val designMah = capacityResult?.designCapacityMah
 
-        return learner.buildComparisonOverview(
+        val overview = learner.buildComparisonOverview(
             currentSocPercent = curStatus.levelPercent.toFloat(),
             hardwareNativeEnergyWh = hardwareWh,
             effectiveCapacityMah = fccMah,
             nominalVoltageVolts = 3.85f,
             temperatureCelsius = curStatus.temperature,
             designCapacityMah = designMah?.toFloat(),
-            screenOnEnergyWh = screenOnMetrics?.screenOnEnergyWh,
-            screenOnDropPercent = screenOnMetrics?.screenOnDropPercent,
-            screenOnStartSoc = screenOnMetrics?.startSoc,
-            screenOnEndSoc = screenOnMetrics?.endSoc,
+            screenOnEnergyWh = null,
+            screenOnDropPercent = null,
+            screenOnStartSoc = null,
+            screenOnEndSoc = null,
             effectiveThresholdPercent = targetThreshold,
             effectiveSampleCountLimit = targetLimit,
             participatingSessionCount = qualifiedRecords.size,
             macroHistoricalFullWh = macroHistoricalMedianWh
         )
+        cachedDischargeEnergyOverview = overview
+        return overview
+    }
+
+    @Volatile
+    private var cachedDischargeEnergyOverview: com.battery.analysis.domain.estimator.model.EnergyComparisonOverview? = null
+
+    /**
+     * 获取按当前用户设定的放电自学习条件（门限 + 条数）测算出的放电能量模型全景概览实体。
+     * 为 BatteryCapacityManager 及全 App 提供统一、同源的放电能量基准。
+     */
+    @Synchronized
+    fun getDischargeEnergyOverview(): com.battery.analysis.domain.estimator.model.EnergyComparisonOverview {
+        return cachedDischargeEnergyOverview ?: recalculateDischargeEnergyModel()
     }
 
     /**
      * 在放电进行中实时评估并学习已完成闭环的 5% SOC 物理区间（In-flight Learning）。
      * 避免用户在单次长周期放电过程中无法及时看到学习成果，且杜绝重复学习。
+     * 遵循学习门限原则：若当前在途放电尚未达到设定的放电门限，严禁提前写入模型。
      *
      * @return 本次评估中新学习的 5% 区间数量
      */
@@ -2349,6 +2367,12 @@ class PowerUsageManager private constructor(private val context: Context) {
         if (dischargeRealtimeSamples.size < 2) return 0
         val status = getCurrentBatteryStatus()
         if (status.isCharging) return 0
+
+        val startLvl = dischargeRealtimeSamples.firstOrNull()?.batteryLevel ?: status.levelPercent
+        val currentDrop = kotlin.math.abs(startLvl - status.levelPercent)
+        val threshold = getDischargeSocSpanThreshold()
+        val minRequired = if (threshold >= 100) 98 else threshold
+        if (currentDrop < minRequired) return 0
 
         val sessionId = if (currentDischargeSessionId > 0L) currentDischargeSessionId else getLastUnplugTime()
         if (sessionId <= 0L) return 0
@@ -3673,6 +3697,10 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
         try {
             dbHelper.deleteRunningRecords()
+        } catch (_: Exception) {}
+        try {
+            recalculateDischargeEnergyModel()
+            BatteryCapacityManager.getInstance(context).refreshEstimateAsync()
         } catch (_: Exception) {}
         return finalizedRecord
     }

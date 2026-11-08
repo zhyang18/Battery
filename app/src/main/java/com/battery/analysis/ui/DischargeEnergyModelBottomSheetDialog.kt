@@ -103,7 +103,6 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
             showResetConfirmationDialog(view)
         }
         view.findViewById<MaterialButton>(R.id.btn_energy_model_reset)?.setOnClickListener(resetClickListener)
-        view.findViewById<ImageView>(R.id.btn_reset_energy_model_header)?.setOnClickListener(resetClickListener)
 
         bindEnergyData(view)
     }
@@ -300,15 +299,15 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
 
         // 实测学习放电样本与会话说明
         if (overview.isScreenOnAnchored) {
-            tvValSessions.text = getString(R.string.energy_source_sessions_anchored)
+            tvValSessions?.text = getString(R.string.energy_source_sessions_anchored)
         } else if (overview.macroHistoricalFullWh != null && overview.participatingSessionCount > 0) {
-            tvValSessions.text = "基于最近 ${overview.participatingSessionCount} 条有效放电记录宏观锚定"
+            tvValSessions?.text = "基于最近 ${overview.participatingSessionCount} 条有效放电记录宏观锚定"
         } else {
             val isDischarging = !powerManager.getCurrentBatteryStatus().isCharging
             val currentDischargeSamples = powerManager.getDischargeRealtimeSamples()
             val hasOngoingDischarge = isDischarging && currentDischargeSamples.size >= 2
             val maxBinSamples = curve.bins.maxOfOrNull { it.sampleCount } ?: 0
-            tvValSessions.text = formatDischargeSessionsSummary(
+            tvValSessions?.text = formatDischargeSessionsSummary(
                 totalSessions = overview.totalSessionsCount,
                 hasOngoingDischarge = hasOngoingDischarge,
                 maxBinSamples = maxBinSamples

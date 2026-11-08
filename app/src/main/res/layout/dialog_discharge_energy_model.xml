@@ -53,18 +53,6 @@
             </LinearLayout>
 
             <ImageView
-                android:id="@+id/btn_reset_energy_model_header"
-                android:layout_width="28dp"
-                android:layout_height="28dp"
-                android:layout_marginEnd="6dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:clickable="true"
-                android:focusable="true"
-                android:padding="4dp"
-                android:src="@drawable/ic_power_reset"
-                app:tint="?android:attr/textColorSecondary" />
-
-            <ImageView
                 android:id="@+id/btn_close_energy_model"
                 android:layout_width="28dp"
                 android:layout_height="28dp"
@@ -229,42 +217,32 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2.5dp"
                             android:gravity="start"
-                            android:singleLine="true"
                             android:textColor="#10b981"
                             android:textSize="11.5sp"
                             android:textStyle="bold"
                             tools:text="能量健康度 82.0% (折合 6560 mAh)" />
 
-                        <!-- 第三行：实测掉电数据与锚定状态说明（左右并列分布，完整展示） -->
-                        <LinearLayout
+                        <!-- 第三行：覆盖基准与做功来源（独占整行，完整展示，绝不截断） -->
+                        <TextView
+                            android:id="@+id/tv_val_learned_coverage"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2.5dp"
+                            android:gravity="start"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="10.5sp"
+                            tools:text="历史中位数 (门限 ≥30% · 10条)" />
+
+                        <!-- 第四行：放电样本与宏观锚定说明（独占整行，清晰底注） -->
+                        <TextView
+                            android:id="@+id/tv_val_model_sessions"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
-                            android:gravity="center_vertical"
-                            android:orientation="horizontal">
-
-                            <TextView
-                                android:id="@+id/tv_val_learned_coverage"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:singleLine="true"
-                                android:ellipsize="end"
-                                android:textColor="?android:attr/textColorSecondary"
-                                android:textSize="10.5sp"
-                                tools:text="亮屏 12.34 Wh (掉电 48.0%)" />
-
-                            <TextView
-                                android:id="@+id/tv_val_model_sessions"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="6dp"
-                                android:gravity="end"
-                                android:singleLine="true"
-                                android:textColor="#64748b"
-                                android:textSize="10sp"
-                                tools:text="亮屏连续高频实测锚定" />
-                        </LinearLayout>
+                            android:gravity="start"
+                            android:textColor="#64748b"
+                            android:textSize="10sp"
+                            tools:text="基于最近 10 条有效放电记录宏观锚定" />
                     </LinearLayout>
 
                     <!-- 分割线 1 -->

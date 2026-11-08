@@ -383,14 +383,11 @@ class SocEnergyCurveLearner(private val context: Context) {
                 )
             } else null
 
-            // 核心仲裁：只有当实时在途亮屏放电跨度真正达到用户设定的有效门限时，才优先作为实时锚点；
-            // 若实时在途放电尚未达到门限，优先采用满足过滤条件的宏观历史中位数
+            // 核心仲裁：严禁以当前在途放电周期外推整机满充标尺，杜绝局部瞬态工况导致标尺严重虚高！
+            // 权威宏观满充标尺优先且仅采用满足过滤条件（门限 + 条数）的历史宏观中位数；
+            // 若历史无满足门限的宏观记录，严禁以未达门限的在途放电会话兜底外推。
             val isCurrentSessionQualified = (screenOnAnchoredFullWh != null && (screenOnDropPercent ?: 0f) >= effectiveThresholdPercent)
-            val authoritativeMacroWh = if (isCurrentSessionQualified) {
-                screenOnAnchoredFullWh
-            } else {
-                macroHistoricalFullWh ?: screenOnAnchoredFullWh
-            }
+            val authoritativeMacroWh = macroHistoricalFullWh ?: if (isCurrentSessionQualified) screenOnAnchoredFullWh else null
 
             // 计算每个完整 5% 区间的标称折算能量（Wh），用于兼容旧的 mixedEstimate
             val nominalWhPerBin: Double? = if (effectiveCapacityMah != null && effectiveCapacityMah > 0f) {

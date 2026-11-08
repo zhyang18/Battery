@@ -220,4 +220,19 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
             false
         }
     }
+
+    /**
+     * 清理所有历史放电容量候选样本，确保容量自学习数据库仅包含高纯净度平稳充电样本。
+     *
+     * @return 受影响删除的记录条数
+     */
+    fun deleteDischargeCandidates(): Int {
+        return try {
+            val db = writableDatabase
+            db.delete(TABLE_NAME, "$COL_SESSION_TYPE = ?", arrayOf(CandidateSessionType.DISCHARGE.name))
+        } catch (e: Exception) {
+            e.printStackTrace()
+            0
+        }
+    }
 }

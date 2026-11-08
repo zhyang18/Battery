@@ -268,7 +268,11 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
         tvMaturityBadge?.text = result.maturityLevel.getDisplayName(requireContext())
         tvMaturityBadge?.setTextColor(badgeColor)
         tvMaturityBadge?.let { setRoundedBadgeBackground(it, badgeColor, 6f) }
-        val countsText = getString(R.string.capacity_diag_counts_format, result.chargeSessionCount, result.dischargeSessionCount)
+        val countsText = if (result.dischargeSessionCount > 0) {
+            getString(R.string.capacity_diag_counts_format, result.chargeSessionCount, result.dischargeSessionCount)
+        } else {
+            getString(R.string.capacity_diag_counts_charge_only, result.chargeSessionCount)
+        }
         tvSessionCounts?.text = formatSessionCountsWithColor(countsText, badgeColor)
         tvSocSpan?.text = "${result.totalSocSpanCovered}%"
         tvDispersion?.text = result.dispersionCoefficientPercent?.let {

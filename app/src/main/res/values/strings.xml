@@ -862,9 +862,10 @@
     <string name="capacity_diag_accumulating">数据积累中</string>
     <string name="capacity_diag_source_format">来源: %s</string>
     <string name="capacity_diag_counts_format">充电 %1$d 次 ｜ 放电 %2$d 次</string>
+    <string name="capacity_diag_counts_charge_only">%1$d 次平稳充电会话</string>
     <string name="capacity_diag_consistency_good">%.2f%% (一致性良好)</string>
     <string name="capacity_diag_consistency_diff">%.2f%% (差异偏大 · 观察中)</string>
-    <string name="capacity_diag_no_conflict">单方向数据 · 暂无冲突</string>
+    <string name="capacity_diag_no_conflict">已遵循纯净平稳充电标定</string>
 
     <!-- 门限设置项副标题 -->
     <string name="capacity_thresh_desc_10">极速建模 · 容纳浅充浅放</string>

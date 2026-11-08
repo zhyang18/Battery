@@ -280,4 +280,35 @@ class DischargeDualConditionAndSessionTest {
         val drop95 = 95
         assertFalse(drop95 >= minRequired)
     }
+
+    /**
+     * 测试当前在途放电周期（未完结/未达门限）严禁外推整机满充标尺：
+     * 当历史合格记录宏观中位数为 null，且当前会话掉电跨度（例如 5.6%）低于门限（15%）时，
+     * authoritativeMacroWh 必须为 null，绝不能以当前在途周期的局部做功外推整机满电能量！
+     */
+    @Test
+    fun testCurrentInFlightSessionDoesNotExtrapolateFullChargeScale() {
+        val emptyCurve = LearnedSocEnergyCurve.createEmpty()
+
+        // 模拟用户截图中的当前在途放电：掉电 5.6%，做功 1.67 Wh，门限 15%
+        val overview = SocEnergyCurveLearner.buildComparisonOverviewFromCurve(
+            curve = emptyCurve,
+            currentSocPercent = 98f,
+            effectiveCapacityMah = 6206f,
+            nominalVoltageVolts = 3.85f,
+            screenOnEnergyWh = 1.670f,
+            screenOnDropPercent = 5.6f,
+            effectiveThresholdPercent = 15,
+            macroHistoricalFullWh = null // 历史暂无满足 >= 15% 的记录
+        )
+
+        // 关键验证：严禁以 5.6% 掉电外推整机标尺（isScreenOnAnchored 必须为 false）
+        assertFalse("未达门限的在途放电绝不能锚定整机满电标尺", overview.isScreenOnAnchored)
+        // 满充预测绝不能被外推为 29.8 Wh 或 31.8 Wh
+        val fullWh = overview.fullLearnedEnergyWh
+        assertTrue(
+            "冷启动无合格历史记录时满充预测应为 null 或基于先验，绝不能由当前 5.6% 周期外推至 29+ Wh",
+            fullWh == null || fullWh <= 24.5
+        )
+    }
 }

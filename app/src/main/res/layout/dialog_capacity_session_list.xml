@@ -87,6 +87,7 @@
 
     <!-- 过滤器 Tab 栏（全部 / 充电 / 放电） -->
     <LinearLayout
+        android:id="@+id/layout_session_tabs"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="6dp"

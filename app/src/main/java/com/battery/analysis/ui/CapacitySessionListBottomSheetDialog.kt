@@ -40,6 +40,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
 
     private var allCandidates: List<CapacityCandidate> = emptyList()
     private var currentThreshold: Int = 15
+    private var currentCountLimit: Int = 10
     private var isOnlyMeetsThreshold: Boolean = false
     private lateinit var sessionPageAdapter: SessionPageAdapter
     private var viewPager: ViewPager2? = null
@@ -279,7 +280,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
     }
 
     /**
-     * 异步从本地数据库加载所有充放电候选样本数据，并同步有效电量跨度阈值。
+     * 异步从本地数据库加载所有充放电候选样本数据，并同步有效电量跨度阈值与最新条数时效窗口。
      */
     private fun loadData() {
         val ctx = context ?: return
@@ -287,6 +288,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             val dbHelper = CapacityCandidateDbHelper.getInstance(ctx)
             val manager = BatteryCapacityManager.getInstance(ctx)
             currentThreshold = manager.getEffectiveSocSpanThreshold()
+            currentCountLimit = manager.getEffectiveSampleCountLimit()
 
             allCandidates = withContext(Dispatchers.IO) {
                 dbHelper.getAllCandidates()
@@ -299,6 +301,11 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
      * 将候选样本数据按分类（全部、充电、放电）及当前门限过滤状态分发至 ViewPager2 的各个子页面，并同步更新副标题统计和 Tab 数量。
      */
     private fun applyDataToPages() {
+        val eligibleCandidates = allCandidates.filter {
+            !it.isExcluded && it.socSpanPercent >= currentThreshold && it.fccObservedMah > 0.0
+        }
+        val includedIds = (if (currentCountLimit > 0) eligibleCandidates.take(currentCountLimit) else eligibleCandidates).map { it.id }.toSet()
+
         val filteredCandidates = if (isOnlyMeetsThreshold) {
             allCandidates.filter { !it.isExcluded && it.socSpanPercent >= currentThreshold }
         } else {
@@ -311,13 +318,19 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             allData = filteredCandidates,
             chargeData = chargeList,
             dischargeData = dischargeList,
-            threshold = currentThreshold
+            threshold = currentThreshold,
+            includedIds = includedIds,
+            countLimit = currentCountLimit
         )
 
         val totalCount = allCandidates.size
         val validCount = allCandidates.count { !it.isExcluded && it.socSpanPercent >= currentThreshold }
         val subtitle = view?.findViewById<TextView>(R.id.tv_session_list_subtitle)
-        subtitle?.text = getString(R.string.capacity_session_subtitle_format, totalCount, validCount, currentThreshold)
+        if (currentCountLimit > 0 && validCount > currentCountLimit) {
+            subtitle?.text = getString(R.string.capacity_session_subtitle_format_with_limit, totalCount, validCount, currentCountLimit, currentThreshold)
+        } else {
+            subtitle?.text = getString(R.string.capacity_session_subtitle_format, totalCount, validCount, currentThreshold)
+        }
 
         val tabAll = view?.findViewById<TextView>(R.id.tab_session_all)
         val tabCharge = view?.findViewById<TextView>(R.id.tab_session_charge)
@@ -451,12 +464,16 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
          * @param chargeData 充电样本列表
          * @param dischargeData 放电样本列表
          * @param threshold 当前有效电量跨度门限
+         * @param includedIds 当前模型纳入计算的样本 ID 集合
+         * @param countLimit 当前有效条数时效窗口限制
          */
         fun updateAllPages(
             allData: List<CapacityCandidate>,
             chargeData: List<CapacityCandidate>,
             dischargeData: List<CapacityCandidate>,
-            threshold: Int
+            threshold: Int,
+            includedIds: Set<Long>,
+            countLimit: Int
         ) {
             currentThreshold = threshold
             pageDataList[0] = allData
@@ -464,7 +481,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             pageDataList[2] = dischargeData
 
             for (i in 0..2) {
-                candidateAdapters[i].submitList(pageDataList[i], threshold)
+                candidateAdapters[i].submitList(pageDataList[i], threshold, includedIds, countLimit)
                 attachedHolders[i]?.let { holder ->
                     bindPageHolder(holder, i)
                 }
@@ -560,16 +577,27 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
 
         private var items: List<CapacityCandidate> = emptyList()
         private var threshold: Int = 15
+        private var includedCandidateIds: Set<Long> = emptySet()
+        private var countLimit: Int = 0
 
         /**
-         * 提交最新的候选样本列表并更新当前电量门限。
+         * 提交最新的候选样本列表并更新当前电量门限与有效时效名单。
          *
          * @param list 待展示的候选样本列表集合
          * @param currentThreshold 当前生效的电量跨度最低门限百分比
+         * @param includedIds 当前模型纳入计算的样本 ID 集合
+         * @param limit 当前生效的有效条数窗口限制
          */
-        fun submitList(list: List<CapacityCandidate>, currentThreshold: Int) {
+        fun submitList(
+            list: List<CapacityCandidate>,
+            currentThreshold: Int,
+            includedIds: Set<Long> = emptySet(),
+            limit: Int = 0
+        ) {
             items = list
             threshold = currentThreshold
+            includedCandidateIds = includedIds
+            countLimit = limit
             notifyDataSetChanged()
         }
 
@@ -610,6 +638,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
 
             // 3. 状态标签与排除说明
             val meetsThreshold = item.socSpanPercent >= threshold
+            val isWithinWindow = includedCandidateIds.contains(item.id)
             when {
                 item.isExcluded -> {
                     holder.tvStatus.text = holder.itemView.context.getString(R.string.capacity_session_status_outlier)
@@ -622,6 +651,12 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
                     holder.tvStatus.setTextColor(Color.parseColor("#64748b"))
                     holder.tvReason.visibility = View.VISIBLE
                     holder.tvReason.text = "${item.socSpanPercent}% <= $threshold%"
+                }
+                countLimit > 0 && !isWithinWindow -> {
+                    holder.tvStatus.text = holder.itemView.context.getString(R.string.capacity_session_status_exceeded_window)
+                    holder.tvStatus.setTextColor(Color.parseColor("#64748b"))
+                    holder.tvReason.visibility = View.VISIBLE
+                    holder.tvReason.text = holder.itemView.context.getString(R.string.capacity_session_reason_exceeded_window, countLimit)
                 }
                 else -> {
                     holder.tvStatus.text = holder.itemView.context.getString(R.string.capacity_session_status_included)

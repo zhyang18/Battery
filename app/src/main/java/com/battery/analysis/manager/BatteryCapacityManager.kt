@@ -59,6 +59,10 @@ class BatteryCapacityManager private constructor(private val context: Context) {
         const val PREF_KEY_EFFECTIVE_SOC_THRESHOLD = "pref_capacity_effective_soc_threshold"
         const val DEFAULT_EFFECTIVE_SOC_THRESHOLD: Int = 15
 
+        /** 容量自学习有效历史数据条数限制持久化键（默认最新 10 条，0 为全部） */
+        const val PREF_KEY_EFFECTIVE_SAMPLE_COUNT_LIMIT = "pref_capacity_effective_sample_count"
+        const val DEFAULT_EFFECTIVE_SAMPLE_COUNT_LIMIT: Int = 10
+
         /** 纳入满充容量自学习样本池的最小物理入库门限（10%） */
         private const val MIN_SOC_SPAN_THRESHOLD: Int = 10
 
@@ -108,6 +112,27 @@ class BatteryCapacityManager private constructor(private val context: Context) {
     }
 
     /**
+     * 获取当前配置的容量自学习有效数据条数时效窗口（默认 10 条，0 为全部）。
+     */
+    fun getEffectiveSampleCountLimit(): Int {
+        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return sp.getInt(PREF_KEY_EFFECTIVE_SAMPLE_COUNT_LIMIT, DEFAULT_EFFECTIVE_SAMPLE_COUNT_LIMIT)
+    }
+
+    /**
+     * 设置容量自学习有效数据条数时效窗口（0 为全部，其余为正整数如 3, 5, 10, 15, 20, 30），
+     * 并立即持久化触发模型重新计算。
+     *
+     * @param limit 目标条数
+     */
+    fun setEffectiveSampleCountLimit(limit: Int) {
+        val safeVal = if (limit <= 0) 0 else limit
+        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        sp.edit().putInt(PREF_KEY_EFFECTIVE_SAMPLE_COUNT_LIMIT, safeVal).apply()
+        refreshEstimateAsync()
+    }
+
+    /**
      * 异步触发容量模型重新计算与状态更新。
      */
     fun refreshEstimateAsync() {
@@ -130,12 +155,16 @@ class BatteryCapacityManager private constructor(private val context: Context) {
         // 2. 从本地 SQLite 查询所有候选样本
         val allCandidates = candidateDbHelper.getAllCandidates()
 
-        // 依据用户设置的有效数据百分比门限进行加权样本动态筛选
+        // 依据用户设置的有效数据百分比门限与最新有效数据条数进行双重加权样本动态筛选
         val threshold = getEffectiveSocSpanThreshold()
-        val eligibleCandidates = allCandidates.filter { it.socSpanPercent >= threshold }
+        val countLimit = getEffectiveSampleCountLimit()
+        val eligibleCandidates = allCandidates.filter {
+            !it.isExcluded && it.socSpanPercent >= threshold && it.fccObservedMah > 0.0
+        }
+        val qualifiedCandidates = if (countLimit > 0) eligibleCandidates.take(countLimit) else eligibleCandidates
 
         // 3. 执行纯领域稳健融合估计
-        val robustResult = RobustFccEstimator.estimateFusedFcc(eligibleCandidates)
+        val robustResult = RobustFccEstimator.estimateFusedFcc(qualifiedCandidates)
 
         // 4. 读取系统底层当前的即时电量与电压（严格遵循零脏数据与真实电量比例）
         val intentFilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)

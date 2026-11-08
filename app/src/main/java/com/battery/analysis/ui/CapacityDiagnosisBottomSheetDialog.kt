@@ -151,6 +151,13 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
         view.findViewById<View>(R.id.layout_diag_threshold_setting)?.setOnClickListener(thresholdClickListener)
         view.findViewById<View>(R.id.tv_diag_threshold_selector)?.setOnClickListener(thresholdClickListener)
 
+        // 绑定有效数据条数时效窗口设置项点击事件
+        val countClickListener = View.OnClickListener {
+            showCountPickerDialog(view)
+        }
+        view.findViewById<View>(R.id.layout_diag_count_setting)?.setOnClickListener(countClickListener)
+        view.findViewById<View>(R.id.tv_diag_count_selector)?.setOnClickListener(countClickListener)
+
         // 获取并动态观察最新的容量状态结果流，自动刷新诊断视图
         val context = view.context ?: return
         viewLifecycleOwner.lifecycleScope.launch {
@@ -178,6 +185,21 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
     }
 
     /**
+     * 弹出与科学诊断主界面设计风格一致的自学习有效数据条数时效窗口选择底部抽屉弹窗。
+     * 从屏幕底部向上平滑滑入，采用与主诊断弹窗完全一致的现代化暗黑卡片风格，确定后即刻更新界面显示。
+     *
+     * @param rootView 触发弹窗的根视图对象，用于定位并局部刷新条数指示器文本
+     */
+    private fun showCountPickerDialog(rootView: View) {
+        val pickerDialog = CapacityCountPickerBottomSheetDialog()
+        pickerDialog.setOnCountSelectedListener { selectedCount ->
+            val labelText = if (selectedCount <= 0) "全部数据 ▾" else "最近 $selectedCount 条 ▾"
+            rootView.findViewById<TextView>(R.id.tv_diag_count_selector)?.text = labelText
+        }
+        pickerDialog.show(parentFragmentManager, "CapacityCountPickerBottomSheetDialog")
+    }
+
+    /**
      * 将容量估计全景结果数据绑定渲染至各个子视图。
      * 严格遵守零假数据原则：在数据缺失时如实显示 "--" 或未知，绝不伪造硬编码数据。
      *
@@ -202,6 +224,10 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
         val threshold = BatteryCapacityManager.getInstance(root.context).getEffectiveSocSpanThreshold()
         val tvThresholdSelector = root.findViewById<TextView>(R.id.tv_diag_threshold_selector)
         tvThresholdSelector?.text = if (threshold == 100) "100% ▾" else "> ${threshold}% ▾"
+
+        val countLimit = BatteryCapacityManager.getInstance(root.context).getEffectiveSampleCountLimit()
+        val tvCountSelector = root.findViewById<TextView>(R.id.tv_diag_count_selector)
+        tvCountSelector?.text = if (countLimit <= 0) "全部数据 ▾" else "最近 $countLimit 条 ▾"
 
         if (result == null) {
             tvRemainingCharge?.text = "-- mAh"

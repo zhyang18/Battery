@@ -166,6 +166,7 @@
                         tools:text="13.17 Wh" />
 
                     <TextView
+                        android:id="@+id/tv_diag_remaining_energy_subtitle"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="1dp"

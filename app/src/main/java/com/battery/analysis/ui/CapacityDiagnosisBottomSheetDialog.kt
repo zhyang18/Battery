@@ -209,6 +209,7 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
     private fun bindDataToViews(root: View, result: CapacityEstimateResult?) {
         val tvRemainingCharge = root.findViewById<TextView>(R.id.tv_diag_remaining_charge)
         val tvRemainingEnergy = root.findViewById<TextView>(R.id.tv_diag_remaining_energy)
+        val tvRemainingEnergySubtitle = root.findViewById<TextView>(R.id.tv_diag_remaining_energy_subtitle)
         val tvFcc = root.findViewById<TextView>(R.id.tv_diag_fcc)
         val tvFccSource = root.findViewById<TextView>(R.id.tv_diag_fcc_source)
         val tvDesignCap = root.findViewById<TextView>(R.id.tv_diag_design_capacity)
@@ -251,6 +252,7 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
         // 1. 板块一：容量与健康度全景
         tvRemainingCharge?.text = result.getFormattedRemainingCharge()
         tvRemainingEnergy?.text = result.getFormattedRemainingEnergy()
+        tvRemainingEnergySubtitle?.text = result.getFormattedRemainingEnergySubtitle(requireContext())
         tvFcc?.text = result.getFormattedFcc()
         tvFccSource?.text = getString(R.string.capacity_diag_source_format, result.sourceTier.getDisplayName(requireContext()))
         tvDesignCap?.text = result.designCapacityMah?.let {

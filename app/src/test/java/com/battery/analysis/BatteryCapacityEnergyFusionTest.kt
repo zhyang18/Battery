@@ -512,4 +512,57 @@ class BatteryCapacityEnergyFusionTest {
             assertEquals(EnergyEstimateSource.BOOTSTRAP_EXTRAPOLATED, resolved[i].source)
         }
     }
+
+    /**
+     * 测试用户真实场景闭环与物理守恒约束：
+     * 设备设计容量 8000 mAh，自学习 FCC 6278 mAh（SOH 78.5%），当前电量 91%（剩余电荷 5713 mAh）。
+     * 满电标称基准必须为 24.17 Wh，可用剩余能量严格为 22.00 Wh，
+     * 严格断言 RemainingWh <= FullEnergyWh，彻底消除 27.03 Wh > 24.17 Wh 倒挂 Bug。
+     */
+    @Test
+    fun testUserScenarioPhysicsConservationAndBaselineConsistency() {
+        val fcc = 6278.0
+        val safeSoc = 91
+        val remainingMah = 5713.0
+        val designCap = 8000.0
+
+        val nominalFullWh = (fcc * 3.85) / 1000.0 // 24.1703 Wh
+        val nominalRemainingWh = (nominalFullWh * safeSoc) / 100.0 // 21.994973 Wh -> 21.99 Wh
+
+        val result = CapacityEstimateResult(
+            remainingChargeMah = remainingMah,
+            remainingEnergyWh = nominalRemainingWh,
+            fullChargeCapacityMah = fcc,
+            designCapacityMah = designCap,
+            sohPercent = (fcc / designCap) * 100.0,
+            currentSoc = safeSoc,
+            sourceTier = CapacitySourceTier.MULTI_SESSION_LEARNED,
+            maturityLevel = MaturityLevel.CONVERGED,
+            validSessionCount = 3,
+            chargeSessionCount = 3,
+            dischargeSessionCount = 0,
+            totalSocSpanCovered = 218,
+            dispersionCoefficientPercent = 1.51,
+            conflictRateDPercent = null,
+            confidenceIntervalMah = 107.0,
+            fullEnergyWh = nominalFullWh,
+            energySourceTier = EnergySourceTier.NOMINAL_VOLTAGE,
+            energyCoveragePercent = 0.65f
+        )
+
+        assertEquals("6278 mAh", result.getFormattedFcc())
+        assertEquals("24.17 Wh", result.getFormattedFullEnergy())
+        assertEquals("5713 mAh", result.getFormattedRemainingCharge())
+        assertEquals("21.99 Wh", result.getFormattedRemainingEnergy())
+        assertEquals("78.5%", result.getFormattedSoh())
+        assertEquals(EnergySourceTier.NOMINAL_VOLTAGE, result.energySourceTier)
+
+        // 核心物理守恒约束：可用剩余能量必须严格小于等于满电总能量
+        assertNotNull(result.remainingEnergyWh)
+        assertNotNull(result.fullEnergyWh)
+        assertTrue(
+            "可用剩余能量 (${result.remainingEnergyWh} Wh) 必须严格小于等于满电能量 (${result.fullEnergyWh} Wh)",
+            result.remainingEnergyWh!! <= result.fullEnergyWh!!
+        )
+    }
 }

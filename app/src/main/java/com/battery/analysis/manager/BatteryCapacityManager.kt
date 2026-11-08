@@ -253,10 +253,13 @@ class BatteryCapacityManager private constructor(private val context: Context) {
         }
 
 
-        // 方案A标准更新：首行满电能量统一基于标称工作电压平台（3.85V）基准计算（如 24.05 Wh），
-        // 严格与出厂设计、FCC 库仑计量、SOH 78.1% 同源闭环，消除标题栏数据认知冲突；
-        // 下方卡片【可用剩余能量】严格以放电能量模型按用户设定条件（门限 + 条数）测算出的权威结果为准；
-        // 仅在初始冷启动（0 段已学或模型无依据）时，自动按标称基准百分比兜底计算。
+        // 方案A标准闭环：
+        // 容量主卡片与诊断档案弹窗作为电池物理容量（FCC）与健康度（SOH）的核心载体，
+        // 所有能量指标必须与当前生效的 FCC（如 6278 mAh）、设计容量（8000 mAh）及当前 SOC 严格同源闭环：
+        // 1. 首行满电能量：统一基于标称工作电压平台（3.85V）基准计算（如 6278 mAh * 3.85V / 1000 = 24.17 Wh）；
+        // 2. 下方卡片【可用剩余能量】：严格同步基于该标称基准计算（如 5713 mAh * 3.85V / 1000 = 22.00 Wh），
+        //    彻底消除此前跨轨混拼放电微积分模型导致的“剩余能量 27.03 Wh > 满电总能量 24.17 Wh”物理逆向倒挂现象；
+        // 3. 独立的放电做功实测微积分模型（实测做功满电基准与 20 段曲线）完整归位至【放电能量学习 >】专属弹窗中展示。
         val nominalFullWh = effectiveFcc?.let { (it * NOMINAL_VOLTAGE_VOLTS) / 1000.0 }
         val nominalRemainingWh = if (nominalFullWh != null && safeSoc != null) {
             (nominalFullWh * safeSoc) / 100.0
@@ -273,21 +276,8 @@ class BatteryCapacityManager private constructor(private val context: Context) {
             }
         } else null
 
-        val hybridRemainingWh = hybridOverview?.learnedRemainingEnergyWh
-
-        val finalRemainingWh: Double?
-        val energyTier: EnergySourceTier
-        if (hybridRemainingWh != null && hybridRemainingWh >= 0.0) {
-            finalRemainingWh = hybridRemainingWh
-            energyTier = if (hybridOverview.hybridEstimate?.isFullyLearned == true || learnedCurve?.isFullyLearned == true) {
-                EnergySourceTier.MEASURED_LEARNED
-            } else {
-                EnergySourceTier.HYBRID_MODEL
-            }
-        } else {
-            finalRemainingWh = nominalRemainingWh
-            energyTier = EnergySourceTier.NOMINAL_VOLTAGE
-        }
+        val finalRemainingWh = nominalRemainingWh
+        val energyTier = EnergySourceTier.NOMINAL_VOLTAGE
 
         val energyFusion = EnergyFusionResult(
             fullEnergyWh = nominalFullWh,

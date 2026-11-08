@@ -92,6 +92,14 @@ class PowerUsageManager private constructor(private val context: Context) {
         private const val PREF_KEY_UNPLUG_BG_SERVICE_SNAPSHOT = "pref_unplug_bg_service_snapshot"
         private const val PREF_KEY_REALTIME_SAMPLES_JSON = "pref_discharge_realtime_samples_json"
 
+        /** 放电自学习有效数据掉电百分比门限持久化键（默认 15%） */
+        const val PREF_KEY_DISCHARGE_SOC_THRESHOLD = "pref_discharge_effective_soc_threshold"
+        const val DEFAULT_DISCHARGE_SOC_THRESHOLD = 15
+
+        /** 放电自学习有效历史数据条数限制持久化键（默认最新 10 条） */
+        const val PREF_KEY_DISCHARGE_SAMPLE_COUNT_LIMIT = "pref_discharge_effective_sample_count"
+        const val DEFAULT_DISCHARGE_SAMPLE_COUNT_LIMIT = 10
+
         /** 连续时序微积分单微元最大有效跨度门限（单位：毫秒，默认 2 分钟，杜绝息屏 Deep Sleep 断层插值放大） */
         const val MAX_INTEGRATION_INTERVAL_MS = 120_000L
 
@@ -1930,6 +1938,7 @@ class PowerUsageManager private constructor(private val context: Context) {
     private var isDischargeSamplesLoaded: Boolean = false
 
     init {
+        instance = this
         ensureDischargeSamplesLoaded()
     }
 
@@ -2120,6 +2129,215 @@ class PowerUsageManager private constructor(private val context: Context) {
     }
 
     /**
+     * 获取当前配置的放电自学习有效数据掉电跨度百分比门限（默认 15%）。
+     */
+    fun getDischargeSocSpanThreshold(): Int {
+        return prefs.getInt(PREF_KEY_DISCHARGE_SOC_THRESHOLD, DEFAULT_DISCHARGE_SOC_THRESHOLD)
+    }
+
+    /**
+     * 设置放电自学习有效数据掉电跨度百分比门限（范围 10% ~ 100%）。
+     *
+     * @param thresholdPercent 目标百分比门限
+     */
+    fun setDischargeSocSpanThreshold(thresholdPercent: Int) {
+        val clamped = thresholdPercent.coerceIn(10, 100)
+        prefs.edit().putInt(PREF_KEY_DISCHARGE_SOC_THRESHOLD, clamped).apply()
+    }
+
+    /**
+     * 获取当前配置的放电自学习最新有效数据条数时效窗口（默认 10 条，0 为全部）。
+     */
+    fun getDischargeSampleCountLimit(): Int {
+        return prefs.getInt(PREF_KEY_DISCHARGE_SAMPLE_COUNT_LIMIT, DEFAULT_DISCHARGE_SAMPLE_COUNT_LIMIT)
+    }
+
+    /**
+     * 设置放电自学习最新有效数据条数时效窗口（0 为全部，其余为正整数如 3, 5, 10, 15, 20, 30）。
+     *
+     * @param limit 目标条数
+     */
+    fun setDischargeSampleCountLimit(limit: Int) {
+        val safeVal = if (limit <= 0) 0 else limit
+        prefs.edit().putInt(PREF_KEY_DISCHARGE_SAMPLE_COUNT_LIMIT, safeVal).apply()
+    }
+
+    /**
+     * 自动回溯同步历史放电记录至放电能量自学习模型（仅在首次启动或配置变更时执行一次）。
+     */
+    fun syncHistoricalDischargeRecordsIfNeeded() {
+        val syncedVer = prefs.getInt("pref_historical_discharge_synced_version", 0)
+        if (syncedVer < 1) {
+            try {
+                recalculateDischargeEnergyModel()
+                prefs.edit().putInt("pref_historical_discharge_synced_version", 1).apply()
+            } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * 基于用户配置的双重条件（单次放电周期百分比门限 + 最新有效数据条数时效窗口），
+     * 实时过滤历史放电账本与当前在途会话，即时重算放电能量模型（满充能量 Wh、等效容量 mAh、健康度与 20 段 Bin 样本分布）。
+     *
+     * @param thresholdPercent 自定义指定的放电掉电跨度门限（默认读取本地设置）
+     * @param countLimit 自定义指定的最新有效数据条数（默认读取本地设置，0 为不限/全部）
+     * @return 即时重算后的三源能量对比看板实体 [EnergyComparisonOverview]
+     */
+    @Synchronized
+    fun recalculateDischargeEnergyModel(
+        thresholdPercent: Int? = null,
+        countLimit: Int? = null
+    ): com.battery.analysis.domain.estimator.model.EnergyComparisonOverview {
+        val targetThreshold = thresholdPercent ?: getDischargeSocSpanThreshold()
+        val targetLimit = countLimit ?: getDischargeSampleCountLimit()
+        val minRequiredThreshold = if (targetThreshold >= 100) 98 else targetThreshold
+
+        val dbHelper = PowerUsageDbHelper.getInstance(context)
+        val allRecords = dbHelper.getAllRecords()
+
+        // 1. 提取所有已完结的放电记录，按掉电百分比筛选（使用轻量接口，杜绝主线程解析应用列表及图标 Binder IPC）
+        val eligibleRecords = allRecords.filter { record ->
+            if (!record.isCompleted) return@filter false
+            val startLvl = record.getStartBatteryLevel()
+            val endLvl = record.levelPercent
+            val drop = kotlin.math.abs(startLvl - endLvl)
+            drop >= minRequiredThreshold
+        }
+
+        // 2. 按有效数据条数截取最近 N 条（滚动时效窗口，淘汰陈旧历史）
+        val qualifiedRecords = if (targetLimit > 0) {
+            eligibleRecords.take(targetLimit)
+        } else {
+            eligibleRecords
+        }
+
+        val (fccMah, _) = getEffectiveDeviceCapacityWithSource()
+        val learner = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.getInstance(context)
+
+        // 3. 微观轨与宏观轨：从全新空模型开始，依序吸收这 N 条合格会话
+        var dynamicCurve = com.battery.analysis.domain.estimator.model.LearnedSocEnergyCurve.createEmpty()
+        val macroFullWhList = mutableListOf<Double>()
+
+        for (record in qualifiedRecords.reversed()) {
+            val trendPoints = record.parseTrendPointsList()
+            val sessionId = record.id.toString()
+            val startLvl = record.getStartBatteryLevel()
+            val endLvl = record.levelPercent
+
+            // 宏观满充推算样本提取（基于高保真纯亮屏实测掉电跨度与区间微积分）
+            val onWh = record.screenOnEnergyWh
+            var pureOnDrop = 0f
+            var minOnSoc = 100f
+            var maxOnSoc = 0f
+            var hasOnPoints = false
+
+            if (trendPoints.size >= 2) {
+                for (i in 0 until trendPoints.size - 1) {
+                    val p = trendPoints[i]
+                    val c = trendPoints[i + 1]
+                    val dt = c.timestamp - p.timestamp
+                    if (p.isScreenOn && dt in 1L..300_000L) {
+                        val pLvl = p.batteryLevel.toFloat()
+                        val cLvl = c.batteryLevel.toFloat()
+                        if (pLvl > cLvl) {
+                            pureOnDrop += (pLvl - cLvl)
+                        }
+                        minOnSoc = minOf(minOnSoc, cLvl, pLvl)
+                        maxOnSoc = maxOf(maxOnSoc, cLvl, pLvl)
+                        hasOnPoints = true
+                    }
+                }
+            }
+
+            val totalCycleDrop = kotlin.math.abs(startLvl - endLvl).toFloat()
+            val effectiveOnDrop = if (pureOnDrop >= 1.0f) {
+                pureOnDrop
+            } else {
+                val totalWh = record.screenOnEnergyWh + record.screenOffEnergyWh
+                if (totalWh > 0.01f) (totalCycleDrop * (record.screenOnEnergyWh / totalWh)) else totalCycleDrop
+            }
+            val sSoc = if (hasOnPoints && maxOnSoc > minOnSoc) maxOnSoc else startLvl.toFloat()
+            val eSoc = if (hasOnPoints && maxOnSoc > minOnSoc) minOnSoc else (startLvl.toFloat() - effectiveOnDrop).coerceAtLeast(0f)
+
+            if (onWh > 0.05f && effectiveOnDrop >= minRequiredThreshold) {
+                val fullWh = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.calculateScreenOnAnchoredFullEnergy(
+                    screenOnEnergyWh = onWh,
+                    screenOnDropPercent = effectiveOnDrop,
+                    startSoc = sSoc,
+                    endSoc = eSoc
+                )
+                if (fullWh != null && fullWh in 5.0..100.0) {
+                    macroFullWhList.add(fullWh)
+                }
+            }
+
+            // 微观 20 段微积分样本提取
+            if (trendPoints.size >= 2) {
+                val powerSamples = trendPoints.map { pt ->
+                    com.battery.analysis.domain.estimator.model.PowerSample(
+                        timestampMs = pt.timestamp,
+                        voltageVolts = pt.voltageVolts,
+                        powerWatts = pt.powerWatts,
+                        batteryLevelPercent = pt.batteryLevel.toFloat(),
+                        state = if (pt.isScreenOn) com.battery.analysis.domain.estimator.model.ScreenPowerState.SCREEN_ON else com.battery.analysis.domain.estimator.model.ScreenPowerState.SCREEN_OFF,
+                        temperatureCelsius = pt.temperature
+                    )
+                }
+                val integrationResult = com.battery.analysis.domain.estimator.DischargeEnergyIntegrator.integrateDischargeSession(powerSamples)
+                val validation = com.battery.analysis.domain.estimator.DischargeSessionValidator.validateDischargeSession(
+                    integrationResult = integrationResult,
+                    sessionId = sessionId,
+                    effectiveCapacityMah = fccMah.toDouble()
+                )
+                if (validation.validCompleteSamples.isNotEmpty()) {
+                    dynamicCurve = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.updateCurveWithSamples(
+                        currentCurve = dynamicCurve,
+                        samples = validation.validCompleteSamples,
+                        updateTimestamp = record.id,
+                        incrementSessionCount = true
+                    )
+                }
+            }
+        }
+
+        // 4. 计算宏观轨历史中位数
+        val macroHistoricalMedianWh = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.calculateMedian(macroFullWhList)
+
+        // 5. 保存并更新内存模型
+        learner.saveCurveDirectly(dynamicCurve)
+
+        // 6. 融入当前正在进行的实时放电会话（若满足门限或具备纯亮屏数据）
+        val screenOnMetrics = getScreenOnDischargeMetrics()
+        val curStatus = getCurrentBatteryStatus()
+        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? android.os.BatteryManager
+        val nativeEnergyNwh = batteryManager?.getLongProperty(android.os.BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER)
+        val hardwareWh = if (nativeEnergyNwh != null && nativeEnergyNwh != Long.MIN_VALUE && nativeEnergyNwh > 0L) {
+            val convertedWh = nativeEnergyNwh.toDouble() / 1_000_000_000.0
+            if (convertedWh in 0.1..100.0) convertedWh else null
+        } else null
+
+        val capacityResult = com.battery.analysis.manager.BatteryCapacityManager.getInstance(context).capacityState.value
+        val designMah = capacityResult?.designCapacityMah
+
+        return learner.buildComparisonOverview(
+            currentSocPercent = curStatus.levelPercent.toFloat(),
+            hardwareNativeEnergyWh = hardwareWh,
+            effectiveCapacityMah = fccMah,
+            nominalVoltageVolts = 3.85f,
+            temperatureCelsius = curStatus.temperature,
+            designCapacityMah = designMah?.toFloat(),
+            screenOnEnergyWh = screenOnMetrics?.screenOnEnergyWh,
+            screenOnDropPercent = screenOnMetrics?.screenOnDropPercent,
+            screenOnStartSoc = screenOnMetrics?.startSoc,
+            screenOnEndSoc = screenOnMetrics?.endSoc,
+            effectiveThresholdPercent = targetThreshold,
+            effectiveSampleCountLimit = targetLimit,
+            participatingSessionCount = qualifiedRecords.size,
+            macroHistoricalFullWh = macroHistoricalMedianWh
+        )
+    }
+
+    /**
      * 在放电进行中实时评估并学习已完成闭环的 5% SOC 物理区间（In-flight Learning）。
      * 避免用户在单次长周期放电过程中无法及时看到学习成果，且杜绝重复学习。
      *
@@ -2147,7 +2365,8 @@ class PowerUsageManager private constructor(private val context: Context) {
                     com.battery.analysis.domain.estimator.model.ScreenPowerState.SCREEN_ON
                 } else {
                     com.battery.analysis.domain.estimator.model.ScreenPowerState.SCREEN_OFF
-                }
+                },
+                temperatureCelsius = point.temperature
             )
         }
 

@@ -874,7 +874,23 @@
     <string name="capacity_thresh_desc_70">Full span calibration</string>
     <string name="capacity_thresh_desc_80">Deep cycle · High accuracy</string>
     <string name="capacity_thresh_desc_90">Ultra deep cycle</string>
+    <string name="capacity_thresh_desc_95">Ultra deep discharge · Near full cycle</string>
     <string name="capacity_thresh_desc_100" formatted="false">Full 0%~100% deep cycle</string>
+
+    <!-- Discharge Dual Filter Conditions -->
+    <string name="discharge_filter_label">Learning Filter:</string>
+    <string name="discharge_threshold_picker_title">Set Discharge Cycle Threshold</string>
+    <string name="discharge_threshold_picker_hint">Only include cycles meeting threshold drop to filter shallow charges</string>
+    <string name="discharge_count_picker_title">Set Discharge Sample Window Count</string>
+    <string name="discharge_count_picker_hint">Take newest qualified cycles to eliminate stale records for current health</string>
+    <string name="discharge_count_desc_3">Fast tracking · Ideal for fresh cells or sudden degradation check</string>
+    <string name="discharge_count_desc_5">High sensitivity · Quickly tracks recent battery performance</string>
+    <string name="discharge_count_desc_10">Recommended · Balances statistical robustness and aging recency</string>
+    <string name="discharge_count_desc_15">Large sample · Smooths out daily multi-scenario fluctuations</string>
+    <string name="discharge_count_desc_20">Long cycle · Covers multi-week operating conditions</string>
+    <string name="discharge_count_desc_30">Monthly span · Comprehensively covers long-term habits</string>
+    <string name="discharge_count_desc_all">Full history · Includes all historical discharge cycles in database</string>
+    <string name="toast_discharge_condition_updated">Discharge learning conditions updated and recalculated</string>
 
     <!-- Power & Charging Tooltips -->
     <string name="power_bubble_screen_on_summary">Screen On: Time, Power, Rate, Energy</string>
@@ -1265,6 +1281,7 @@
 
     <string name="energy_source_badge_measured">Measured</string>
     <string name="energy_badge_screen_on_anchored">Screen-On Anchored (High Conf)</string>
+    <string name="energy_badge_macro_historical_anchored">Historical Anchored (High Conf)</string>
     <string name="energy_source_badge_screen_on_anchored">Anchored</string>
     <string name="energy_source_screen_on_anchored_desc">Screen-On Work Anchored</string>
     <string name="energy_source_sessions_anchored">Continuous Screen-On Meter</string>

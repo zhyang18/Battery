@@ -875,7 +875,23 @@
     <string name="capacity_thresh_desc_70">极限全量程校准</string>
     <string name="capacity_thresh_desc_80">深度充放 · 极高精度</string>
     <string name="capacity_thresh_desc_90">超深度充放循环</string>
+    <string name="capacity_thresh_desc_95">超深放电 · 接近全量程</string>
     <string name="capacity_thresh_desc_100" formatted="false">完整 0%~100% 深度充放</string>
+
+    <!-- 放电双重条件选择器与说明 -->
+    <string name="discharge_filter_label">学习条件:</string>
+    <string name="discharge_threshold_picker_title">设置放电单次周期百分比门限</string>
+    <string name="discharge_threshold_picker_hint">仅纳入单次掉电达到门限的放电周期，过滤碎片化浅充浅放</string>
+    <string name="discharge_count_picker_title">设置放电自学习有效数据条数</string>
+    <string name="discharge_count_picker_hint">仅取时间最新的有效放电周期，淘汰过往陈旧数据以追踪当前健康度</string>
+    <string name="discharge_count_desc_3">极速敏感追踪 · 适合刚换新电芯或突发衰减检测</string>
+    <string name="discharge_count_desc_5">高灵敏度平滑 · 快速追踪近期电池性能</string>
+    <string name="discharge_count_desc_10">推荐基准 · 兼顾统计稳健性与老化时效性</string>
+    <string name="discharge_count_desc_15">大样本平滑 · 减少日常多场景波动</string>
+    <string name="discharge_count_desc_20">长周期平滑 · 覆盖多周使用工况</string>
+    <string name="discharge_count_desc_30">月度跨度平滑 · 全面涵盖长期使用习惯</string>
+    <string name="discharge_count_desc_all">全量历史累计 · 包含本地数据库中所有历史放电周期</string>
+    <string name="toast_discharge_condition_updated">已更新放电自学习条件并即时重算</string>
 
     <!-- 耗电与充电卡片提示 -->
     <string name="power_bubble_screen_on_summary">亮屏：时间、平均功耗、放电速度、能量</string>
@@ -1016,6 +1032,7 @@
     <string name="energy_model_theory_p3" formatted="false">无量纲形态自举补全（Shape Bootstrapping）：未学习的 SOC 区间彻底脱离容量先验推算；系统基于锂电池无量纲电化学形态权重向量，通过已实测区间的单位做功自举反推整机做功标尺，并在看板中对各区间来源（实测/插值/自举/待采集）实施多色透明溯源。</string>
     <string name="energy_source_badge_measured">实测</string>
     <string name="energy_badge_screen_on_anchored">实测锚定 (高置信)</string>
+    <string name="energy_badge_macro_historical_anchored">历史实测锚定 (高置信)</string>
     <string name="energy_source_badge_screen_on_anchored">锚定</string>
     <string name="energy_source_screen_on_anchored_desc">亮屏实测展开</string>
     <string name="energy_source_sessions_anchored">亮屏连续高频实测锚定</string>

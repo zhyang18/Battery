@@ -196,7 +196,8 @@ data class SocEnergyBin(
     val medianDischargeCRate: Double? = null,
     val lastUpdatedTimestamp: Long = 0L,
     val minObservedWh: Double? = null,
-    val maxObservedWh: Double? = null
+    val maxObservedWh: Double? = null,
+    val lastUpdatedSessionId: String = ""
 ) {
     /**
      * 判断当前区间是否已具备可信的学习样本数据。
@@ -835,5 +836,9 @@ data class EnergyComparisonOverview(
     val effectiveCapacityMah: Float? = null,
     val isScreenOnAnchored: Boolean = false,
     val screenOnMeasuredEnergyWh: Float? = null,
-    val screenOnDropPercent: Float? = null
+    val screenOnDropPercent: Float? = null,
+    val effectiveThresholdPercent: Int = 15,
+    val effectiveSampleCountLimit: Int = 10,
+    val participatingSessionCount: Int = 0,
+    val macroHistoricalFullWh: Double? = null
 )

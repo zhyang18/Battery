@@ -130,6 +130,54 @@
                         tools:text="覆盖率 80.0% (学习中)" />
                 </LinearLayout>
 
+                <!-- 双重条件过滤器胶囊栏（单次放电门限 + 时效有效条数） -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/discharge_filter_label"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="10.5sp" />
+
+                    <TextView
+                        android:id="@+id/tv_discharge_threshold_selector"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:background="@drawable/bg_diag_pill_badge"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center"
+                        android:paddingHorizontal="8dp"
+                        android:paddingVertical="3dp"
+                        android:textColor="#10b981"
+                        android:textSize="10.5sp"
+                        android:textStyle="bold"
+                        tools:text="门限: > 15% ▾" />
+
+                    <TextView
+                        android:id="@+id/tv_discharge_count_selector"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:background="@drawable/bg_diag_pill_badge"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center"
+                        android:paddingHorizontal="8dp"
+                        android:paddingVertical="3dp"
+                        android:textColor="#3b82f6"
+                        android:textSize="10.5sp"
+                        android:textStyle="bold"
+                        tools:text="最近 10 条 ▾" />
+                </LinearLayout>
+
                 <!-- 三源对比：纵向每行显示（实测学习 | 硬件直读 | 传统标称） -->
                 <LinearLayout
                     android:layout_width="match_parent"

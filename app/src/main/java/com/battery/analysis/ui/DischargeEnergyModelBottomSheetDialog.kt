@@ -175,58 +175,45 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
     private fun bindEnergyData(root: View) {
         val context = context ?: return
 
+        val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(context)
+
         // 核心增强：打开弹窗时优先触发一次正在进行中放电会话的即时学习评估，让已跑满的 5% 区间立即可见
         try {
-            com.battery.analysis.manager.PowerUsageManager.getInstance(context).evaluateInFlightSocLearning()
+            powerManager.evaluateInFlightSocLearning()
         } catch (_: Exception) {}
 
+        // 执行基于双重条件（门限 + 条数时效窗口）的即时重算并获得最新全景数据
+        val overview = powerManager.recalculateDischargeEnergyModel()
         val learner = SocEnergyCurveLearner.getInstance(context)
         val curve = learner.getLearnedCurve()
 
-        // 1. 获取当前电量与底层硬件原始数据
-        val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-        val currentSoc = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.toFloat() ?: 50.0f
-        val nativeEnergyNwh = batteryManager?.getLongProperty(BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER)
-        val hardwareWh = if (nativeEnergyNwh != null && nativeEnergyNwh != Long.MIN_VALUE && nativeEnergyNwh > 0L) {
-            val convertedWh = nativeEnergyNwh.toDouble() / 1_000_000_000.0
-            if (convertedWh in 0.1..100.0) convertedWh else null
-        } else null
+        // 绑定双重条件过滤器选择器（放电门限 + 时效有效条数）
+        val tvThresholdSelector = root.findViewById<TextView>(R.id.tv_discharge_threshold_selector)
+        val tvCountSelector = root.findViewById<TextView>(R.id.tv_discharge_count_selector)
 
-        // 获取基准满充容量与设计容量
-        val capacityResult = BatteryCapacityManager.getInstance(context).capacityState.value
-        val fccMah = capacityResult?.fullChargeCapacityMah
-        val designMah = capacityResult?.designCapacityMah
-        val effectiveMah = fccMah ?: designMah
+        val currentThreshold = powerManager.getDischargeSocSpanThreshold()
+        val currentLimit = powerManager.getDischargeSampleCountLimit()
 
-        val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(context)
-        val currentStatus = powerManager.getCurrentBatteryStatus()
-        val isDischarging = !currentStatus.isCharging
-        val currentDischargeMa = if (isDischarging) {
-            val rawCur = batteryManager?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW) ?: 0
-            if (rawCur != 0 && rawCur != Int.MIN_VALUE) {
-                val normalizedMa = BatteryUnitNormalizer.normalizeCurrentMa(rawCur.toLong(), isCharging = false)
-                if (normalizedMa > 0f) normalizedMa.toDouble() else null
-            } else null
-        } else null
-        val tempCelsius = currentStatus.temperature
+        tvThresholdSelector?.text = if (currentThreshold == 100) "门限: 100% ▾" else "门限: > $currentThreshold% ▾"
+        tvCountSelector?.text = if (currentLimit <= 0) "全部数据 ▾" else "最近 $currentLimit 条 ▾"
 
-        val screenOnMetrics = try {
-            powerManager.getScreenOnDischargeMetrics()
-        } catch (_: Exception) { null }
+        tvThresholdSelector?.setOnClickListener {
+            val picker = DischargeThresholdPickerBottomSheetDialog()
+            picker.setOnThresholdSelectedListener { newThreshold ->
+                powerManager.setDischargeSocSpanThreshold(newThreshold)
+                bindEnergyData(root)
+            }
+            picker.show(childFragmentManager, "DischargeThresholdPicker")
+        }
 
-        val overview = learner.buildComparisonOverview(
-            currentSocPercent = currentSoc,
-            hardwareNativeEnergyWh = hardwareWh,
-            effectiveCapacityMah = effectiveMah?.toFloat(),
-            nominalVoltageVolts = 3.85f,
-            currentDischargeCurrentMa = currentDischargeMa,
-            temperatureCelsius = tempCelsius,
-            designCapacityMah = designMah?.toFloat(),
-            screenOnEnergyWh = screenOnMetrics?.screenOnEnergyWh,
-            screenOnDropPercent = screenOnMetrics?.screenOnDropPercent,
-            screenOnStartSoc = screenOnMetrics?.startSoc,
-            screenOnEndSoc = screenOnMetrics?.endSoc
-        )
+        tvCountSelector?.setOnClickListener {
+            val picker = DischargeCountPickerBottomSheetDialog()
+            picker.setOnCountSelectedListener { newLimit ->
+                powerManager.setDischargeSampleCountLimit(newLimit)
+                bindEnergyData(root)
+            }
+            picker.show(childFragmentManager, "DischargeCountPicker")
+        }
 
         // 2. 渲染板块一看板数据（纵向每行显示对比）
         val tvCoverageBadge = root.findViewById<TextView>(R.id.tv_model_coverage_badge)
@@ -243,6 +230,10 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
             tvCoverageBadge.text = getString(R.string.energy_badge_screen_on_anchored)
             tvCoverageBadge.setTextColor(Color.parseColor("#10b981"))
             tvCoverageBadge.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#2010b981"))
+        } else if (overview.macroHistoricalFullWh != null && overview.participatingSessionCount > 0) {
+            tvCoverageBadge.text = getString(R.string.energy_badge_macro_historical_anchored)
+            tvCoverageBadge.setTextColor(Color.parseColor("#3b82f6"))
+            tvCoverageBadge.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#203b82f6"))
         } else {
             val coveragePercentStr = String.format(Locale.US, "%.1f%%", overview.curveCoveragePercent * 100f)
             val maturityText = getModelMaturityLabel(context, curve.maturity)
@@ -266,6 +257,9 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
                 val onWh = overview.screenOnMeasuredEnergyWh ?: 0f
                 val onDrop = overview.screenOnDropPercent ?: 0f
                 String.format(Locale.US, "亮屏 %.2f Wh (掉电 %.1f%%)", onWh, onDrop)
+            } else if (overview.macroHistoricalFullWh != null && overview.participatingSessionCount > 0) {
+                val threshText = if (overview.effectiveThresholdPercent == 100) "100%" else "≥${overview.effectiveThresholdPercent}%"
+                "历史中位数 (门限 $threshText · ${overview.participatingSessionCount}条)"
             } else if (hybridFull.isFullyLearned) {
                 "100% 实测微积分"
             } else {
@@ -307,7 +301,10 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
         // 实测学习放电样本与会话说明
         if (overview.isScreenOnAnchored) {
             tvValSessions.text = getString(R.string.energy_source_sessions_anchored)
+        } else if (overview.macroHistoricalFullWh != null && overview.participatingSessionCount > 0) {
+            tvValSessions.text = "基于最近 ${overview.participatingSessionCount} 条有效放电记录宏观锚定"
         } else {
+            val isDischarging = !powerManager.getCurrentBatteryStatus().isCharging
             val currentDischargeSamples = powerManager.getDischargeRealtimeSamples()
             val hasOngoingDischarge = isDischarging && currentDischargeSamples.size >= 2
             val maxBinSamples = curve.bins.maxOfOrNull { it.sampleCount } ?: 0

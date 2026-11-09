@@ -3,6 +3,7 @@ package com.battery.analysis
 import com.battery.analysis.domain.estimator.DischargeEnergyIntegrator
 import com.battery.analysis.domain.estimator.model.LearnedSocEnergyCurve
 import com.battery.analysis.domain.estimator.model.PowerSample
+import com.battery.analysis.domain.estimator.model.SampleQuality
 import com.battery.analysis.domain.estimator.model.ScreenPowerState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -122,10 +123,11 @@ class DischargeEnergyIntegratorTest {
     }
 
     /**
-     * 测试息屏待机休眠区间（SCREEN_OFF）坚决不注入虚构保底待机功耗，忠实记录为未观测断层（UnobservedSocRange）。
+     * 测试真实的息屏待机低功耗被动广播采样（时间跨度数分钟至数十分钟、单步掉电 <= 2.0% 且功耗符合待机底噪）
+     * 正常执行梯形微积分，忠实累加待机实测做功，且绝不误判为未观测断层（彻底修复 15%~20%、10%~15% 被误拒的问题）。
      */
     @Test
-    fun testScreenOffStandbyGapMarkedAsUnobservedWithoutMockData() {
+    fun testScreenOffNormalStandbySamplingIntegratesFaithfully() {
         val samples = listOf(
             PowerSample(
                 timestampMs = 0L,
@@ -135,7 +137,7 @@ class DischargeEnergyIntegratorTest {
                 state = ScreenPowerState.SCREEN_OFF
             ),
             PowerSample(
-                timestampMs = 300_000L, // 跨越 5 分钟
+                timestampMs = 300_000L, // 跨越 5 分钟（> 180 秒，但属于正常息屏 1% 掉电待机周期）
                 voltageVolts = 3.98f,
                 powerWatts = 0.25f,
                 batteryLevelPercent = 79.5f,
@@ -144,12 +146,96 @@ class DischargeEnergyIntegratorTest {
         )
 
         val sessionResult = DischargeEnergyIntegrator.integrateDischargeSession(samples)
-        // 纯亮屏积分不生成虚构做功 Bin
+        // 正常息屏待机放电绝不能误报为断层
+        assertTrue("正常息屏待机放电绝不能误报为未观测断层", sessionResult.unobservedRanges.isEmpty())
+        // 忠实产生物理积分做功：0.25W * (300 / 3600) = 0.020833 Wh
+        assertEquals(1, sessionResult.binDeltas.size)
+        val bin15 = sessionResult.binDeltas[15]
+        assertNotNull(bin15)
+        val expectedWh = 0.25 * (300.0 / 3600.0)
+        assertEquals(expectedWh, bin15!!.energyWh, 0.0001)
+        assertEquals(0.5f, bin15.coveredSocSpan, 0.001f)
+    }
+
+    /**
+     * 测试真正异常的长时间关机/失联断层（如电量跨度跳变 > 2.0%，中间丢失了 1% 广播轨迹）：
+     * 必须忠实标记为未观测断层（UnobservedSocRange），防止以首尾粗暴连线虚构未观测期间的能耗。
+     */
+    @Test
+    fun testScreenOffAbnormalShutdownGapMarkedAsUnobserved() {
+        val samples = listOf(
+            PowerSample(
+                timestampMs = 0L,
+                voltageVolts = 4.0f,
+                powerWatts = 0.25f,
+                batteryLevelPercent = 80.0f,
+                state = ScreenPowerState.SCREEN_OFF
+            ),
+            PowerSample(
+                timestampMs = 1800_000L, // 跨越 30 分钟，但电量突变 4.0%（中间未收到 79, 78, 77 广播，属于关机断层）
+                voltageVolts = 3.92f,
+                powerWatts = 0.25f,
+                batteryLevelPercent = 76.0f,
+                state = ScreenPowerState.SCREEN_OFF
+            )
+        )
+
+        val sessionResult = DischargeEnergyIntegrator.integrateDischargeSession(samples)
+        // 突变断层不生成虚构做功
         assertTrue(sessionResult.binDeltas.isEmpty())
         // 忠实记录息屏未观测区间
         assertEquals(1, sessionResult.unobservedRanges.size)
         assertEquals(80.0f, sessionResult.unobservedRanges[0].startSocPercent, 0.001f)
-        assertEquals(79.5f, sessionResult.unobservedRanges[0].endSocPercent, 0.001f)
+        assertEquals(76.0f, sessionResult.unobservedRanges[0].endSocPercent, 0.001f)
+    }
+
+    /**
+     * 测试超长待机采样（跨越 25 分钟、掉电 1%、功耗 0.29W，完全还原用户真实工况）：
+     * 系统忠实微积分做功，并验证连续 5 步息屏放电完整闭合 15%~20% 区间，经校验器评定为合格实测完整样本（COMPLETE_BIN）。
+     */
+    @Test
+    fun testScreenOffStandbyFivePercentBinLearnedAsCompleteMeasured() {
+        // 模拟从 20% 放电到 15%（Bin 3），每 1% 耗时 25 分钟（1500 秒），功率 0.29W，完全处于息屏待机状态
+        val samples = mutableListOf<PowerSample>()
+        val stepMs = 25 * 60 * 1000L
+        for (i in 0..5) {
+            val level = 20.0f - i.toFloat()
+            val ts = i * stepMs
+            val volt = 3.90f - (i * 0.02f)
+            samples.add(
+                PowerSample(
+                    timestampMs = ts,
+                    voltageVolts = volt,
+                    powerWatts = 0.29f,
+                    batteryLevelPercent = level,
+                    state = ScreenPowerState.SCREEN_OFF
+                )
+            )
+        }
+
+        val integrationResult = DischargeEnergyIntegrator.integrateDischargeSession(samples)
+        // 验证未观测断层必须为空
+        assertTrue("正常连续 1% 广播息屏待机放电断层数必须为 0", integrationResult.unobservedRanges.isEmpty())
+        // 验证 Bin 3 (15%~20%) 成功生成做功
+        val bin3Delta = integrationResult.binDeltas[3]
+        assertNotNull("Bin 3 必须存在做功微元", bin3Delta)
+        val expectedTotalWh = 0.29 * (125.0 / 60.0) // 125 分钟做功约 0.604167 Wh
+        assertEquals(expectedTotalWh, bin3Delta!!.energyWh, 0.001)
+        assertEquals(5.0f, bin3Delta.coveredSocSpan, 0.001f)
+
+        // 校验器审计
+        val validation = com.battery.analysis.domain.estimator.DischargeSessionValidator.validateDischargeSession(
+            integrationResult = integrationResult,
+            sessionId = "standby_session_complete"
+        )
+        // 验证绝不能被拉黑拒绝
+        assertFalse("Bin 3 绝不能被拒绝拉黑", validation.rejectedBinIndices.contains(3))
+        // 验证被评定为合格完整样本（COMPLETE_BIN）
+        val bin3Sample = validation.validCompleteSamples.find { it.binIndex == 3 }
+        assertNotNull("Bin 3 必须顺利成为 COMPLETE_BIN 实测样本", bin3Sample)
+        assertEquals(SampleQuality.COMPLETE_BIN, bin3Sample!!.quality)
+        assertEquals(1.0, bin3Sample.coverageFraction, 0.001)
+        assertEquals(expectedTotalWh, bin3Sample.energyWh, 0.001)
     }
 
     /**

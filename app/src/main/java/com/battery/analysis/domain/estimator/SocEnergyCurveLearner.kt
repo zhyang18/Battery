@@ -425,7 +425,9 @@ class SocEnergyCurveLearner(private val context: Context) {
             if (weight <= 0.005) return null
 
             val fullWh = dischargeEnergyWh.toDouble() / weight
-            return if (fullWh in 5.0..100.0) fullWh else null
+            // 物理守卫：智能手机单电芯电池满电能量合理范围为 4.0Wh ~ 45.0Wh（对应 1000mAh ~ 11600mAh），
+            // 超过 45Wh 说明历史放电包含长待机虚增或测量失真，绝不能纳入宏观满充标尺中位数
+            return if (fullWh in 4.0..45.0) fullWh else null
         }
 
         /**
@@ -544,7 +546,7 @@ class SocEnergyCurveLearner(private val context: Context) {
                 temperatureCelsius = temperatureCelsius,
                 screenOnAnchoredFullEnergyWh = authoritativeMacroWh
             )
-            val fullLearnedWh = if (curve.bins.count { it.hasLearnedData() } >= LearnedSocEnergyCurve.MIN_BOOTSTRAP_LEARNED_BINS) {
+            val rawFullLearnedWh = if (curve.bins.count { it.hasLearnedData() } >= LearnedSocEnergyCurve.MIN_BOOTSTRAP_LEARNED_BINS) {
                 hybridFullEstimate?.remainingEnergyWh ?: authoritativeMacroWh ?: curve.estimatedFullUsableEnergyWh
             } else {
                 authoritativeMacroWh ?: hybridFullEstimate?.remainingEnergyWh ?: curve.estimatedFullUsableEnergyWh
@@ -556,6 +558,20 @@ class SocEnergyCurveLearner(private val context: Context) {
 
             val fullDesignWh = if (designCapacityMah != null && designCapacityMah > 0f) {
                 (designCapacityMah * nominalVoltageVolts) / 1000.0
+            } else null
+
+            // 物理守恒与电化学一致性约束（Physical Plausibility Constraint）：
+            // 真实整机物理放电做功绝不可能突破出厂全新设计理论上限（结合高压满电形态极限不超过出厂设计 105%），
+            // 坚决杜绝因历史休眠采样残余毛刺将实测做功虚推至超越出厂物理容量（如 35.08Wh / 113.9% / 9110mAh）。
+            val fullLearnedWh = if (rawFullLearnedWh != null && rawFullLearnedWh > 0.0) {
+                var clampedWh = rawFullLearnedWh
+                if (fullDesignWh != null && fullDesignWh > 0.0) {
+                    val maxAllowedDesignWh = fullDesignWh * 1.05
+                    if (clampedWh > maxAllowedDesignWh) {
+                        clampedWh = maxAllowedDesignWh
+                    }
+                }
+                clampedWh
             } else null
 
             val fullHardwareWh = if (hardwareNativeEnergyWh != null && currentSocPercent in 15f..100f) {

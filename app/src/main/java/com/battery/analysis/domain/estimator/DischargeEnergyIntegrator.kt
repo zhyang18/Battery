@@ -20,8 +20,20 @@ import kotlin.math.min
  */
 object DischargeEnergyIntegrator {
 
-    /** 连续时序微积分单微元最大有效时间跨度门限（单位：毫秒，默认 180 秒，超过此门限判定为超长深睡断层挂起） */
+    /** 连续时序微积分单微元最大有效时间跨度门限（单位：毫秒，默认 180 秒，超过此门限判定为纯亮屏工况超时断层） */
     const val MAX_INTEGRATION_INTERVAL_MS: Long = 180_000L
+
+    /** 息屏待机状态下单次被动广播采样最大允许时间跨度门限（单位：毫秒，默认 4 小时，覆盖深度休眠 1% 掉电周期） */
+    const val MAX_STANDBY_INTERVAL_MS: Long = 4 * 3600_000L
+
+    /** 息屏待机状态下单次被动广播采样最大允许单步电量变化（单位：%，默认 2.0%，允许系统 1% 广播与防抖边界） */
+    const val MAX_STANDBY_STEP_SOC_DELTA: Float = 2.0f
+
+    /** 息屏待机状态下允许的最大待机功耗门限（单位：瓦 W，默认 0.8W，超过此值判定为异常功耗或非纯待机） */
+    const val MAX_STANDBY_POWER_WATTS: Float = 0.8f
+
+    /** 待机保底默认功耗（单位：瓦 W，当设备底层在息屏时未上报有效功率读数时保底使用） */
+    const val DEFAULT_STANDBY_BASE_WATTS: Float = 0.15f
 
     /** 最小有效时间间隔（单位：毫秒，防止并发打点微小除零） */
     const val MIN_INTEGRATION_INTERVAL_MS: Long = 50L
@@ -114,10 +126,31 @@ object DischargeEnergyIntegrator {
                 continue
             }
 
-            // 仅当时间跨度超过失联门限（> 180 秒）时，说明系统经历超长深度休眠失联挂起，中间缺乏连续物理轨迹。
-            // 此时严禁将大跨度休眠按首尾粗暴线性积分，忠实将该时段跨越的 SOC 区间记录为未观测断层（UnobservedSocRange）。
-            // 正常连续放电采样周期内（<= 180 秒），无论屏幕开或关，均具备底层硬件真实电压与功率，正常执行梯形微积分！
-            if (dtMs > MAX_INTEGRATION_INTERVAL_MS) {
+            val isScreenOffInterval = p1.state == ScreenPowerState.SCREEN_OFF || p2.state == ScreenPowerState.SCREEN_OFF
+            val socDelta = abs(p1.batteryLevelPercent - p2.batteryLevelPercent)
+            val avgPower = ((max(0.0f, p1.powerWatts) + max(0.0f, p2.powerWatts)) / 2.0)
+
+            // 区分真实的息屏被动广播采样与超长关机/异常失联断层：
+            // 1) 正常息屏待机广播采样：至少一端为息屏状态，单步电量变化 <= 2.0%（忠实对应 Android ACTION_BATTERY_CHANGED 1% 广播），
+            //    且两点时间差在合理待机时间窗内（<= 4 小时），平均功率符合真实硬件待机底噪（<= 2.5W）。
+            //    对于正常的息屏待机广播放电，即使采样间隔因深度休眠达到数十分钟，也忠实执行梯形微积分，正常累加为该区间的实测做功！
+            // 2) 真实未观测失联断层：
+            //    - 纯亮屏期间采样间隔超过 180 秒（说明系统卡顿、服务被杀或亮屏轮询中断）；
+            //    - 息屏期间单步电量跨度跳变 > 2.0%（说明手机中间经历长时间关机或服务被彻底杀掉数小时后重启，丢失了中间 1% 广播轨迹）；
+            //    - 息屏期间单步时间 > 4 小时（长期关机封存）；
+            //    - 功耗异常超标（> 2.5W）。
+            val isNormalStandbySampling = isScreenOffInterval &&
+                    socDelta <= MAX_STANDBY_STEP_SOC_DELTA &&
+                    dtMs <= MAX_STANDBY_INTERVAL_MS &&
+                    avgPower <= MAX_STANDBY_POWER_WATTS
+
+            val isUnobservedGap = if (isScreenOffInterval) {
+                !isNormalStandbySampling
+            } else {
+                dtMs > MAX_INTEGRATION_INTERVAL_MS
+            }
+
+            if (isUnobservedGap) {
                 unobservedList.add(
                     UnobservedSocRange(
                         startSocPercent = p1.batteryLevelPercent,
@@ -217,10 +250,45 @@ object DischargeEnergyIntegrator {
         val bin1 = getBinIndexForSoc(s1)
         val bin2 = getBinIndexForSoc(s2)
 
-        val power1 = max(0.0f, p1.powerWatts)
-        val power2 = max(0.0f, p2.powerWatts)
-        val current1 = p1.currentAmperes?.let { max(0.0f, it) } ?: 0.0f
-        val current2 = p2.currentAmperes?.let { max(0.0f, it) } ?: 0.0f
+        val rawPower1 = max(0.0f, p1.powerWatts)
+        val rawPower2 = max(0.0f, p2.powerWatts)
+        val isScreenOff = p1.state == ScreenPowerState.SCREEN_OFF || p2.state == ScreenPowerState.SCREEN_OFF
+
+        // 息屏长待机切片保护：当处于息屏状态时，待机功率严禁受到灭屏瞬间亮屏大功率（2W~4W）持续污染，
+        // 且缺失读数时严禁回退为对侧的亮屏高功率，必须以真实的物理待机功耗上限（MAX_STANDBY_POWER_WATTS = 0.8W）与基准底噪约束
+        val power1 = if (isScreenOff) {
+            if (p1.state == ScreenPowerState.SCREEN_OFF && dtMs > MAX_INTEGRATION_INTERVAL_MS) {
+                if (rawPower1 <= 0.001f) DEFAULT_STANDBY_BASE_WATTS else min(rawPower1, MAX_STANDBY_POWER_WATTS)
+            } else if (rawPower1 <= 0.001f) {
+                if (rawPower2 > 0.001f) min(rawPower2, MAX_STANDBY_POWER_WATTS) else DEFAULT_STANDBY_BASE_WATTS
+            } else if (dtMs > MAX_INTEGRATION_INTERVAL_MS) {
+                min(rawPower1, MAX_STANDBY_POWER_WATTS)
+            } else {
+                rawPower1
+            }
+        } else {
+            rawPower1
+        }
+
+        val power2 = if (isScreenOff) {
+            if (p2.state == ScreenPowerState.SCREEN_OFF && dtMs > MAX_INTEGRATION_INTERVAL_MS) {
+                if (rawPower2 <= 0.001f) DEFAULT_STANDBY_BASE_WATTS else min(rawPower2, MAX_STANDBY_POWER_WATTS)
+            } else if (rawPower2 <= 0.001f) {
+                if (rawPower1 > 0.001f) min(rawPower1, MAX_STANDBY_POWER_WATTS) else DEFAULT_STANDBY_BASE_WATTS
+            } else if (dtMs > MAX_INTEGRATION_INTERVAL_MS) {
+                min(rawPower2, MAX_STANDBY_POWER_WATTS)
+            } else {
+                rawPower2
+            }
+        } else {
+            rawPower2
+        }
+
+        val rawCurrent1 = p1.currentAmperes?.let { max(0.0f, it) } ?: 0.0f
+        val rawCurrent2 = p2.currentAmperes?.let { max(0.0f, it) } ?: 0.0f
+        val current1 = if (isScreenOff && rawCurrent1 <= 0.0001f && p1.voltageVolts > 0f) power1 / p1.voltageVolts else rawCurrent1
+        val current2 = if (isScreenOff && rawCurrent2 <= 0.0001f && p2.voltageVolts > 0f) power2 / p2.voltageVolts else rawCurrent2
+
         val temp1 = p1.temperatureCelsius ?: 25.0f
         val temp2 = p2.temperatureCelsius ?: 25.0f
 
@@ -228,7 +296,13 @@ object DischargeEnergyIntegrator {
         if (bin1 == bin2 || abs(s1 - s2) < 0.001f) {
             val targetBin = bin1
             val avgPower = (power1 + power2) / 2.0
-            val deltaWh = avgPower * (dtMs.toDouble() / 3600000.0)
+            var deltaWh = avgPower * (dtMs.toDouble() / 3600000.0)
+            // 物理电荷守恒上限保护：息屏长待机切片在单步内的放电做功不能超过物理最大电荷化学能
+            if (isScreenOff && dtMs > MAX_INTEGRATION_INTERVAL_MS) {
+                val stepSpan = max(0.3, abs(s1 - s2).toDouble())
+                val maxAllowedStepWh = maxOf(0.45 * stepSpan, 0.40)
+                deltaWh = min(deltaWh, maxAllowedStepWh)
+            }
             if (deltaWh > 0.0 && deltaWh.isFinite()) {
                 binEnergyAcc[targetBin] += deltaWh
                 binDurationAcc[targetBin] += dtMs
@@ -277,7 +351,11 @@ object DischargeEnergyIntegrator {
                 val midSoc = (cursorSoc + b) / 2.0f
                 val subBin = getBinIndexForSoc(midSoc)
                 val subAvgPower = max(0.0, ((cursorPower + boundaryPower) / 2.0).toDouble())
-                val subWh = subAvgPower * (subDtMs.toDouble() / 3600000.0)
+                var subWh = subAvgPower * (subDtMs.toDouble() / 3600000.0)
+                if (isScreenOff && dtMs > MAX_INTEGRATION_INTERVAL_MS) {
+                    val subSpan = max(0.3, abs(cursorSoc - b).toDouble())
+                    subWh = min(subWh, maxOf(0.45 * subSpan, 0.40))
+                }
 
                 if (subWh > 0.0 && subWh.isFinite()) {
                     binEnergyAcc[subBin] += subWh
@@ -302,7 +380,11 @@ object DischargeEnergyIntegrator {
             val midSoc = (cursorSoc + s2) / 2.0f
             val tailBin = getBinIndexForSoc(midSoc)
             val tailAvgPower = max(0.0, ((cursorPower + power2) / 2.0).toDouble())
-            val tailWh = tailAvgPower * (tailDtMs.toDouble() / 3600000.0)
+            var tailWh = tailAvgPower * (tailDtMs.toDouble() / 3600000.0)
+            if (isScreenOff && dtMs > MAX_INTEGRATION_INTERVAL_MS) {
+                val tailSpan = max(0.3, abs(cursorSoc - s2).toDouble())
+                tailWh = min(tailWh, maxOf(0.45 * tailSpan, 0.40))
+            }
 
             if (tailWh > 0.0 && tailWh.isFinite()) {
                 binEnergyAcc[tailBin] += tailWh

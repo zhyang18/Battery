@@ -396,18 +396,22 @@ data class LearnedSocEnergyCurve(
                     val rationaleText: String
 
                     if (index > maxLearnedIndex) {
-                        // 高电量单侧外推（如 80%~100%）：以最高实测边界为锚点，按电化学高压形态平滑向上微抬
+                        // 高电量单侧外推（如 80%~100%）：以全局中位数形态自举标尺为主干，结合边界锚点平滑微调，杜绝单侧端点偏高带偏后续全部区间
                         val anchorBin = bins[maxLearnedIndex]
                         val anchorWh = anchorBin.learnedEnergyWh!!
                         val anchorWeight = SOC_ENERGY_SHAPE_WEIGHTS[maxLearnedIndex]
-                        extrapolatedWh = anchorWh * (currentWeight / anchorWeight)
+                        val anchorBasedWh = anchorWh * (currentWeight / anchorWeight)
+                        val medianBasedWh = fullScaleWhFromLearned * currentWeight
+                        extrapolatedWh = min(anchorBasedWh, medianBasedWh * 1.10)
                         rationaleText = String.format(Locale.US, "实测形态自举 (高电量衔接 %d%%~%d%%)", anchorBin.minSocPercent.toInt(), anchorBin.maxSocPercent.toInt())
                     } else if (index < minLearnedIndex) {
-                        // 低电量单侧外推（如 0%~30%）：以最低实测边界为锚点，按电化学低压曲线平滑向截止区过渡
+                        // 低电量单侧外推（如 0%~30%）：结合全局中位数标尺与最低实测边界，平滑向截止区过渡，杜绝下限虚高
                         val anchorBin = bins[minLearnedIndex]
                         val anchorWh = anchorBin.learnedEnergyWh!!
                         val anchorWeight = SOC_ENERGY_SHAPE_WEIGHTS[minLearnedIndex]
-                        extrapolatedWh = anchorWh * (currentWeight / anchorWeight)
+                        val anchorBasedWh = anchorWh * (currentWeight / anchorWeight)
+                        val medianBasedWh = fullScaleWhFromLearned * currentWeight
+                        extrapolatedWh = min(anchorBasedWh, medianBasedWh * 1.10)
                         rationaleText = String.format(Locale.US, "实测形态自举 (低电量衔接 %d%%~%d%%)", anchorBin.minSocPercent.toInt(), anchorBin.maxSocPercent.toInt())
                     } else {
                         // 中间非相邻缺失段：基于全局中位数自举标尺展开

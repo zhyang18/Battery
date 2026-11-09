@@ -2309,19 +2309,20 @@ class PowerUsageManager private constructor(private val context: Context) {
                     startSoc = startLvl.toFloat(),
                     endSoc = endLvl.toFloat()
                 )
-                if (fullWh != null && fullWh in 5.0..100.0) {
+                if (fullWh != null && fullWh in 4.0..45.0) {
                     macroFullWhList.add(fullWh)
                 }
             }
         }
 
-        // 5. 若当前在途放电满足学习条件，吸收当前在途会话的微观与宏观数据
+        // 5. 若当前在途放电存在有效数据，吸收当前在途会话的微观与宏观数据
         var inFlightTotalWh: Float? = null
         var inFlightTotalDrop: Float? = null
         var inFlightStartSoc: Float? = null
         var inFlightEndSoc: Float? = null
 
-        if (isInFlightQualified) {
+        val hasInFlightSamples = isDischarging && inFlightPoints.size >= 2
+        if (hasInFlightSamples) {
             val inFlightPowerSamples = inFlightPoints.map { pt ->
                 com.battery.analysis.domain.estimator.model.PowerSample(
                     timestampMs = pt.timestamp,
@@ -2339,27 +2340,30 @@ class PowerUsageManager private constructor(private val context: Context) {
                 sessionId = inFlightSessionId,
                 effectiveCapacityMah = fccMah.toDouble()
             )
+            // 微观轨解耦：只要在途放电产生了已闭合的合格 5% Bin（validCompleteSamples），忠实学入 20 段模型，
+            // 绝不因宏观大周期门限（如 100% 对应 98%）尚未达到而拒收已完整实测的 5% 区间！
             if (inFlightValidation.validCompleteSamples.isNotEmpty()) {
                 dynamicCurve = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.updateCurveWithSamples(
                     currentCurve = dynamicCurve,
                     samples = inFlightValidation.validCompleteSamples,
                     updateTimestamp = System.currentTimeMillis(),
-                    incrementSessionCount = true
+                    incrementSessionCount = isInFlightQualified
                 )
             }
 
             // 宏观满充实测推算：
-            // 严禁将电量阶梯跳变漏算的纯亮屏drop作为分母！采用在途全工况微积分做功（亮屏+息屏）与真实净掉电跨度
+            // 严禁将电量阶梯跳变漏算的纯亮屏drop作为分母！采用在途全工况微积分做功（亮屏+息屏）与真实净掉电跨度。
+            // 宏观满充推算与有效条数严格受控于当前设定的放电周期百分比门限（isInFlightQualified）！
             val currentDischargeEnergy = inFlightIntegration.totalIntegratedEnergyWh.toFloat()
             val currentDropPercent = inFlightCurrentDrop.toFloat()
-            if (currentDischargeEnergy > 0.05f && currentDropPercent >= 1.5f) {
+            if (isInFlightQualified && currentDischargeEnergy > 0.05f && currentDropPercent >= 1.5f) {
                 val inFlightFullWh = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.calculateAnchoredFullEnergy(
                     dischargeEnergyWh = currentDischargeEnergy,
                     dropPercent = currentDropPercent,
                     startSoc = inFlightStartLvl.toFloat(),
                     endSoc = curStatus.levelPercent.toFloat()
                 )
-                if (inFlightFullWh != null && inFlightFullWh in 5.0..100.0) {
+                if (inFlightFullWh != null && inFlightFullWh in 4.0..45.0) {
                     macroFullWhList.add(inFlightFullWh)
                 }
                 inFlightTotalWh = currentDischargeEnergy
@@ -2444,9 +2448,9 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         val startLvl = dischargeRealtimeSamples.firstOrNull()?.batteryLevel ?: status.levelPercent
         val currentDrop = kotlin.math.abs(startLvl - status.levelPercent)
-        val threshold = getDischargeSocSpanThreshold()
-        val minRequired = if (threshold >= 100) 98 else threshold
-        if (currentDrop < minRequired) return 0
+        // 微观 5% Bin 学习解耦：只要当前在途放电净掉电达到 4% 以上（足以闭合一个 5% Bin 且 coverage >= 90%），
+        // 即可实时评估并学习已闭合的完整区间，绝不被宏观大周期门限阻塞
+        if (currentDrop < 4) return 0
 
         val sessionId = if (currentDischargeSessionId > 0L) currentDischargeSessionId else getLastUnplugTime()
         if (sessionId <= 0L) return 0

@@ -426,4 +426,59 @@ class DischargeDualConditionAndSessionTest {
         val energyHealth = (coherentFullWh / fullDesignWh) * 100.0
         assertEquals("能量健康度应在 74.2% 左右，坚决杜绝 102.2% 虚高暴涨", 74.2, energyHealth, 0.2)
     }
+
+    /**
+     * 测试在途微观 20 段 Bin 实测学习与宏观大周期门限解耦：
+     * 当门限配置为 100%（minRequired = 98%）而当前在途放电从 100% 降至 8%（掉电 92%）：
+     * 1. 宏观标尺判定：isInFlightQualified = false（92% < 98%），绝不提前将宏观推算加入 macroFullWhList；
+     * 2. 微观 20 段学习：在途会话中已闭合完整的 5% 区间（如 15%~20% 的 Bin 3，10%~15% 的 Bin 2）
+     *    顺利学入 dynamicCurve，显示为实测数据，绝不被 98% 宏观门限误伤卡住！
+     */
+    @Test
+    fun testInFlightMicroBinLearningDecoupledFromMacroThreshold() {
+        val targetThreshold = 100
+        val minRequiredThreshold = if (targetThreshold >= 100) 98 else targetThreshold
+        val inFlightCurrentDrop = 92.0f // 100% -> 8%
+        val isDischarging = true
+
+        val isInFlightQualified = isDischarging && inFlightCurrentDrop >= minRequiredThreshold
+        // 宏观放电门限严格要求 98%
+        assertFalse("掉电 92% 未达到 98% 门限，宏观满充推算不应合格", isInFlightQualified)
+
+        // 微观 20 段在途样本（包含 15%~20% 的 Bin 3 和 10%~15% 的 Bin 2）
+        val sampleBin3 = SocEnergyBinSample(
+            binIndex = 3,
+            energyWh = 0.604,
+            durationMs = 7500_000L,
+            startSocPercent = 20.0f,
+            endSocPercent = 15.0f,
+            coverageFraction = 1.0,
+            sessionId = "inflight_active",
+            quality = SampleQuality.COMPLETE_BIN
+        )
+        val sampleBin2 = SocEnergyBinSample(
+            binIndex = 2,
+            energyWh = 0.598,
+            durationMs = 7500_000L,
+            startSocPercent = 15.0f,
+            endSocPercent = 10.0f,
+            coverageFraction = 1.0,
+            sessionId = "inflight_active",
+            quality = SampleQuality.COMPLETE_BIN
+        )
+
+        var dynamicCurve = LearnedSocEnergyCurve.createEmpty()
+        dynamicCurve = SocEnergyCurveLearner.updateCurveWithSamples(
+            currentCurve = dynamicCurve,
+            samples = listOf(sampleBin3, sampleBin2),
+            updateTimestamp = System.currentTimeMillis(),
+            incrementSessionCount = isInFlightQualified
+        )
+
+        // 关键断言：即使宏观 isInFlightQualified = false，Bin 3 与 Bin 2 也成功学为实测！
+        assertTrue("Bin 3 (15%~20%) 必须成功学入模型成为实测", dynamicCurve.bins[3].hasLearnedData())
+        assertTrue("Bin 2 (10%~15%) 必须成功学入模型成为实测", dynamicCurve.bins[2].hasLearnedData())
+        assertEquals(0.604, dynamicCurve.bins[3].learnedEnergyWh!!, 0.001)
+        assertEquals(0.598, dynamicCurve.bins[2].learnedEnergyWh!!, 0.001)
+    }
 }

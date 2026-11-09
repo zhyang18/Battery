@@ -93,13 +93,14 @@ object DischargeSessionValidator {
                 delta.energyWh
             }
 
-            // 物理守卫：单段 5% SOC 正常物理能量约 0.8~1.6Wh（8000mAh 电池单 Bin 约 1.54Wh，5000mAh 约 0.96Wh）
-            // 若因长时间待机唤醒累计导致 normalizedWh 超过标称单段能量的 2.2 倍（或绝对上限 3.8Wh），或能量过低 (<0.2Wh)，判定为异常工况，拒绝作为完整实测基础样本
+            // 严格电化学物理守卫：单段 5% SOC 正常物理能量约 0.8~1.6Wh（8000mAh 电池单 Bin 标称约 1.54Wh，5000mAh 约 0.96Wh）
+            // 在锂电池最高放电电压（~4.35V）及轻载无压降极限下，单段能量绝对不可能超过标称能量的 1.35 倍（8000mAh 电池绝对上限约 2.08Wh）
+            // 若因长时间待机唤醒累计导致 normalizedWh 超过合理电化学物理上限，或能量过低 (<0.2Wh)，判定为工况畸变样本，严禁作为实测完整样本入库污染模型
             val maxAllowedWh = if (effectiveCapacityMah != null && effectiveCapacityMah > 0.0) {
                 val theoreticalBinWh = (effectiveCapacityMah * 3.85 / 1000.0) * 0.05
-                (theoreticalBinWh * 2.2).coerceIn(2.5, 3.8)
+                (theoreticalBinWh * 1.35).coerceIn(1.5, 2.1)
             } else {
-                3.8
+                2.1
             }
             if (normalizedWh > maxAllowedWh || normalizedWh < 0.2) {
                 continue

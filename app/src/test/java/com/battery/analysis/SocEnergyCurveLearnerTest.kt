@@ -563,8 +563,9 @@ class SocEnergyCurveLearnerTest {
         assertEquals(com.battery.analysis.domain.estimator.model.ModelMaturity.DEVELOPING, mat3)
         assertEquals(com.battery.analysis.domain.estimator.model.ConfidenceLevel.MEDIUM, conf3)
 
-        // 场景 4：达到 5 次放电周期，且 15 段已学 (75% 覆盖)，平均样本 3.0 次
-        val highBins = (0 until 20).map { index ->
+        // 场景 4：达到 5 次放电周期，在 50%~80% 严密梯度准则下：
+        // 4a. 15 段已学 (75% 覆盖，未达 80% 门限) -> 严格保持在 DEVELOPING 和 MEDIUM
+        val seventyFiveBins = (0 until 20).map { index ->
             if (index in 2..16) { // 15 段已学 (75% 覆盖)
                 SocEnergyBin(
                     binIndex = index,
@@ -583,9 +584,33 @@ class SocEnergyCurveLearnerTest {
                 )
             }
         }
-        val (mat4, conf4) = SocEnergyCurveLearner.evaluateMaturityAndConfidence(highBins, totalSessions = 5)
-        assertEquals(com.battery.analysis.domain.estimator.model.ModelMaturity.CONVERGED, mat4)
-        assertEquals(com.battery.analysis.domain.estimator.model.ConfidenceLevel.HIGH, conf4)
+        val (mat4a, conf4a) = SocEnergyCurveLearner.evaluateMaturityAndConfidence(seventyFiveBins, totalSessions = 5)
+        assertEquals(com.battery.analysis.domain.estimator.model.ModelMaturity.DEVELOPING, mat4a)
+        assertEquals(com.battery.analysis.domain.estimator.model.ConfidenceLevel.MEDIUM, conf4a)
+
+        // 4b. 16 段已学 (80% 覆盖，达到 >= 80% 门限) -> 成功晋升 CONVERGED 和 HIGH
+        val eightyBins = (0 until 20).map { index ->
+            if (index in 2..17) { // 16 段已学 (80% 覆盖)
+                SocEnergyBin(
+                    binIndex = index,
+                    minSocPercent = index * 5.0f,
+                    maxSocPercent = (index + 1) * 5.0f,
+                    sampleCount = 3,
+                    learnedEnergyWh = 1.18
+                )
+            } else {
+                SocEnergyBin(
+                    binIndex = index,
+                    minSocPercent = index * 5.0f,
+                    maxSocPercent = (index + 1) * 5.0f,
+                    sampleCount = 0,
+                    learnedEnergyWh = null
+                )
+            }
+        }
+        val (mat4b, conf4b) = SocEnergyCurveLearner.evaluateMaturityAndConfidence(eightyBins, totalSessions = 5)
+        assertEquals(com.battery.analysis.domain.estimator.model.ModelMaturity.CONVERGED, mat4b)
+        assertEquals(com.battery.analysis.domain.estimator.model.ConfidenceLevel.HIGH, conf4b)
     }
 
     /**
@@ -630,31 +655,34 @@ class SocEnergyCurveLearnerTest {
     }
 
     /**
-     * 测试深睡断层待机底噪微积分补偿：
-     * 验证在连续采样中夹杂 30 分钟息屏休眠（采样间隔 dt > 120s）时，能量不被丢弃，
-     * 而是正确注入待机底噪微积分，使 5% SOC 区间做功忠实反映真实能量释放。
+     * 测试纯亮屏放电微积分与息屏休眠断层严格隔离：
+     * 验证在连续采样中夹杂 45 分钟息屏休眠（采样间隔 dt > 120s 且状态为 SCREEN_OFF）时，
+     * 纯亮屏区间忠实按实测梯形积分，息屏休眠断层坚决不注入虚构待机保底能量，
+     * 而是忠实记录为未观测断层（UnobservedSocRange），由电化学理论模型补全。
      */
     @Test
-    fun testStandbySleepGapCompensationInDischargeIntegration() {
+    fun testPureScreenOnIntegrationAndStandbyGapSeparation() {
         val t0 = 1000000L
         val samples = listOf(
             // 亮屏使用：80% -> 78%，耗时 1 分钟 (60s <= 120s)，功率 1.8W，能量 = 1.8 * (60/3600) = 0.03 Wh
             PowerSample(t0, 3.85f, 0.467f, 1.8f, 80.0f, ScreenPowerState.SCREEN_ON),
             PowerSample(t0 + 60_000L, 3.82f, 0.471f, 1.8f, 78.0f, ScreenPowerState.SCREEN_ON),
             // 进入息屏休眠：78% -> 75%，休眠 45 分钟 (2700s)，dt > 120s，测得待机功率 0.29W
-            // 待机补偿能量 = 0.29W * 0.75h = 0.2175 Wh
             PowerSample(t0 + 60_000L + 2700_000L, 3.80f, 0.076f, 0.29f, 75.0f, ScreenPowerState.SCREEN_OFF)
         )
 
         val result = DischargeEnergyIntegrator.integrateDischargeSession(samples)
-        // 80% 到 75% 属于 Bin 15 (75% - 80%)
+        // 80% 到 78% 属于 Bin 15 (75% - 80%)，纯亮屏实测做功 0.03 Wh
         val bin15 = result.binDeltas[15]
         assertNotNull(bin15)
-        // 验证该区间的能量包含了亮屏做功 (0.03 Wh) + 息屏待机补偿做功 (0.2175 Wh) ≈ 0.2475 Wh
-        val expectedMin = 0.03 + 0.21
-        assertTrue("Bin 15 energy should be >= $expectedMin but was ${bin15!!.energyWh}", bin15.energyWh >= expectedMin)
-        // 验证正常休眠未被判定为超大断层
-        assertTrue("Normal standby gap <= 4h should not be in unobservedRanges", result.unobservedRanges.isEmpty())
+        assertEquals(0.03, bin15!!.energyWh, 0.001)
+
+        // 验证 45 分钟息屏断层忠实记录在 unobservedRanges 中，不注入虚假保底数据
+        assertEquals(1, result.unobservedRanges.size)
+        val gap = result.unobservedRanges[0]
+        assertEquals(78.0f, gap.startSocPercent, 0.001f)
+        assertEquals(75.0f, gap.endSocPercent, 0.001f)
+        assertEquals(2700_000L, gap.gapDurationMs)
     }
 
     /**
@@ -795,7 +823,7 @@ class SocEnergyCurveLearnerTest {
         // 7.444 / 0.252 ≈ 29.539 Wh
         assertEquals(29.54, projectedFullWh!!, 0.05)
 
-        // 2. 指定处于高压区间（90% -> 65%）：权重更精细
+        // 2. 指定处于高压区间（90% -> 65%）：纯物理公式计算 7.70 / 0.25 = 30.80 Wh
         val highRangeFullWh = SocEnergyCurveLearner.calculateScreenOnAnchoredFullEnergy(
             screenOnEnergyWh = 7.70f,
             screenOnDropPercent = 25.0f,
@@ -803,7 +831,7 @@ class SocEnergyCurveLearnerTest {
             endSoc = 65f
         )
         assertNotNull(highRangeFullWh)
-        assertEquals(29.50, highRangeFullWh!!, 0.1)
+        assertEquals(30.80, highRangeFullWh!!, 0.05)
 
         // 3. 门限保护：掉电 < 1.5% 时优雅返回 null
         val lowDropResult = SocEnergyCurveLearner.calculateScreenOnAnchoredFullEnergy(
@@ -813,11 +841,8 @@ class SocEnergyCurveLearnerTest {
         assertNull(lowDropResult)
 
         // 4. 断续亮屏（包含息屏待机）防稀释回归测试：
-        // 真实案例：亮屏做功 11.25 Wh，掉电 43.0%，但全天会话起止为 88% -> 31% (跨度 57%，含 11h 息屏 14% 掉电)
-        // 旧 Bug 会算成 11.25 / 0.571 = 19.70 Wh；
-        // 修复后基于区间形态密度加权（31%~88%高压平台形态密度约为 1.0207），
-        // 43% 亮屏掉电的电化学能量权重约为 43.89%，
-        // 推算满电应为 11.25 / 0.4389 ≈ 25.63 Wh（与全会话 14.57Wh / 0.57 算出的 25.52Wh 极度吻合）
+        // 纯亮屏实测做功 11.25 Wh，纯亮屏真实掉电 43.0%
+        // 纯客观物理做功：11.25 / 0.43 = 26.16 Wh
         val fragmentedFullWh = SocEnergyCurveLearner.calculateScreenOnAnchoredFullEnergy(
             screenOnEnergyWh = 11.25f,
             screenOnDropPercent = 43.0f,
@@ -825,7 +850,7 @@ class SocEnergyCurveLearnerTest {
             endSoc = 31.0f
         )
         assertNotNull(fragmentedFullWh)
-        assertEquals(25.63, fragmentedFullWh!!, 0.1)
+        assertEquals(26.16, fragmentedFullWh!!, 0.05)
         assertTrue("满电能量绝不能被息屏跨度稀释为 19.70 Wh", fragmentedFullWh > 25.0)
     }
 
@@ -853,10 +878,11 @@ class SocEnergyCurveLearnerTest {
         assertEquals(25.2f, overview.screenOnDropPercent!!, 0.001f)
         assertEquals(29.54, overview.fullLearnedEnergyWh!!, 0.05)
 
-        // 验证整体评级立即可达已收敛高置信
-        assertEquals(ConfidenceLevel.HIGH, overview.confidence)
-        assertEquals(ModelMaturity.CONVERGED, overview.maturity)
-        assertEquals(1.0f, overview.curveCoveragePercent, 0.001f)
+        // 验证在新的 50%~80% 双维度准则下：单次亮屏掉电 25.2%（<50%）属于局部实测（大量外推），
+        // 置信度如实评定为 LOW，曲线实际学习覆盖率忠实反映真实样本（0.0f），严禁虚构为 1.0f
+        assertEquals(ConfidenceLevel.LOW, overview.confidence)
+        assertEquals(ModelMaturity.DEVELOPING, overview.maturity)
+        assertEquals(0.0f, overview.curveCoveragePercent, 0.001f)
 
         // 验证全部 20 个区间均由 SCREEN_ON_ANCHORED 展开，且总能量严格守恒
         assertEquals(20, overview.resolvedBins.size)
@@ -880,5 +906,162 @@ class SocEnergyCurveLearnerTest {
         assertEquals(7672.0, overview.equivalentCapacityMah!!, 15.0)
         assertNotNull(overview.capacityModelSohPercent)
         assertEquals(78.1, overview.capacityModelSohPercent!!, 0.2)
+    }
+
+    /**
+     * 测试场景 1：大跨度单次深放电（如 1 条记录，覆盖率 85% >= 80%）。
+     * 验证物理规律：单次测量虽深度大，但属于孤证不立，置信度只能评定为 MEDIUM（单次参考），严禁虚高评定为 HIGH。
+     */
+    @Test
+    fun testSingleDeepDischargeSessionConfidence() {
+        val (maturity, confidence, reason) = SocEnergyCurveLearner.evaluateDischargeEnergyConfidence(
+            coveragePercent = 0.85f,
+            participatingSessionCount = 1,
+            historicalDispersionPercent = null,
+            isScreenOnAnchored = false
+        )
+
+        assertEquals(ConfidenceLevel.MEDIUM, confidence)
+        assertEquals(ModelMaturity.DEVELOPING, maturity)
+        assertTrue(reason.contains("1 次深度放电"))
+    }
+
+    /**
+     * 测试场景 2：多条记录但覆盖率不足 50% 且区间高度重复（如 10 条浅充浅放记录，覆盖率 35%）。
+     * 验证用户核心洞察：低电量关键区间全部依赖模型外推，满充推算极易失真虚高，置信度必须判定为 LOW（局部实测，大量外推）。
+     */
+    @Test
+    fun testMultipleShallowDischargeSessionsConfidence() {
+        val (maturity, confidence, reason) = SocEnergyCurveLearner.evaluateDischargeEnergyConfidence(
+            coveragePercent = 0.35f,
+            participatingSessionCount = 10,
+            historicalDispersionPercent = 2.5,
+            isScreenOnAnchored = false
+        )
+
+        assertEquals(ConfidenceLevel.LOW, confidence)
+        assertEquals(ModelMaturity.DEVELOPING, maturity)
+        assertTrue(reason.contains("不足 50%"))
+    }
+
+    /**
+     * 测试场景 3：多条深度大跨度记录且离散度低（如 5 条记录，覆盖率 85% >= 80%，离散度 3.2% <= 8%）。
+     * 验证物理与统计学自洽收敛：达到真正的 HIGH（高置信度）和 CONVERGED（已收敛成熟）。
+     */
+    @Test
+    fun testMultipleDeepDischargeSessionsConvergence() {
+        val (maturity, confidence, reason) = SocEnergyCurveLearner.evaluateDischargeEnergyConfidence(
+            coveragePercent = 0.85f,
+            participatingSessionCount = 5,
+            historicalDispersionPercent = 3.2,
+            isScreenOnAnchored = false
+        )
+
+        assertEquals(ConfidenceLevel.HIGH, confidence)
+        assertEquals(ModelMaturity.CONVERGED, maturity)
+        assertTrue(reason.contains("高置信度"))
+    }
+
+    /**
+     * 测试场景 4：多条深度大跨度记录但离散度偏高（如 5 条记录，覆盖率 85%，但离散度 11.5% > 8%）。
+     * 验证工况波动保护：受极端温差或重载发热差异影响，样本未能自洽收敛，降级为 MEDIUM（工况离散）。
+     */
+    @Test
+    fun testMultipleDeepDischargeSessionsHighDispersion() {
+        val (maturity, confidence, reason) = SocEnergyCurveLearner.evaluateDischargeEnergyConfidence(
+            coveragePercent = 0.85f,
+            participatingSessionCount = 5,
+            historicalDispersionPercent = 11.5,
+            isScreenOnAnchored = false
+        )
+
+        assertEquals(ConfidenceLevel.MEDIUM, confidence)
+        assertEquals(ModelMaturity.DEVELOPING, maturity)
+        assertTrue(reason.contains("离散度偏高"))
+    }
+
+    /**
+     * 测试电化学形态边界平滑自适应自举外推算法与整机能量守恒。
+     * 复现用户真实工况：30%~80% 存在实测微积分（各段约 1.40~1.65 Wh，8000mAh 电池）：
+     * 1. 验证 80%~85% 外推值平滑衔接 75%~80% (1.582 Wh)，向上微抬至 1.61 Wh，彻底消除断崖跳水 (严禁暴跌到 1.27 Wh)；
+     * 2. 验证 25%~30% 外推值平滑衔接 30%~35% (1.442 Wh)，平缓过渡到 1.44 Wh (严禁暴跌到 1.17 Wh 或 0.20 Wh)；
+     * 3. 验证 0%~5% 低压截止区做功符合电化学物理特性 (~1.15 Wh)；
+     * 4. 验证 20 段 Bin 能量总和与 100% 满充实测做功预测严格能量守恒。
+     */
+    @Test
+    fun testAdaptiveBoundarySmoothingAndEnergyConservation() {
+        var curve = LearnedSocEnergyCurve.createEmpty()
+
+        // 模拟用户截图中的 10 个实测区间 (bin 6 到 bin 15，对应 30%~80%)
+        val measuredDeltas = mapOf(
+            6 to DischargeEnergyIntegrator.BinEnergyDelta(6, 1.442, 60_000L, 35f, 30f),
+            7 to DischargeEnergyIntegrator.BinEnergyDelta(7, 1.550, 60_000L, 40f, 35f),
+            8 to DischargeEnergyIntegrator.BinEnergyDelta(8, 1.396, 60_000L, 45f, 40f),
+            9 to DischargeEnergyIntegrator.BinEnergyDelta(9, 1.513, 60_000L, 50f, 45f),
+            10 to DischargeEnergyIntegrator.BinEnergyDelta(10, 1.457, 60_000L, 55f, 50f),
+            11 to DischargeEnergyIntegrator.BinEnergyDelta(11, 1.423, 60_000L, 60f, 55f),
+            12 to DischargeEnergyIntegrator.BinEnergyDelta(12, 1.436, 60_000L, 65f, 60f),
+            13 to DischargeEnergyIntegrator.BinEnergyDelta(13, 1.487, 60_000L, 70f, 65f),
+            14 to DischargeEnergyIntegrator.BinEnergyDelta(14, 1.652, 60_000L, 75f, 70f),
+            15 to DischargeEnergyIntegrator.BinEnergyDelta(15, 1.582, 60_000L, 80f, 75f)
+        )
+        curve = SocEnergyCurveLearner.updateCurveWithDeltas(curve, measuredDeltas, 1000L)
+
+        // 即使传入了偏低的宏观中位数 23.51 Wh，微观实测自举也必须占主导并平滑衔接
+        val resolvedBins = curve.resolveAllBins(
+            effectiveCapacityMah = 8000.0,
+            nominalVoltageVolts = 3.85,
+            screenOnAnchoredFullEnergyWh = 23.51
+        )
+        assertEquals(20, resolvedBins.size)
+
+        // 1. 验证 75%~80% (bin 15) 为实测真值 1.582 Wh
+        val bin15 = resolvedBins[15]
+        assertEquals(EnergyEstimateSource.MEASURED_LEARNED, bin15.source)
+        assertEquals(1.582, bin15.effectiveEnergyWh!!, 0.001)
+
+        // 2. 关键断言：80%~85% (bin 16) 必须平滑衔接，按高电量形态向上微抬至 1.61 Wh 左右
+        // 坚决杜绝原代码中暴跌到 1.246 Wh 的断崖 BUG！
+        val bin16 = resolvedBins[16]
+        assertEquals(EnergyEstimateSource.BOOTSTRAP_EXTRAPOLATED, bin16.source)
+        assertNotNull(bin16.effectiveEnergyWh)
+        assertTrue("bin 16 (${bin16.effectiveEnergyWh} Wh) 必须平滑衔接 bin 15 (1.582 Wh)，绝不得暴跌", bin16.effectiveEnergyWh!! >= 1.55)
+        assertEquals(1.612, bin16.effectiveEnergyWh!!, 0.02)
+
+        // 3. 验证 95%~100% (bin 19) 同样保持平滑高压做功 (~1.64 Wh)
+        val bin19 = resolvedBins[19]
+        assertEquals(EnergyEstimateSource.BOOTSTRAP_EXTRAPOLATED, bin19.source)
+        assertEquals(1.643, bin19.effectiveEnergyWh!!, 0.02)
+
+        // 4. 验证 30%~35% (bin 6) 为实测真值 1.442 Wh
+        val bin6 = resolvedBins[6]
+        assertEquals(EnergyEstimateSource.MEASURED_LEARNED, bin6.source)
+        assertEquals(1.442, bin6.effectiveEnergyWh!!, 0.001)
+
+        // 5. 关键断言：25%~30% (bin 5) 必须平滑衔接 bin 6 (1.442 Wh)
+        // 坚决杜绝原代码中暴跌到 1.176 Wh 的断崖 BUG！
+        val bin5 = resolvedBins[5]
+        assertEquals(EnergyEstimateSource.BOOTSTRAP_EXTRAPOLATED, bin5.source)
+        assertEquals(1.442, bin5.effectiveEnergyWh!!, 0.02)
+
+        // 6. 验证 0%~5% (bin 0) 低压截止区做功约为 1.15 Wh (客观反映端电压压降，绝不是异常的 0.20 Wh)
+        val bin0 = resolvedBins[0]
+        assertEquals(EnergyEstimateSource.BOOTSTRAP_EXTRAPOLATED, bin0.source)
+        assertEquals(1.154, bin0.effectiveEnergyWh!!, 0.03)
+
+        // 7. 验证整机能量守恒：20 段 Bin 能量求和与 fullLearnedEnergyWh 绝对守恒
+        val totalBinsWh = resolvedBins.sumOf { it.effectiveEnergyWh ?: 0.0 }
+        assertTrue("8000mAh 电池总满充能量应自洽收敛于 28~31 Wh 之间，实际: $totalBinsWh Wh", totalBinsWh in 28.5..30.5)
+
+        val overview = SocEnergyCurveLearner.buildComparisonOverviewFromCurve(
+            curve = curve,
+            currentSocPercent = 50f,
+            effectiveCapacityMah = 8000f,
+            nominalVoltageVolts = 3.85f,
+            designCapacityMah = 8000f,
+            macroHistoricalFullWh = 23.51
+        )
+        assertNotNull(overview.fullLearnedEnergyWh)
+        assertEquals("实测学习满充预测必须与 20 段 Bin 实际能量总和严格守恒一致", totalBinsWh, overview.fullLearnedEnergyWh!!, 0.01)
     }
 }

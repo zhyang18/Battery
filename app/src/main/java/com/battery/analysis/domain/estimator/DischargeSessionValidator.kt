@@ -48,18 +48,27 @@ object DischargeSessionValidator {
         val completeList = mutableListOf<SocEnergyBinSample>()
         val partialList = mutableListOf<SocEnergyBinSample>()
         val rejectedBins = mutableSetOf<Int>()
+        val binUnobservedSpan = FloatArray(LearnedSocEnergyCurve.BIN_COUNT)
 
-        // 1. 提取所有深睡断层所波及的 SOC 区间索引
+        // 1. 累计各 5% SOC 区间因深度睡眠超长断层而真实缺失的未观测电量跨度
         for (gap in integrationResult.unobservedRanges) {
             val minSoc = minOf(gap.startSocPercent, gap.endSocPercent)
             val maxSoc = maxOf(gap.startSocPercent, gap.endSocPercent)
             for (binIndex in 0 until LearnedSocEnergyCurve.BIN_COUNT) {
                 val binFloor = binIndex * LearnedSocEnergyCurve.BIN_SOC_STEP
                 val binCeil = binFloor + LearnedSocEnergyCurve.BIN_SOC_STEP
-                // 若断层与该 Bin 存在交集（含点接触与区间交集），将该 Bin 列入受损拒绝名单
-                if ((maxSoc > binFloor && minSoc < binCeil) || (minSoc == maxSoc && minSoc >= binFloor && minSoc <= binCeil)) {
-                    rejectedBins.add(binIndex)
-                }
+                val overlapStart = minOf(maxSoc, binCeil)
+                val overlapEnd = maxOf(minSoc, binFloor)
+                val overlapSpan = (overlapStart - overlapEnd).coerceAtLeast(0f)
+                binUnobservedSpan[binIndex] += overlapSpan
+            }
+        }
+
+        // 只有当区间内因失联断层导致未观测缺损跨度实质性超过 1.0%（即超过 20% 的电量处于完全未知盲区）时，才判定该区间受损拒绝。
+        // 彻底废除点接触一票否决拉黑，杜绝日常高频息屏锁屏导致正常放电区间被无理拒收
+        for (binIndex in 0 until LearnedSocEnergyCurve.BIN_COUNT) {
+            if (binUnobservedSpan[binIndex] >= 1.0f) {
+                rejectedBins.add(binIndex)
             }
         }
 

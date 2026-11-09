@@ -20,14 +20,8 @@ import kotlin.math.min
  */
 object DischargeEnergyIntegrator {
 
-    /** 连续时序微积分单微元最大有效时间跨度门限（单位：毫秒，默认 120 秒，杜绝息屏 Deep Sleep 断层插值放大） */
-    const val MAX_INTEGRATION_INTERVAL_MS: Long = 120_000L
-
-    /** 息屏待机底噪微积分自适应补偿的最大跨度门限（4小时，超过判定为关机等超大断层） */
-    const val MAX_STANDBY_GAP_MS: Long = 4 * 3600_000L
-
-    /** 默认待机补偿基准功率（单位：瓦特 W，约 0.28W，吻合典型 Android 手机息屏休眠硬件实测基准） */
-    const val DEFAULT_STANDBY_COMPENSATION_WATTS: Float = 0.28f
+    /** 连续时序微积分单微元最大有效时间跨度门限（单位：毫秒，默认 180 秒，超过此门限判定为超长深睡断层挂起） */
+    const val MAX_INTEGRATION_INTERVAL_MS: Long = 180_000L
 
     /** 最小有效时间间隔（单位：毫秒，防止并发打点微小除零） */
     const val MIN_INTEGRATION_INTERVAL_MS: Long = 50L
@@ -114,57 +108,27 @@ object DischargeEnergyIntegrator {
                 continue
             }
 
-            // 2. 时间跨度校验与深睡待机微积分自适应补偿：
+            // 2. 时间跨度校验与深睡长失联断层审计：
             val dtMs = p2.timestampMs - p1.timestampMs
             if (dtMs < MIN_INTEGRATION_INTERVAL_MS) {
                 continue
             }
 
+            // 仅当时间跨度超过失联门限（> 180 秒）时，说明系统经历超长深度休眠失联挂起，中间缺乏连续物理轨迹。
+            // 此时严禁将大跨度休眠按首尾粗暴线性积分，忠实将该时段跨越的 SOC 区间记录为未观测断层（UnobservedSocRange）。
+            // 正常连续放电采样周期内（<= 180 秒），无论屏幕开或关，均具备底层硬件真实电压与功率，正常执行梯形微积分！
             if (dtMs > MAX_INTEGRATION_INTERVAL_MS) {
-                if (dtMs <= MAX_STANDBY_GAP_MS) {
-                    // 处于正常息屏休眠区间 [120s, 4h]：
-                    // 提取客观待机功耗（优先采用采样点测得的息屏功耗，兜底默认待机底噪）
-                    val standbyPower = when {
-                        p1.state == ScreenPowerState.SCREEN_OFF && p1.powerWatts in 0.05f..1.2f -> p1.powerWatts
-                        p2.state == ScreenPowerState.SCREEN_OFF && p2.powerWatts in 0.05f..1.2f -> p2.powerWatts
-                        else -> DEFAULT_STANDBY_COMPENSATION_WATTS
-                    }
-                    val socDelta = abs(p1.batteryLevelPercent - p2.batteryLevelPercent)
-                    // 物理单调性防膨胀约束：若未掉电，限制最大待机补偿能量不超过 1.2% SOC 对应能量 (~0.35Wh)
-                    val rawGapWh = standbyPower * (dtMs.toDouble() / 3600000.0)
-                    val maxAllowedWh = if (socDelta < 0.5f) 0.35 else (socDelta + 1.0) * 0.35
-                    val effectiveGapWh = minOf(rawGapWh, maxAllowedWh)
-                    val effectivePower = if (dtMs > 0L) (effectiveGapWh / (dtMs.toDouble() / 3600000.0)).toFloat() else standbyPower
-
-                    val p1Comp = p1.copy(powerWatts = effectivePower, state = ScreenPowerState.SCREEN_OFF)
-                    val p2Comp = p2.copy(powerWatts = effectivePower, state = ScreenPowerState.SCREEN_OFF)
-
-                    allocateSegmentWithTimeInterpolation(
-                        p1 = p1Comp,
-                        p2 = p2Comp,
-                        dtMs = dtMs,
-                        binEnergyAcc = binEnergyAcc,
-                        binDurationAcc = binDurationAcc,
-                        binMinSoc = binMinSoc,
-                        binMaxSoc = binMaxSoc,
-                        binCurrentWeightSum = binCurrentWeightSum,
-                        binTempWeightSum = binTempWeightSum
+                unobservedList.add(
+                    UnobservedSocRange(
+                        startSocPercent = p1.batteryLevelPercent,
+                        endSocPercent = p2.batteryLevelPercent,
+                        gapDurationMs = dtMs
                     )
-                    totalValidDuration += dtMs
-                } else {
-                    // 发生超大异常深度断层（> 4小时，如关机、超长深度挂起）：忠实记录该断层所跨越的未观测 SOC 区间
-                    unobservedList.add(
-                        UnobservedSocRange(
-                            startSocPercent = p1.batteryLevelPercent,
-                            endSocPercent = p2.batteryLevelPercent,
-                            gapDurationMs = dtMs
-                        )
-                    )
-                }
+                )
                 continue
             }
 
-            // 3. 执行边界时刻时间插值分段积分并累加
+            // 3. 执行边界时刻时间插值分段积分并累加（真实放电梯形微积分）
             allocateSegmentWithTimeInterpolation(
                 p1 = p1,
                 p2 = p2,

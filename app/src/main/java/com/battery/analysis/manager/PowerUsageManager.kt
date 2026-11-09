@@ -2130,6 +2130,8 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 获取当前配置的放电自学习有效数据掉电跨度百分比门限（默认 15%）。
+     *
+     * @return 当前设定的放电单次周期有效数据百分比门限数值
      */
     fun getDischargeSocSpanThreshold(): Int {
         return prefs.getInt(PREF_KEY_DISCHARGE_SOC_THRESHOLD, DEFAULT_DISCHARGE_SOC_THRESHOLD)
@@ -2137,18 +2139,22 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 设置放电自学习有效数据掉电跨度百分比门限（范围 10% ~ 100%）。
+     * 将配置持久化至本地 SharedPreferences，并清空全景模型概览缓存，
+     * 异步触发全量容量估算与放电能量模型刷新，彻底避免阻塞主线程 UI。
      *
      * @param thresholdPercent 目标百分比门限
      */
     fun setDischargeSocSpanThreshold(thresholdPercent: Int) {
         val clamped = thresholdPercent.coerceIn(10, 100)
         prefs.edit().putInt(PREF_KEY_DISCHARGE_SOC_THRESHOLD, clamped).apply()
-        recalculateDischargeEnergyModel()
+        cachedDischargeEnergyOverview = null
         BatteryCapacityManager.getInstance(context).refreshEstimateAsync()
     }
 
     /**
      * 获取当前配置的放电自学习最新有效数据条数时效窗口（默认 10 条，0 为全部）。
+     *
+     * @return 当前时效窗口允许的最大样本条数（0 表示不限）
      */
     fun getDischargeSampleCountLimit(): Int {
         return prefs.getInt(PREF_KEY_DISCHARGE_SAMPLE_COUNT_LIMIT, DEFAULT_DISCHARGE_SAMPLE_COUNT_LIMIT)
@@ -2156,13 +2162,15 @@ class PowerUsageManager private constructor(private val context: Context) {
 
     /**
      * 设置放电自学习最新有效数据条数时效窗口（0 为全部，其余为正整数如 3, 5, 10, 15, 20, 30）。
+     * 将配置持久化至本地 SharedPreferences，并清空全景模型概览缓存，
+     * 异步触发全量容量估算与放电能量模型刷新，彻底避免阻塞主线程 UI。
      *
      * @param limit 目标条数
      */
     fun setDischargeSampleCountLimit(limit: Int) {
         val safeVal = if (limit <= 0) 0 else limit
         prefs.edit().putInt(PREF_KEY_DISCHARGE_SAMPLE_COUNT_LIMIT, safeVal).apply()
-        recalculateDischargeEnergyModel()
+        cachedDischargeEnergyOverview = null
         BatteryCapacityManager.getInstance(context).refreshEstimateAsync()
     }
 
@@ -2208,17 +2216,41 @@ class PowerUsageManager private constructor(private val context: Context) {
             drop >= minRequiredThreshold
         }
 
-        // 2. 按有效数据条数截取最近 N 条（滚动时效窗口，淘汰陈旧历史）
-        val qualifiedRecords = if (targetLimit > 0) {
-            eligibleRecords.take(targetLimit)
+        val curStatus = getCurrentBatteryStatus()
+        val isDischarging = !curStatus.isCharging
+
+        // 2. 评估当前在途放电是否满足学习条件（In-flight Qualification）
+        // 只有当前处于真实放电工况且瞬时点集掉电已达到设定门限时，才允许动态作为最新 1 条有效记录参与统计与学习
+        ensureDischargeSamplesLoaded()
+        val inFlightPoints = dischargeRealtimeSamples
+        val unplugLvl = getLastUnplugLevel().takeIf { it in 1..100 }
+        val firstSampleLvl = inFlightPoints.firstOrNull()?.batteryLevel
+        val inFlightStartLvl = unplugLvl ?: firstSampleLvl ?: curStatus.levelPercent
+        val inFlightCurrentDrop = kotlin.math.abs(inFlightStartLvl - curStatus.levelPercent)
+
+        val isInFlightQualified = isDischarging && inFlightPoints.size >= 2 && inFlightCurrentDrop >= minRequiredThreshold
+
+        // 3. 按有效数据条数截取最近 N 条（滚动时效窗口）：
+        // 若当前在途达标，在途放电作为最即时的第 1 条有效会话占用 1 个名额，历史合格记录取最近 (targetLimit - 1) 条
+        val historyLimit = if (isInFlightQualified && targetLimit > 0) {
+            (targetLimit - 1).coerceAtLeast(0)
         } else {
-            eligibleRecords
+            targetLimit
         }
+        val qualifiedRecords = if (historyLimit > 0) {
+            eligibleRecords.take(historyLimit)
+        } else if (targetLimit == 0 || !isInFlightQualified) {
+            eligibleRecords
+        } else {
+            emptyList()
+        }
+
+        val totalParticipatingCount = qualifiedRecords.size + (if (isInFlightQualified) 1 else 0)
 
         val (fccMah, _) = getEffectiveDeviceCapacityWithSource()
         val learner = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.getInstance(context)
 
-        // 3. 微观轨与宏观轨：从全新空模型开始，依序吸收这 N 条合格会话
+        // 4. 微观轨与宏观轨：从全新空模型开始，依序吸收这 N 条合格历史会话
         var dynamicCurve = com.battery.analysis.domain.estimator.model.LearnedSocEnergyCurve.createEmpty()
         val macroFullWhList = mutableListOf<Double>()
 
@@ -2227,55 +2259,10 @@ class PowerUsageManager private constructor(private val context: Context) {
             val sessionId = record.id.toString()
             val startLvl = record.getStartBatteryLevel()
             val endLvl = record.levelPercent
+            val totalDropPercent = kotlin.math.abs(startLvl - endLvl).toFloat()
 
-            // 宏观满充推算样本提取（基于高保真纯亮屏实测掉电跨度与区间微积分）
-            val onWh = record.screenOnEnergyWh
-            var pureOnDrop = 0f
-            var minOnSoc = 100f
-            var maxOnSoc = 0f
-            var hasOnPoints = false
-
-            if (trendPoints.size >= 2) {
-                for (i in 0 until trendPoints.size - 1) {
-                    val p = trendPoints[i]
-                    val c = trendPoints[i + 1]
-                    val dt = c.timestamp - p.timestamp
-                    if (p.isScreenOn && dt in 1L..300_000L) {
-                        val pLvl = p.batteryLevel.toFloat()
-                        val cLvl = c.batteryLevel.toFloat()
-                        if (pLvl > cLvl) {
-                            pureOnDrop += (pLvl - cLvl)
-                        }
-                        minOnSoc = minOf(minOnSoc, cLvl, pLvl)
-                        maxOnSoc = maxOf(maxOnSoc, cLvl, pLvl)
-                        hasOnPoints = true
-                    }
-                }
-            }
-
-            val totalCycleDrop = kotlin.math.abs(startLvl - endLvl).toFloat()
-            val effectiveOnDrop = if (pureOnDrop >= 1.0f) {
-                pureOnDrop
-            } else {
-                val totalWh = record.screenOnEnergyWh + record.screenOffEnergyWh
-                if (totalWh > 0.01f) (totalCycleDrop * (record.screenOnEnergyWh / totalWh)) else totalCycleDrop
-            }
-            val sSoc = if (hasOnPoints && maxOnSoc > minOnSoc) maxOnSoc else startLvl.toFloat()
-            val eSoc = if (hasOnPoints && maxOnSoc > minOnSoc) minOnSoc else (startLvl.toFloat() - effectiveOnDrop).coerceAtLeast(0f)
-
-            if (onWh > 0.05f && effectiveOnDrop >= minRequiredThreshold) {
-                val fullWh = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.calculateScreenOnAnchoredFullEnergy(
-                    screenOnEnergyWh = onWh,
-                    screenOnDropPercent = effectiveOnDrop,
-                    startSoc = sSoc,
-                    endSoc = eSoc
-                )
-                if (fullWh != null && fullWh in 5.0..100.0) {
-                    macroFullWhList.add(fullWh)
-                }
-            }
-
-            // 微观 20 段微积分样本提取
+            // 1. 微观 20 段微积分样本提取（优先计算真实物理时序点微积分真值）
+            var integrationResult: com.battery.analysis.domain.estimator.DischargeEnergyIntegrator.DischargeIntegrationResult? = null
             if (trendPoints.size >= 2) {
                 val powerSamples = trendPoints.map { pt ->
                     com.battery.analysis.domain.estimator.model.PowerSample(
@@ -2287,9 +2274,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                         temperatureCelsius = pt.temperature
                     )
                 }
-                val integrationResult = com.battery.analysis.domain.estimator.DischargeEnergyIntegrator.integrateDischargeSession(powerSamples)
+                val result = com.battery.analysis.domain.estimator.DischargeEnergyIntegrator.integrateDischargeSession(powerSamples)
+                integrationResult = result
                 val validation = com.battery.analysis.domain.estimator.DischargeSessionValidator.validateDischargeSession(
-                    integrationResult = integrationResult,
+                    integrationResult = result,
                     sessionId = sessionId,
                     effectiveCapacityMah = fccMah.toDouble()
                 )
@@ -2302,16 +2290,100 @@ class PowerUsageManager private constructor(private val context: Context) {
                     )
                 }
             }
+
+            // 2. 宏观满充推算样本提取（真实总放电做功 / 真实净掉电跨度）
+            // 真实总做功：最高优先级采用原始点集微积分真值，其次取归档总能量，最后回退亮息之和（彻底避免旧历史字段脏数据或漏息屏）
+            val totalWh = if (integrationResult != null && integrationResult.totalIntegratedEnergyWh > 0.05) {
+                integrationResult.totalIntegratedEnergyWh.toFloat()
+            } else if (record.totalEnergyWh > 0.05f) {
+                record.totalEnergyWh
+            } else {
+                record.screenOnEnergyWh + record.screenOffEnergyWh
+            }
+
+            // 客观物理做功守恒：当实测总能量有效且整机净掉电达到门限时纳入宏观满充推算
+            if (totalWh > 0.05f && totalDropPercent >= 1.5f) {
+                val fullWh = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.calculateAnchoredFullEnergy(
+                    dischargeEnergyWh = totalWh,
+                    dropPercent = totalDropPercent,
+                    startSoc = startLvl.toFloat(),
+                    endSoc = endLvl.toFloat()
+                )
+                if (fullWh != null && fullWh in 5.0..100.0) {
+                    macroFullWhList.add(fullWh)
+                }
+            }
         }
 
-        // 4. 计算宏观轨历史中位数
-        val macroHistoricalMedianWh = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.calculateMedian(macroFullWhList)
+        // 5. 若当前在途放电满足学习条件，吸收当前在途会话的微观与宏观数据
+        var inFlightTotalWh: Float? = null
+        var inFlightTotalDrop: Float? = null
+        var inFlightStartSoc: Float? = null
+        var inFlightEndSoc: Float? = null
 
-        // 5. 保存并更新内存模型
+        if (isInFlightQualified) {
+            val inFlightPowerSamples = inFlightPoints.map { pt ->
+                com.battery.analysis.domain.estimator.model.PowerSample(
+                    timestampMs = pt.timestamp,
+                    voltageVolts = pt.voltageVolts,
+                    powerWatts = pt.powerWatts,
+                    batteryLevelPercent = pt.batteryLevel.toFloat(),
+                    state = if (pt.isScreenOn) com.battery.analysis.domain.estimator.model.ScreenPowerState.SCREEN_ON else com.battery.analysis.domain.estimator.model.ScreenPowerState.SCREEN_OFF,
+                    temperatureCelsius = pt.temperature
+                )
+            }
+            val inFlightIntegration = com.battery.analysis.domain.estimator.DischargeEnergyIntegrator.integrateDischargeSession(inFlightPowerSamples)
+            val inFlightSessionId = if (currentDischargeSessionId > 0L) currentDischargeSessionId.toString() else "inflight_${System.currentTimeMillis()}"
+            val inFlightValidation = com.battery.analysis.domain.estimator.DischargeSessionValidator.validateDischargeSession(
+                integrationResult = inFlightIntegration,
+                sessionId = inFlightSessionId,
+                effectiveCapacityMah = fccMah.toDouble()
+            )
+            if (inFlightValidation.validCompleteSamples.isNotEmpty()) {
+                dynamicCurve = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.updateCurveWithSamples(
+                    currentCurve = dynamicCurve,
+                    samples = inFlightValidation.validCompleteSamples,
+                    updateTimestamp = System.currentTimeMillis(),
+                    incrementSessionCount = true
+                )
+            }
+
+            // 宏观满充实测推算：
+            // 严禁将电量阶梯跳变漏算的纯亮屏drop作为分母！采用在途全工况微积分做功（亮屏+息屏）与真实净掉电跨度
+            val currentDischargeEnergy = inFlightIntegration.totalIntegratedEnergyWh.toFloat()
+            val currentDropPercent = inFlightCurrentDrop.toFloat()
+            if (currentDischargeEnergy > 0.05f && currentDropPercent >= 1.5f) {
+                val inFlightFullWh = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.calculateAnchoredFullEnergy(
+                    dischargeEnergyWh = currentDischargeEnergy,
+                    dropPercent = currentDropPercent,
+                    startSoc = inFlightStartLvl.toFloat(),
+                    endSoc = curStatus.levelPercent.toFloat()
+                )
+                if (inFlightFullWh != null && inFlightFullWh in 5.0..100.0) {
+                    macroFullWhList.add(inFlightFullWh)
+                }
+                inFlightTotalWh = currentDischargeEnergy
+                inFlightTotalDrop = currentDropPercent
+                inFlightStartSoc = inFlightStartLvl.toFloat()
+                inFlightEndSoc = curStatus.levelPercent.toFloat()
+            }
+        }
+
+        // 6. 计算宏观轨历史/在途聚合中位数与样本相对离散度（CV）
+        val macroHistoricalMedianWh = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.calculateMedian(macroFullWhList)
+        val macroDispersionPercent: Double? = if (macroFullWhList.size >= 2) {
+            val mean = macroFullWhList.average()
+            if (mean > 0.0) {
+                val variance = macroFullWhList.map { (it - mean) * (it - mean) }.average()
+                val stdDev = Math.sqrt(variance)
+                (stdDev / mean) * 100.0
+            } else null
+        } else null
+
+        // 7. 保存并更新内存模型
         learner.saveCurveDirectly(dynamicCurve)
 
-        // 6. 严禁以当前在途放电周期向外推算整机满充标尺，仅基于满足设定条件的合格历史记录与历史宏观中位数进行纯粹建模
-        val curStatus = getCurrentBatteryStatus()
+        // 8. 构建对比看板实体
         val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? android.os.BatteryManager
         val nativeEnergyNwh = batteryManager?.getLongProperty(android.os.BatteryManager.BATTERY_PROPERTY_ENERGY_COUNTER)
         val hardwareWh = if (nativeEnergyNwh != null && nativeEnergyNwh != Long.MIN_VALUE && nativeEnergyNwh > 0L) {
@@ -2321,22 +2393,24 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         val capacityResult = com.battery.analysis.manager.BatteryCapacityManager.getInstance(context).capacityState.value
         val designMah = capacityResult?.designCapacityMah
+        val learnedCapMah = capacityResult?.fullChargeCapacityMah?.toFloat()?.takeIf { it > 0f } ?: fccMah
 
         val overview = learner.buildComparisonOverview(
             currentSocPercent = curStatus.levelPercent.toFloat(),
             hardwareNativeEnergyWh = hardwareWh,
-            effectiveCapacityMah = fccMah,
+            effectiveCapacityMah = learnedCapMah,
             nominalVoltageVolts = 3.85f,
             temperatureCelsius = curStatus.temperature,
             designCapacityMah = designMah?.toFloat(),
-            screenOnEnergyWh = null,
-            screenOnDropPercent = null,
-            screenOnStartSoc = null,
-            screenOnEndSoc = null,
+            screenOnEnergyWh = inFlightTotalWh,
+            screenOnDropPercent = inFlightTotalDrop,
+            screenOnStartSoc = inFlightStartSoc,
+            screenOnEndSoc = inFlightEndSoc,
             effectiveThresholdPercent = targetThreshold,
             effectiveSampleCountLimit = targetLimit,
-            participatingSessionCount = qualifiedRecords.size,
-            macroHistoricalFullWh = macroHistoricalMedianWh
+            participatingSessionCount = if (macroFullWhList.isNotEmpty()) macroFullWhList.size else totalParticipatingCount,
+            macroHistoricalFullWh = macroHistoricalMedianWh,
+            historicalDispersionPercent = macroDispersionPercent
         )
         cachedDischargeEnergyOverview = overview
         return overview

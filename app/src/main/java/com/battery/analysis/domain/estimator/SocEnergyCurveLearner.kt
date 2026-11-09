@@ -1,6 +1,7 @@
 package com.battery.analysis.domain.estimator
 
 import android.content.Context
+import java.util.Locale
 import android.content.SharedPreferences
 import com.battery.analysis.domain.estimator.model.ConfidenceLevel
 import com.battery.analysis.domain.estimator.model.EnergyComparisonOverview
@@ -102,6 +103,108 @@ class SocEnergyCurveLearner(private val context: Context) {
          * @param totalSessions 累计独立放电会话总数
          * @return 包含成熟度与置信度的键值对 [Pair<ModelMaturity, ConfidenceLevel>]
          */
+        /**
+         * 依据【物理空间覆盖率】与【统计学样本自洽性】双维度评估放电能量模型的置信度等级与成熟度。
+         * 响应严格的 50%~80% 覆盖率梯度标准：
+         * 1. 实测区间覆盖率 < 50%：超过一半区间未学习、高度依赖自举外推，置信度一律判定为 LOW；
+         * 2. 实测区间覆盖率 50%~80%：中等半程覆盖，若样本 N=1 为 LOW，若样本 N>=2 为 MEDIUM；
+         * 3. 实测区间覆盖率 >= 80%：具备高置信度的物理空间基础，若样本 N=1 为 MEDIUM（单次参考），若 N=2 为 MEDIUM（双次校验），
+         *    若 N>=3 且样本相对离散度 <= 8% 达到已收敛 HIGH（高置信度）；若离散度 > 8% 降级为 MEDIUM（工况离散）。
+         *
+         * @param coveragePercent 20 段 SOC 区间的实际已学习覆盖率（0.0f ~ 1.0f）
+         * @param participatingSessionCount 参与建模的有效放电记录条数
+         * @param historicalDispersionPercent 历史多次大跨度放电样本推算满充做功的相对离散度（百分比，若无法计算为 null）
+         * @param isScreenOnAnchored 当前会话是否处于连续亮屏微积分高精锚定
+         * @param screenOnDropPercent 当前连续亮屏的掉电百分比（若处于在途亮屏）
+         * @return 包含模型成熟度 [ModelMaturity]、置信度 [ConfidenceLevel] 与决策原因 [String] 的三元组
+         */
+        fun evaluateDischargeEnergyConfidence(
+            coveragePercent: Float,
+            participatingSessionCount: Int,
+            historicalDispersionPercent: Double? = null,
+            isScreenOnAnchored: Boolean = false,
+            screenOnDropPercent: Float? = null
+        ): Triple<ModelMaturity, ConfidenceLevel, String> {
+            // 场景 1：无任何有效实测记录
+            if (participatingSessionCount <= 0 && !isScreenOnAnchored && coveragePercent <= 0.0f) {
+                return Triple(ModelMaturity.COLD_START, ConfidenceLevel.UNRELIABLE, "无实测放电数据，纯标称理论推算")
+            }
+
+            // 场景 2：单次在途/临时全工况放电高精微积分实测锚定（未形成宏观多会话集合，participatingSessionCount <= 0）
+            if (participatingSessionCount <= 0 && isScreenOnAnchored) {
+                val drop = screenOnDropPercent ?: 0f
+                return when {
+                    drop >= 80f -> Triple(ModelMaturity.DEVELOPING, ConfidenceLevel.MEDIUM, "当前深度放电实测锚定 (单次参考)")
+                    drop >= 50f -> Triple(ModelMaturity.DEVELOPING, ConfidenceLevel.MEDIUM, "当前半程放电实测锚定 (中置信)")
+                    else -> Triple(ModelMaturity.DEVELOPING, ConfidenceLevel.LOW, "当前局部放电实测锚定 (大量外推)")
+                }
+            }
+
+            // 场景 3：历史有效放电记录宏观建模
+            val cov = coveragePercent.coerceIn(0.0f, 1.0f)
+            return when {
+                // 覆盖率不足 50%：超过一半区间依赖外推，严禁赋予中/高置信度
+                cov < 0.50f -> {
+                    Triple(
+                        ModelMaturity.DEVELOPING,
+                        ConfidenceLevel.LOW,
+                        String.format(Locale.US, "实测覆盖率仅 %.1f%%（不足 50%%），超过一半区间依赖模型外推，满充推算仅供参考", cov * 100f)
+                    )
+                }
+                // 覆盖率 50% ~ 80%：半程至大半程覆盖
+                cov < 0.80f -> {
+                    if (participatingSessionCount <= 1) {
+                        Triple(
+                            ModelMaturity.DEVELOPING,
+                            ConfidenceLevel.LOW,
+                            String.format(Locale.US, "实测覆盖率 %.1f%%，仅 1 条放电记录，缺乏重复验证且部分区间依赖外推", cov * 100f)
+                        )
+                    } else {
+                        Triple(
+                            ModelMaturity.DEVELOPING,
+                            ConfidenceLevel.MEDIUM,
+                            String.format(Locale.US, "实测覆盖率 %.1f%%，已累积 %d 条放电记录，部分区间依赖外推", cov * 100f, participatingSessionCount)
+                        )
+                    }
+                }
+                // 覆盖率 >= 80%：深度大跨度覆盖，具备高置信度的物理空间基础
+                else -> {
+                    when {
+                        participatingSessionCount <= 1 -> {
+                            Triple(
+                                ModelMaturity.DEVELOPING,
+                                ConfidenceLevel.MEDIUM,
+                                String.format(Locale.US, "实测覆盖率达到 %.1f%%，但仅有 1 次深度放电，孤证不立，需累积验证", cov * 100f)
+                            )
+                        }
+                        participatingSessionCount == 2 -> {
+                            Triple(
+                                ModelMaturity.DEVELOPING,
+                                ConfidenceLevel.MEDIUM,
+                                String.format(Locale.US, "实测覆盖率 %.1f%%，累积 2 次深度放电，双次校验中", cov * 100f)
+                            )
+                        }
+                        else -> {
+                            // N >= 3：检验样本离散度
+                            if (historicalDispersionPercent != null && historicalDispersionPercent > 8.0) {
+                                Triple(
+                                    ModelMaturity.DEVELOPING,
+                                    ConfidenceLevel.MEDIUM,
+                                    String.format(Locale.US, "实测覆盖率 %.1f%%（%d次放电），但样本相对离散度偏高(%.1f%% > 8%%)，受温差或工况波动影响", cov * 100f, participatingSessionCount, historicalDispersionPercent)
+                                )
+                            } else {
+                                Triple(
+                                    ModelMaturity.CONVERGED,
+                                    ConfidenceLevel.HIGH,
+                                    String.format(Locale.US, "实测覆盖率 %.1f%%，%d 次深度放电样本自洽收敛，达到高置信度", cov * 100f, participatingSessionCount)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         fun evaluateMaturityAndConfidence(
             bins: List<SocEnergyBin>,
             totalSessions: Int
@@ -115,11 +218,11 @@ class SocEnergyCurveLearner(private val context: Context) {
             // 严密的成熟度评级准则：必须将“完整放电周期次数”作为硬性前置条件
             // 杜绝单次放电一口气跑多个区间就草率晋升中/高置信度的问题
             val maturity = when {
-                // 冷启动：已测区间不足 3 段，或已归档完整放电周期少于 3 次，或覆盖率低于 35%
-                coveredCount < LearnedSocEnergyCurve.MIN_BOOTSTRAP_LEARNED_BINS || totalSessions < 3 || coverage < 0.35f -> ModelMaturity.COLD_START
-                // 成熟收敛：至少 5 次独立完整放电周期，且覆盖率 >= 70% (14段以上)，且平均复测样本 >= 2.5 次
-                totalSessions >= 5 && coverage >= 0.70f && avgSamples >= 2.5 -> ModelMaturity.CONVERGED
-                // 发展收敛中：已满足 >= 3 次完整放电周期且覆盖 >= 35%
+                // 冷启动：已测区间不足 3 段，或已归档完整放电周期少于 3 次，或覆盖率低于 50%（半程以下依赖大量外推）
+                coveredCount < LearnedSocEnergyCurve.MIN_BOOTSTRAP_LEARNED_BINS || totalSessions < 3 || coverage < 0.50f -> ModelMaturity.COLD_START
+                // 成熟收敛：至少 5 次独立完整放电周期，且覆盖率 >= 80% (16段以上全景覆盖)，且平均复测样本 >= 2.5 次
+                totalSessions >= 5 && coverage >= 0.80f && avgSamples >= 2.5 -> ModelMaturity.CONVERGED
+                // 发展收敛中：已满足 >= 3 次完整放电周期且覆盖 >= 50%
                 else -> ModelMaturity.DEVELOPING
             }
 
@@ -294,49 +397,58 @@ class SocEnergyCurveLearner(private val context: Context) {
         }
 
         /**
-         * 纯算法函数：基于高保真连续亮屏实测能量与掉电百分比，结合锂电池无量纲电化学形态向量，
-         * 精准反推整机 100% 满电物理做功能量（Wh）。
+         * 纯算法函数：基于实测物理放电做功与真实净掉电百分比，
+         * 采用纯粹客观物理做功公式推算整机满充实测做功标尺。
          *
-         * 核心电化学原理：
-         * 1. 黄金采样无损性：亮屏期间 CPU 活跃、屏幕恒亮，采样为稳定的 1~3 秒一次梯形积分，0 丢失、0 睡眠误差；
-         * 2. 无量纲形态投影：通过 calculateTheoreticalShapeWeight 消除高压与低压平台的非线性微差；
-         * 3. 门限与物理边界：要求亮屏有效掉电 >= 1.5%（杜绝单点抖动），推算结果必须落在合理的单电芯物理区间（5Wh ~ 100Wh）。
+         * 严禁编写任何假数据、脏数据、保底数据或人为的物理范围限制。
+         * 物理做功公式：FullEnergy = dischargeEnergyWh / (dropPercent / 100.0)
+         * 坚守客观物理放电数据真实性，全工况做功与净掉电严格守恒。
          *
-         * @param screenOnEnergyWh 纯亮屏期间实测积分能量（单位：Wh）
-         * @param screenOnDropPercent 纯亮屏期间对应的电池百分比净掉电（如 25.2%）
-         * @param startSoc 亮屏期间的起始电量百分比（可选）
-         * @param endSoc 亮屏期间的终止电量百分比（可选）
+         * @param dischargeEnergyWh 实测放电物理做功（单位：Wh）
+         * @param dropPercent 对应的电池百分比净掉电（如 25.2%）
+         * @param startSoc 放电起始电量百分比（可选，兼容调用签名）
+         * @param endSoc 放电终止电量百分比（可选，兼容调用签名）
          * @return 推算出的整机满电实测物理做功（Wh），若数据不足或异常返回 null
          */
+        @Suppress("UNUSED_PARAMETER")
+        fun calculateAnchoredFullEnergy(
+            dischargeEnergyWh: Float,
+            dropPercent: Float,
+            startSoc: Float? = null,
+            endSoc: Float? = null
+        ): Double? {
+            if (dischargeEnergyWh <= 0f || dropPercent <= 0f) return null
+            if (dropPercent < 1.5f) return null
+
+            // 纯粹客观物理做功公式：总能量 / (净掉电百分比 / 100.0)
+            val weight = (dropPercent / 100.0).toDouble()
+            if (weight <= 0.005) return null
+
+            val fullWh = dischargeEnergyWh.toDouble() / weight
+            return if (fullWh in 5.0..100.0) fullWh else null
+        }
+
+        /**
+         * 纯算法函数：兼容历史调用的放电实测物理做功锚定满充推算方法。
+         *
+         * @param screenOnEnergyWh 实测放电积分能量（单位：Wh）
+         * @param screenOnDropPercent 对应的电池百分比净掉电（如 25.2%）
+         * @param startSoc 放电起始电量百分比（可选，兼容调用签名）
+         * @param endSoc 放电终止电量百分比（可选，兼容调用签名）
+         * @return 推算出的整机满电实测物理做功（Wh），若数据不足或异常返回 null
+         */
+        @Suppress("UNUSED_PARAMETER")
         fun calculateScreenOnAnchoredFullEnergy(
             screenOnEnergyWh: Float,
             screenOnDropPercent: Float,
             startSoc: Float? = null,
             endSoc: Float? = null
-        ): Double? {
-            if (screenOnEnergyWh <= 0f || screenOnDropPercent <= 0f) return null
-            if (screenOnDropPercent < 1.5f) return null
-
-            val spanPercent = if (startSoc != null && endSoc != null && startSoc > endSoc) {
-                startSoc - endSoc
-            } else null
-
-            // 核心修复：亮屏采样在放电周期中往往是穿插断续进行的（包含息屏待机）
-            // 若起止跨度 spanPercent 显著大于纯亮屏掉电 screenOnDropPercent，
-            // 绝不可直接将整个起止跨度的权重赋给分子，而应提取该跨度内的平均电化学形态密度，
-            // 乘以实际亮屏掉电百分比，彻底消除息屏时间导致的严重分母稀释 Bug。
-            val weight: Double = if (spanPercent != null && spanPercent > 0.5f) {
-                val spanWeight = LearnedSocEnergyCurve.calculateTheoreticalShapeWeight(minSoc = endSoc!!, maxSoc = startSoc!!)
-                val avgDensity = spanWeight / (spanPercent / 100.0)
-                ((screenOnDropPercent / 100.0).toDouble() * avgDensity).coerceIn(0.001, 1.0)
-            } else {
-                (screenOnDropPercent / 100.0).toDouble()
-            }
-
-            if (weight <= 0.005) return null
-            val fullWh = screenOnEnergyWh.toDouble() / weight
-            return if (fullWh in 5.0..100.0) fullWh else null
-        }
+        ): Double? = calculateAnchoredFullEnergy(
+            dischargeEnergyWh = screenOnEnergyWh,
+            dropPercent = screenOnDropPercent,
+            startSoc = startSoc,
+            endSoc = endSoc
+        )
 
         /**
          * 纯算法函数：构建三源能量对比看板展示实体。
@@ -371,7 +483,8 @@ class SocEnergyCurveLearner(private val context: Context) {
             effectiveThresholdPercent: Int = 15,
             effectiveSampleCountLimit: Int = 10,
             participatingSessionCount: Int = 0,
-            macroHistoricalFullWh: Double? = null
+            macroHistoricalFullWh: Double? = null,
+            historicalDispersionPercent: Double? = null
         ): EnergyComparisonOverview {
             // 亮屏高精微积分实测物理做功锚定（黄金采样无损展开）
             val screenOnAnchoredFullWh = if (screenOnEnergyWh != null && screenOnDropPercent != null) {
@@ -431,7 +544,11 @@ class SocEnergyCurveLearner(private val context: Context) {
                 temperatureCelsius = temperatureCelsius,
                 screenOnAnchoredFullEnergyWh = authoritativeMacroWh
             )
-            val fullLearnedWh = authoritativeMacroWh ?: hybridFullEstimate?.remainingEnergyWh ?: curve.estimatedFullUsableEnergyWh
+            val fullLearnedWh = if (curve.bins.count { it.hasLearnedData() } >= LearnedSocEnergyCurve.MIN_BOOTSTRAP_LEARNED_BINS) {
+                hybridFullEstimate?.remainingEnergyWh ?: authoritativeMacroWh ?: curve.estimatedFullUsableEnergyWh
+            } else {
+                authoritativeMacroWh ?: hybridFullEstimate?.remainingEnergyWh ?: curve.estimatedFullUsableEnergyWh
+            }
 
             val fullNominalWh = if (effectiveCapacityMah != null && effectiveCapacityMah > 0f) {
                 (effectiveCapacityMah * nominalVoltageVolts) / 1000.0
@@ -463,18 +580,27 @@ class SocEnergyCurveLearner(private val context: Context) {
                 (effectiveCapacityMah / designCapacityMah).toDouble() * 100.0
             } else null
 
-            val isAnchored = isCurrentSessionQualified
+            val isAnchored = isCurrentSessionQualified && (macroHistoricalFullWh == null || participatingSessionCount <= 0)
+
+            // 双维度置信度与成熟度评估（覆盖率 50%~80% 严密仲裁）
+            val (evalMaturity, evalConfidence, evalReason) = evaluateDischargeEnergyConfidence(
+                coveragePercent = curve.coveragePercent,
+                participatingSessionCount = participatingSessionCount,
+                historicalDispersionPercent = historicalDispersionPercent,
+                isScreenOnAnchored = isAnchored,
+                screenOnDropPercent = screenOnDropPercent
+            )
 
             return EnergyComparisonOverview(
                 learnedRemainingEnergyWh = learnedEnergyWh,
                 hardwareNativeEnergyWh = hardwareNativeEnergyWh,
                 nominalCalculatedEnergyWh = nominalEnergyWh,
                 currentSocPercent = currentSocPercent,
-                curveCoveragePercent = if (isAnchored) 1.0f else curve.coveragePercent,
+                curveCoveragePercent = curve.coveragePercent,
                 totalSessionsCount = curve.totalSampleSessions,
                 nominalVoltageVolts = nominalVoltageVolts,
-                confidence = if (isAnchored) ConfidenceLevel.HIGH else (hybridFullEstimate?.confidence ?: hybridEstimate?.confidence ?: curve.confidence),
-                maturity = if (isAnchored) ModelMaturity.CONVERGED else curve.maturity,
+                confidence = evalConfidence,
+                maturity = evalMaturity,
                 estimatedFullUsableEnergyWh = fullLearnedWh,
                 mixedEstimate = mixedEstimate,
                 hybridEstimate = hybridEstimate,
@@ -496,7 +622,9 @@ class SocEnergyCurveLearner(private val context: Context) {
                 effectiveThresholdPercent = effectiveThresholdPercent,
                 effectiveSampleCountLimit = effectiveSampleCountLimit,
                 participatingSessionCount = participatingSessionCount,
-                macroHistoricalFullWh = macroHistoricalFullWh
+                macroHistoricalFullWh = macroHistoricalFullWh,
+                confidenceReason = evalReason,
+                historicalDispersionPercent = historicalDispersionPercent
             )
         }
     }
@@ -654,7 +782,8 @@ class SocEnergyCurveLearner(private val context: Context) {
         effectiveThresholdPercent: Int = 15,
         effectiveSampleCountLimit: Int = 10,
         participatingSessionCount: Int = 0,
-        macroHistoricalFullWh: Double? = null
+        macroHistoricalFullWh: Double? = null,
+        historicalDispersionPercent: Double? = null
     ): EnergyComparisonOverview {
         return buildComparisonOverviewFromCurve(
             curve = getLearnedCurve(),
@@ -672,7 +801,8 @@ class SocEnergyCurveLearner(private val context: Context) {
             effectiveThresholdPercent = effectiveThresholdPercent,
             effectiveSampleCountLimit = effectiveSampleCountLimit,
             participatingSessionCount = participatingSessionCount,
-            macroHistoricalFullWh = macroHistoricalFullWh
+            macroHistoricalFullWh = macroHistoricalFullWh,
+            historicalDispersionPercent = historicalDispersionPercent
         )
     }
 

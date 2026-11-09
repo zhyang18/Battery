@@ -29,7 +29,7 @@ import java.util.Locale
 
 /**
  * 电池容量科学诊断与学习档案底部抽屉弹窗控制器（CapacityDiagnosisBottomSheetDialog）。
- * 负责呈现真实的电荷微积分模型结果、自学习样本档案统计、充放电交叉冲突率 D 及零假数据工况声明。
+ * 负责呈现真实的电荷微积分模型结果、自学习样本档案统计、平稳充电观测相对差异率 D 及零假数据工况声明。
  */
 class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
 
@@ -148,14 +148,12 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
         val thresholdClickListener = View.OnClickListener {
             showThresholdPickerDialog(view)
         }
-        view.findViewById<View>(R.id.layout_diag_threshold_setting)?.setOnClickListener(thresholdClickListener)
         view.findViewById<View>(R.id.tv_diag_threshold_selector)?.setOnClickListener(thresholdClickListener)
 
         // 绑定有效数据条数时效窗口设置项点击事件
         val countClickListener = View.OnClickListener {
             showCountPickerDialog(view)
         }
-        view.findViewById<View>(R.id.layout_diag_count_setting)?.setOnClickListener(countClickListener)
         view.findViewById<View>(R.id.tv_diag_count_selector)?.setOnClickListener(countClickListener)
 
         // 获取并动态观察最新的容量状态结果流，自动刷新诊断视图
@@ -178,7 +176,7 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
     private fun showThresholdPickerDialog(rootView: View) {
         val pickerDialog = CapacityThresholdPickerBottomSheetDialog()
         pickerDialog.setOnThresholdSelectedListener { selectedPercent ->
-            val labelText = if (selectedPercent == 100) "100% ▾" else "> ${selectedPercent}% ▾"
+            val labelText = if (selectedPercent == 100) "门限: 100% ▾" else "门限: > ${selectedPercent}% ▾"
             rootView.findViewById<TextView>(R.id.tv_diag_threshold_selector)?.text = labelText
         }
         pickerDialog.show(parentFragmentManager, "CapacityThresholdPickerBottomSheetDialog")
@@ -224,7 +222,7 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
 
         val threshold = BatteryCapacityManager.getInstance(root.context).getEffectiveSocSpanThreshold()
         val tvThresholdSelector = root.findViewById<TextView>(R.id.tv_diag_threshold_selector)
-        tvThresholdSelector?.text = if (threshold == 100) "100% ▾" else "> ${threshold}% ▾"
+        tvThresholdSelector?.text = if (threshold == 100) "门限: 100% ▾" else "门限: > ${threshold}% ▾"
 
         val countLimit = BatteryCapacityManager.getInstance(root.context).getEffectiveSampleCountLimit()
         val tvCountSelector = root.findViewById<TextView>(R.id.tv_diag_count_selector)
@@ -240,7 +238,7 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
             tvMaturityBadge?.text = getString(R.string.capacity_maturity_pending)
             tvMaturityBadge?.setTextColor(pendingColor)
             tvMaturityBadge?.let { setRoundedBadgeBackground(it, pendingColor, 6f) }
-            val zeroText = getString(R.string.capacity_diag_zero_times)
+            val zeroText = getString(R.string.capacity_diag_counts_charge_only, 0)
             tvSessionCounts?.text = formatSessionCountsWithColor(zeroText, pendingColor)
             tvSocSpan?.text = "0%"
             tvDispersion?.text = "--"
@@ -270,11 +268,7 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
         tvMaturityBadge?.text = result.maturityLevel.getDisplayName(requireContext())
         tvMaturityBadge?.setTextColor(badgeColor)
         tvMaturityBadge?.let { setRoundedBadgeBackground(it, badgeColor, 6f) }
-        val countsText = if (result.dischargeSessionCount > 0) {
-            getString(R.string.capacity_diag_counts_format, result.chargeSessionCount, result.dischargeSessionCount)
-        } else {
-            getString(R.string.capacity_diag_counts_charge_only, result.chargeSessionCount)
-        }
+        val countsText = getString(R.string.capacity_diag_counts_charge_only, result.chargeSessionCount)
         tvSessionCounts?.text = formatSessionCountsWithColor(countsText, badgeColor)
         tvSocSpan?.text = "${result.totalSocSpanCovered}%"
         tvDispersion?.text = result.dispersionCoefficientPercent?.let {
@@ -284,7 +278,7 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
             String.format(Locale.getDefault(), "±%.0f mAh", it)
         } ?: "--"
 
-        // 3. 板块三：交叉冲突率 D
+        // 3. 板块三：观测相对差异率 D
         tvConflictD?.text = result.conflictRateDPercent?.let {
             if (it < 10.0) {
                 String.format(Locale.getDefault(), getString(R.string.capacity_diag_consistency_good), it)
@@ -315,7 +309,7 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
     /**
      * 将格式化后的会话次数字符串中的数字部分渲染为指定的高亮主题色。
      *
-     * @param text 包含会话次数的原始文本（如 "充电 3 次 ｜ 放电 4 次" 或 "0 次"）
+     * @param text 包含会话次数的原始文本（如 "3 次平稳充电会话" 或 "0 次平稳充电会话"）
      * @param highlightColor 用于高亮展示数字的颜色值
      * @return 包含颜色样式区间的 [CharSequence]
      */

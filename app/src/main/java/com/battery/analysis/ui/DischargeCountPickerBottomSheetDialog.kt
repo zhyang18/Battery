@@ -36,6 +36,14 @@ class DischargeCountPickerBottomSheetDialog : BottomSheetDialogFragment() {
         this.onCountSelectedListener = listener
     }
 
+    /**
+     * 创建并加载有效条数选择底部抽屉弹窗的根视图。
+     *
+     * @param inflater 布局填充器
+     * @param container 父容器视图
+     * @param savedInstanceState 保存的状态数据包
+     * @return 实例化的根视图，可能为 null
+     */
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -44,6 +52,9 @@ class DischargeCountPickerBottomSheetDialog : BottomSheetDialogFragment() {
         return inflater.inflate(R.layout.dialog_discharge_count_picker, container, false)
     }
 
+    /**
+     * 初始化配置底部抽屉的高级样式与全量展开行为。
+     */
     override fun onStart() {
         super.onStart()
         val dialog = dialog as? BottomSheetDialog ?: return
@@ -96,6 +107,9 @@ class DischargeCountPickerBottomSheetDialog : BottomSheetDialogFragment() {
         }
     }
 
+    /**
+     * 以与手势向下滑动完全一致的平滑下落动画退出底部弹窗。
+     */
     private fun dismissWithSlideDownAnimation() {
         val dialog = dialog as? BottomSheetDialog
         val bottomSheet = dialog?.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
@@ -108,6 +122,12 @@ class DischargeCountPickerBottomSheetDialog : BottomSheetDialogFragment() {
         }
     }
 
+    /**
+     * 视图构建完成后的回调，用于初始化有效数据条数选项列表与绑定确定/取消交互事件。
+     *
+     * @param view 已创建的根视图实例
+     * @param savedInstanceState 保存的状态数据包，可能为 null
+     */
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         val ctx = context ?: return
@@ -122,7 +142,15 @@ class DischargeCountPickerBottomSheetDialog : BottomSheetDialogFragment() {
             dismissWithSlideDownAnimation()
         }
 
+        var isDismissing = false
         view.findViewById<MaterialButton>(R.id.btn_confirm_count)?.setOnClickListener {
+            if (isDismissing) return@setOnClickListener
+            // 若用户未做任何变更，直接退出，避免冗余重算与刷新开销
+            if (selectedCount == currentVal) {
+                dismissWithSlideDownAnimation()
+                return@setOnClickListener
+            }
+            isDismissing = true
             manager.setDischargeSampleCountLimit(selectedCount)
             onCountSelectedListener?.invoke(selectedCount)
             Toast.makeText(ctx, getString(R.string.toast_discharge_condition_updated), Toast.LENGTH_SHORT).show()
@@ -142,6 +170,13 @@ class DischargeCountPickerBottomSheetDialog : BottomSheetDialogFragment() {
         }
     }
 
+    /**
+     * 条数选项列表项实体数据类。
+     *
+     * @property count 时效窗口最大样本条数（0 表示全部）
+     * @property valueLabel 界面显示的条数文案（如 "最近 10 条 (推荐)"）
+     * @property descResId 对应的本地化描述字符串资源 ID
+     */
     private data class CountOptionItem(
         val count: Int,
         val valueLabel: String,
@@ -158,6 +193,13 @@ class DischargeCountPickerBottomSheetDialog : BottomSheetDialogFragment() {
         CountOptionItem(0, "全部数据", R.string.discharge_count_desc_all)
     )
 
+    /**
+     * 有效数据条数选项列表 RecyclerView 适配器。
+     *
+     * @param items 条数选项列表数据源
+     * @param initialSelected 初始选中的有效条数限制
+     * @param onSelected 选项单选选中后的回调函数
+     */
     private class CountOptionAdapter(
         private val items: List<CountOptionItem>,
         initialSelected: Int,
@@ -166,11 +208,24 @@ class DischargeCountPickerBottomSheetDialog : BottomSheetDialogFragment() {
 
         private var selectedCount: Int = initialSelected
 
+        /**
+         * 创建列表项 ViewHolder 实例。
+         *
+         * @param parent 父容器视图
+         * @param viewType 视图类型
+         * @return 实例化的 [CountOptionViewHolder]
+         */
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CountOptionViewHolder {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.item_capacity_threshold_option, parent, false)
             return CountOptionViewHolder(view)
         }
 
+        /**
+         * 绑定列表项视图数据与选中状态。
+         *
+         * @param holder 目标 ViewHolder 实例
+         * @param position 列表项索引位置
+         */
         override fun onBindViewHolder(holder: CountOptionViewHolder, position: Int) {
             val item = items[position]
             val isSelected = (item.count == selectedCount)
@@ -184,15 +239,32 @@ class DischargeCountPickerBottomSheetDialog : BottomSheetDialogFragment() {
             }
         }
 
+        /**
+         * 获取列表项总数量。
+         *
+         * @return 数据项总数
+         */
         override fun getItemCount(): Int = items.size
     }
 
+    /**
+     * 有效条数选项列表项视图持有者。
+     *
+     * @param itemView 列表项根视图
+     */
     private class CountOptionViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val rootLayout: View = itemView.findViewById(R.id.layout_threshold_item_root)
         private val tvValue: TextView = itemView.findViewById(R.id.tv_threshold_value)
         private val tvDesc: TextView = itemView.findViewById(R.id.tv_threshold_desc)
         private val ivCheck: ImageView = itemView.findViewById(R.id.iv_threshold_check)
 
+        /**
+         * 绑定单条有效条数数据并设置高亮与选中对勾。
+         *
+         * @param item 条数数据实体
+         * @param isSelected 是否处于被选中状态
+         * @param onClick 项点击回调函数
+         */
         fun bind(item: CountOptionItem, isSelected: Boolean, onClick: () -> Unit) {
             tvValue.text = item.valueLabel
             tvDesc.setText(item.descResId)

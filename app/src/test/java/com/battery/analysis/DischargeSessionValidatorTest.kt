@@ -171,4 +171,51 @@ class DischargeSessionValidatorTest {
         // 满 5.0% 跨度无额外倍数
         assertEquals(1.20, s11.energyWh, 0.0001)
     }
+
+    /**
+     * 测试废除极端一票否决拉黑：
+     * 当某区间仅存在微小的失联断层（例如缺损 0.2%），
+     * 系统绝不能因为点接触或微小断层将整段拉黑，正常有效跨度（4.8% >= 4.5%）必须正常评定为 COMPLETE_BIN。
+     */
+    @Test
+    fun testMinorGapNotCausingOneVoteVetoRejection() {
+        val deltas = mapOf(
+            5 to DischargeEnergyIntegrator.BinEnergyDelta(
+                binIndex = 5, // 25%~30%
+                energyWh = 1.40,
+                durationMs = 600_000L,
+                startSocPercent = 30.0f,
+                endSocPercent = 25.2f,
+                coveredSocSpan = 4.8f // 覆盖 4.8%，缺损 0.2%
+            )
+        )
+        val minorGaps = listOf(
+            DischargeEnergyIntegrator.UnobservedSocRange(
+                startSocPercent = 25.2f,
+                endSocPercent = 25.0f, // 仅缺损 0.2%
+                gapDurationMs = 200_000L
+            )
+        )
+        val integrationResult = DischargeEnergyIntegrator.DischargeIntegrationResult(
+            binDeltas = deltas,
+            unobservedRanges = minorGaps,
+            totalValidDurationMs = 600_000L,
+            totalIntegratedEnergyWh = 1.40
+        )
+
+        val validation = DischargeSessionValidator.validateDischargeSession(
+            integrationResult = integrationResult,
+            sessionId = "session_minor_gap",
+            effectiveCapacityMah = 8000.0
+        )
+
+        // 缺损 0.2% 远小于 1.0% 的损毁门限，bin 5 绝不能被拉黑拒绝
+        assertFalse(validation.rejectedBinIndices.contains(5))
+        assertEquals(1, validation.validCompleteSamples.size)
+        val s5 = validation.validCompleteSamples[0]
+        assertEquals(5, s5.binIndex)
+        assertEquals(SampleQuality.COMPLETE_BIN, s5.quality)
+        // 1.40 * (5.0 / 4.8) = 1.4583 Wh
+        assertEquals(1.40 * (5.0 / 4.8), s5.energyWh, 0.001)
+    }
 }

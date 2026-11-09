@@ -5,6 +5,7 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.os.BatteryManager
 import android.os.Bundle
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -26,6 +27,11 @@ import com.google.android.material.button.MaterialButton
 import java.util.Locale
 import androidx.appcompat.app.AlertDialog
 import android.widget.Toast
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 放电能量模型与 5% SOC 历史放电能量曲线实测档案底部抽屉弹窗控制器（DischargeEnergyModelBottomSheetDialog）。
@@ -36,6 +42,8 @@ import android.widget.Toast
  * 3. 严格遵循零假数据原则：未采集的 SOC 区间如实展示“待采集”，绝不合成伪造数据。
  */
 class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
+
+    private var refreshDataJob: Job? = null
 
     /**
      * 创建并加载放电能量模型底部弹窗的根视图。
@@ -168,6 +176,7 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
 
     /**
      * 绑定实测三源能量对比看板与 20 段 SOC 能量释放明细。
+     * 采用主线程轻量级指示器更新与协程后台模型计算异步分离架构，杜绝界面卡顿与掉帧。
      *
      * @param root 弹窗根视图
      */
@@ -176,17 +185,7 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
 
         val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(context)
 
-        // 核心增强：打开弹窗时优先触发一次正在进行中放电会话的即时学习评估，让已跑满的 5% 区间立即可见
-        try {
-            powerManager.evaluateInFlightSocLearning()
-        } catch (_: Exception) {}
-
-        // 执行基于双重条件（门限 + 条数时效窗口）的即时重算并获得最新全景数据
-        val overview = powerManager.recalculateDischargeEnergyModel()
-        val learner = SocEnergyCurveLearner.getInstance(context)
-        val curve = learner.getLearnedCurve()
-
-        // 绑定双重条件过滤器选择器（放电门限 + 时效有效条数）
+        // 1. 立即在主线程更新双重条件选择器文案与弹窗监听器（零延迟）
         val tvThresholdSelector = root.findViewById<TextView>(R.id.tv_discharge_threshold_selector)
         val tvCountSelector = root.findViewById<TextView>(R.id.tv_discharge_count_selector)
 
@@ -198,8 +197,7 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
 
         tvThresholdSelector?.setOnClickListener {
             val picker = DischargeThresholdPickerBottomSheetDialog()
-            picker.setOnThresholdSelectedListener { newThreshold ->
-                powerManager.setDischargeSocSpanThreshold(newThreshold)
+            picker.setOnThresholdSelectedListener {
                 bindEnergyData(root)
             }
             picker.show(childFragmentManager, "DischargeThresholdPicker")
@@ -207,37 +205,104 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
 
         tvCountSelector?.setOnClickListener {
             val picker = DischargeCountPickerBottomSheetDialog()
-            picker.setOnCountSelectedListener { newLimit ->
-                powerManager.setDischargeSampleCountLimit(newLimit)
+            picker.setOnCountSelectedListener {
                 bindEnergyData(root)
             }
             picker.show(childFragmentManager, "DischargeCountPicker")
         }
 
-        // 2. 渲染板块一看板数据（纵向每行显示对比）
+        // 2. 异步在后台 IO 线程调度模型计算与数据重算，彻底杜绝主线程卡顿
+        refreshDataJob?.cancel()
+        refreshDataJob = viewLifecycleOwner.lifecycleScope.launch {
+            val (overview, curve) = withContext(Dispatchers.IO) {
+                try {
+                    powerManager.evaluateInFlightSocLearning()
+                } catch (_: Exception) {}
+                val ov = powerManager.recalculateDischargeEnergyModel()
+                val learner = SocEnergyCurveLearner.getInstance(context)
+                val crv = learner.getLearnedCurve()
+                Pair(ov, crv)
+            }
+
+            if (!isAdded || view == null) return@launch
+            renderEnergyOverviewAndBins(root, overview, curve)
+        }
+    }
+
+    /**
+     * 渲染实测三源能量看板数据与 20 段 SOC 能量释放明细视图。
+     *
+     * @param root 弹窗根视图
+     * @param overview 放电能量模型三源对比概览实体
+     * @param curve 20 段 SOC 能量学习曲线实体
+     */
+    private fun renderEnergyOverviewAndBins(
+        root: View,
+        overview: EnergyComparisonOverview,
+        curve: LearnedSocEnergyCurve
+    ) {
+        val context = context ?: return
+
+        // 渲染板块一看板数据（纵向每行显示对比）
         val tvCoverageBadge = root.findViewById<TextView>(R.id.tv_model_coverage_badge)
         val tvValLearned = root.findViewById<TextView>(R.id.tv_val_learned_energy)
+        val tvLabelLearnedHealth = root.findViewById<TextView>(R.id.tv_label_learned_health)
         val tvValLearnedCoverage = root.findViewById<TextView>(R.id.tv_val_learned_coverage)
         val tvValSessions = root.findViewById<TextView>(R.id.tv_val_model_sessions)
-        val tvValHardware = root.findViewById<TextView>(R.id.tv_val_hardware_energy)
-        val tvValHardwareDesc = root.findViewById<TextView>(R.id.tv_val_hardware_desc)
+        val tvLabelRemaining = root.findViewById<TextView>(R.id.tv_label_remaining_energy)
+        val tvDescRemaining = root.findViewById<TextView>(R.id.tv_desc_remaining_energy)
+        val tvValRemaining = root.findViewById<TextView>(R.id.tv_val_remaining_energy)
+        val tvValRemainingDesc = root.findViewById<TextView>(R.id.tv_val_remaining_desc)
         val tvLabelNominal = root.findViewById<TextView>(R.id.tv_label_nominal_energy)
+        val tvLabelNominalHealth = root.findViewById<TextView>(R.id.tv_label_nominal_health)
         val tvValNominal = root.findViewById<TextView>(R.id.tv_val_nominal_energy)
 
-        // 覆盖率 badge：显示全局覆盖率 + 成熟度（支持多语言，中文环境下显示中文）
-        if (overview.isScreenOnAnchored) {
-            tvCoverageBadge.text = getString(R.string.energy_badge_screen_on_anchored)
-            tvCoverageBadge.setTextColor(Color.parseColor("#10b981"))
-            tvCoverageBadge.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#2010b981"))
-        } else if (overview.macroHistoricalFullWh != null && overview.participatingSessionCount > 0) {
-            tvCoverageBadge.text = getString(R.string.energy_badge_macro_historical_anchored)
-            tvCoverageBadge.setTextColor(Color.parseColor("#3b82f6"))
-            tvCoverageBadge.backgroundTintList = ColorStateList.valueOf(Color.parseColor("#203b82f6"))
-        } else {
-            val coveragePercentStr = String.format(Locale.US, "%.1f%%", overview.curveCoveragePercent * 100f)
-            val maturityText = getModelMaturityLabel(context, curve.maturity)
-            tvCoverageBadge.text = "$coveragePercentStr ($maturityText)"
+        // 覆盖率 badge：优先响应参与统计的多会话/在途宏观锚定，其次响应单次纯亮屏实测
+        val (badgeText, badgeColorHex) = when {
+            overview.macroHistoricalFullWh != null && overview.participatingSessionCount > 0 -> {
+                val cov = overview.curveCoveragePercent
+                val count = overview.participatingSessionCount
+                val disp = overview.historicalDispersionPercent
+                when {
+                    cov < 0.50f -> Pair(getString(R.string.energy_badge_macro_low_coverage_extrapolated), "#f59e0b")
+                    cov < 0.80f -> {
+                        if (count <= 1) Pair(getString(R.string.energy_badge_macro_single_ref), "#f59e0b")
+                        else Pair(getString(R.string.energy_badge_macro_mid_confidence), "#3b82f6")
+                    }
+                    else -> {
+                        when {
+                            count <= 1 -> Pair(getString(R.string.energy_badge_macro_single_deep_ref), "#3b82f6")
+                            count == 2 -> Pair(getString(R.string.energy_badge_macro_dual_deep_check), "#3b82f6")
+                            disp != null && disp > 8.0 -> Pair(getString(R.string.energy_badge_macro_dispersed), "#8b5cf6")
+                            else -> Pair(getString(R.string.energy_badge_macro_historical_anchored), "#10b981")
+                        }
+                    }
+                }
+            }
+            overview.isScreenOnAnchored -> {
+                val drop = overview.screenOnDropPercent ?: 0f
+                when {
+                    drop >= 80f -> Pair(getString(R.string.energy_badge_screen_on_anchored_deep_ref), "#3b82f6")
+                    drop >= 50f -> Pair(getString(R.string.energy_badge_screen_on_anchored), "#3b82f6")
+                    else -> Pair(getString(R.string.energy_badge_macro_low_coverage_extrapolated), "#f59e0b")
+                }
+            }
+            else -> {
+                if (overview.curveCoveragePercent > 0f) {
+                    val coveragePercentStr = String.format(Locale.US, "%.1f%%", overview.curveCoveragePercent * 100f)
+                    val maturityText = getModelMaturityLabel(context, curve.maturity)
+                    Pair("$coveragePercentStr ($maturityText)", "#3b82f6")
+                } else {
+                    Pair(getString(R.string.energy_badge_unreliable), "#94a3b8")
+                }
+            }
         }
+
+        tvCoverageBadge.text = badgeText
+        val parsedColor = Color.parseColor(badgeColorHex)
+        tvCoverageBadge.setTextColor(parsedColor)
+        val alphaColor = Color.argb(32, Color.red(parsedColor), Color.green(parsedColor), Color.blue(parsedColor))
+        tvCoverageBadge.backgroundTintList = ColorStateList.valueOf(alphaColor)
 
         // 行1：实测学习满充预测（三层混合满充估算值 + 覆盖血统 + 放电周期/分段样本状态 + 能量转化效率）
         val hybridFull = overview.hybridFullEstimate ?: overview.hybridEstimate
@@ -252,31 +317,47 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
             tvValLearned.text = mainText
             tvValLearned.setTextColor(Color.parseColor("#10b981"))
 
-            val covText = if (overview.isScreenOnAnchored) {
-                val onWh = overview.screenOnMeasuredEnergyWh ?: 0f
-                val onDrop = overview.screenOnDropPercent ?: 0f
-                String.format(Locale.US, "亮屏 %.2f Wh (掉电 %.1f%%)", onWh, onDrop)
-            } else if (overview.macroHistoricalFullWh != null && overview.participatingSessionCount > 0) {
-                val threshText = if (overview.effectiveThresholdPercent == 100) "100%" else "≥${overview.effectiveThresholdPercent}%"
-                "历史中位数 (门限 $threshText · ${overview.participatingSessionCount}条)"
-            } else if (hybridFull.isFullyLearned) {
-                "100% 实测微积分"
-            } else {
-                val measStr = String.format(Locale.US, "%.0f%%", hybridFull.measuredSocCoverage * 100f)
-                val modStr = String.format(Locale.US, "%.0f%%", hybridFull.modeledSocCoverage * 100f)
-                "${measStr}实测 + ${modStr}自举"
+            val threshText = if (overview.effectiveThresholdPercent == 100) "100%" else "≥${overview.effectiveThresholdPercent}%"
+            val covText = when {
+                hybridFull.isFullyLearned -> {
+                    if (overview.participatingSessionCount > 0) "100% 实测微积分 (门限 $threshText · ${overview.participatingSessionCount}条)"
+                    else "100% 实测微积分"
+                }
+                hybridFull.measuredSocCoverage >= 0.80f -> {
+                    val measStr = String.format(Locale.US, "%.0f%%", hybridFull.measuredSocCoverage * 100f)
+                    if (overview.participatingSessionCount > 0) "${measStr}实测微积分 (门限 $threshText · ${overview.participatingSessionCount}条)"
+                    else "${measStr}实测微积分"
+                }
+                overview.macroHistoricalFullWh != null && overview.participatingSessionCount > 0 -> {
+                    "历史中位数 (门限 $threshText · ${overview.participatingSessionCount}条)"
+                }
+                overview.isScreenOnAnchored -> {
+                    val onWh = overview.screenOnMeasuredEnergyWh ?: 0f
+                    val onDrop = overview.screenOnDropPercent ?: 0f
+                    String.format(Locale.US, "实测 %.2f Wh (掉电 %.1f%%)", onWh, onDrop)
+                }
+                else -> {
+                    val measStr = String.format(Locale.US, "%.0f%%", hybridFull.measuredSocCoverage * 100f)
+                    val modStr = String.format(Locale.US, "%.0f%%", hybridFull.modeledSocCoverage * 100f)
+                    "${measStr}实测 + ${modStr}自举"
+                }
             }
             tvValLearnedCoverage?.text = covText
 
             val energyHealth = overview.energyHealthRetentionPercent
             val equivMah = overview.equivalentCapacityMah
             if (energyHealth != null && energyHealth in 30.0..130.0 && equivMah != null && equivMah > 0.0) {
+                tvLabelLearnedHealth?.visibility = View.VISIBLE
+                tvLabelLearnedHealth?.text = getString(R.string.energy_source_learned_health_title)
+                tvHintLearned?.gravity = Gravity.END
                 tvHintLearned?.text = getString(
-                    R.string.energy_source_learned_health_hint,
+                    R.string.energy_source_learned_health_val,
                     energyHealth,
                     Math.round(equivMah)
                 )
             } else {
+                tvLabelLearnedHealth?.visibility = View.GONE
+                tvHintLearned?.gravity = Gravity.START
                 val efficiency = overview.dischargeEnergyEfficiencyPercent
                 if (efficiency != null && efficiency in 40.0..130.0) {
                     tvHintLearned?.text = getString(R.string.energy_source_learned_efficiency_hint, efficiency)
@@ -294,15 +375,31 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
                 "0 段已学习"
             }
             tvValLearnedCoverage?.text = progressText
+            tvLabelLearnedHealth?.visibility = View.GONE
+            tvHintLearned?.gravity = Gravity.START
             tvHintLearned?.text = getString(R.string.energy_source_learned_hint)
         }
 
         // 实测学习放电样本与会话说明
-        if (overview.isScreenOnAnchored) {
-            tvValSessions?.text = getString(R.string.energy_source_sessions_anchored)
-        } else if (overview.macroHistoricalFullWh != null && overview.participatingSessionCount > 0) {
-            tvValSessions?.text = "基于最近 ${overview.participatingSessionCount} 条有效放电记录宏观锚定"
+        if (overview.macroHistoricalFullWh != null && overview.participatingSessionCount > 0) {
+            val baseDesc = "基于最近 ${overview.participatingSessionCount} 条有效放电记录"
+            val medianStr = String.format(Locale.US, "宏观中位数 %.2f Wh", overview.macroHistoricalFullWh)
+            tvValSessions?.text = when {
+                overview.curveCoveragePercent < 0.50f -> {
+                    "$baseDesc · $medianStr · 实测覆盖 ${String.format(Locale.US, "%.0f%%", overview.curveCoveragePercent * 100f)}，低电量依赖外推"
+                }
+                overview.participatingSessionCount <= 1 -> {
+                    "$baseDesc · $medianStr · 单次放电实测，需积累验证"
+                }
+                overview.historicalDispersionPercent != null && overview.historicalDispersionPercent > 8.0 -> {
+                    "$baseDesc · $medianStr · 样本离散度 ${String.format(Locale.US, "%.1f%%", overview.historicalDispersionPercent)}"
+                }
+                else -> "$baseDesc · $medianStr"
+            }
+        } else if (overview.isScreenOnAnchored) {
+            tvValSessions?.text = overview.confidenceReason ?: getString(R.string.energy_source_sessions_anchored)
         } else {
+            val powerManager = com.battery.analysis.manager.PowerUsageManager.getInstance(context)
             val isDischarging = !powerManager.getCurrentBatteryStatus().isCharging
             val currentDischargeSamples = powerManager.getDischargeRealtimeSamples()
             val hasOngoingDischarge = isDischarging && currentDischargeSamples.size >= 2
@@ -314,16 +411,52 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
             )
         }
 
-        // 行2：硬件电量计满充推算
-        val fullHw = overview.fullHardwareEnergyWh ?: overview.hardwareNativeEnergyWh
-        if (fullHw != null && fullHw > 0.0) {
-            tvValHardware.text = String.format(Locale.US, "%.2f Wh", fullHw)
-            tvValHardwareDesc.text = context.getString(R.string.energy_col_hardware_supported)
-            tvValHardwareDesc.setTextColor(Color.parseColor("#10b981"))
+        // 行2：当前剩余能量（包含实测微积分、硬件直读与容量模型折算，忠实呈现当前电量下的实际可用做功）
+        tvLabelRemaining?.text = getString(R.string.energy_col_remaining_label)
+        val currentSoc = overview.currentSocPercent
+        val currentSocInt = Math.round(currentSoc)
+        val effCap = overview.effectiveCapacityMah ?: 0f
+
+        // 优先判断硬件原生上报剩余能量（若有且物理有效）
+        val hwNativeWh = overview.hardwareNativeEnergyWh
+        if (hwNativeWh != null && hwNativeWh > 0.0) {
+            tvValRemaining?.text = String.format(Locale.US, "%.2f Wh", hwNativeWh)
+            tvValRemaining?.setTextColor(Color.parseColor("#3b82f6"))
+            tvDescRemaining?.text = getString(R.string.energy_col_remaining_source_hardware, currentSocInt)
+            val equivMah = (hwNativeWh * 1000.0) / overview.nominalVoltageVolts
+            tvValRemainingDesc?.text = getString(R.string.energy_col_remaining_equiv_mah, Math.round(equivMah))
         } else {
-            tvValHardware.text = "--"
-            tvValHardwareDesc.text = context.getString(R.string.energy_col_hardware_unsupported)
-            tvValHardwareDesc.setTextColor(Color.parseColor("#64748b"))
+            // 实测学习模型推算的当前剩余能量（已学 20 段曲线积分或宏观锚定展开）
+            val fullLearned = overview.fullLearnedEnergyWh ?: hybridFull?.remainingEnergyWh ?: overview.learnedRemainingEnergyWh
+            val learnedRemainingWh = overview.learnedRemainingEnergyWh
+                ?: (if (fullLearned != null && fullLearned > 0.0 && currentSoc > 0f) fullLearned * (currentSoc / 100.0) else null)
+
+            if (learnedRemainingWh != null && learnedRemainingWh > 0.0) {
+                tvValRemaining?.text = String.format(Locale.US, "%.2f Wh", learnedRemainingWh)
+                tvValRemaining?.setTextColor(Color.parseColor("#3b82f6"))
+                tvDescRemaining?.text = getString(R.string.energy_col_remaining_source_learned, currentSocInt)
+
+                val equivFullMah = overview.equivalentCapacityMah
+                val equivRemainMah = if (equivFullMah != null && equivFullMah > 0.0) {
+                    equivFullMah * (currentSoc / 100.0)
+                } else {
+                    (learnedRemainingWh * 1000.0) / overview.nominalVoltageVolts
+                }
+                tvValRemainingDesc?.text = getString(R.string.energy_col_remaining_equiv_mah, Math.round(equivRemainMah))
+            } else if (overview.nominalCalculatedEnergyWh != null && overview.nominalCalculatedEnergyWh > 0.0) {
+                // 标称模型推算（未学习冷启动或初始阶段）
+                tvValRemaining?.text = String.format(Locale.US, "%.2f Wh", overview.nominalCalculatedEnergyWh)
+                tvValRemaining?.setTextColor(Color.parseColor("#3b82f6"))
+                tvDescRemaining?.text = getString(R.string.energy_col_remaining_source_nominal, currentSocInt)
+
+                val equivRemainMah = if (effCap > 0f) effCap * (currentSoc / 100.0) else (overview.nominalCalculatedEnergyWh * 1000.0) / overview.nominalVoltageVolts
+                tvValRemainingDesc?.text = getString(R.string.energy_col_remaining_equiv_mah, Math.round(equivRemainMah))
+            } else {
+                tvValRemaining?.text = "--"
+                tvValRemaining?.setTextColor(Color.parseColor("#64748b"))
+                tvDescRemaining?.text = getString(R.string.energy_col_remaining_source_nominal, currentSocInt)
+                tvValRemainingDesc?.text = "--"
+            }
         }
 
         // 行3：出厂设计标称额定满电基准与健康度对比
@@ -337,11 +470,13 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
             tvLabelNominal.text = "${getString(R.string.energy_col_design_label)} (${nominalVStr})"
             tvValNominal.text = String.format(Locale.US, "%.2f Wh", fullDesign)
             val designCap = overview.designCapacityMah ?: 0f
-            val effCap = overview.effectiveCapacityMah ?: 0f
             val capSoh = overview.capacityModelSohPercent ?: (if (designCap > 0f && effCap > 0f) (effCap / designCap).toDouble() * 100.0 else null)
             if (capSoh != null && fullNominal != null && Math.abs(fullDesign - fullNominal) > 0.1) {
+                tvLabelNominalHealth?.visibility = View.VISIBLE
+                tvLabelNominalHealth?.text = getString(R.string.energy_col_capacity_model_health_title)
+                tvDescNominal?.gravity = Gravity.END
                 tvDescNominal?.text = getString(
-                    R.string.energy_col_capacity_model_health_line,
+                    R.string.energy_col_capacity_model_health_val,
                     capSoh,
                     Math.round(effCap),
                     fullNominal
@@ -351,38 +486,56 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
                     Math.round(designCap)
                 )
             } else {
+                tvLabelNominalHealth?.visibility = View.GONE
+                tvDescNominal?.gravity = Gravity.START
                 tvDescNominal?.text = getString(R.string.energy_col_nominal_source)
                 tvHintNominal?.text = getString(R.string.energy_col_nominal_desc)
             }
         } else if (fullNominal != null && fullNominal > 0.0) {
             tvLabelNominal.text = "${getString(R.string.energy_col_nominal_label)} (${nominalVStr})"
             tvValNominal.text = String.format(Locale.US, "%.2f Wh", fullNominal)
+            tvLabelNominalHealth?.visibility = View.GONE
+            tvDescNominal?.gravity = Gravity.START
             tvDescNominal?.text = getString(R.string.energy_col_nominal_source)
             tvHintNominal?.text = getString(R.string.energy_col_nominal_desc)
         } else if (overview.nominalCalculatedEnergyWh != null && overview.nominalCalculatedEnergyWh > 0.0) {
             tvValNominal.text = String.format(Locale.US, "%.2f Wh", overview.nominalCalculatedEnergyWh)
+            tvLabelNominalHealth?.visibility = View.GONE
+            tvDescNominal?.gravity = Gravity.START
             tvHintNominal?.text = getString(R.string.energy_col_nominal_desc)
         } else {
             tvValNominal.text = "--"
+            tvLabelNominalHealth?.visibility = View.GONE
+            tvDescNominal?.gravity = Gravity.START
             tvHintNominal?.text = getString(R.string.energy_col_nominal_desc)
         }
 
-        // 3. 渲染板块三 20 段 SOC 能量分布明细
+        // 渲染板块三 20 段 SOC 能量分布明细（优化复用既有 View，杜绝无节制重复 Inflate 布局）
         val tvBinsSummary = root.findViewById<TextView>(R.id.tv_bins_summary_count)
         val layoutBinsContainer = root.findViewById<LinearLayout>(R.id.layout_bins_container)
-        layoutBinsContainer.removeAllViews()
 
         val coveredCount = curve.bins.count { it.hasLearnedData() }
         tvBinsSummary.text = "已学习 $coveredCount / ${LearnedSocEnergyCurve.BIN_COUNT} 段"
 
         val inflater = LayoutInflater.from(context)
         val fullResolvedBins = overview.hybridFullEstimate?.resolvedBins ?: overview.resolvedBins
+        val shouldInflate = layoutBinsContainer.childCount != LearnedSocEnergyCurve.BIN_COUNT
+        if (shouldInflate) {
+            layoutBinsContainer.removeAllViews()
+        }
 
         // 从高 SOC 到低 SOC 逆序展示（从 100%~95% 往下排列，更符合用户日常掉电心智）
-        for (i in (LearnedSocEnergyCurve.BIN_COUNT - 1) downTo 0) {
+        for (order in 0 until LearnedSocEnergyCurve.BIN_COUNT) {
+            val i = (LearnedSocEnergyCurve.BIN_COUNT - 1) - order
             val bin = curve.bins[i]
             val resolved = fullResolvedBins.find { it.binIndex == i } ?: overview.resolvedBins.getOrNull(i)
-            val itemView = inflater.inflate(R.layout.item_soc_energy_bin, layoutBinsContainer, false)
+            val itemView = if (shouldInflate) {
+                val v = inflater.inflate(R.layout.item_soc_energy_bin, layoutBinsContainer, false)
+                layoutBinsContainer.addView(v)
+                v
+            } else {
+                layoutBinsContainer.getChildAt(order)
+            }
 
             val tvLabel = itemView.findViewById<TextView>(R.id.tv_bin_range_label)
             val tvSourceBadge = itemView.findViewById<TextView>(R.id.tv_bin_source_badge)
@@ -458,8 +611,6 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
                     tvEnergy.setTextColor(Color.parseColor("#888888"))
                 }
             }
-
-            layoutBinsContainer.addView(itemView)
         }
     }
 

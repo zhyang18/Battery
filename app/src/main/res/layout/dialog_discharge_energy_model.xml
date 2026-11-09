@@ -127,7 +127,8 @@
                     android:orientation="horizontal">
 
                     <TextView
-                        android:layout_width="wrap_content"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
                         android:layout_height="wrap_content"
                         android:text="@string/discharge_filter_label"
                         android:textColor="?android:attr/textColorSecondary"
@@ -210,17 +211,35 @@
                                 tools:text="25.26 ± 0.22 Wh" />
                         </LinearLayout>
 
-                        <!-- 第二行：能量健康度（独占整行，大字醒目，绝不被截断） -->
-                        <TextView
-                            android:id="@+id/tv_hint_learned_energy"
+                        <!-- 第二行：能量健康度（左侧标题标签，右侧数值靠右对齐） -->
+                        <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2.5dp"
-                            android:gravity="start"
-                            android:textColor="#10b981"
-                            android:textSize="11.5sp"
-                            android:textStyle="bold"
-                            tools:text="能量健康度 82.0% (折合 6560 mAh)" />
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:id="@+id/tv_label_learned_health"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/energy_source_learned_health_title"
+                                android:textColor="#10b981"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_hint_learned_energy"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:layout_marginStart="8dp"
+                                android:gravity="end"
+                                android:textColor="#10b981"
+                                android:textSize="11.5sp"
+                                android:textStyle="bold"
+                                tools:text="82.0% (折合 6560 mAh)" />
+                        </LinearLayout>
 
                         <!-- 第三行：覆盖基准与做功来源（独占整行，完整展示，绝不截断） -->
                         <TextView
@@ -253,7 +272,7 @@
                         android:background="?android:attr/textColorSecondary"
                         android:alpha="0.12" />
 
-                    <!-- 行2：硬件电量计原生直读 -->
+                    <!-- 行2：当前剩余能量 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -268,20 +287,23 @@
                             android:orientation="vertical">
 
                             <TextView
+                                android:id="@+id/tv_label_remaining_energy"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="@string/energy_col_hardware_label"
+                                android:text="@string/energy_col_remaining_label"
                                 android:textColor="?android:attr/textColorPrimary"
-                                android:textSize="12.5sp"
+                                android:textSize="13sp"
                                 android:textStyle="bold" />
 
                             <TextView
+                                android:id="@+id/tv_desc_remaining_energy"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
-                                android:text="@string/energy_col_hardware_source"
+                                android:text="@string/energy_col_remaining_source_learned"
                                 android:textColor="?android:attr/textColorSecondary"
-                                android:textSize="10.5sp" />
+                                android:textSize="10.5sp"
+                                tools:text="当前电量 29% · 实测微积分推算" />
                         </LinearLayout>
 
                         <LinearLayout
@@ -291,25 +313,24 @@
                             android:orientation="vertical">
 
                             <TextView
-                                android:id="@+id/tv_val_hardware_energy"
+                                android:id="@+id/tv_val_remaining_energy"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:gravity="end"
-                                android:textColor="?android:attr/textColorPrimary"
-                                android:textSize="15.5sp"
+                                android:textColor="#3b82f6"
+                                android:textSize="16sp"
                                 android:textStyle="bold"
-                                tools:text="--" />
+                                tools:text="6.82 Wh" />
 
                             <TextView
-                                android:id="@+id/tv_val_hardware_desc"
+                                android:id="@+id/tv_val_remaining_desc"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
                                 android:gravity="end"
-                                android:text="@string/energy_col_hardware_unsupported"
                                 android:textColor="?android:attr/textColorSecondary"
-                                android:textSize="10sp"
-                                tools:text="底层硬件不支持" />
+                                android:textSize="10.5sp"
+                                tools:text="折合 1771 mAh" />
                         </LinearLayout>
                     </LinearLayout>
 
@@ -359,17 +380,35 @@
                                 tools:text="30.80 Wh" />
                         </LinearLayout>
 
-                        <!-- 第二行：容量模型健康度对照（独占整行，完整展示，绝不截断） -->
-                        <TextView
-                            android:id="@+id/tv_desc_nominal_energy"
+                        <!-- 第二行：容量模型健康度对照（左侧标题标签，右侧数值靠右对齐） -->
+                        <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2.5dp"
-                            android:gravity="start"
-                            android:singleLine="true"
-                            android:textColor="?android:attr/textColorPrimary"
-                            android:textSize="11.5sp"
-                            tools:text="容量模型健康度 78.1% (6247 mAh | 24.05 Wh)" />
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal">
+
+                            <TextView
+                                android:id="@+id/tv_label_nominal_health"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="@string/energy_col_capacity_model_health_title"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                tools:text="容量模型健康度" />
+
+                            <TextView
+                                android:id="@+id/tv_desc_nominal_energy"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:layout_marginStart="8dp"
+                                android:gravity="end"
+                                android:singleLine="true"
+                                android:textColor="?android:attr/textColorPrimary"
+                                android:textSize="11.5sp"
+                                tools:text="78.1% (6247 mAh | 24.05 Wh)" />
+                        </LinearLayout>
 
                         <!-- 第三行：出厂设计容量与理论基准说明（独占整行，清晰底注） -->
                         <TextView

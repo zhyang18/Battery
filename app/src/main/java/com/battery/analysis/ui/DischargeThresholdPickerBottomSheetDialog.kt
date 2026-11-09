@@ -36,6 +36,14 @@ class DischargeThresholdPickerBottomSheetDialog : BottomSheetDialogFragment() {
         this.onThresholdSelectedListener = listener
     }
 
+    /**
+     * 创建并加载门限选择底部抽屉弹窗的根视图。
+     *
+     * @param inflater 布局填充器
+     * @param container 父容器视图
+     * @param savedInstanceState 保存的状态数据包
+     * @return 实例化的根视图，可能为 null
+     */
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -44,6 +52,9 @@ class DischargeThresholdPickerBottomSheetDialog : BottomSheetDialogFragment() {
         return inflater.inflate(R.layout.dialog_discharge_threshold_picker, container, false)
     }
 
+    /**
+     * 初始化配置底部抽屉的高级样式与全量展开行为。
+     */
     override fun onStart() {
         super.onStart()
         val dialog = dialog as? BottomSheetDialog ?: return
@@ -96,6 +107,9 @@ class DischargeThresholdPickerBottomSheetDialog : BottomSheetDialogFragment() {
         }
     }
 
+    /**
+     * 以与手势向下滑动完全一致的平滑下落动画退出底部弹窗。
+     */
     private fun dismissWithSlideDownAnimation() {
         val dialog = dialog as? BottomSheetDialog
         val bottomSheet = dialog?.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
@@ -108,6 +122,12 @@ class DischargeThresholdPickerBottomSheetDialog : BottomSheetDialogFragment() {
         }
     }
 
+    /**
+     * 视图构建完成后的回调，用于初始化门限选项列表与绑定确定/取消交互事件。
+     *
+     * @param view 已创建的根视图实例
+     * @param savedInstanceState 保存的状态数据包，可能为 null
+     */
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         val ctx = context ?: return
@@ -122,10 +142,17 @@ class DischargeThresholdPickerBottomSheetDialog : BottomSheetDialogFragment() {
             dismissWithSlideDownAnimation()
         }
 
+        var isDismissing = false
         view.findViewById<MaterialButton>(R.id.btn_confirm_threshold)?.setOnClickListener {
+            if (isDismissing) return@setOnClickListener
+            // 若用户未做任何变更，直接退出，避免冗余重算与刷新开销
+            if (selectedPercent == currentVal) {
+                dismissWithSlideDownAnimation()
+                return@setOnClickListener
+            }
+            isDismissing = true
             manager.setDischargeSocSpanThreshold(selectedPercent)
             onThresholdSelectedListener?.invoke(selectedPercent)
-            val thresholdText = if (selectedPercent == 100) "100%" else "> $selectedPercent%"
             Toast.makeText(ctx, getString(R.string.toast_discharge_condition_updated), Toast.LENGTH_SHORT).show()
             dismissWithSlideDownAnimation()
         }
@@ -143,6 +170,13 @@ class DischargeThresholdPickerBottomSheetDialog : BottomSheetDialogFragment() {
         }
     }
 
+    /**
+     * 门限选项列表项实体数据类。
+     *
+     * @property percent 掉电百分比门限数值
+     * @property valueLabel 界面显示的百分比文案（如 "> 40%"）
+     * @property descResId 对应的本地化描述字符串资源 ID
+     */
     private data class ThresholdOptionItem(
         val percent: Int,
         val valueLabel: String,
@@ -164,6 +198,13 @@ class DischargeThresholdPickerBottomSheetDialog : BottomSheetDialogFragment() {
         ThresholdOptionItem(100, "100%", R.string.capacity_thresh_desc_100)
     )
 
+    /**
+     * 放电门限选项列表 RecyclerView 适配器。
+     *
+     * @param items 门限选项列表数据源
+     * @param initialSelected 初始选中的百分比门限值
+     * @param onSelected 选项单选选中后的回调函数
+     */
     private class ThresholdOptionAdapter(
         private val items: List<ThresholdOptionItem>,
         initialSelected: Int,
@@ -172,11 +213,24 @@ class DischargeThresholdPickerBottomSheetDialog : BottomSheetDialogFragment() {
 
         private var selectedPercent: Int = initialSelected
 
+        /**
+         * 创建列表项 ViewHolder 实例。
+         *
+         * @param parent 父容器视图
+         * @param viewType 视图类型
+         * @return 实例化的 [ThresholdOptionViewHolder]
+         */
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ThresholdOptionViewHolder {
             val view = LayoutInflater.from(parent.context).inflate(R.layout.item_capacity_threshold_option, parent, false)
             return ThresholdOptionViewHolder(view)
         }
 
+        /**
+         * 绑定列表项视图数据与选中状态。
+         *
+         * @param holder 目标 ViewHolder 实例
+         * @param position 列表项索引位置
+         */
         override fun onBindViewHolder(holder: ThresholdOptionViewHolder, position: Int) {
             val item = items[position]
             val isSelected = (item.percent == selectedPercent)
@@ -190,15 +244,32 @@ class DischargeThresholdPickerBottomSheetDialog : BottomSheetDialogFragment() {
             }
         }
 
+        /**
+         * 获取列表项总数量。
+         *
+         * @return 数据项总数
+         */
         override fun getItemCount(): Int = items.size
     }
 
+    /**
+     * 门限选项列表项视图持有者。
+     *
+     * @param itemView 列表项根视图
+     */
     private class ThresholdOptionViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         private val rootLayout: View = itemView.findViewById(R.id.layout_threshold_item_root)
         private val tvValue: TextView = itemView.findViewById(R.id.tv_threshold_value)
         private val tvDesc: TextView = itemView.findViewById(R.id.tv_threshold_desc)
         private val ivCheck: ImageView = itemView.findViewById(R.id.iv_threshold_check)
 
+        /**
+         * 绑定单条门限数据并设置高亮与选中对勾。
+         *
+         * @param item 门限数据实体
+         * @param isSelected 是否处于被选中状态
+         * @param onClick 项点击回调函数
+         */
         fun bind(item: ThresholdOptionItem, isSelected: Boolean, onClick: () -> Unit) {
             tvValue.text = item.valueLabel
             tvDesc.setText(item.descResId)

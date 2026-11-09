@@ -324,15 +324,23 @@ data class LearnedSocEnergyCurve(
                 wh / SOC_ENERGY_SHAPE_WEIGHTS[bin.binIndex]
             } else null
         }
-        // 方案 B 核心：至少需要已学习 3 个不同 SOC 区间才开启形态自举，杜绝单次极端瞬态负载误导
+        // 至少需要已学习 3 个不同 SOC 区间才开启形态自举，杜绝单次极端瞬态负载误导
         val fullScaleWhFromLearned: Double? = if (learnedVotes.size >= MIN_BOOTSTRAP_LEARNED_BINS) {
             val sorted = learnedVotes.sorted()
             val mid = sorted.size / 2
             if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
         } else null
 
-        // 核心进化：若外部传入当前会话的高保真连续亮屏实测锚定满电能量，优先作为权威物理标尺
-        val effectiveFullWh = screenOnAnchoredFullEnergyWh?.takeIf { it > 0.0 } ?: fullScaleWhFromLearned
+        // 核心仲裁法则：
+        // 1. 若微观实测样本充足 (>= 3段已学习)，实测微积分投票中位数是最高保真物理真值，优先作为权威标尺；
+        // 2. 若微观样本不足 (< 3段)，才使用外部宏观实测锚定值或容量先验。
+        val effectiveFullWh = fullScaleWhFromLearned ?: screenOnAnchoredFullEnergyWh?.takeIf { it > 0.0 }
+
+        // 提取已实测区间的上下界索引与实测真值，用于外推时的边界自适应平滑衔接（彻底消除断面断崖）
+        val learnedIndices = bins.filter { it.hasLearnedData() && it.learnedEnergyWh != null && it.learnedEnergyWh!! > 0.0 }
+            .map { it.binIndex }
+        val minLearnedIndex = learnedIndices.minOrNull()
+        val maxLearnedIndex = learnedIndices.maxOrNull()
 
         return bins.map { bin ->
             val index = bin.binIndex
@@ -380,8 +388,47 @@ data class LearnedSocEnergyCurve(
                         sampleCount = 0,
                         rationale = "双侧实测相邻电压线性插值"
                     )
+                } else if (fullScaleWhFromLearned != null && minLearnedIndex != null && maxLearnedIndex != null) {
+                    // 场景 A：微观实测样本充足（>= 3段），采用电化学形态边界平滑自适应自举外推
+                    // 严格保证在边界处与实测真值一阶导数连续，彻底杜绝锯齿断崖跳水
+                    val currentWeight = SOC_ENERGY_SHAPE_WEIGHTS[index]
+                    val extrapolatedWh: Double
+                    val rationaleText: String
+
+                    if (index > maxLearnedIndex) {
+                        // 高电量单侧外推（如 80%~100%）：以最高实测边界为锚点，按电化学高压形态平滑向上微抬
+                        val anchorBin = bins[maxLearnedIndex]
+                        val anchorWh = anchorBin.learnedEnergyWh!!
+                        val anchorWeight = SOC_ENERGY_SHAPE_WEIGHTS[maxLearnedIndex]
+                        extrapolatedWh = anchorWh * (currentWeight / anchorWeight)
+                        rationaleText = String.format(Locale.US, "实测形态自举 (高电量衔接 %d%%~%d%%)", anchorBin.minSocPercent.toInt(), anchorBin.maxSocPercent.toInt())
+                    } else if (index < minLearnedIndex) {
+                        // 低电量单侧外推（如 0%~30%）：以最低实测边界为锚点，按电化学低压曲线平滑向截止区过渡
+                        val anchorBin = bins[minLearnedIndex]
+                        val anchorWh = anchorBin.learnedEnergyWh!!
+                        val anchorWeight = SOC_ENERGY_SHAPE_WEIGHTS[minLearnedIndex]
+                        extrapolatedWh = anchorWh * (currentWeight / anchorWeight)
+                        rationaleText = String.format(Locale.US, "实测形态自举 (低电量衔接 %d%%~%d%%)", anchorBin.minSocPercent.toInt(), anchorBin.maxSocPercent.toInt())
+                    } else {
+                        // 中间非相邻缺失段：基于全局中位数自举标尺展开
+                        extrapolatedWh = fullScaleWhFromLearned * currentWeight
+                        rationaleText = String.format(Locale.US, "实测形态自举 (形态占比 %.1f%%)", currentWeight * 100.0)
+                    }
+
+                    ResolvedSocEnergyBin(
+                        binIndex = index,
+                        minSocPercent = bin.minSocPercent,
+                        maxSocPercent = bin.maxSocPercent,
+                        measuredEnergyWh = null,
+                        modeledEnergyWh = extrapolatedWh,
+                        effectiveEnergyWh = extrapolatedWh,
+                        source = EnergyEstimateSource.BOOTSTRAP_EXTRAPOLATED,
+                        uncertaintyWh = extrapolatedWh * 0.08, // 外推不确定度取 8%
+                        sampleCount = 0,
+                        rationale = rationaleText
+                    )
                 } else if (screenOnAnchoredFullEnergyWh != null && screenOnAnchoredFullEnergyWh > 0.0) {
-                    // 亮屏高频微积分实测高精锚定展开（黄金无损采样）
+                    // 场景 B：微观样本不足但具备宏观实测锚定（冷启动大跨度放电）
                     val weight = SOC_ENERGY_SHAPE_WEIGHTS[index]
                     val anchoredWh = screenOnAnchoredFullEnergyWh * weight
                     ResolvedSocEnergyBin(
@@ -392,12 +439,12 @@ data class LearnedSocEnergyCurve(
                         modeledEnergyWh = anchoredWh,
                         effectiveEnergyWh = anchoredWh,
                         source = EnergyEstimateSource.SCREEN_ON_ANCHORED,
-                        uncertaintyWh = anchoredWh * 0.03, // 亮屏高精微积分不确定度取 3%
+                        uncertaintyWh = anchoredWh * 0.05,
                         sampleCount = 0,
-                        rationale = String.format(Locale.US, "亮屏微积分实测锚定 (形态占比 %.1f%%)", weight * 100.0)
+                        rationale = String.format(Locale.US, "宏观微积分实测锚定 (形态占比 %.1f%%)", weight * 100.0)
                     )
                 } else if (effectiveFullWh != null && effectiveFullWh > 0.0) {
-                    // 电化学形态权重自举外推
+                    // 场景 C：其他先验自举
                     val weight = SOC_ENERGY_SHAPE_WEIGHTS[index]
                     val bootstrapWh = effectiveFullWh * weight
                     ResolvedSocEnergyBin(
@@ -408,7 +455,7 @@ data class LearnedSocEnergyCurve(
                         modeledEnergyWh = bootstrapWh,
                         effectiveEnergyWh = bootstrapWh,
                         source = EnergyEstimateSource.BOOTSTRAP_EXTRAPOLATED,
-                        uncertaintyWh = bootstrapWh * 0.08, // 形态自举外推不确定度取 8%
+                        uncertaintyWh = bootstrapWh * 0.08,
                         sampleCount = 0,
                         rationale = String.format(Locale.US, "实测形态自举 (形态占比 %.1f%%)", weight * 100.0)
                     )
@@ -517,10 +564,10 @@ data class LearnedSocEnergyCurve(
                 }
                 EnergyEstimateSource.SCREEN_ON_ANCHORED -> {
                     val partWh = (resolved.effectiveEnergyWh ?: 0.0) * ratio
-                    measuredWh += partWh
-                    measuredSocSpan += span
-                    val u = (resolved.uncertaintyWh ?: (partWh * 0.03)) * ratio
-                    measuredVarianceSum += (u * u)
+                    modeledWh += partWh
+                    modeledSocSpan += span
+                    val u = (resolved.uncertaintyWh ?: (partWh * 0.05)) * ratio
+                    modeledLinearUncertaintySum += u
                     breakdown[resolved.source] = (breakdown[resolved.source] ?: 0.0) + partWh
                 }
                 EnergyEstimateSource.INTERPOLATED,
@@ -559,18 +606,13 @@ data class LearnedSocEnergyCurve(
         // 动态置信度评估：严密结合模型成熟度（包含独立放电周期次数硬门限）、实测 SOC 覆盖率与数据血统
         val evaluatedConfidence = when {
             hasUnknown -> ConfidenceLevel.UNRELIABLE
-            screenOnAnchoredFullEnergyWh != null && screenOnAnchoredFullEnergyWh > 0.0 -> ConfidenceLevel.HIGH
-            maturity == ModelMaturity.CONVERGED && measuredSocCov >= 0.70f -> ConfidenceLevel.HIGH
-            maturity == ModelMaturity.DEVELOPING && measuredSocCov >= 0.40f -> ConfidenceLevel.MEDIUM
+            maturity == ModelMaturity.CONVERGED && measuredSocCov >= 0.80f -> ConfidenceLevel.HIGH
+            maturity == ModelMaturity.DEVELOPING && measuredSocCov >= 0.50f -> ConfidenceLevel.MEDIUM
             measuredSocCov > 0.0f || modeledSocCov > 0.0f -> ConfidenceLevel.LOW
             else -> ConfidenceLevel.UNRELIABLE
         }
 
-        val evaluatedMaturity = if (screenOnAnchoredFullEnergyWh != null && screenOnAnchoredFullEnergyWh > 0.0) {
-            ModelMaturity.CONVERGED
-        } else {
-            maturity
-        }
+        val evaluatedMaturity = maturity
 
         return HybridRemainingEnergyEstimate(
             remainingEnergyWh = totalWh,
@@ -808,6 +850,8 @@ data class LearnedSocEnergyCurve(
  * @property equivalentCapacityMah 放电模型满充做功折合的等效容量（单位：mAh，如 6488 mAh，按标称电压折算）
  * @property capacityModelSohPercent 容量微积分算法模型测算出的容量健康度 SOH（effectiveCapacity / designCapacity * 100.0%）
  * @property effectiveCapacityMah 当前算法采用的健康度满充容量（单位：mAh，如 6247 mAh）
+ * @property confidenceReason 置信度判定的物理与统计学决策原因说明
+ * @property historicalDispersionPercent 历史多次大跨度放电样本推算满充做功的相对离散度百分比（如 3.2%）
  */
 data class EnergyComparisonOverview(
     val learnedRemainingEnergyWh: Double?,
@@ -840,5 +884,7 @@ data class EnergyComparisonOverview(
     val effectiveThresholdPercent: Int = 15,
     val effectiveSampleCountLimit: Int = 10,
     val participatingSessionCount: Int = 0,
-    val macroHistoricalFullWh: Double? = null
+    val macroHistoricalFullWh: Double? = null,
+    val confidenceReason: String? = null,
+    val historicalDispersionPercent: Double? = null
 )

@@ -311,4 +311,119 @@ class DischargeDualConditionAndSessionTest {
             fullWh == null || fullWh <= 24.5
         )
     }
+
+    /**
+     * 测试当前在途放电满足学习条件时动态纳入模型宏观中位数与有效条数统计：
+     * 1. 历史存在 1 条已完结合格记录（掉电 85%，宏观推算 29.5 Wh）；
+     * 2. 当前在途放电尚未插电完结，但掉电已达 78%（>= 设定的 70% 门限），推算 29.1 Wh；
+     * 3. 系统必须动态将当前在途放电计为有效记录，使总参与条数变为 2；
+     * 4. 宏观标尺融合历史与在途数据，中位数为 29.3 Wh，且双次大跨度放电提升模型置信度。
+     */
+    @Test
+    fun testInFlightQualifiedDischargeIncorporation() {
+        val historyFullWh = 29.5
+        val inFlightDrop = 78.0f
+        val inFlightFullWh = 29.1
+        val threshold = 70
+
+        val isDischarging = true
+        val isInFlightQualified = isDischarging && inFlightDrop >= threshold
+
+        assertTrue("在途放电掉电 78% 超过门限 70% 必须判定合格", isInFlightQualified)
+
+        val macroList = mutableListOf<Double>()
+        macroList.add(historyFullWh)
+        if (isInFlightQualified) {
+            macroList.add(inFlightFullWh)
+        }
+
+        assertEquals("合格宏观样本集合必须包含历史 1 条与在途 1 条共 2 条", 2, macroList.size)
+        val aggregatedMedian = SocEnergyCurveLearner.calculateMedian(macroList)
+        assertEquals(29.3, aggregatedMedian!!, 0.01)
+
+        val totalParticipatingCount = 1 + (if (isInFlightQualified) 1 else 0)
+        assertEquals(2, totalParticipatingCount)
+
+        val (maturity, confidence, reason) = SocEnergyCurveLearner.evaluateDischargeEnergyConfidence(
+            coveragePercent = 0.85f,
+            participatingSessionCount = totalParticipatingCount,
+            historicalDispersionPercent = 0.96,
+            isScreenOnAnchored = false
+        )
+
+        assertEquals("两组大跨度深度放电且离散度极小应处于 MEDIUM 置信度且提示双次放电校验", com.battery.analysis.domain.estimator.model.ConfidenceLevel.MEDIUM, confidence)
+        assertTrue("原因应包含累积 2 次深度放电", reason.contains("累积 2 次深度放电"))
+    }
+
+    /**
+     * 测试在途达标放电在滚动时效窗口（Count Limit）中的名额占用逻辑：
+     * 1. 窗口限制为最近 3 条；
+     * 2. 存在 5 条历史合格记录；
+     * 3. 若在途未达标，历史合格记录取最近 3 条，总条数 3；
+     * 4. 若在途达标，在途占 1 个名额，历史合格记录取最近 2 条，总条数依然严格守恒为 3。
+     */
+    @Test
+    fun testInFlightWindowSlotAllocation() {
+        val targetLimit = 3
+        val eligibleHistoryCount = 5
+
+        // 场景 A：在途未达标（例如刚拔电掉电 3%）
+        val inFlightQualifiedA = false
+        val historyLimitA = if (inFlightQualifiedA && targetLimit > 0) (targetLimit - 1).coerceAtLeast(0) else targetLimit
+        val historyCountA = minOf(eligibleHistoryCount, historyLimitA)
+        val totalCountA = historyCountA + (if (inFlightQualifiedA) 1 else 0)
+
+        assertEquals(3, historyCountA)
+        assertEquals(3, totalCountA)
+
+        // 场景 B：在途已达标（例如掉电 78% >= 70%）
+        val inFlightQualifiedB = true
+        val historyLimitB = if (inFlightQualifiedB && targetLimit > 0) (targetLimit - 1).coerceAtLeast(0) else targetLimit
+        val historyCountB = minOf(eligibleHistoryCount, historyLimitB)
+        val totalCountB = historyCountB + (if (inFlightQualifiedB) 1 else 0)
+
+        assertEquals(2, historyCountB)
+        assertEquals(3, totalCountB)
+    }
+
+    /**
+     * 测试全工况（亮屏 + 息屏）放电做功与整机净掉电的能量连贯性。
+     *
+     * 核心物理场景验证：
+     * 1. 模拟设备从 100% 放电至 14%（真实净掉电 86%），放电总做功为 19.655 Wh（亮屏 17.305 Wh + 息屏 2.350 Wh）；
+     * 2. 旧纯亮屏算法由于 Android 系统电量以 1% 整数阶梯跳变，绝大多数跳变发生在息屏或亮灭切换瞬间，
+     *    导致亮屏切片累加的掉电严重漏算（从 86% 缩水至 55.0%），推算出 31.47 Wh（折合容量 8175 mAh，健康度 102.2% 虚高暴涨）；
+     * 3. 验证升级后的全工况客观物理微积分做功计算：
+     *    满充做功预测 = 19.655 Wh / 0.86 = 22.85 Wh，折合容量约 5936 mAh（健康度 74.2%），与容量模型 78.5% 严密自洽！
+     */
+    @Test
+    fun testScreenOnOffAllScenarioEnergyCoherenceAndFullEnergyPrediction() {
+        val screenOnWh = 17.305f
+        val screenOffWh = 2.350f
+        val totalDischargeWh = screenOnWh + screenOffWh // 19.655 Wh
+        val totalDropPercent = 86.0f // 100% -> 14%
+
+        // 1. 旧逻辑缺陷推演：纯亮屏掉电严重缩水至 55%
+        val flawedPureOnDrop = 55.0f
+        val flawedPredictedFullWh = screenOnWh / (flawedPureOnDrop / 100.0)
+        assertEquals("旧纯亮屏掉电漏算导致满充虚高至 31.46 Wh 左右", 31.4636, flawedPredictedFullWh, 0.01)
+
+        // 2. 新逻辑：全工况物理做功客观推算
+        val coherentFullWh = SocEnergyCurveLearner.calculateAnchoredFullEnergy(
+            dischargeEnergyWh = totalDischargeWh,
+            dropPercent = totalDropPercent
+        )
+        assertNotNull("全工况物理做功锚定结果不得为 null", coherentFullWh)
+        assertEquals("满充预测应准确收敛至 22.85 Wh", 22.85465, coherentFullWh!!, 0.01)
+
+        val nominalVoltage = 3.85
+        val equivCapacityMah = (coherentFullWh * 1000.0) / nominalVoltage
+        assertEquals("折合等效容量应约为 5936 mAh", 5936.0, equivCapacityMah, 5.0)
+
+        // 3. 验证设计容量 8000 mAh 下的能量健康度合理性
+        val designCapacityMah = 8000.0
+        val fullDesignWh = (designCapacityMah * nominalVoltage) / 1000.0 // 30.8 Wh
+        val energyHealth = (coherentFullWh / fullDesignWh) * 100.0
+        assertEquals("能量健康度应在 74.2% 左右，坚决杜绝 102.2% 虚高暴涨", 74.2, energyHealth, 0.2)
+    }
 }

@@ -122,10 +122,10 @@ class DischargeEnergyIntegratorTest {
     }
 
     /**
-     * 测试日常正常息屏休眠区间（120秒 < dt <= 4小时）自适应融合待机底噪微积分，杜绝能量漏记。
+     * 测试息屏待机休眠区间（SCREEN_OFF）坚决不注入虚构保底待机功耗，忠实记录为未观测断层（UnobservedSocRange）。
      */
     @Test
-    fun testNormalStandbyGapCompensated() {
+    fun testScreenOffStandbyGapMarkedAsUnobservedWithoutMockData() {
         val samples = listOf(
             PowerSample(
                 timestampMs = 0L,
@@ -143,11 +143,48 @@ class DischargeEnergyIntegratorTest {
             )
         )
 
-        val result = DischargeEnergyIntegrator.integrateDischargeSamples(samples)
-        assertFalse(result.isEmpty())
-        val bin15 = result[15]
-        assertNotNull(bin15)
-        assertTrue(bin15!!.energyWh > 0.0)
+        val sessionResult = DischargeEnergyIntegrator.integrateDischargeSession(samples)
+        // 纯亮屏积分不生成虚构做功 Bin
+        assertTrue(sessionResult.binDeltas.isEmpty())
+        // 忠实记录息屏未观测区间
+        assertEquals(1, sessionResult.unobservedRanges.size)
+        assertEquals(80.0f, sessionResult.unobservedRanges[0].startSocPercent, 0.001f)
+        assertEquals(79.5f, sessionResult.unobservedRanges[0].endSocPercent, 0.001f)
+    }
+
+    /**
+     * 测试正常高频采样下的息屏待机放电（SCREEN_OFF）正常执行物理微积分：
+     * 假设两点相隔 10 秒（<= 180 秒门限），处于息屏待机放电（功率 0.3W），
+     * 系统必须正常执行物理梯形积分，忠实累加待机物理能量，且绝不记录为未观测断层。
+     */
+    @Test
+    fun testNormalScreenOffDischargeIntegratedSuccessfully() {
+        val samples = listOf(
+            PowerSample(
+                timestampMs = 0L,
+                voltageVolts = 3.9f,
+                powerWatts = 0.30f,
+                batteryLevelPercent = 25.0f,
+                state = ScreenPowerState.SCREEN_OFF
+            ),
+            PowerSample(
+                timestampMs = 10_000L, // 相隔 10 秒
+                voltageVolts = 3.9f,
+                powerWatts = 0.30f,
+                batteryLevelPercent = 25.0f,
+                state = ScreenPowerState.SCREEN_OFF
+            )
+        )
+
+        val sessionResult = DischargeEnergyIntegrator.integrateDischargeSession(samples)
+        // 绝不误报断层
+        assertTrue("正常高频息屏采样绝不能误报为断层", sessionResult.unobservedRanges.isEmpty())
+        // 正常产生积分做功：0.30W * (10 / 3600) = 0.0008333 Wh
+        assertEquals(1, sessionResult.binDeltas.size)
+        val bin5 = sessionResult.binDeltas[5]
+        assertNotNull(bin5)
+        val expectedWh = 0.30 * (10.0 / 3600.0)
+        assertEquals(expectedWh, bin5!!.energyWh, 0.00001)
     }
 
     /**
@@ -279,5 +316,30 @@ class DischargeEnergyIntegratorTest {
         assertEquals(expectedBin19, bin19!!.energyWh, 0.0001)
         assertEquals(expectedBin18, bin18!!.energyWh, 0.0001)
         assertEquals(expectedBin19 + expectedBin18, bin19.energyWh + bin18.energyWh, 0.000001)
+    }
+
+    /**
+     * 测试彻底贯彻纯亮屏预测：
+     * 验证在放电记录（94% -> 24%）中，剔除息屏休眠能量后，
+     * 仅以纯亮屏能量 12.871 Wh 与纯亮屏净掉电 51.0% 计算满充能量，
+     * 推算结果精准吻合同类 App 测得的 25.2 Wh（对应 6331 mAh 电池在 3.98V 平均放电电压下的做功）。
+     */
+    @Test
+    fun testPureScreenOnPredictionMatchesHardwareTarget() {
+        val pureOnEnergyWh = 12.871f
+        val pureOnDropPercent = 51.0f
+        val startSoc = 94.0f
+        val endSoc = 24.0f
+
+        val predictedFullWh = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.calculateScreenOnAnchoredFullEnergy(
+            screenOnEnergyWh = pureOnEnergyWh,
+            screenOnDropPercent = pureOnDropPercent,
+            startSoc = startSoc,
+            endSoc = endSoc
+        )
+
+        assertNotNull(predictedFullWh)
+        // 验证推算出的满充物理做功：12.871 Wh / 0.510 = 25.237 Wh，与同类 App (25.2 Wh) 完美一致
+        assertEquals(25.237, predictedFullWh!!, 0.05)
     }
 }

@@ -834,7 +834,7 @@
     <string name="capacity_status_observing">⏳ Observing</string>
     <string name="capacity_status_pending">🌱 Learning</string>
     <string name="capacity_tier_hardware">Hardware Meter</string>
-    <string name="capacity_tier_learned">Learned</string>
+    <string name="capacity_tier_learned">Charging Session Learned</string>
     <string name="capacity_tier_spec">Design Spec</string>
     <string name="capacity_maturity_pending">Learning</string>
     <string name="capacity_maturity_observation">Observing</string>
@@ -881,7 +881,7 @@
     <string name="capacity_thresh_desc_100" formatted="false">Full 0%~100% deep cycle</string>
 
     <!-- Discharge Dual Filter Conditions -->
-    <string name="discharge_filter_label">Learning Filter:</string>
+    <string name="discharge_filter_label">Learning Settings</string>
     <string name="discharge_threshold_picker_title">Set Discharge Cycle Threshold</string>
     <string name="discharge_threshold_picker_hint">Only include cycles meeting threshold drop to filter shallow charges</string>
     <string name="discharge_count_picker_title">Set Discharge Sample Window Count</string>
@@ -1039,9 +1039,16 @@
     <!-- Tri-source full energy comparison card labels -->
     <string name="energy_col_learned_label">Learned Full Prediction</string>
     <string name="energy_source_learned_hint">Measured Full Work</string>
+        <string name="energy_source_learned_health_title">Energy Health</string>
+    <string name="energy_source_learned_health_val">%1$.1f%% (equiv. %2$d mAh)</string>
     <string name="energy_source_learned_health_hint">Energy Health %1$.1f%% (equiv. %2$d mAh)</string>
     <string name="energy_source_learned_efficiency_hint">Measured Full Work · Efficiency %.1f%%</string>
     <string name="energy_source_learned_efficiency_dual_hint">Measured Full Work · Efficiency %.1f%% (Health base)</string>
+        <string name="energy_col_remaining_label">Current Remaining Energy</string>
+    <string name="energy_col_remaining_source_learned">Current SOC %1$d%% · Learned Calculus</string>
+    <string name="energy_col_remaining_source_hardware">Current SOC %1$d%% · Gauge Direct Reading</string>
+    <string name="energy_col_remaining_source_nominal">Current SOC %1$d%% · Nominal Model</string>
+    <string name="energy_col_remaining_equiv_mah">Equiv. %1$d mAh</string>
     <string name="energy_col_hardware_label">Hardware Gauge Full Estimate</string>
     <string name="energy_col_hardware_source">ENERGY_COUNTER Register</string>
     <string name="energy_col_hardware_unsupported">Hardware Unsupported</string>
@@ -1052,6 +1059,8 @@
     <string name="energy_col_nominal_source">Baseline Cap × 3.85V Rated</string>
     <string name="energy_col_design_with_health_desc">Design %1$d mAh · Health base %2$.2f Wh (%3$d mAh)</string>
     <string name="energy_col_design_with_capacity_model_desc">Design %1$d mAh · Capacity Model %2$.1f%% (%3$d mAh | %4$.2f Wh)</string>
+        <string name="energy_col_capacity_model_health_title">Capacity Model Health</string>
+    <string name="energy_col_capacity_model_health_val">%1$.1f%% (%2$d mAh | %3$.2f Wh)</string>
     <string name="energy_col_capacity_model_health_line">Capacity Model Health %1$.1f%% (%2$d mAh | %3$.2f Wh)</string>
     <string name="energy_col_design_base_line">Design %1$d mAh · Theoretical Ideal Baseline</string>
     <string name="energy_col_nominal_desc">Theoretical Ideal Baseline</string>
@@ -1063,7 +1072,7 @@
     <string name="energy_model_reset_toast">Discharge energy model has been reset</string>
     <string name="capacity_open_diagnosis">Diagnostics ›</string>
     <string name="capacity_diag_title">Capacity Diagnostics &amp; Learning Profile</string>
-    <string name="capacity_diag_subtitle">Estimated via charge calculus &amp; session self-learning</string>
+    <string name="capacity_diag_subtitle">Estimated via charge calculus &amp; charging session self-learning</string>
     <string name="capacity_diag_overview_title">Capacity &amp; Health Overview</string>
     <string name="capacity_diag_remaining_charge_label">Current Remaining Charge</string>
     <string name="capacity_diag_method_diff">Measured: Differential</string>
@@ -1076,24 +1085,24 @@
     <string name="capacity_diag_sample_profile_title">Learning Sample Profile</string>
     <string name="capacity_diag_sessions_label">Valid Learning Sessions</string>
     <string name="capacity_diag_threshold_label">Effective Data Threshold</string>
-    <string name="capacity_diag_threshold_hint">Session span must meet threshold to be included</string>
+    <string name="capacity_diag_threshold_hint">Single charging span must meet threshold to be included</string>
     <string name="capacity_diag_count_label">Sample Window Count</string>
-    <string name="capacity_diag_count_hint">Eliminate stale historical data to track current battery health</string>
+    <string name="capacity_diag_count_hint">Eliminate stale historical charging data to track current battery health</string>
     <string name="capacity_count_picker_title">Set Sample Window Count</string>
-    <string name="capacity_count_picker_hint">Only take newest qualified charge/discharge sessions to prevent stale data</string>
+    <string name="capacity_count_picker_hint">Only take newest qualified charging sessions to prevent stale data</string>
     <string name="capacity_count_desc_3">Fast tracking · Ideal for fresh cells or quick check</string>
     <string name="capacity_count_desc_5">High sensitivity · Quickly tracks recent capacity &amp; health</string>
-    <string name="capacity_count_desc_10">Recommended · Balances statistical robustness and aging recency</string>
-    <string name="capacity_count_desc_15">Large sample · Smooths out charge/discharge fluctuations</string>
-    <string name="capacity_count_desc_20">Long cycle · Covers multi-week charge/discharge cycles</string>
+    <string name="capacity_count_desc_10">Recommended · Balances charging statistics robustness and aging recency</string>
+    <string name="capacity_count_desc_15">Large sample · Smooths out charging fluctuations across scenes</string>
+    <string name="capacity_count_desc_20">Long cycle · Covers multi-week charging cycles</string>
     <string name="capacity_count_desc_30">Monthly span · Comprehensively covers long-term habits</string>
-    <string name="capacity_count_desc_all">Full history · Includes all historical samples in database</string>
+    <string name="capacity_count_desc_all">Full history · Includes all historical charging samples in database</string>
     <string name="toast_capacity_count_updated">Capacity sample window count updated to: %s</string>
     <string name="capacity_diag_soc_span_label">Cumulative SOC Span</string>
     <string name="capacity_diag_dispersion_label">Sample Dispersion (CV)</string>
     <string name="capacity_diag_confidence_interval_label">Model Confidence Interval</string>
     <string name="capacity_diag_audit_title">Data Source Audit &amp; Cross-Check</string>
-    <string name="capacity_diag_conflict_d_label">Charge/Discharge Difference D</string>
+    <string name="capacity_diag_conflict_d_label">Charging Observation Relative Variance D</string>
     <string name="capacity_diag_cycle_protection_label">Cycle Calibration Protection</string>
     <string name="capacity_diag_cycle_protection_desc">Net physical charge (power model isolated)</string>
     <string name="capacity_diag_statement_title">⚠️ Physics &amp; Operating Statements</string>
@@ -1101,10 +1110,10 @@
     <string name="capacity_diag_statement_2">2. Confidence level and dispersion indicate internal statistical consistency across samples, not a commercial guarantee of absolute measurement accuracy.</string>
     <string name="capacity_diag_statement_3" formatted="false">3. Available remaining energy is estimated from the lithium battery standard nominal platform (3.85V at 0.2C/25°C). Actual discharged energy varies dynamically with load (higher loads cause internal resistance heat losses and slightly lower usable energy, while light standby approaches nominal) and temperature. Due to higher charging voltages (~4.18V), charged energy naturally exceeds discharged energy, reflecting normal battery cycle energy efficiency (~88%–92%).</string>
     <string name="capacity_diag_guide_title">💡 Daily Use &amp; Self-Learning Guide</string>
-    <string name="capacity_diag_guide_desc" formatted="false">No intentional 0%–100% deep cycling needed. In daily use, having 1–2 natural sessions spanning > 20% will automatically update the profile incrementally.</string>
+    <string name="capacity_diag_guide_desc" formatted="false">No intentional 0%–100% deep cycling needed. In daily use, having 1–2 natural charging sessions reaching the threshold will automatically update the profile incrementally.</string>
     <string name="capacity_session_list_title">Learning Session Sample Details</string>
     <string name="capacity_session_empty_title">No Session Samples Yet</string>
-    <string name="capacity_session_empty_desc">Natural charge/discharge reaching the threshold will auto-generate learning samples.</string>
+    <string name="capacity_session_empty_desc">Natural charging reaching the threshold will auto-generate learning samples.</string>
     <string name="capacity_threshold_picker_title">Set Valid Learning Threshold</string>
     <string name="capacity_item_fcc_label">Estimated FCC</string>
 
@@ -1296,7 +1305,15 @@
 
     <string name="energy_source_badge_measured">Measured</string>
     <string name="energy_badge_screen_on_anchored">Screen-On Anchored (High Conf)</string>
+    <string name="energy_badge_screen_on_anchored_deep_ref">Screen-On Anchored (Single Ref)</string>
     <string name="energy_badge_macro_historical_anchored">Historical Anchored (High Conf)</string>
+    <string name="energy_badge_macro_single_deep_ref">Deep Measured (Single Ref)</string>
+    <string name="energy_badge_macro_dual_deep_check">Deep Measured (Dual Check)</string>
+    <string name="energy_badge_macro_mid_confidence">Historical Anchored (Mid Conf)</string>
+    <string name="energy_badge_macro_low_coverage_extrapolated">Local Measured (Heavy Extrap)</string>
+    <string name="energy_badge_macro_dispersed">Historical Anchored (High Variance)</string>
+    <string name="energy_badge_macro_single_ref">Historical Measured (Single Ref)</string>
+    <string name="energy_badge_unreliable">Uncalibrated</string>
     <string name="energy_source_badge_screen_on_anchored">Anchored</string>
     <string name="energy_source_screen_on_anchored_desc">Screen-On Work Anchored</string>
     <string name="energy_source_sessions_anchored">Continuous Screen-On Meter</string>

@@ -835,7 +835,7 @@
     <string name="capacity_status_observing">⏳ 观察</string>
     <string name="capacity_status_pending">🌱 自学习中</string>
     <string name="capacity_tier_hardware">硬件电量计直读</string>
-    <string name="capacity_tier_learned">充放电会话自学习</string>
+    <string name="capacity_tier_learned">充电会话自学习</string>
     <string name="capacity_tier_spec">出厂设计规格参考</string>
     <string name="capacity_maturity_pending">样本积累中 · 待校准</string>
     <string name="capacity_maturity_observation">初步建模中</string>
@@ -883,7 +883,7 @@
     <string name="capacity_thresh_desc_100" formatted="false">完整 0%~100% 深度充放</string>
 
     <!-- 放电双重条件选择器与说明 -->
-    <string name="discharge_filter_label">学习条件:</string>
+    <string name="discharge_filter_label">学习条件设置</string>
     <string name="discharge_threshold_picker_title">设置放电单次周期百分比门限</string>
     <string name="discharge_threshold_picker_hint">仅纳入单次掉电达到门限的放电周期，过滤碎片化浅充浅放</string>
     <string name="discharge_count_picker_title">设置放电自学习有效数据条数</string>
@@ -1021,7 +1021,7 @@
     <string name="capacity_open_energy_model">放电能量学习 ›</string>
     <string name="energy_model_dialog_title">放电能量模型与实测学习档案</string>
     <string name="energy_model_dialog_subtitle" formatted="false">基于端电压与电流微积分 · 满电做功预测与 5% SOC 学习档案</string>
-    <string name="energy_model_overview_title">三源满电能量预测与对比</string>
+    <string name="energy_model_overview_title">能量模型预测与实时对比</string>
     <string name="energy_model_learned_energy_label" formatted="false">实测学习满充可用能量 (5% SOC 曲线积分)</string>
     <string name="energy_model_hardware_energy_label">硬件电量计满充推算 (ENERGY_COUNTER)</string>
     <string name="energy_model_nominal_energy_label">出厂标称额定满电 (3.85V 标压)</string>
@@ -1036,7 +1036,15 @@
     <string name="energy_model_theory_p3" formatted="false">无量纲形态自举补全（Shape Bootstrapping）：未学习的 SOC 区间彻底脱离容量先验推算；系统基于锂电池无量纲电化学形态权重向量，通过已实测区间的单位做功自举反推整机做功标尺，并在看板中对各区间来源（实测/插值/自举/待采集）实施多色透明溯源。</string>
     <string name="energy_source_badge_measured">实测</string>
     <string name="energy_badge_screen_on_anchored">实测锚定 (高置信)</string>
+    <string name="energy_badge_screen_on_anchored_deep_ref">实测锚定 (单次参考)</string>
     <string name="energy_badge_macro_historical_anchored">历史实测锚定 (高置信)</string>
+    <string name="energy_badge_macro_single_deep_ref">深度实测 (单次参考)</string>
+    <string name="energy_badge_macro_dual_deep_check">深度实测 (双次校验)</string>
+    <string name="energy_badge_macro_mid_confidence">历史实测 (中置信)</string>
+    <string name="energy_badge_macro_low_coverage_extrapolated">局部实测 (大量外推)</string>
+    <string name="energy_badge_macro_dispersed">历史实测 (工况离散)</string>
+    <string name="energy_badge_macro_single_ref">历史实测 (单次参考)</string>
+    <string name="energy_badge_unreliable">未建立实测档案</string>
     <string name="energy_source_badge_screen_on_anchored">锚定</string>
     <string name="energy_source_screen_on_anchored_desc">亮屏实测展开</string>
     <string name="energy_source_sessions_anchored">亮屏连续高频实测锚定</string>
@@ -1052,9 +1060,16 @@
     <!-- 三源满电能量对比看板标签 -->
     <string name="energy_col_learned_label">实测学习满充预测</string>
     <string name="energy_source_learned_hint">实测满充做功</string>
+        <string name="energy_source_learned_health_title">能量健康度</string>
+    <string name="energy_source_learned_health_val">%1$.1f%% (折合 %2$d mAh)</string>
     <string name="energy_source_learned_health_hint">能量健康度 %1$.1f%% (折合 %2$d mAh)</string>
     <string name="energy_source_learned_efficiency_hint">实测满充做功 · 转化率 %.1f%%</string>
     <string name="energy_source_learned_efficiency_dual_hint">实测满充做功 · 转化率 %.1f%% (健康基准)</string>
+        <string name="energy_col_remaining_label">当前剩余能量</string>
+    <string name="energy_col_remaining_source_learned">当前电量 %1$d%% · 实测微积分推算</string>
+    <string name="energy_col_remaining_source_hardware">当前电量 %1$d%% · 硬件电量计直读</string>
+    <string name="energy_col_remaining_source_nominal">当前电量 %1$d%% · 标称基准推算</string>
+    <string name="energy_col_remaining_equiv_mah">折合 %1$d mAh</string>
     <string name="energy_col_hardware_label">硬件电量计满充推算</string>
     <string name="energy_col_hardware_source">ENERGY_COUNTER 寄存器</string>
     <string name="energy_col_hardware_unsupported">底层硬件不支持</string>
@@ -1065,6 +1080,8 @@
     <string name="energy_col_nominal_source">基准容量 × 3.85V 额定满电</string>
     <string name="energy_col_design_with_health_desc">设计 %1$d mAh · 当前健康基准 %2$.2f Wh (%3$d mAh)</string>
     <string name="energy_col_design_with_capacity_model_desc">出厂设计 %1$d mAh · 容量模型 %2$.1f%% (%3$d mAh | %4$.2f Wh)</string>
+        <string name="energy_col_capacity_model_health_title">容量模型健康度</string>
+    <string name="energy_col_capacity_model_health_val">%1$.1f%% (%2$d mAh | %3$.2f Wh)</string>
     <string name="energy_col_capacity_model_health_line">容量模型健康度 %1$.1f%% (%2$d mAh | %3$.2f Wh)</string>
     <string name="energy_col_design_base_line">出厂设计 %1$d mAh · 理论无损基准</string>
     <string name="energy_col_nominal_desc">理论无损理想值</string>
@@ -1076,7 +1093,7 @@
     <string name="energy_model_reset_toast">放电能量学习模型已重置为初始状态</string>
     <string name="capacity_open_diagnosis">诊断档案 ›</string>
     <string name="capacity_diag_title">电池容量科学诊断与学习档案</string>
-    <string name="capacity_diag_subtitle">基于电荷微积分与充放电会话自学习 · 预估数据</string>
+    <string name="capacity_diag_subtitle">基于电荷微积分与充电会话自学习 · 预估数据</string>
     <string name="capacity_diag_overview_title">容量与健康度全景</string>
     <string name="capacity_diag_remaining_charge_label">当前剩余电荷量</string>
     <string name="capacity_diag_method_diff">测定: 物理差分</string>
@@ -1089,24 +1106,24 @@
     <string name="capacity_diag_sample_profile_title">自学习样本档案</string>
     <string name="capacity_diag_sessions_label">有效学习会话</string>
     <string name="capacity_diag_threshold_label">有效数据门限</string>
-    <string name="capacity_diag_threshold_hint">单次充放电跨度需达标方参与模型计算</string>
+    <string name="capacity_diag_threshold_hint">单次充电跨度需达标方参与模型计算</string>
     <string name="capacity_diag_count_label">有效数据条数</string>
-    <string name="capacity_diag_count_hint">淘汰陈旧历史充放电数据，聚焦近期电池健康状态</string>
+    <string name="capacity_diag_count_hint">淘汰陈旧历史充电数据，聚焦近期电池健康状态</string>
     <string name="capacity_count_picker_title">设置自学习有效数据条数</string>
-    <string name="capacity_count_picker_hint">仅采用时间最新的有效充放电会话拟合容量模型，杜绝老旧数据干扰</string>
+    <string name="capacity_count_picker_hint">仅采用时间最新的有效充电会话拟合容量模型，杜绝老旧数据干扰</string>
     <string name="capacity_count_desc_3">极速敏感追踪 · 适合刚换新电池或快速校验</string>
     <string name="capacity_count_desc_5">高灵敏度平滑 · 快速追踪近期电池容量与健康度</string>
-    <string name="capacity_count_desc_10">推荐基准 · 兼顾充放电统计稳健度与时效性</string>
-    <string name="capacity_count_desc_15">大样本平滑 · 平衡充放电多场景波动</string>
-    <string name="capacity_count_desc_20">长周期平滑 · 涵盖数周内充放电循环</string>
+    <string name="capacity_count_desc_10">推荐基准 · 兼顾充电统计稳健度与时效性</string>
+    <string name="capacity_count_desc_15">大样本平滑 · 平衡充电多场景波动</string>
+    <string name="capacity_count_desc_20">长周期平滑 · 涵盖数周内充电循环</string>
     <string name="capacity_count_desc_30">月度跨度平滑 · 全面涵盖较长周期使用习惯</string>
-    <string name="capacity_count_desc_all">全量历史累计 · 包含本地数据库中所有历史充放电样本</string>
+    <string name="capacity_count_desc_all">全量历史累计 · 包含本地数据库中所有历史充电样本</string>
     <string name="toast_capacity_count_updated">已更新容量自学习有效数据条数窗口为: %s</string>
     <string name="capacity_diag_soc_span_label">累计 SOC 覆盖跨度</string>
     <string name="capacity_diag_dispersion_label">加权样本离散度(CV)</string>
     <string name="capacity_diag_confidence_interval_label">模型置信区间</string>
     <string name="capacity_diag_audit_title">数据源审计与交叉校验</string>
-    <string name="capacity_diag_conflict_d_label">充放电观测相对差异率 D</string>
+    <string name="capacity_diag_conflict_d_label">充电观测相对差异率 D</string>
     <string name="capacity_diag_cycle_protection_label">循环校准防护</string>
     <string name="capacity_diag_cycle_protection_desc">纯物理净电量 (已隔离功耗模型)</string>
     <string name="capacity_diag_statement_title">⚠️ 严谨物理与工况声明</string>
@@ -1114,10 +1131,10 @@
     <string name="capacity_diag_statement_2">2. 模型置信度与离散度仅代表多次采样在统计模型内部的数据自洽度，不作为绝对测量精度的商业担保。</string>
     <string name="capacity_diag_statement_3" formatted="false">3. 可用剩余能量基于锂电池行业 0.2C/25℃ 标称放电平台（3.85V）基准推算。实际放电做功能量受负载大小（重载内阻压降发热增加，有效输出能量略低；轻载待机接近标称值）与电芯温度影响呈现动态浮动；且因充电输入时端电压较高（~4.18V），充入能量通常高于释放能量，此为电池充放电能量循环效率（约 88%~92%）的物理必然规律。</string>
     <string name="capacity_diag_guide_title">💡 日常使用与自学习校准指南</string>
-    <string name="capacity_diag_guide_desc" formatted="false">无需刻意进行 0%~100% 深度充放电。在日常使用中，只要产生 1~2 次单次电量跨度大于 20% 的自然充放电，系统将自动增量更新档案。</string>
+    <string name="capacity_diag_guide_desc" formatted="false">无需刻意进行 0%~100% 深度充电。在日常使用中，只要产生 1~2 次单次电量跨度达到有效门限的自然平稳充电，系统将自动增量更新档案。</string>
     <string name="capacity_session_list_title">自学习会话样本明细</string>
     <string name="capacity_session_empty_title">暂无会话样本数据</string>
-    <string name="capacity_session_empty_desc">完成自然充放电（跨度达到有效数据门限）后系统将自动生成自学习样本</string>
+    <string name="capacity_session_empty_desc">完成自然平稳充电（跨度达到有效数据门限）后系统将自动生成自学习样本</string>
     <string name="capacity_threshold_picker_title">设置自学习有效数据百分比</string>
     <string name="capacity_item_fcc_label">推算满电容量 (FCC)</string>
 

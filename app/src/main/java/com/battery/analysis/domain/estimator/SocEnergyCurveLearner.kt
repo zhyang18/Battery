@@ -560,18 +560,8 @@ class SocEnergyCurveLearner(private val context: Context) {
                 (designCapacityMah * nominalVoltageVolts) / 1000.0
             } else null
 
-            // 物理守恒与电化学一致性约束（Physical Plausibility Constraint）：
-            // 真实整机物理放电做功绝不可能突破出厂全新设计理论上限（结合高压满电形态极限不超过出厂设计 105%），
-            // 坚决杜绝因历史休眠采样残余毛刺将实测做功虚推至超越出厂物理容量（如 35.08Wh / 113.9% / 9110mAh）。
             val fullLearnedWh = if (rawFullLearnedWh != null && rawFullLearnedWh > 0.0) {
-                var clampedWh = rawFullLearnedWh
-                if (fullDesignWh != null && fullDesignWh > 0.0) {
-                    val maxAllowedDesignWh = fullDesignWh * 1.05
-                    if (clampedWh > maxAllowedDesignWh) {
-                        clampedWh = maxAllowedDesignWh
-                    }
-                }
-                clampedWh
+                rawFullLearnedWh
             } else null
 
             val fullHardwareWh = if (hardwareNativeEnergyWh != null && currentSocPercent in 15f..100f) {

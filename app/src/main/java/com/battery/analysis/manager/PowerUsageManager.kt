@@ -2125,6 +2125,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         }
         editor.apply()
         com.battery.analysis.domain.estimator.SocEnergyCurveLearner.getInstance(context).resetCurve()
+        cachedDischargeEnergyOverview = null
         BatteryCapacityManager.getInstance(context).refreshEstimateAsync()
     }
 
@@ -2483,15 +2484,16 @@ class PowerUsageManager private constructor(private val context: Context) {
             effectiveCapacityMah = fccMah.toDouble()
         )
 
-        // 3. 过滤出合格完整样本：尚未学习过的全新样本，或者当前会话中已有但新样本能量更高/更完整（待机补偿生效）的样本
+        // 3. 过滤出合格完整样本：尚未学习过的全新样本，或者当前会话中已有但覆盖率实质性提升的更完整样本
         val curve = com.battery.analysis.domain.estimator.SocEnergyCurveLearner.getInstance(context).getLearnedCurve()
         val samplesToRecord = validation.validCompleteSamples.filter { sample ->
             val binIndex = sample.binIndex
             if (!currentSessionLearnedBins.contains(binIndex)) {
                 true
             } else {
-                val currentWh = curve.bins.getOrNull(binIndex)?.learnedEnergyWh ?: 0.0
-                sample.energyWh > currentWh * 1.03 // 有显著提升（待机补偿生效）
+                val currentBin = curve.bins.getOrNull(binIndex)
+                val currentCov = currentBin?.coverageFraction ?: 0.0
+                sample.coverageFraction > (currentCov + 0.05) // 覆盖率更完整时才允许替换，杜绝待机虚增能量覆盖真实放电
             }
         }
         if (samplesToRecord.isEmpty()) return 0

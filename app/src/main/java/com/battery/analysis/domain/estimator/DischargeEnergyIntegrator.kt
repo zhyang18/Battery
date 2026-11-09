@@ -32,8 +32,8 @@ object DischargeEnergyIntegrator {
     /** 息屏待机状态下允许的最大待机功耗门限（单位：瓦 W，默认 0.8W，超过此值判定为异常功耗或非纯待机） */
     const val MAX_STANDBY_POWER_WATTS: Float = 0.8f
 
-    /** 待机保底默认功耗（单位：瓦 W，当设备底层在息屏时未上报有效功率读数时保底使用） */
-    const val DEFAULT_STANDBY_BASE_WATTS: Float = 0.15f
+    /** 待机保底默认功耗（单位：瓦 W，当设备底层在息屏时未上报有效功率读数时保底使用，对应典型智能手机休眠底噪约 25mA @ 4.0V） */
+    const val DEFAULT_STANDBY_BASE_WATTS: Float = 0.10f
 
     /** 最小有效时间间隔（单位：毫秒，防止并发打点微小除零） */
     const val MIN_INTEGRATION_INTERVAL_MS: Long = 50L
@@ -297,10 +297,9 @@ object DischargeEnergyIntegrator {
             val targetBin = bin1
             val avgPower = (power1 + power2) / 2.0
             var deltaWh = avgPower * (dtMs.toDouble() / 3600000.0)
-            // 物理电荷守恒上限保护：息屏长待机切片在单步内的放电做功不能超过物理最大电荷化学能
             if (isScreenOff && dtMs > MAX_INTEGRATION_INTERVAL_MS) {
-                val stepSpan = max(0.3, abs(s1 - s2).toDouble())
-                val maxAllowedStepWh = maxOf(0.45 * stepSpan, 0.40)
+                val stepSpan = abs(s1 - s2).toDouble()
+                val maxAllowedStepWh = if (stepSpan > 0.05) 0.35 * stepSpan else 0.05
                 deltaWh = min(deltaWh, maxAllowedStepWh)
             }
             if (deltaWh > 0.0 && deltaWh.isFinite()) {
@@ -353,8 +352,9 @@ object DischargeEnergyIntegrator {
                 val subAvgPower = max(0.0, ((cursorPower + boundaryPower) / 2.0).toDouble())
                 var subWh = subAvgPower * (subDtMs.toDouble() / 3600000.0)
                 if (isScreenOff && dtMs > MAX_INTEGRATION_INTERVAL_MS) {
-                    val subSpan = max(0.3, abs(cursorSoc - b).toDouble())
-                    subWh = min(subWh, maxOf(0.45 * subSpan, 0.40))
+                    val subSpan = abs(cursorSoc - b).toDouble()
+                    val maxAllowedSubWh = if (subSpan > 0.05) 0.35 * subSpan else 0.05
+                    subWh = min(subWh, maxAllowedSubWh)
                 }
 
                 if (subWh > 0.0 && subWh.isFinite()) {
@@ -382,8 +382,9 @@ object DischargeEnergyIntegrator {
             val tailAvgPower = max(0.0, ((cursorPower + power2) / 2.0).toDouble())
             var tailWh = tailAvgPower * (tailDtMs.toDouble() / 3600000.0)
             if (isScreenOff && dtMs > MAX_INTEGRATION_INTERVAL_MS) {
-                val tailSpan = max(0.3, abs(cursorSoc - s2).toDouble())
-                tailWh = min(tailWh, maxOf(0.45 * tailSpan, 0.40))
+                val tailSpan = abs(cursorSoc - s2).toDouble()
+                val maxAllowedTailWh = if (tailSpan > 0.05) 0.35 * tailSpan else 0.05
+                tailWh = min(tailWh, maxAllowedTailWh)
             }
 
             if (tailWh > 0.0 && tailWh.isFinite()) {

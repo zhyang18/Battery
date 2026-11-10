@@ -263,7 +263,11 @@ data class PowerUsageRecord(
                 val volt = obj.optDouble("volt", voltageVolts.toDouble()).toFloat()
                 val temp = obj.optDouble("temp", temperature.toDouble()).toFloat()
                 val pwr = obj.optDouble("pwr", avgPowerWatts.toDouble()).toFloat()
-                val isScreenOn = obj.optBoolean("screenOn", true)
+                val rawScreenOn = obj.optBoolean("screenOn", false)
+                // 纯亮屏物理特征纯度清洗（Purity Guard）：
+                // 若历史记录由于旧版本 bug 被错误标记为 screenOn，但瞬时功率处于极低待机底噪（< 0.40W 且明确 > 0W），
+                // 忠实反映系统物理事实，将其清洗还原为息屏状态，坚决杜绝历史待机能耗污染微积分
+                val isScreenOn = if (rawScreenOn && pwr in 0.001f..0.399f) false else rawScreenOn
 
                 trendPoints.add(
                     PowerDischargePoint(
@@ -573,7 +577,9 @@ data class PowerUsageRecord(
                     for (i in 0 until jsonArray.length() - 1) {
                         val p1 = jsonArray.getJSONObject(i)
                         val p2 = jsonArray.getJSONObject(i + 1)
-                        val isScreenOn = p1.optBoolean("screenOn", true)
+                        val rawScreenOn = p1.optBoolean("screenOn", false)
+                        val pwr = p1.optDouble("pwr", 0.0)
+                        val isScreenOn = if (rawScreenOn && pwr in 0.001..0.399) false else rawScreenOn
                         if (isScreenOn) {
                             val dt = (p2.optLong("ts", 0L) - p1.optLong("ts", 0L)).coerceAtLeast(0L)
                             totalScreenOnMs += dt
@@ -634,6 +640,12 @@ data class PowerUsageRecord(
                 val elapsedHours = if (startTs > 0L && ts >= startTs) {
                     ((ts - startTs).toDouble() / 3600000.0).toFloat()
                 } else 0f
+                val pwr = obj.optDouble("pwr", 0.0).toFloat()
+                val rawScreenOn = obj.optBoolean("screenOn", false)
+                // 纯亮屏物理特征纯度清洗（Purity Guard）：
+                // 若历史记录由于旧版本 bug 被错误标记为 screenOn，但瞬时功率处于极低待机底噪（< 0.40W 且明确 > 0W），
+                // 忠实反映系统物理事实，将其清洗还原为息屏状态，坚决杜绝历史待机能耗污染微积分
+                val isScreenOn = if (rawScreenOn && pwr in 0.001f..0.399f) false else rawScreenOn
                 list.add(
                     PowerDischargePoint(
                         timestamp = ts,
@@ -641,8 +653,8 @@ data class PowerUsageRecord(
                         batteryLevel = obj.optInt("lvl", 0),
                         voltageVolts = obj.optDouble("volt", 0.0).toFloat(),
                         temperature = obj.optDouble("temp", 0.0).toFloat(),
-                        powerWatts = obj.optDouble("pwr", 0.0).toFloat(),
-                        isScreenOn = obj.optBoolean("screenOn", true)
+                        powerWatts = pwr,
+                        isScreenOn = isScreenOn
                     )
                 )
             }

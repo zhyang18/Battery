@@ -407,7 +407,30 @@ class BatteryEnergyCalculatorTest {
         val fullRuntimeIndex = message.indexOf("• 满电待机时长：04d01h00m00s")
         assertTrue("预测基准放电速度必须在当前剩余续航上方", speedIndex in 0 until remainingIndex)
         assertTrue("当前剩余续航必须在满电待机时长上方", remainingIndex in 0 until fullRuntimeIndex)
+        assertTrue("息屏弹框也必须包含预测基于容量展示（数据缺失如实展示未获取）", message.contains("• 预测基于容量：未获取"))
         assertTrue("包含说明模块", message.contains("💡 说明："))
+    }
+
+    /**
+     * 测试息屏放电速度卡片弹框在提供有效预估满电容量时的格式化展示，验证“• 预测基于容量：多少Wh（多少mAh）”。
+     */
+    @Test
+    fun testFormatScreenOffDischargeSpeedDetailMessage_WithPredictedCapacity() {
+        val message = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_OFF,
+            currentRatePercentPerHour = 2.6f,
+            sevenDaysRatePercentPerHour = 2.5f,
+            sevenDaysDurationMs = 86400_000L * 3,
+            fullDurationMs = 86400_000L * 3,
+            predictedCapacityWh = 24.16f,
+            predictedCapacityMah = 6276f,
+            remainingDurationMs = 86400_000L
+        )
+
+        assertTrue("息屏弹框包含基于预估满电容量的说明", message.contains("• 预测基于容量：24.16 Wh (6276 mAh)"))
+        val capIndex = message.indexOf("• 预测基于容量：24.16 Wh (6276 mAh)")
+        val noteIndex = message.indexOf("💡 说明：")
+        assertTrue("预测基于容量必须位于说明前方", capIndex in 0 until noteIndex)
     }
 
     /**
@@ -443,7 +466,30 @@ class BatteryEnergyCalculatorTest {
         assertTrue("预测基准放电速度必须在当前会话放电速度下方", sessionIndex in 0 until speedIndex)
         assertTrue("当前剩余续航必须在预测基准放电速度下方", speedIndex in 0 until remainingIndex)
         assertTrue("满电综合续航必须在当前剩余续航下方", remainingIndex in 0 until fullRuntimeIndex)
+        assertTrue("全局弹框也必须包含预测基于容量展示（数据缺失如实展示未获取）", message.contains("• 预测基于容量：未获取"))
         assertTrue("包含说明模块", message.contains("💡 说明："))
+    }
+
+    /**
+     * 测试全局放电速度卡片弹框在提供有效预估满电容量时的格式化展示，验证“• 预测基于容量：多少Wh（多少mAh）”。
+     */
+    @Test
+    fun testFormatGlobalDischargeSpeedDetailMessage_WithPredictedCapacity() {
+        val message = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_GLOBAL,
+            currentRatePercentPerHour = 4.7f,
+            sevenDaysRatePercentPerHour = 4.5f,
+            sevenDaysDurationMs = 86400_000L * 5,
+            fullDurationMs = 86400_000L * 2,
+            predictedCapacityWh = 24.16f,
+            predictedCapacityMah = 6276f,
+            remainingDurationMs = 86400_000L
+        )
+
+        assertTrue("全局弹框包含基于预估满电容量的说明", message.contains("• 预测基于容量：24.16 Wh (6276 mAh)"))
+        val capIndex = message.indexOf("• 预测基于容量：24.16 Wh (6276 mAh)")
+        val noteIndex = message.indexOf("💡 说明：")
+        assertTrue("预测基于容量必须位于说明前方", capIndex in 0 until noteIndex)
     }
 
     /**

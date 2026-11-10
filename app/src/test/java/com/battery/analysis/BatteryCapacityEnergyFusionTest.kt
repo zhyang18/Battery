@@ -565,4 +565,55 @@ class BatteryCapacityEnergyFusionTest {
             result.remainingEnergyWh!! <= result.fullEnergyWh!!
         )
     }
+
+    /**
+     * 测试亮屏、息屏与全局预测基于容量改用预估满电容量（FCC与满电能量）解析的逻辑一致性。
+     * 验证当存在自学习预估满电容量时，预测计算能量与电荷量优先与自学习 FCC 严格保持同源。
+     */
+    @Test
+    fun testPredictedCapacityResolutionFromEstimatedFcc() {
+        val fccMah = 6276.0
+        val fullWh = 24.16
+        val designMah = 7580.6f
+        val designWh = 29.19f
+
+        val result = CapacityEstimateResult(
+            remainingChargeMah = 1882.8,
+            remainingEnergyWh = 7.25,
+            fullChargeCapacityMah = fccMah,
+            designCapacityMah = designMah.toDouble(),
+            sohPercent = (fccMah / designMah.toDouble()) * 100.0,
+            currentSoc = 30,
+            sourceTier = CapacitySourceTier.MULTI_SESSION_LEARNED,
+            maturityLevel = MaturityLevel.CONVERGED,
+            validSessionCount = 5,
+            chargeSessionCount = 5,
+            dischargeSessionCount = 0,
+            totalSocSpanCovered = 350,
+            dispersionCoefficientPercent = 1.2,
+            conflictRateDPercent = null,
+            confidenceIntervalMah = 80.0,
+            fullEnergyWh = fullWh,
+            energySourceTier = EnergySourceTier.NOMINAL_VOLTAGE,
+            energyCoveragePercent = 0.8f
+        )
+
+        // 验证 CapacityEstimateResult 具备有效容量
+        assertTrue(result.hasValidCapacity())
+
+        // 模拟预测容量解析：优先采用预估满电容量
+        val predictedWh = (result.fullEnergyWh ?: (result.fullChargeCapacityMah?.let { (it * 3.85) / 1000.0 }))?.toFloat()
+            ?: designWh
+        val predictedMah = result.fullChargeCapacityMah?.toFloat() ?: designMah
+
+        assertEquals(24.16f, predictedWh, 0.01f)
+        assertEquals(6276f, predictedMah, 0.1f)
+
+        // 验证格式化输出符合用户界面红框要求
+        val formattedStr = com.battery.analysis.util.BatteryEnergyCalculator.formatPredictedCapacity(
+            capacityWh = predictedWh,
+            capacityMah = predictedMah
+        )
+        assertEquals("24.16 Wh (6276 mAh)", formattedStr)
+    }
 }

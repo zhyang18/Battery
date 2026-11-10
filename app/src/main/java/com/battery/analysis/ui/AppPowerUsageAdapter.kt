@@ -243,12 +243,51 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     /**
      * 更新最新的电池容量与自学习状态结果，并安全刷新对应卡片。
+     * 若预估满电容量发生变化，同步触发放电速度三维度（亮屏、息屏、全局）预测卡片的重算与刷新。
      *
      * @param result 最新的容量估计结果实体 [CapacityEstimateResult]
      */
     fun updateCapacityEstimate(result: CapacityEstimateResult?) {
+        val previousEstWh = getPredictedFullEnergyWh()
         capacityEstimateResult = result
         capacityHolder?.let { bindCapacityOverview(it) }
+        val newEstWh = getPredictedFullEnergyWh()
+        if (previousEstWh != newEstWh && newEstWh != null) {
+            dischargeSpeedHolder?.let { bindDischargeSpeed(it, forceRecalculate = true, animateProgress = false) }
+        }
+    }
+
+    /**
+     * 获取当前优先用于亮屏、息屏与全局续航预测计算的满电总能量（单位：Wh）。
+     * 优先采用算法自学习的预估满电容量（Full Charge Capacity），若未就绪或不可用则如实降级采用设备底层基准总容量。
+     *
+     * @return 预测基于的满电总能量（单位：Wh，若均不可用返回 null）
+     */
+    fun getPredictedFullEnergyWh(): Float? {
+        val est = capacityEstimateResult?.takeIf { it.hasValidCapacity() }
+        if (est != null) {
+            val energy = est.fullEnergyWh ?: est.fullChargeCapacityMah?.let {
+                (it * BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS.toDouble()) / 1000.0
+            }
+            if (energy != null && energy > 0.0) {
+                return energy.toFloat()
+            }
+        }
+        return cachedTotalEnergyWh
+    }
+
+    /**
+     * 获取当前优先用于亮屏、息屏与全局续航预测计算的满电总电荷量（单位：mAh）。
+     * 优先采用算法自学习的预估满电容量（Full Charge Capacity），若未就绪或不可用则如实降级采用设备底层基准容量。
+     *
+     * @return 预测基于的满电总电荷量（单位：mAh，若均不可用返回 null）
+     */
+    fun getPredictedFullCapacityMah(): Float? {
+        val est = capacityEstimateResult?.takeIf { it.hasValidCapacity() }
+        if (est != null && est.fullChargeCapacityMah != null && est.fullChargeCapacityMah > 0.0) {
+            return est.fullChargeCapacityMah.toFloat()
+        }
+        return cachedTotalEnergyWh?.let { (it * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
     }
 
 
@@ -828,7 +867,7 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         val result = PowerDischargeMetricsViewBinder.bindDischargeSpeed(
             binding = holder.binding,
             overview = cachedOverviewStats,
-            totalCapacityWh = cachedTotalEnergyWh,
+            totalCapacityWh = getPredictedFullEnergyWh(),
             sevenDaysStats = cachedSevenDaysStats,
             batteryLevelPercent = cachedBatteryLevelPercent,
             remainingEnergyWh = cachedRemainingEnergyWh,

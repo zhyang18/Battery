@@ -54,6 +54,36 @@ class BatteryCapacityManager private constructor(private val context: Context) {
      */
     val capacityState: StateFlow<CapacityEstimateResult?> = _capacityState.asStateFlow()
 
+    /**
+     * 获取当前预测（亮屏、息屏、全局续航及放电速率推算）所基于的满电容量与能量（单位：Wh 与 mAh）。
+     * 遵循底层物理优先级逻辑：
+     * 1. 优先采用算法自学习的预估满电容量（Full Charge Capacity FCC 与 Full Energy Wh）；
+     * 2. 若自学习模型尚未就绪（如数据不足、初始化中或未获取），如实降级返回系统底层设备物理基准容量。
+     * 若均无法获取则如实返回 null，忠实反映系统真实状态。
+     *
+     * @param fallbackCapacityWh 降级备选总能量（单位：Wh，若不可用传入 null）
+     * @param fallbackCapacityMah 降级备选总电荷量（单位：mAh，若不可用传入 null）
+     * @return 包含预测物理能量与电荷量的配对实体 [Pair]，若均不可用返回 Pair(null, null)
+     */
+    fun getPredictedFullCapacityWithFallback(
+        fallbackCapacityWh: Float? = null,
+        fallbackCapacityMah: Float? = null
+    ): Pair<Float?, Float?> {
+        val estimate = _capacityState.value
+        if (estimate != null && estimate.hasValidCapacity()) {
+            val mah = estimate.fullChargeCapacityMah?.toFloat()
+            val wh = (estimate.fullEnergyWh ?: mah?.let { (it * com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS.toDouble()) / 1000.0 })?.toFloat()
+            if (wh != null && wh > 0f) {
+                return Pair(wh, mah)
+            }
+        }
+        val safeWh = fallbackCapacityWh?.takeIf { it > 0f }
+        val safeMah = fallbackCapacityMah?.takeIf { it > 0f }
+            ?: safeWh?.let { (it * 1000f) / com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+        val derivedWh = safeWh ?: safeMah?.let { (it * com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS) / 1000f }
+        return Pair(derivedWh, safeMah)
+    }
+
     companion object {
         const val PREFS_NAME = "capacity_prefs"
         const val PREF_KEY_EFFECTIVE_SOC_THRESHOLD = "pref_capacity_effective_soc_threshold"

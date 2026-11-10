@@ -10,6 +10,7 @@ import com.battery.analysis.domain.estimator.model.ModelMaturity
 import com.battery.analysis.domain.estimator.model.SampleQuality
 import com.battery.analysis.domain.estimator.model.SocEnergyBin
 import com.battery.analysis.domain.estimator.model.SocEnergyBinSample
+import com.battery.analysis.domain.estimator.model.QualifiedScreenOnSession
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.abs
@@ -407,49 +408,145 @@ class SocEnergyCurveLearner(private val context: Context) {
          * @param dischargeEnergyWh 实测放电物理做功（单位：Wh）
          * @param dropPercent 对应的电池百分比净掉电（如 25.2%）
          * @param startSoc 放电起始电量百分比（可选，兼容调用签名）
-         * @param endSoc 放电终止电量百分比（可选，兼容调用签名）
-         * @return 推算出的整机满电实测物理做功（Wh），若数据不足或异常返回 null
+         * 纯算法函数：基于纯亮屏实测物理做功与纯亮屏掉电跨度，推算整机 100% 满电物理做功标尺。
+         *
+         * @param dischargeEnergyWh 纯亮屏实测微积分总能量（单位：Wh）
+         * @param dropPercent 纯亮屏期间对应的真实有效电量百分比净掉电（如 25.2%）
+         * @param startSoc 亮屏放电起始电量百分比（可选，兼容调用签名）
+         * @param endSoc 亮屏放电终止电量百分比（可选，兼容调用签名）
+         * @param designCapacityMah 设备出厂设计容量（单位：mAh，可选，用于理论电化学上限守卫）
+         * @param nominalVoltageVolts 电池标称电压（单位：V，默认 3.85V）
+         * @return 推算出的整机满电实测物理做功（Wh），若数据不足或超物理极限返回 null
+         */
+        /**
+         * 纯算法函数：结合所有符合有效条件设置（门限 + 条数）的亮屏放电记录，
+         * 实施全样本微积分联合做功累加、电化学形态权重归一化与贝叶斯先验约束，
+         * 严谨推算整机 100% 满充实测物理能量标尺。
+         * 核心法则：严禁仅由单次局部亮屏时间片面外推，必须基于全部符合条件的亮屏数据联合推算。
+         *
+         * @param sessions 所有符合当前有效条件筛选（门限、条数）的亮屏放电会话物理数据列表
+         * @param effectiveCapacityMah 设备当前基准有效容量（mAh，可选）
+         * @param nominalVoltageVolts 电池标称电压（单位：V，默认 3.85V）
+         * @param designCapacityMah 出厂设计容量（mAh，可选，用于理论电化学上限守卫）
+         * @return 联合推算出的整机满充实测物理能量（Wh），无有效数据时返回 null
+         */
+        fun calculateAggregatedScreenOnFullEnergy(
+            sessions: List<QualifiedScreenOnSession>,
+            effectiveCapacityMah: Float? = null,
+            nominalVoltageVolts: Float = 3.85f,
+            designCapacityMah: Float? = null
+        ): Double? {
+            if (sessions.isEmpty()) return null
+
+            val totalWh = sessions.sumOf { it.screenOnWh }
+            val totalWeight = sessions.sumOf { it.theoreticalShapeWeight }
+            val totalDrop = sessions.sumOf { it.screenOnDropPercent.toDouble() }
+
+            if (totalWh <= 0.05 || totalDrop < 1.5) return null
+
+            // 1. 电化学形态理论能量权重归一化联合推算：做功总和 / 理论能量形态权重和
+            // 消除高电量段（4.05V~4.15V）端电压偏高带来的全局系统性放大假象
+            val dropFraction = totalDrop / 100.0
+            val shapeRatio = if (dropFraction > 0.001) totalWeight / dropFraction else 1.0
+            val effectiveWeight = if (totalWeight > 0.005 && shapeRatio in 0.80..1.35) totalWeight else dropFraction
+            val rawPooledWh = totalWh / effectiveWeight
+
+            // 2. 有效基准容量标尺（仅在外部显式提供时参与浅放电贝叶斯锚定）：
+            val totalMah = sessions.sumOf { it.screenOnChargeMah }
+            val avgMeasuredVolts = if (totalMah > 0.0 && totalWh > 0.0) {
+                ((totalWh * 1000.0) / totalMah).toFloat().takeIf { it > 0f && it.isFinite() }
+            } else null
+            val operatingVolts = avgMeasuredVolts ?: nominalVoltageVolts
+
+            val baselineFullWh = if (effectiveCapacityMah != null && effectiveCapacityMah > 0f) {
+                (effectiveCapacityMah * nominalVoltageVolts) / 1000.0
+            } else null
+
+            // 3. 贝叶斯自适应覆盖度加权：
+            // 采用区间并集形态覆盖度（Union Shape Coverage），杜绝多次重复浅放电通过权重简单累加而虚假拉满全量程覆盖度；
+            // 只有当外部显式传入基准容量且实测样本仅为局部浅放电（覆盖度 < 1.0）时，先验能量提供平滑物理锚定；
+            // 若未提供外部基准容量（自主闭环模式），或实测样本覆盖量程充分时，实测联合做功完全主导（100%）。
+            val unionCoverage = com.battery.analysis.domain.estimator.model.LearnedSocEnergyCurve.calculateUnionShapeCoverage(sessions)
+            val coverageBeta = unionCoverage.coerceIn(0.0, 1.0)
+            val fusedWh = if (baselineFullWh != null && baselineFullWh > 0.0) {
+                (1.0 - coverageBeta) * baselineFullWh + coverageBeta * rawPooledWh
+            } else {
+                rawPooledWh
+            }
+
+            if (fusedWh <= 0.05 || !fusedWh.isFinite()) return null
+
+            // 4. 电化学物理守卫（仅在显式传入设计容量时防范超电化学极限数值）：
+            if (designCapacityMah != null && designCapacityMah > 0f) {
+                val maxElectrochemicalWh = (designCapacityMah * maxOf(4.45f, operatingVolts) * 1.05) / 1000.0
+                if (fusedWh > maxElectrochemicalWh) return null
+            }
+
+            return fusedWh
+        }
+
+        /**
+         * 纯算法函数：基于单次放电做功与电量掉电比例，推算单次放电锚定的整机满充实测物理能量。
+         *
+         * @param dischargeEnergyWh 实测放电物理做功（单位：Wh）
+         * @param dropPercent 对应的电池百分比净掉电跨度（如 25.0%）
+         * @param startSoc 放电起始电量百分比（可选）
+         * @param endSoc 放电终止电量百分比（可选）
+         * @param designCapacityMah 设备出厂设计容量（单位：mAh，可选，用于理论物理上限守卫）
+         * @param nominalVoltageVolts 电池标称电压（单位：V，默认 3.85V）
+         * @return 单次放电物理推算出的整机满电实测做功（Wh），若数据不足或超物理极限返回 null
          */
         @Suppress("UNUSED_PARAMETER")
         fun calculateAnchoredFullEnergy(
             dischargeEnergyWh: Float,
             dropPercent: Float,
             startSoc: Float? = null,
-            endSoc: Float? = null
+            endSoc: Float? = null,
+            designCapacityMah: Float? = null,
+            nominalVoltageVolts: Float = 3.85f
         ): Double? {
             if (dischargeEnergyWh <= 0f || dropPercent <= 0f) return null
             if (dropPercent < 1.5f) return null
 
-            // 纯粹客观物理做功公式：总能量 / (净掉电百分比 / 100.0)
-            val weight = (dropPercent / 100.0).toDouble()
-            if (weight <= 0.005) return null
+            // 纯亮屏第一性原理：单次放电实测物理做功与真实净掉电严格守恒
+            val fullWh = (dischargeEnergyWh.toDouble() / dropPercent.toDouble()) * 100.0
+            if (fullWh <= 0.05 || !fullWh.isFinite()) return null
 
-            val fullWh = dischargeEnergyWh.toDouble() / weight
-            // 物理守卫：智能手机单电芯电池满电能量合理范围为 4.0Wh ~ 45.0Wh（对应 1000mAh ~ 11600mAh），
-            // 超过 45Wh 说明历史放电包含长待机虚增或测量失真，绝不能纳入宏观满充标尺中位数
-            return if (fullWh in 4.0..45.0) fullWh else null
+            // 物理守卫：仅当调用方显式传入 designCapacityMah 时，校验是否突破热力学极限（能量守恒定律，零内阻无损耗开路电压极限）
+            if (designCapacityMah != null && designCapacityMah > 0f) {
+                val maxElectrochemicalWh = (designCapacityMah * maxOf(4.45f, nominalVoltageVolts)) / 1000.0
+                if (fullWh > maxElectrochemicalWh) return null
+            }
+
+            return fullWh
         }
 
         /**
-         * 纯算法函数：兼容历史调用的放电实测物理做功锚定满充推算方法。
+         * 纯算法函数：兼容历史调用的纯亮屏放电实测物理做功锚定满充推算方法。
          *
-         * @param screenOnEnergyWh 实测放电积分能量（单位：Wh）
-         * @param screenOnDropPercent 对应的电池百分比净掉电（如 25.2%）
+         * @param screenOnEnergyWh 纯亮屏实测放电积分能量（单位：Wh）
+         * @param screenOnDropPercent 对应的纯亮屏电池百分比净掉电（如 25.2%）
          * @param startSoc 放电起始电量百分比（可选，兼容调用签名）
          * @param endSoc 放电终止电量百分比（可选，兼容调用签名）
-         * @return 推算出的整机满电实测物理做功（Wh），若数据不足或异常返回 null
+         * @param designCapacityMah 设备出厂设计容量（单位：mAh，可选）
+         * @param nominalVoltageVolts 电池标称电压（单位：V，默认 3.85V）
+         * @return 推算出的整机满电实测物理做功（Wh），若数据不足或超物理极限返回 null
          */
         @Suppress("UNUSED_PARAMETER")
         fun calculateScreenOnAnchoredFullEnergy(
             screenOnEnergyWh: Float,
             screenOnDropPercent: Float,
             startSoc: Float? = null,
-            endSoc: Float? = null
+            endSoc: Float? = null,
+            designCapacityMah: Float? = null,
+            nominalVoltageVolts: Float = 3.85f
         ): Double? = calculateAnchoredFullEnergy(
             dischargeEnergyWh = screenOnEnergyWh,
             dropPercent = screenOnDropPercent,
             startSoc = startSoc,
-            endSoc = endSoc
+            endSoc = endSoc,
+            designCapacityMah = designCapacityMah,
+            nominalVoltageVolts = nominalVoltageVolts
         )
 
         /**
@@ -494,7 +591,9 @@ class SocEnergyCurveLearner(private val context: Context) {
                     screenOnEnergyWh = screenOnEnergyWh,
                     screenOnDropPercent = screenOnDropPercent,
                     startSoc = screenOnStartSoc,
-                    endSoc = screenOnEndSoc
+                    endSoc = screenOnEndSoc,
+                    designCapacityMah = designCapacityMah,
+                    nominalVoltageVolts = nominalVoltageVolts
                 )
             } else null
 

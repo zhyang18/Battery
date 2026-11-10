@@ -1433,7 +1433,7 @@ class PowerUsageFragment : Fragment() {
     /**
      * 弹出放电速度卡片（亮屏、息屏、全局）的详细信息说明气泡弹框。
      * 呈现当前放电速度、最近7天内统计放电速度与有效时长、满电可用时长、当前剩余续航（精确到秒）以及对应原理说明；
-     * 并在亮屏卡片弹框中特别呈现预测基于容量（单位：Wh 与 mAh）。气泡弹窗不自动超时关闭，需用户手动轻触关闭。
+     * 并在亮屏、息屏与全局卡片弹框中统一呈现基于预估满电容量的预测基于容量（单位：Wh 与 mAh）。气泡弹窗不自动超时关闭，需用户手动轻触关闭。
      *
      * @param anchorView 触发气泡弹窗的目标锚点卡片视图
      * @param rowType 行分类标识（[ROW_SCREEN_ON] 为亮屏行，[ROW_SCREEN_OFF] 为息屏行，[ROW_GLOBAL] 为全局行）
@@ -1443,15 +1443,18 @@ class PowerUsageFragment : Fragment() {
         val overview = pkg?.overviewStats
 
         val totalEnergyInfo = pkg?.batterySnapshot?.totalEnergyInfo ?: powerManager.getTotalEnergyInfo()
-        val totalCapacityWh = pkg?.batterySnapshot?.totalEnergyWh
+        val fallbackCapacityWh = pkg?.batterySnapshot?.totalEnergyWh
             ?: totalEnergyInfo?.totalWh
             ?: powerManager.getTotalEnergyWh()
             ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
                 BatteryEnergyCalculator.calculateTotalEnergyWh(it)
             }
-        val capacityMah = totalEnergyInfo?.equivalentMah
+        val fallbackCapacityMah = totalEnergyInfo?.equivalentMah
             ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }
-            ?: totalCapacityWh?.takeIf { it > 0f }?.let { (it * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+            ?: fallbackCapacityWh?.takeIf { it > 0f }?.let { (it * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+
+        val (totalCapacityWh, capacityMah) = BatteryCapacityManager.getInstance(requireContext())
+            .getPredictedFullCapacityWithFallback(fallbackCapacityWh, fallbackCapacityMah)
 
         val sevenDays = adapter.getCachedSevenDaysStats()
         val currentRate = PowerDischargeMetricsViewBinder.getEffectiveDischargeRate(rowType, totalCapacityWh, overview, sevenDays)
@@ -1808,9 +1811,12 @@ class PowerUsageFragment : Fragment() {
         binding.tvMetricScreenOffSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(offSessionRate))
         binding.tvMetricGlobalSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(globalSessionRate))
 
+        val (predictionCapacityWh, _) = BatteryCapacityManager.getInstance(requireContext())
+            .getPredictedFullCapacityWithFallback(totalCapacityWh)
+
         adapter.updateOverviewStats(
             overviewStats = overview,
-            totalCapacityWh = totalCapacityWh,
+            totalCapacityWh = predictionCapacityWh,
             batteryLevelPercent = snapshot.levelPercent.toFloat(),
             remainingEnergyWh = snapshot.energyWh,
             tempCelsius = snapshot.temperature,
@@ -1824,7 +1830,7 @@ class PowerUsageFragment : Fragment() {
             val stats = com.battery.analysis.util.SevenDaysDischargeCalculator.calculateSevenDaysStats(
                 context = appContext,
                 currentOverview = overview,
-                totalCapacityWh = totalCapacityWh,
+                totalCapacityWh = predictionCapacityWh,
                 baseTimestamp = System.currentTimeMillis(),
                 currentTrendPoints = fullPackage.trendPoints
             )
@@ -2322,9 +2328,12 @@ class PowerUsageFragment : Fragment() {
             ?: powerManager.getCachedSevenDaysStats()
         val hasSevenDaysStats = currentCachedSevenDays != null
         val shouldForceRecalculateNow = isFullDischargeRefresh && hasSevenDaysStats
+        val (predictionCapacityWh, _) = BatteryCapacityManager.getInstance(requireContext())
+            .getPredictedFullCapacityWithFallback(totalCapacityWh)
+
         adapter.updateOverviewStats(
             overviewStats = overview,
-            totalCapacityWh = totalCapacityWh,
+            totalCapacityWh = predictionCapacityWh,
             batteryLevelPercent = currentLevel,
             remainingEnergyWh = currentEnergy,
             tempCelsius = currentTemp,
@@ -2346,7 +2355,7 @@ class PowerUsageFragment : Fragment() {
                     val stats = com.battery.analysis.util.SevenDaysDischargeCalculator.calculateSevenDaysStats(
                         context = fullDataAppContext,
                         currentOverview = overview,
-                        totalCapacityWh = totalCapacityWh,
+                        totalCapacityWh = predictionCapacityWh,
                         baseTimestamp = baseTs,
                         currentTrendPoints = lastRenderedPackage?.trendPoints
                     )
@@ -2368,7 +2377,7 @@ class PowerUsageFragment : Fragment() {
                 val stats = com.battery.analysis.util.SevenDaysDischargeCalculator.calculateSevenDaysStats(
                     context = fullDataAppContext,
                     currentOverview = null,
-                    totalCapacityWh = totalCapacityWh,
+                    totalCapacityWh = predictionCapacityWh,
                     baseTimestamp = baseTs,
                     currentTrendPoints = null
                 )

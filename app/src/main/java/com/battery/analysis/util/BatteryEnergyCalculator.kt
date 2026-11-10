@@ -1069,6 +1069,7 @@ object BatteryEnergyCalculator {
                 }
             }
             ROW_SCREEN_OFF -> {
+                val capacityStr = formatPredictedCapacity(predictedCapacityWh, predictedCapacityMah, nominalVoltageVolts)
                 buildString {
                     if (context != null) {
                         append(context.getString(R.string.prediction_title_screen_off) + "\n")
@@ -1224,13 +1225,15 @@ object BatteryEnergyCalculator {
                     }
 
                     if (context != null) {
+                        append(context.getString(R.string.prediction_real_capacity, capacityStr) + "\n")
                         append(context.getString(R.string.prediction_notes_header))
                         append(context.getString(R.string.prediction_note_screen_off_1))
                         append(context.getString(R.string.prediction_note_screen_off_2))
                         append(context.getString(R.string.prediction_note_screen_off_3))
                         append(context.getString(R.string.prediction_note_screen_off_5))
                     } else {
-                        append("\n💡 说明：\n")
+                        append("• 预测基于容量：$capacityStr\n\n")
+                        append("💡 说明：\n")
                         append("• 会话放电速度反映本次拔电以来的息屏待机耗电表现；\n")
                         append("• 预测基准放电速度基于大样本历史稳态工况推算，作为推算待机续航的基准；\n")
                         append("• 满电待机时长解构深睡底噪与后台唤醒；\n")
@@ -1239,6 +1242,7 @@ object BatteryEnergyCalculator {
                 }
             }
             ROW_GLOBAL -> {
+                val capacityStr = formatPredictedCapacity(predictedCapacityWh, predictedCapacityMah, nominalVoltageVolts)
                 buildString {
                     if (context != null) {
                         append(context.getString(R.string.prediction_title_global) + "\n")
@@ -1382,13 +1386,15 @@ object BatteryEnergyCalculator {
                     }
 
                     if (context != null) {
+                        append(context.getString(R.string.prediction_real_capacity, capacityStr) + "\n")
                         append(context.getString(R.string.prediction_notes_header))
                         append(context.getString(R.string.prediction_note_global_1))
                         append(context.getString(R.string.prediction_note_global_2))
                         append(context.getString(R.string.prediction_note_global_5))
                         append(context.getString(R.string.prediction_note_global_6))
                     } else {
-                        append("\n💡 说明：\n")
+                        append("• 预测基于容量：$capacityStr\n\n")
+                        append("💡 说明：\n")
                         append("• 会话放电速度反映本次拔电以来的全局综合耗电表现；\n")
                         append("• 预测基准放电速度基于大样本历史稳态工况推算，作为推算综合剩余续航的基准；\n")
                         append("• 满电综合续航自适应历史窗口与工况建模；\n")

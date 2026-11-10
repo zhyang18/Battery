@@ -218,4 +218,45 @@ class DischargeSessionValidatorTest {
         // 1.40 * (5.0 / 4.8) = 1.4583 Wh
         assertEquals(1.40 * (5.0 / 4.8), s5.energyWh, 0.001)
     }
+
+    /**
+     * 测试 100% 满充浮充虚假电量做功异常点（如 3.356 Wh）被电化学能量守恒物理守卫严格拦截。
+     * 单电芯满充截止电压物理上限为 4.45V，对于 8000mAh 电池，单段 5% 物理做功理论上限仅为：
+     * (8000 * 0.05 * 4.45 * 1.05) / 1000 = 1.869 Wh。
+     * 3.356 Wh 严重违背物理规律，必须被坚决过滤，绝不允许学入模型污染曲线。
+     *
+     * @see DischargeSessionValidator.validateDischargeSession
+     */
+    @Test
+    fun testTopOffBufferingEnergyRejection() {
+        val deltas = mapOf(
+            19 to DischargeEnergyIntegrator.BinEnergyDelta(
+                binIndex = 19,
+                energyWh = 3.356,
+                durationMs = 1_800_000L,
+                startSocPercent = 100.0f,
+                endSocPercent = 95.0f,
+                coveredSocSpan = 5.0f,
+                averageCurrentAmperes = 0.5f,
+                averageTemperatureCelsius = 32.0f
+            )
+        )
+        val integrationResult = DischargeEnergyIntegrator.DischargeIntegrationResult(
+            binDeltas = deltas,
+            unobservedRanges = emptyList(),
+            totalValidDurationMs = 1_800_000L,
+            totalIntegratedEnergyWh = 3.356
+        )
+
+        val validation = DischargeSessionValidator.validateDischargeSession(
+            integrationResult = integrationResult,
+            sessionId = "session_top_off_anomaly",
+            effectiveCapacityMah = 8000.0,
+            isDualCell = false
+        )
+
+        // 3.356 Wh 严重超出单段 5% 物理极限，坚决被拦截，合格样本集必须为空
+        assertTrue(validation.validCompleteSamples.isEmpty())
+        assertTrue(validation.partialSamples.isEmpty())
+    }
 }

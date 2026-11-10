@@ -11,6 +11,7 @@ import com.battery.analysis.domain.estimator.model.PowerSample
 import com.battery.analysis.domain.estimator.model.ScreenPowerState
 import com.battery.analysis.domain.estimator.model.SocEnergyBin
 import com.battery.analysis.domain.estimator.model.SocEnergyBinSample
+import com.battery.analysis.domain.estimator.model.QualifiedScreenOnSession
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -667,8 +668,8 @@ class SocEnergyCurveLearnerTest {
             // 亮屏使用：80% -> 78%，耗时 1 分钟 (60s <= 120s)，功率 1.8W，能量 = 1.8 * (60/3600) = 0.03 Wh
             PowerSample(t0, 3.85f, 0.467f, 1.8f, 80.0f, ScreenPowerState.SCREEN_ON),
             PowerSample(t0 + 60_000L, 3.82f, 0.471f, 1.8f, 78.0f, ScreenPowerState.SCREEN_ON),
-            // 进入息屏休眠：78% -> 75%，休眠 45 分钟 (2700s)，dt > 120s，测得待机功率 0.29W
-            PowerSample(t0 + 60_000L + 2700_000L, 3.80f, 0.076f, 0.29f, 75.0f, ScreenPowerState.SCREEN_OFF)
+            // 进入亮屏失联大断层（> 180s）：78% -> 75%，失联 5 分钟 (300s)，dt > 180s
+            PowerSample(t0 + 60_000L + 300_000L, 3.80f, 0.471f, 1.8f, 75.0f, ScreenPowerState.SCREEN_ON)
         )
 
         val result = DischargeEnergyIntegrator.integrateDischargeSession(samples)
@@ -677,12 +678,12 @@ class SocEnergyCurveLearnerTest {
         assertNotNull(bin15)
         assertEquals(0.03, bin15!!.energyWh, 0.001)
 
-        // 验证 45 分钟息屏断层忠实记录在 unobservedRanges 中，不注入虚假保底数据
+        // 验证 300 秒亮屏失联断层忠实记录在 unobservedRanges 中，不注入虚假保底数据
         assertEquals(1, result.unobservedRanges.size)
         val gap = result.unobservedRanges[0]
         assertEquals(78.0f, gap.startSocPercent, 0.001f)
         assertEquals(75.0f, gap.endSocPercent, 0.001f)
-        assertEquals(2700_000L, gap.gapDurationMs)
+        assertEquals(300_000L, gap.gapDurationMs)
     }
 
     /**
@@ -1063,5 +1064,149 @@ class SocEnergyCurveLearnerTest {
         )
         assertNotNull(overview.fullLearnedEnergyWh)
         assertEquals("实测学习满充预测必须与 20 段 Bin 实际能量总和严格守恒一致", totalBinsWh, overview.fullLearnedEnergyWh!!, 0.01)
+    }
+
+    /**
+     * 测试电化学理论物理极限守卫：
+     * 当某次放电外推得到的满电能量超过设备设计能量（8000mAh * 3.85V = 30.8Wh）的 1.15 倍（如达到 34.22Wh 或更高）时，
+     * calculateAnchoredFullEnergy 必须严密判定其为待机漂移或测量失真样本，如实返回 null。
+     */
+    @Test
+    fun testCalculateAnchoredFullEnergy_RejectsOverCapacitySample() {
+        val designMah = 8000f
+        val nominalVolts = 3.85f // 30.8 Wh 设计总电能
+
+        // 验证 30.798 Wh / 0.9 = 34.22 Wh (在 35.42 Wh 理论绝对上限以内)
+        val boundaryFullWh = SocEnergyCurveLearner.calculateAnchoredFullEnergy(
+            dischargeEnergyWh = 30.798f,
+            dropPercent = 90.0f,
+            designCapacityMah = designMah,
+            nominalVoltageVolts = nominalVolts
+        )
+        assertNotNull(boundaryFullWh)
+        assertEquals(34.22, boundaryFullWh!!, 0.01)
+
+        // 30.8 Wh * 1.15 = 35.42 Wh。若外推达到 36 Wh 以上直接拒收
+        val extremeFullWh = SocEnergyCurveLearner.calculateAnchoredFullEnergy(
+            dischargeEnergyWh = 33.0f,
+            dropPercent = 90.0f, // 33.0 / 0.9 = 36.67 Wh > 35.42 Wh
+            designCapacityMah = designMah,
+            nominalVoltageVolts = nominalVolts
+        )
+        assertNull("超过理论电化学物理上限的异常做功样本必须返回 null", extremeFullWh)
+    }
+
+    /**
+     * 测试纯亮屏放电满充物理推算：
+     * 8000mAh 电池，纯亮屏放电从 90% 降至 10%（掉电 80%），纯亮屏实测做功 23.98 Wh，
+     * 验证推算出的满充物理做功为 29.975 Wh，能量健康度准确收敛至 97.3%。
+     */
+    @Test
+    fun testCalculateAnchoredFullEnergy_AcceptsNormalScreenOnDischarge() {
+        val designMah = 8000f
+        val nominalVolts = 3.85f // 30.8 Wh 设计总能量
+
+        val normalFullWh = SocEnergyCurveLearner.calculateAnchoredFullEnergy(
+            dischargeEnergyWh = 23.976f,
+            dropPercent = 80.0f,
+            designCapacityMah = designMah,
+            nominalVoltageVolts = nominalVolts
+        )
+        assertNotNull(normalFullWh)
+        assertEquals(29.97, normalFullWh!!, 0.01)
+
+        val healthPercent = (normalFullWh / (designMah * nominalVolts / 1000.0)) * 100.0
+        assertEquals(97.3, healthPercent, 0.1)
+    }
+
+    /**
+     * 验证多个放电会话在 SOC 轴上的区间并集形态覆盖度（Union Shape Coverage）计算：
+     * 1. 验证多次在同一高压区间（如 100% -> 70%）重复放电时，并集覆盖度绝不累加突破理论区间上限（约 0.318）；
+     * 2. 验证多段互不重叠区间的并集覆盖度能正确累加两段理论形态权重；
+     * 3. 验证单次深度放电（100% -> 15%）的形态覆盖度超过 0.88。
+     */
+    @Test
+    fun testCalculateUnionShapeCoverage_MultipleOverlappingSessions() {
+        val singleSession = listOf(
+            QualifiedScreenOnSession(
+                sessionId = "s1",
+                screenOnWh = 9.8,
+                screenOnChargeMah = 2400.0,
+                startSoc = 100f,
+                endSoc = 70f,
+                screenOnDropPercent = 30f,
+                theoreticalShapeWeight = 0.318
+            )
+        )
+        val singleCoverage = LearnedSocEnergyCurve.calculateUnionShapeCoverage(singleSession)
+        assertEquals(0.318, singleCoverage, 0.005)
+
+        // 5 次同样在 100% -> 70% 的重复放电，其并集覆盖度必须与单次完全一致，绝不能累加为 1.0 或 1.59
+        val repeatedSessions = (1..5).map { idx ->
+            QualifiedScreenOnSession(
+                sessionId = "repeat_$idx",
+                screenOnWh = 9.8,
+                screenOnChargeMah = 2400.0,
+                startSoc = 100f,
+                endSoc = 70f,
+                screenOnDropPercent = 30f,
+                theoreticalShapeWeight = 0.318
+            )
+        }
+        val repeatedCoverage = LearnedSocEnergyCurve.calculateUnionShapeCoverage(repeatedSessions)
+        assertEquals(singleCoverage, repeatedCoverage, 0.0001)
+
+        // 拼接不相交区间：100% -> 70% (Bin 14..19, 权重约 0.318) + 40% -> 10% (Bin 2..7, 权重约 0.295)
+        val disjointSessions = listOf(
+            QualifiedScreenOnSession("s1", 9.8, 2400.0, 100f, 70f, 30f, 0.318),
+            QualifiedScreenOnSession("s2", 7.0, 2400.0, 40f, 10f, 30f, 0.295)
+        )
+        val disjointCoverage = LearnedSocEnergyCurve.calculateUnionShapeCoverage(disjointSessions)
+        assertTrue("两段并集覆盖度应在 0.60 左右", disjointCoverage in 0.59..0.63)
+
+        // 单次大跨度深度放电：100% -> 15% (Bin 3..19)
+        val deepSession = listOf(
+            QualifiedScreenOnSession("deep", 22.0, 6800.0, 100f, 15f, 85f, 0.868)
+        )
+        val deepCoverage = LearnedSocEnergyCurve.calculateUnionShapeCoverage(deepSession)
+        assertTrue("85% 深度放电并集覆盖度应达到 0.85 以上", deepCoverage > 0.85)
+    }
+
+    /**
+     * 验证宏观亮屏多会话联合推算（calculateAggregatedScreenOnFullEnergy）：
+     * 多次在 100% -> 70% 浅放电时，由于实测平均电压偏高（~4.10V），原始外推值偏大（~30.5 Wh）；
+     * 引入区间并集形态覆盖度后，系统识别出低电量段尚未实测（覆盖度仅 ~0.32），先验基准能量（25.8 Wh）保持主导，
+     * 成功将联合推算结果平滑收敛在 ~27.3 Wh，杜绝因会话数量增多而导致推算能量虚高失控。
+     */
+    @Test
+    fun testCalculateAggregatedScreenOnFullEnergy_DoesNotOvershootWithRepeatedShallowSessions() {
+        val fccMah = 6700f
+        val nominalVolts = 3.85f // 基准能量 = 6.7 * 3.85 = 25.795 Wh
+
+        // 9 次在 100% -> 70% 浅放电
+        val shallowSessions = (1..9).map { idx ->
+            QualifiedScreenOnSession(
+                sessionId = "shallow_$idx",
+                screenOnWh = 9.8, // 9.8 / 0.318 ≈ 30.8 Wh 偏大
+                screenOnChargeMah = 2400.0,
+                startSoc = 100f,
+                endSoc = 70f,
+                screenOnDropPercent = 30f,
+                theoreticalShapeWeight = 0.318
+            )
+        }
+
+        val aggregatedFullWh = SocEnergyCurveLearner.calculateAggregatedScreenOnFullEnergy(
+            sessions = shallowSessions,
+            effectiveCapacityMah = fccMah,
+            nominalVoltageVolts = nominalVolts
+        )
+
+        assertNotNull(aggregatedFullWh)
+        // 验证宏观推算绝不会失控输出 30.5 Wh 以上，而是由先验能量锚定在 26.5 ~ 27.8 Wh
+        assertTrue(
+            "多次浅放电联合推算应在 26.5 Wh 到 27.8 Wh 之间，实际: $aggregatedFullWh",
+            aggregatedFullWh!! in 26.5..27.8
+        )
     }
 }

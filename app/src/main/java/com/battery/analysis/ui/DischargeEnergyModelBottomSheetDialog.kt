@@ -329,7 +329,8 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
                     else "${measStr}实测微积分"
                 }
                 overview.macroHistoricalFullWh != null && overview.participatingSessionCount > 0 -> {
-                    "历史中位数 (门限 $threshText · ${overview.participatingSessionCount}条)"
+                    if (overview.participatingSessionCount <= 1) "亮屏实测 (门限 $threshText · 1条)"
+                    else "亮屏联合实测 (门限 $threshText · ${overview.participatingSessionCount}条)"
                 }
                 overview.isScreenOnAnchored -> {
                     val onWh = overview.screenOnMeasuredEnergyWh ?: 0f
@@ -380,16 +381,20 @@ class DischargeEnergyModelBottomSheetDialog : BottomSheetDialogFragment() {
             tvHintLearned?.text = getString(R.string.energy_source_learned_hint)
         }
 
-        // 实测学习放电样本与会话说明
+        // 实测学习放电样本与会话说明（纯亮屏高信噪比物理做功）
         if (overview.macroHistoricalFullWh != null && overview.participatingSessionCount > 0) {
-            val baseDesc = "基于最近 ${overview.participatingSessionCount} 条有效放电记录"
-            val medianStr = String.format(Locale.US, "宏观中位数 %.2f Wh", overview.macroHistoricalFullWh)
+            val baseDesc = "基于符合条件的 ${overview.participatingSessionCount} 条有效亮屏记录"
+            val medianStr = if (overview.participatingSessionCount <= 1) {
+                String.format(Locale.US, "亮屏推算 %.2f Wh", overview.macroHistoricalFullWh)
+            } else {
+                String.format(Locale.US, "亮屏联合推算 %.2f Wh", overview.macroHistoricalFullWh)
+            }
             tvValSessions?.text = when {
                 overview.curveCoveragePercent < 0.50f -> {
-                    "$baseDesc · $medianStr · 实测覆盖 ${String.format(Locale.US, "%.0f%%", overview.curveCoveragePercent * 100f)}，低电量依赖外推"
+                    "$baseDesc · $medianStr · 实测覆盖 ${String.format(Locale.US, "%.0f%%", overview.curveCoveragePercent * 100f)}，未测区间平滑自举"
                 }
                 overview.participatingSessionCount <= 1 -> {
-                    "$baseDesc · $medianStr · 单次放电实测，需积累验证"
+                    "$baseDesc · $medianStr · 随更多亮屏数据平滑演进"
                 }
                 overview.historicalDispersionPercent != null && overview.historicalDispersionPercent > 8.0 -> {
                     "$baseDesc · $medianStr · 样本离散度 ${String.format(Locale.US, "%.1f%%", overview.historicalDispersionPercent)}"

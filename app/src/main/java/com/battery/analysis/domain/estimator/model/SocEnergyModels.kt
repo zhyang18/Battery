@@ -316,25 +316,40 @@ data class LearnedSocEnergyCurve(
         temperatureCelsius: Float? = null,
         screenOnAnchoredFullEnergyWh: Double? = null
     ): List<ResolvedSocEnergyBin> {
-        // 方案 1：基于已测区间做功与电化学形态权重向量，通过中位数投票自举反推整机满充做功标尺
-        // 彻底脱离对充放电预测容量（FCC / mAh）的先验依赖
+        // 1. 基于已测区间做功与电化学形态权重向量，通过中位数投票提取微观实测形态标尺
         val learnedVotes = bins.mapNotNull { bin ->
             val wh = bin.learnedEnergyWh
             if (bin.hasLearnedData() && wh != null && wh > 0.0) {
                 wh / SOC_ENERGY_SHAPE_WEIGHTS[bin.binIndex]
             } else null
         }
-        // 至少需要已学习 3 个不同 SOC 区间才开启形态自举，杜绝单次极端瞬态负载误导
         val fullScaleWhFromLearned: Double? = if (learnedVotes.size >= MIN_BOOTSTRAP_LEARNED_BINS) {
             val sorted = learnedVotes.sorted()
             val mid = sorted.size / 2
             if (sorted.size % 2 == 1) sorted[mid] else (sorted[mid - 1] + sorted[mid]) / 2.0
         } else null
 
-        // 核心仲裁法则：
-        // 1. 若微观实测样本充足 (>= 3段已学习)，实测微积分投票中位数是最高保真物理真值，优先作为权威标尺；
-        // 2. 若微观样本不足 (< 3段)，才使用外部宏观实测锚定值或容量先验。
-        val effectiveFullWh = fullScaleWhFromLearned ?: screenOnAnchoredFullEnergyWh?.takeIf { it > 0.0 }
+        // 2. 权威宏观联合标尺：由符合条件的全部有效亮屏数据联合微积分推算生成，彻底脱离外部 FCC 先验
+        val authoritativeMacroWh = screenOnAnchoredFullEnergyWh?.takeIf { it > 0.0 }
+
+        // 梯度自适应融合权重：
+        // 若实测段数稀疏 (< 6段，即 < 30% 覆盖率，如单次 73%->56% 亮屏片段)，实测样本存在局域电压偏态，
+        // 权威宏观联合标尺与有效容量基准绝对主导（100%），未测区间坚决不被单次高压微观自举绑架；
+        // 当积累达到 6~10 段 (>= 30%~50% 覆盖率) 时，实测样本跨越了不同电压平台，微观自举权重平滑提升并占主导。
+        val microWeight = if (learnedVotes.size < 6) {
+            0.0
+        } else {
+            (0.50 + (learnedVotes.size - 6).toDouble() * 0.125).coerceIn(0.50, 1.0)
+        }
+
+        val effectiveFullWh: Double? = when {
+            authoritativeMacroWh != null && fullScaleWhFromLearned != null -> {
+                (1.0 - microWeight) * authoritativeMacroWh + microWeight * fullScaleWhFromLearned
+            }
+            authoritativeMacroWh != null -> authoritativeMacroWh
+            fullScaleWhFromLearned != null -> fullScaleWhFromLearned
+            else -> null
+        }
 
         // 提取已实测区间的上下界索引与实测真值，用于外推时的边界自适应平滑衔接（彻底消除断面断崖）
         val learnedIndices = bins.filter { it.hasLearnedData() && it.learnedEnergyWh != null && it.learnedEnergyWh!! > 0.0 }
@@ -395,30 +410,46 @@ data class LearnedSocEnergyCurve(
                     val extrapolatedWh: Double
                     val rationaleText: String
 
-                    if (index > maxLearnedIndex) {
-                        // 高电量单侧外推（如 80%~100%）：以全局中位数形态自举标尺为主干，结合边界锚点平滑微调，杜绝单侧端点偏高带偏后续全部区间
-                        val anchorBin = bins[maxLearnedIndex]
-                        val anchorWh = anchorBin.learnedEnergyWh!!
-                        val anchorWeight = SOC_ENERGY_SHAPE_WEIGHTS[maxLearnedIndex]
-                        val anchorBasedWh = anchorWh * (currentWeight / anchorWeight)
-                        val medianBasedWh = fullScaleWhFromLearned * currentWeight
-                        extrapolatedWh = min(anchorBasedWh, medianBasedWh * 1.10)
-                        rationaleText = String.format(Locale.US, "实测形态自举 (高电量衔接 %d%%~%d%%)", anchorBin.minSocPercent.toInt(), anchorBin.maxSocPercent.toInt())
-                    } else if (index < minLearnedIndex) {
-                        // 低电量单侧外推（如 0%~30%）：结合全局中位数标尺与最低实测边界，平滑向截止区过渡，杜绝下限虚高
-                        val anchorBin = bins[minLearnedIndex]
-                        val anchorWh = anchorBin.learnedEnergyWh!!
-                        val anchorWeight = SOC_ENERGY_SHAPE_WEIGHTS[minLearnedIndex]
-                        val anchorBasedWh = anchorWh * (currentWeight / anchorWeight)
-                        val medianBasedWh = fullScaleWhFromLearned * currentWeight
-                        extrapolatedWh = min(anchorBasedWh, medianBasedWh * 1.10)
-                        rationaleText = String.format(Locale.US, "实测形态自举 (低电量衔接 %d%%~%d%%)", anchorBin.minSocPercent.toInt(), anchorBin.maxSocPercent.toInt())
+                    val baselineScaleWh = effectiveFullWh ?: fullScaleWhFromLearned
+                    if (learnedVotes.size >= 6) {
+                        // 场景 A：微观实测样本充足 (>= 6 段，覆盖率 >= 30%)，微观实测曲线跨越多电压平台已形成有效形态，
+                        // 以实测边界锚点形态自举为主，以全电量中位数标尺为容差上限 (* 1.10)
+                        if (index > maxLearnedIndex) {
+                            val anchorBin = bins[maxLearnedIndex]
+                            val anchorWh = anchorBin.learnedEnergyWh!!
+                            val anchorWeight = SOC_ENERGY_SHAPE_WEIGHTS[maxLearnedIndex]
+                            val anchorBasedWh = anchorWh * (currentWeight / anchorWeight)
+                            val medianBasedWh = fullScaleWhFromLearned * currentWeight
+                            extrapolatedWh = min(anchorBasedWh, medianBasedWh * 1.10)
+                            rationaleText = String.format(Locale.US, "实测形态自举 (高电量衔接 %d%%~%d%%)", anchorBin.minSocPercent.toInt(), anchorBin.maxSocPercent.toInt())
+                        } else if (index < minLearnedIndex) {
+                            val anchorBin = bins[minLearnedIndex]
+                            val anchorWh = anchorBin.learnedEnergyWh!!
+                            val anchorWeight = SOC_ENERGY_SHAPE_WEIGHTS[minLearnedIndex]
+                            val anchorBasedWh = anchorWh * (currentWeight / anchorWeight)
+                            val medianBasedWh = fullScaleWhFromLearned * currentWeight
+                            extrapolatedWh = min(anchorBasedWh, medianBasedWh * 1.10)
+                            rationaleText = String.format(Locale.US, "实测形态自举 (低电量衔接 %d%%~%d%%)", anchorBin.minSocPercent.toInt(), anchorBin.maxSocPercent.toInt())
+                        } else {
+                            extrapolatedWh = fullScaleWhFromLearned * currentWeight
+                            rationaleText = String.format(Locale.US, "实测形态自举 (形态占比 %.1f%%)", currentWeight * 100.0)
+                        }
                     } else {
-                        // 中间非相邻缺失段：基于全局中位数自举标尺展开
-                        extrapolatedWh = fullScaleWhFromLearned * currentWeight
-                        rationaleText = String.format(Locale.US, "实测形态自举 (形态占比 %.1f%%)", currentWeight * 100.0)
-                    }
+                        // 场景 B：微观实测样本稀疏 (< 6 段，如仅单次 73%->56% 亮屏片段)，局域电压严重偏态！
+                        // 核心准则：微观 20 段 SOC 严禁仅由单次局部亮屏外推，未测区间必须由所有符合有效条件的亮屏联合宏观标尺与基准容量主导展开，
+                        // 紧邻实测段平滑衔接，远端严格按权威基尺展开，彻底杜绝单次 28.67Wh / 32.68Wh 虚高！
+                        val anchorIndex = if (index > maxLearnedIndex) maxLearnedIndex else minLearnedIndex
+                        val dist = kotlin.math.abs(index - anchorIndex)
+                        val anchorBin = bins[anchorIndex]
+                        val anchorWh = anchorBin.learnedEnergyWh!!
+                        val anchorWeight = SOC_ENERGY_SHAPE_WEIGHTS[anchorIndex]
+                        val anchorBasedWh = anchorWh * (currentWeight / anchorWeight)
+                        val baselineBasedWh = baselineScaleWh * currentWeight
 
+                        val blendFactor = if (dist <= 1) 0.50 else 0.0 // 紧邻边界 50% 平滑过渡消除锯齿断崖，远端 100% 遵从权威联合基尺
+                        extrapolatedWh = blendFactor * anchorBasedWh + (1.0 - blendFactor) * baselineBasedWh
+                        rationaleText = String.format(Locale.US, "实测形态自举 (联合宏观标尺展开 %.1f%%)", currentWeight * 100.0)
+                    }
                     ResolvedSocEnergyBin(
                         binIndex = index,
                         minSocPercent = bin.minSocPercent,
@@ -765,6 +796,25 @@ data class LearnedSocEnergyCurve(
         )
 
         /**
+         * 依据放电积分切片（BinEnergyDelta）实际走过的有效电量跨度，精确累加对应的电化学形态理论权重。
+         * 彻底消除跨越长时息屏断层时首尾直接推算导致的形态权重虚高失真。
+         *
+         * @param binDeltas 放电积分器输出的有效区间切片集合
+         * @return 真实对应的理论电化学形态权重和（0.0 ~ 1.0）
+         */
+        fun calculateActualShapeWeight(binDeltas: Collection<com.battery.analysis.domain.estimator.DischargeEnergyIntegrator.BinEnergyDelta>): Double {
+            if (binDeltas.isEmpty()) return 0.0
+            var weightSum = 0.0
+            for (delta in binDeltas) {
+                if (delta.binIndex in 0 until BIN_COUNT && delta.coveredSocSpan > 0f) {
+                    val fraction = (delta.coveredSocSpan / BIN_SOC_STEP).toDouble()
+                    weightSum += fraction * SOC_ENERGY_SHAPE_WEIGHTS[delta.binIndex]
+                }
+            }
+            return weightSum
+        }
+
+        /**
          * 计算任意指定 SOC 范围在锂电池无量纲电化学形态向量中的理论权重占比。
          *
          * @param minSoc 起始下界电量百分比（0.0f ~ 100.0f）
@@ -788,6 +838,58 @@ data class LearnedSocEnergyCurve(
                 }
             }
             return weightSum
+        }
+
+        /**
+         * 计算多个纯亮屏放电会话在 20 段 SOC 能量形态上的区间并集覆盖度（Union Shape Coverage）。
+         *
+         * 杜绝多个重复浅放电样本在局部相同区间通过权重简单累加而虚假拉满全量程覆盖度的缺陷，
+         * 忠实反映所有样本并集对 0%~100% 全 SOC 电化学能量形态的真实物理覆盖比例。
+         *
+         * @param sessions 经审计合格的纯亮屏放电会话列表
+         * @return 所有会话在 SOC 轴上的并集理论形态权重和（0.0 ~ 1.0）
+         */
+        fun calculateUnionShapeCoverage(sessions: List<QualifiedScreenOnSession>): Double {
+            if (sessions.isEmpty()) return 0.0
+
+            var totalUnionWeight = 0.0
+            for (i in 0 until BIN_COUNT) {
+                val binMin = i * BIN_SOC_STEP.toDouble()
+                val binMax = binMin + BIN_SOC_STEP.toDouble()
+
+                val intervals = mutableListOf<Pair<Double, Double>>()
+                for (s in sessions) {
+                    val sMin = minOf(s.startSoc, s.endSoc).toDouble().coerceIn(0.0, 100.0)
+                    val sMax = maxOf(s.startSoc, s.endSoc).toDouble().coerceIn(0.0, 100.0)
+                    val overlapStart = maxOf(binMin, sMin)
+                    val overlapEnd = minOf(binMax, sMax)
+                    if (overlapEnd > overlapStart) {
+                        intervals.add(Pair(overlapStart, overlapEnd))
+                    }
+                }
+                if (intervals.isEmpty()) continue
+
+                intervals.sortBy { it.first }
+                var mergedLength = 0.0
+                var curStart = intervals[0].first
+                var curEnd = intervals[0].second
+                for (j in 1 until intervals.size) {
+                    val next = intervals[j]
+                    if (next.first <= curEnd) {
+                        curEnd = maxOf(curEnd, next.second)
+                    } else {
+                        mergedLength += (curEnd - curStart)
+                        curStart = next.first
+                        curEnd = next.second
+                    }
+                }
+                mergedLength += (curEnd - curStart)
+
+                val fraction = (mergedLength / BIN_SOC_STEP.toDouble()).coerceIn(0.0, 1.0)
+                totalUnionWeight += fraction * SOC_ENERGY_SHAPE_WEIGHTS[i]
+            }
+
+            return totalUnionWeight.coerceIn(0.0, 1.0)
         }
 
         /**
@@ -891,4 +993,26 @@ data class EnergyComparisonOverview(
     val macroHistoricalFullWh: Double? = null,
     val confidenceReason: String? = null,
     val historicalDispersionPercent: Double? = null
+)
+
+
+/**
+ * 满足当前有效条件筛选门限与条数限制的纯亮屏放电会话物理做功与电荷概要实体。
+ *
+ * @property sessionId 产生该记录的会话唯一标识 ID
+ * @property screenOnWh 纯亮屏梯形微积分实测释放物理能量（单位：Wh）
+ * @property screenOnChargeMah 纯亮屏实测释放物理电荷量（单位：mAh）
+ * @property startSoc 亮屏放电起始电量百分比
+ * @property endSoc 亮屏放电终止电量百分比
+ * @property screenOnDropPercent 纯亮屏实际覆盖的有效电量净掉电跨度（%）
+ * @property theoreticalShapeWeight 该放电区间在锂电池无量纲电化学形态向量中的理论能量积分权重（0.0 ~ 1.0）
+ */
+data class QualifiedScreenOnSession(
+    val sessionId: String,
+    val screenOnWh: Double,
+    val screenOnChargeMah: Double,
+    val startSoc: Float,
+    val endSoc: Float,
+    val screenOnDropPercent: Float,
+    val theoreticalShapeWeight: Double
 )

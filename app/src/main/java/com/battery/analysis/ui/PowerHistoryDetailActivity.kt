@@ -861,10 +861,12 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         val remainingEnergyWh = currentRecord?.energyWh
         val tempCelsius = currentRecord?.temperature
         val trendPoints = currentRecord?.parseTrendPointsList()
+        val (predictedCapacityWh, _) = com.battery.analysis.manager.BatteryCapacityManager.getInstance(this)
+            .getPredictedFullCapacityWithFallback(cachedTotalCapacityWh)
         PowerDischargeMetricsViewBinder.bindDischargeSpeed(
             binding = hBinding.layoutDischargeSpeed,
             overview = cachedOverviewStats,
-            totalCapacityWh = cachedTotalCapacityWh,
+            totalCapacityWh = predictedCapacityWh,
             sevenDaysStats = cachedSevenDaysStats,
             batteryLevelPercent = batteryLevel,
             remainingEnergyWh = remainingEnergyWh,
@@ -897,15 +899,18 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         val overview = cachedOverviewStats
         val powerMgr = PowerUsageManager.getInstance(this)
         val totalEnergyInfo = cachedTotalEnergyInfo ?: powerMgr.getTotalEnergyInfo()
-        val totalCapacityWh = cachedTotalCapacityWh
+        val fallbackCapacityWh = cachedTotalCapacityWh
             ?: totalEnergyInfo?.totalWh
             ?: powerMgr.getTotalEnergyWh()
             ?: powerMgr.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
                 BatteryEnergyCalculator.calculateTotalEnergyWh(it)
             }
-        val capacityMah = totalEnergyInfo?.equivalentMah
+        val fallbackCapacityMah = totalEnergyInfo?.equivalentMah
             ?: powerMgr.getEffectiveDeviceCapacityMah().takeIf { it > 0f }
-            ?: totalCapacityWh?.takeIf { it > 0f }?.let { (it * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+            ?: fallbackCapacityWh?.takeIf { it > 0f }?.let { (it * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+
+        val (totalCapacityWh, capacityMah) = com.battery.analysis.manager.BatteryCapacityManager.getInstance(this)
+            .getPredictedFullCapacityWithFallback(fallbackCapacityWh, fallbackCapacityMah)
 
         val sevenDays = cachedSevenDaysStats
         val currentRate = PowerDischargeMetricsViewBinder.getEffectiveDischargeRate(rowType, totalCapacityWh, overview, sevenDays)

@@ -38,12 +38,14 @@ object DischargeSessionValidator {
      * @param integrationResult 微积分与断层审计结果 [DischargeEnergyIntegrator.DischargeIntegrationResult]
      * @param sessionId 产生该样本的独立会话标识 ID
      * @param effectiveCapacityMah 设备当前基准容量（优先 FCC，可选）
+     * @param isDualCell 是否为串联双电芯架构（默认 false，单电芯最高开路电压 4.45V，串联双电芯最高 8.9V）
      * @return 会话校验与质量分级结果实体 [ValidationResult]
      */
     fun validateDischargeSession(
         integrationResult: DischargeEnergyIntegrator.DischargeIntegrationResult,
         sessionId: String,
-        effectiveCapacityMah: Double? = null
+        effectiveCapacityMah: Double? = null,
+        isDualCell: Boolean = false
     ): ValidationResult {
         val completeList = mutableListOf<SocEnergyBinSample>()
         val partialList = mutableListOf<SocEnergyBinSample>()
@@ -85,24 +87,22 @@ object DischargeSessionValidator {
             val span = delta.coveredSocSpan
             val coverage = (span.toDouble() / LearnedSocEnergyCurve.BIN_SOC_STEP.toDouble()).coerceIn(0.0, 1.0)
 
-            // 关键物理归一化：将实际覆盖跨度测得的微元能量严格折算为 5.0% 标准物理区间能量
-            // 彻底杜绝 4.5%~4.9% 跨度的有效样本因未折算而导致该区间能量系统性缩水 5%~10%
-            val normalizedWh = if (span in 0.5f..5.0f) {
+            // 施加 0.001 浮点容差（防止 IEEE 754 4.5f / 5.0f = 0.89999997 精度损失误判）
+            val isComplete = coverage >= (MIN_COMPLETE_COVERAGE_FRACTION - 0.001)
+
+            // 标准物理区间归一化：
+            // 当实际跨度达到完整区间门限（span >= 4.5%），将该区间真实释放电量所产生的微积分能量严格折算为标准 5.0% 区间能量。
+            // 无论实际走满 5%，还是由于系统电量计平台期滞后导致实际释放了更大电荷跨度（如 8.96%），均按安时积分电荷比例归一化为 5.0% 标准做功；
+            // 未达标的残缺区间（< 4.5%）保留原始做功，不进行乘数放大
+            val normalizedWh = if (isComplete && span >= 4.5f) {
                 delta.energyWh * (LearnedSocEnergyCurve.BIN_SOC_STEP.toDouble() / span.toDouble())
             } else {
                 delta.energyWh
             }
 
-            // 严格电化学物理守卫：单段 5% SOC 正常物理能量约 0.8~1.6Wh（8000mAh 电池单 Bin 标称约 1.54Wh，5000mAh 约 0.96Wh）
-            // 在锂电池最高放电电压（~4.35V）及轻载无压降极限下，单段能量绝对不可能超过标称能量的 1.35 倍（8000mAh 电池绝对上限约 2.08Wh）
-            // 若因长时间待机唤醒累计导致 normalizedWh 超过合理电化学物理上限，或能量过低 (<0.2Wh)，判定为工况畸变样本，严禁作为实测完整样本入库污染模型
-            val maxAllowedWh = if (effectiveCapacityMah != null && effectiveCapacityMah > 0.0) {
-                val theoreticalBinWh = (effectiveCapacityMah * 3.85 / 1000.0) * 0.05
-                (theoreticalBinWh * 1.35).coerceIn(1.5, 2.1)
-            } else {
-                2.1
-            }
-            if (normalizedWh > maxAllowedWh || normalizedWh < 0.2) {
+            // 硬件物理合理性通用过滤（过滤待机底噪累加 4.2Wh 或浮充倒灌 3.3Wh 等显式工况畸变）
+            val maxAllowedWh = if (isDualCell) 5.6 else 2.8
+            if (normalizedWh > maxAllowedWh || normalizedWh < 0.15) {
                 continue
             }
 
@@ -111,9 +111,6 @@ object DischargeSessionValidator {
                 val fccAmperes = effectiveCapacityMah / 1000.0
                 (delta.averageCurrentAmperes / fccAmperes).coerceAtLeast(0.0)
             } else null
-
-            // 施加 0.001 浮点容差（防止 IEEE 754 4.5f / 5.0f = 0.89999997 精度损失误判）
-            val isComplete = coverage >= (MIN_COMPLETE_COVERAGE_FRACTION - 0.001)
 
             val sample = SocEnergyBinSample(
                 binIndex = binIndex,

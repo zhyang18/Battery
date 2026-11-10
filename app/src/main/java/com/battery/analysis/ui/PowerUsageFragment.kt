@@ -399,11 +399,12 @@ class PowerUsageFragment : Fragment() {
             }
         }
 
-        // 观察电池容量与物理自学习状态流，动态刷新容量卡片
+        // 观察电池容量与物理自学习状态流，动态刷新容量卡片与吸顶核心功耗指标
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 BatteryCapacityManager.getInstance(requireContext()).capacityState.collect { estimateResult ->
                     adapter.updateCapacityEstimate(estimateResult)
+                    restoreNormalPowerMetrics()
                 }
             }
         }
@@ -909,19 +910,35 @@ class PowerUsageFragment : Fragment() {
     private fun showEnergyTooltip(anchorView: View, touchX: Float? = null, touchY: Float? = null) {
         val snapshot = lastRenderedPackage?.batterySnapshot
         val overview = lastRenderedPackage?.overviewStats
-        val totalCapMah = powerManager.getEffectiveDeviceCapacityMah()
+        val totalEnergyInfo = snapshot?.totalEnergyInfo ?: powerManager.getTotalEnergyInfo()
+        val fallbackCapacityWh = snapshot?.totalEnergyWh
+            ?: totalEnergyInfo?.totalWh
+            ?: powerManager.getTotalEnergyWh()
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
+                BatteryEnergyCalculator.calculateTotalEnergyWh(it)
+            }
+        val fallbackCapacityMah = totalEnergyInfo?.equivalentMah
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }
+            ?: fallbackCapacityWh?.takeIf { it > 0f }?.let { (it * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
 
-        val currentWh = snapshot?.energyWh
-            ?: (if (totalCapMah > 0f && snapshot != null) {
-                snapshot.levelPercent / 100f * (totalCapMah / 1000f * BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS)
-            } else null)
+        val (predictedWh, _) = BatteryCapacityManager.getInstance(requireContext())
+            .getPredictedFullCapacityWithFallback(fallbackCapacityWh, fallbackCapacityMah)
 
-        val totalWh = snapshot?.totalEnergyWh?.takeIf { it > 0f }
-            ?: (if (totalCapMah > 0f) {
-                totalCapMah / 1000f * BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
-            } else null)
+        val totalWh = predictedWh ?: fallbackCapacityWh
+        val currentWh = if (totalWh != null && snapshot != null) {
+            val calcWh = (snapshot.levelPercent / 100f) * totalWh
+            snapshot.energyWh.takeIf { it > 0f && it <= totalWh } ?: calcWh
+        } else {
+            snapshot?.energyWh?.takeIf { it > 0f }
+        }
 
-        val unplugWh = powerManager.getLastUnplugEnergyWh()
+        val rawUnplugWh = powerManager.getLastUnplugEnergyWh()
+        val unplugWh = if (totalWh != null && rawUnplugWh != null && rawUnplugWh > totalWh) {
+            val unplugLevel = powerManager.getLastUnplugLevel()
+            if (unplugLevel in 1..100) (unplugLevel / 100f) * totalWh else totalWh
+        } else {
+            rawUnplugWh
+        }
         val consumedWh = overview?.totalEnergyWh?.takeIf { it > 0f }
             ?: (if (unplugWh != null && currentWh != null && unplugWh >= currentWh) {
                 (unplugWh - currentWh).toFloat()
@@ -1333,13 +1350,19 @@ class PowerUsageFragment : Fragment() {
         }
 
         val totalEnergyInfo = pkg.batterySnapshot.totalEnergyInfo ?: powerManager.getTotalEnergyInfo()
-        val totalCapacityWh = pkg.batterySnapshot.totalEnergyWh
+        val fallbackCapacityWh = pkg.batterySnapshot.totalEnergyWh
             ?: totalEnergyInfo?.totalWh
             ?: powerManager.getTotalEnergyWh()
             ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
                 BatteryEnergyCalculator.calculateTotalEnergyWh(it)
             }
-        val baseTotalEnergy = totalCapacityWh?.takeIf { it > 0f }
+        val fallbackCapacityMah = totalEnergyInfo?.equivalentMah
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }
+            ?: fallbackCapacityWh?.takeIf { it > 0f }?.let { (it * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+
+        val (predictedWh, predictedMah) = BatteryCapacityManager.getInstance(requireContext())
+            .getPredictedFullCapacityWithFallback(fallbackCapacityWh, fallbackCapacityMah)
+        val baseTotalEnergy = predictedWh?.takeIf { it > 0f } ?: fallbackCapacityWh?.takeIf { it > 0f }
         val (title, energyWh, ratioStr) = when (rowType) {
             ROW_SCREEN_ON -> {
                 val ratio = if (baseTotalEnergy != null) {
@@ -1365,11 +1388,21 @@ class PowerUsageFragment : Fragment() {
             else -> return
         }
 
+        val effectiveTotalEnergyInfo = if (predictedWh != null && predictedMah != null) {
+            com.battery.analysis.util.BatteryTotalEnergyInfo(
+                totalWh = predictedWh,
+                sourceDescription = "预估满电容量",
+                equivalentMah = predictedMah
+            )
+        } else {
+            totalEnergyInfo
+        }
+
         val message = BatteryEnergyCalculator.formatEnergyConversionMessage(
             title = title,
             energyWh = energyWh,
             ratioStr = ratioStr,
-            totalEnergyInfo = totalEnergyInfo
+            totalEnergyInfo = effectiveTotalEnergyInfo
         )
         showBubbleTooltip(anchorView, message, autoDismissMs = 0L)
     }
@@ -1390,13 +1423,19 @@ class PowerUsageFragment : Fragment() {
         }
 
         val totalEnergyInfo = pkg?.batterySnapshot?.totalEnergyInfo ?: powerManager.getTotalEnergyInfo()
-        val totalCapacityWh = pkg?.batterySnapshot?.totalEnergyWh
+        val fallbackCapacityWh = pkg?.batterySnapshot?.totalEnergyWh
             ?: totalEnergyInfo?.totalWh
             ?: powerManager.getTotalEnergyWh()
             ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
                 BatteryEnergyCalculator.calculateTotalEnergyWh(it)
             }
-        val nominalTotalWh = totalCapacityWh?.takeIf { it > 0f }
+        val fallbackCapacityMah = totalEnergyInfo?.equivalentMah
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }
+            ?: fallbackCapacityWh?.takeIf { it > 0f }?.let { (it * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+
+        val (predictedWh, _) = BatteryCapacityManager.getInstance(requireContext())
+            .getPredictedFullCapacityWithFallback(fallbackCapacityWh, fallbackCapacityMah)
+        val nominalTotalWh = predictedWh?.takeIf { it > 0f } ?: fallbackCapacityWh?.takeIf { it > 0f }
         val nominalVoltage = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
 
         val message = when (cardType) {
@@ -1478,13 +1517,20 @@ class PowerUsageFragment : Fragment() {
         }
 
         val batteryPercent = pkg?.batterySnapshot?.levelPercent?.toFloat()
-        val remainingEnergyWh = pkg?.batterySnapshot?.energyWh
+        val (predictedWh, _) = BatteryCapacityManager.getInstance(requireContext())
+            .getPredictedFullCapacityWithFallback(totalCapacityWh)
+        val effectiveTotalWh = predictedWh ?: totalCapacityWh
+        val remainingEnergyWh = if (effectiveTotalWh != null && effectiveTotalWh > 0f && batteryPercent != null && batteryPercent > 0f) {
+            effectiveTotalWh * (batteryPercent.coerceIn(0f, 100f) / 100f)
+        } else {
+            pkg?.batterySnapshot?.energyWh
+        }
         val tripleResult = adapter.getCachedTripleRuntimeResult() ?: BatteryEnergyCalculator.estimateTripleRuntimes(
             overview = overview,
             sevenDaysStats = sevenDays,
             batteryLevelPercent = batteryPercent,
             remainingEnergyWh = remainingEnergyWh,
-            totalCapacityWh = totalCapacityWh,
+            totalCapacityWh = effectiveTotalWh,
             tempCelsius = pkg?.batterySnapshot?.temperature,
             currentTrendPoints = pkg?.trendPoints
         )
@@ -1760,12 +1806,33 @@ class PowerUsageFragment : Fragment() {
         val snapshot = fullPackage.batterySnapshot
         val overview = fullPackage.overviewStats
 
-        // 1. 刷新概览卡片瞬时指标
+        // 1. 刷新概览卡片瞬时指标与放电速度容量基准
+        val totalCapacityWh = snapshot.totalEnergyWh
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
+                BatteryEnergyCalculator.calculateTotalEnergyWh(it)
+            }
+
+        val (predictionCapacityWh, _) = BatteryCapacityManager.getInstance(requireContext())
+            .getPredictedFullCapacityWithFallback(totalCapacityWh)
+        val effectiveDischargeCapacityWh = predictionCapacityWh ?: totalCapacityWh
+
+        val effectiveCurrentWh = if (effectiveDischargeCapacityWh != null && effectiveDischargeCapacityWh > 0f && snapshot.levelPercent in 1..100) {
+            (snapshot.levelPercent / 100f) * effectiveDischargeCapacityWh
+        } else {
+            snapshot.energyWh
+        }
         val lastUnplugWh = powerManager.getLastUnplugEnergyWh()
+        val effectiveUnplugWh = if (lastUnplugWh != null && effectiveDischargeCapacityWh != null && lastUnplugWh > effectiveDischargeCapacityWh) {
+            val unplugLevel = powerManager.getLastUnplugLevel().takeIf { it in 1..100 } ?: snapshot.levelPercent
+            (unplugLevel / 100f) * effectiveDischargeCapacityWh
+        } else {
+            lastUnplugWh
+        }
+
         adapter.updateOverviewMetrics(
-            energyWh = snapshot.energyWh,
-            totalEnergyWh = snapshot.totalEnergyWh,
-            lastUnplugWh = lastUnplugWh,
+            energyWh = effectiveCurrentWh,
+            totalEnergyWh = effectiveDischargeCapacityWh,
+            lastUnplugWh = effectiveUnplugWh,
             temp = snapshot.temperature,
             volt = snapshot.voltageVolts,
             isCharging = snapshot.isCharging
@@ -1791,34 +1858,31 @@ class PowerUsageFragment : Fragment() {
         binding.tvMetricGlobalPower.setUnitText(avgPowerStr)
         binding.tvMetricScreenOffPower.setUnitText(offPowerStr)
 
-        // 刷新列表内放电速度概览卡片（包含全局放电速度、亮屏放电速度、息屏放电速度三个主要模块）
-        val totalCapacityWh = snapshot.totalEnergyWh
-            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
-                BatteryEnergyCalculator.calculateTotalEnergyWh(it)
-            }
-
         val (onSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
-            BatteryEnergyCalculator.ROW_SCREEN_ON, totalCapacityWh, overview
+            BatteryEnergyCalculator.ROW_SCREEN_ON, effectiveDischargeCapacityWh, overview
         )
         val (offSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
-            BatteryEnergyCalculator.ROW_SCREEN_OFF, totalCapacityWh, overview
+            BatteryEnergyCalculator.ROW_SCREEN_OFF, effectiveDischargeCapacityWh, overview
         )
         val (globalSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
-            BatteryEnergyCalculator.ROW_GLOBAL, totalCapacityWh, overview
+            BatteryEnergyCalculator.ROW_GLOBAL, effectiveDischargeCapacityWh, overview
         )
 
         binding.tvMetricScreenOnSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(onSessionRate))
         binding.tvMetricScreenOffSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(offSessionRate))
         binding.tvMetricGlobalSpeed.setUnitText(PowerDischargeMetricsViewBinder.formatDischargeRateSpannable(globalSessionRate))
 
-        val (predictionCapacityWh, _) = BatteryCapacityManager.getInstance(requireContext())
-            .getPredictedFullCapacityWithFallback(totalCapacityWh)
+        val effectiveRemainingWh = if (predictionCapacityWh != null && predictionCapacityWh > 0f && snapshot.levelPercent in 1..100) {
+            predictionCapacityWh * (snapshot.levelPercent / 100f)
+        } else {
+            snapshot.energyWh
+        }
 
         adapter.updateOverviewStats(
             overviewStats = overview,
             totalCapacityWh = predictionCapacityWh,
             batteryLevelPercent = snapshot.levelPercent.toFloat(),
-            remainingEnergyWh = snapshot.energyWh,
+            remainingEnergyWh = effectiveRemainingWh,
             tempCelsius = snapshot.temperature,
             trendPoints = fullPackage.trendPoints,
             forceRecalculateRuntime = false
@@ -2190,11 +2254,32 @@ class PowerUsageFragment : Fragment() {
         val baseState = prebuiltTimelineState ?: powerManager.buildTimelineState(fullPackage, isHistoryRecord = isViewingSnapshot)
         val timelineState = baseState.copy(selectedMetrics = selectedMetrics, displayUnit = currentDisplayUnit)
         val lastUnplugWh = powerManager.getLastUnplugEnergyWh()
+        val totalCapacityWh = snapshot.totalEnergyWh
+            ?: powerManager.getTotalEnergyWh()
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
+                BatteryEnergyCalculator.calculateTotalEnergyWh(it)
+            }
+        val (predictionCapacityWh, _) = BatteryCapacityManager.getInstance(requireContext())
+            .getPredictedFullCapacityWithFallback(totalCapacityWh)
+        val baseTotalEnergy = predictionCapacityWh?.takeIf { it > 0f } ?: totalCapacityWh?.takeIf { it > 0f }
+        val effectiveTotalWh = predictionCapacityWh ?: totalCapacityWh
+
+        val effectiveCurrentWh = if (effectiveTotalWh != null && effectiveTotalWh > 0f && snapshot.levelPercent in 1..100) {
+            (snapshot.levelPercent / 100f) * effectiveTotalWh
+        } else {
+            snapshot.energyWh
+        }
+        val effectiveUnplugWh = if (lastUnplugWh != null && effectiveTotalWh != null && lastUnplugWh > effectiveTotalWh) {
+            val unplugLevel = powerManager.getLastUnplugLevel().takeIf { it in 1..100 } ?: snapshot.levelPercent
+            (unplugLevel / 100f) * effectiveTotalWh
+        } else {
+            lastUnplugWh
+        }
 
         adapter.updateOverviewMetrics(
-            energyWh = snapshot.energyWh,
-            totalEnergyWh = snapshot.totalEnergyWh,
-            lastUnplugWh = lastUnplugWh,
+            energyWh = effectiveCurrentWh,
+            totalEnergyWh = effectiveTotalWh,
+            lastUnplugWh = effectiveUnplugWh,
             temp = snapshot.temperature,
             volt = snapshot.voltageVolts,
             isCharging = snapshot.isCharging,
@@ -2205,15 +2290,9 @@ class PowerUsageFragment : Fragment() {
         val onEnergy = overview.screenOnEnergyWh
         val offEnergy = overview.screenOffEnergyWh
         val totalEnergy = overview.totalEnergyWh
-        val totalCapacityWh = snapshot.totalEnergyWh
-            ?: powerManager.getTotalEnergyWh()
-            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
-                BatteryEnergyCalculator.calculateTotalEnergyWh(it)
-            }
-        val baseTotalEnergy = totalCapacityWh?.takeIf { it > 0f }
 
         // 异步预计算时间轴前缀和索引数据，赋能 120Hz 游标探查零延迟无感联动
-        val capWh = totalCapacityWh
+        val capWh = predictionCapacityWh ?: totalCapacityWh
         viewLifecycleOwner.lifecycleScope.launch(Dispatchers.Default) {
             val prefix = com.battery.analysis.timeline.util.TimelinePrefixSumCalculator.buildPrefixData(
                 timelineState = timelineState,
@@ -2288,13 +2367,13 @@ class PowerUsageFragment : Fragment() {
         }
 
         val (onSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
-            BatteryEnergyCalculator.ROW_SCREEN_ON, totalCapacityWh, overview
+            BatteryEnergyCalculator.ROW_SCREEN_ON, capWh, overview
         )
         val (offSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
-            BatteryEnergyCalculator.ROW_SCREEN_OFF, totalCapacityWh, overview
+            BatteryEnergyCalculator.ROW_SCREEN_OFF, capWh, overview
         )
         val (globalSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
-            BatteryEnergyCalculator.ROW_GLOBAL, totalCapacityWh, overview
+            BatteryEnergyCalculator.ROW_GLOBAL, capWh, overview
         )
 
         // 第一行：亮屏数据（图标已由 XML 设置）
@@ -2328,14 +2407,18 @@ class PowerUsageFragment : Fragment() {
             ?: powerManager.getCachedSevenDaysStats()
         val hasSevenDaysStats = currentCachedSevenDays != null
         val shouldForceRecalculateNow = isFullDischargeRefresh && hasSevenDaysStats
-        val (predictionCapacityWh, _) = BatteryCapacityManager.getInstance(requireContext())
-            .getPredictedFullCapacityWithFallback(totalCapacityWh)
+
+        val effectiveRemainingWh = if (predictionCapacityWh != null && predictionCapacityWh > 0f && currentLevel != null && currentLevel in 1f..100f) {
+            predictionCapacityWh * (currentLevel / 100f)
+        } else {
+            currentEnergy
+        }
 
         adapter.updateOverviewStats(
             overviewStats = overview,
             totalCapacityWh = predictionCapacityWh,
             batteryLevelPercent = currentLevel,
-            remainingEnergyWh = currentEnergy,
+            remainingEnergyWh = effectiveRemainingWh,
             tempCelsius = currentTemp,
             trendPoints = fullPackage.trendPoints,
             sevenDaysStats = currentCachedSevenDays,
@@ -2560,7 +2643,9 @@ class PowerUsageFragment : Fragment() {
             ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
                 BatteryEnergyCalculator.calculateTotalEnergyWh(it)
             }
-        val baseTotalEnergy = totalCapacityWh?.takeIf { it > 0f }
+        val (predictionCapacityWh, _) = BatteryCapacityManager.getInstance(requireContext())
+            .getPredictedFullCapacityWithFallback(totalCapacityWh)
+        val baseTotalEnergy = predictionCapacityWh?.takeIf { it > 0f } ?: totalCapacityWh?.takeIf { it > 0f }
 
         val onEnergyRatioStr = if (baseTotalEnergy != null) {
             val ratio = (onEnergy / baseTotalEnergy * 100f)
@@ -2621,14 +2706,15 @@ class PowerUsageFragment : Fragment() {
             "--"
         }
 
+        val capWh = predictionCapacityWh ?: totalCapacityWh
         val (onSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
-            BatteryEnergyCalculator.ROW_SCREEN_ON, totalCapacityWh, overview
+            BatteryEnergyCalculator.ROW_SCREEN_ON, capWh, overview
         )
         val (offSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
-            BatteryEnergyCalculator.ROW_SCREEN_OFF, totalCapacityWh, overview
+            BatteryEnergyCalculator.ROW_SCREEN_OFF, capWh, overview
         )
         val (globalSessionRate, _) = PowerDischargeMetricsViewBinder.calculateSessionDischargeRate(
-            BatteryEnergyCalculator.ROW_GLOBAL, totalCapacityWh, overview
+            BatteryEnergyCalculator.ROW_GLOBAL, capWh, overview
         )
 
         val onEnergyText = BatteryEnergyCalculator.formatDisplayEnergy(onEnergy, currentDisplayUnit)

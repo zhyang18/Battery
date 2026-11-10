@@ -33,6 +33,7 @@ class RollingDischargeBufferTest {
         testDir = File(System.getProperty("java.io.tmpdir"), "rolling_test_${System.currentTimeMillis()}")
         testDir.mkdirs()
         buffer = RollingDischargeBuffer.initForTesting(testDir)
+        com.battery.analysis.domain.estimator.EnduranceRuntimeSmoother.getInstance().reset()
     }
 
     /**
@@ -42,6 +43,7 @@ class RollingDischargeBufferTest {
     @After
     fun tearDown() {
         RollingDischargeBuffer.resetForTesting()
+        com.battery.analysis.domain.estimator.EnduranceRuntimeSmoother.getInstance().reset()
         testDir.deleteRecursively()
     }
 

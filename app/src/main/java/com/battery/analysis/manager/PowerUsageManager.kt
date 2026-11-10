@@ -4287,6 +4287,15 @@ class PowerUsageManager private constructor(private val context: Context) {
     fun getLastUnplugEnergyWh(): Float? {
         val saved = prefs.getFloat(PREF_KEY_LAST_UNPLUG_ENERGY, -1f)
         if (saved > 0f) {
+            val totalWh = getTotalEnergyWh()
+            if (totalWh != null && totalWh > 0f && saved > totalWh) {
+                val unplugLvl = getLastUnplugLevel()
+                if (unplugLvl in 1..100) {
+                    val corrected = (unplugLvl / 100f) * totalWh
+                    prefs.edit().putFloat(PREF_KEY_LAST_UNPLUG_ENERGY, corrected).apply()
+                    return corrected
+                }
+            }
             return saved
         }
         val effCap = getEffectiveDeviceCapacityMah()
@@ -4615,29 +4624,50 @@ class PowerUsageManager private constructor(private val context: Context) {
         val now = SystemClock.elapsedRealtime()
         val cachedCap = cachedEffectiveCapacity
         val cachedSource = cachedCapacitySource
+        val currentEstCap = try {
+            BatteryCapacityManager.getInstance(context).capacityState.value?.takeIf { it.hasValidCapacity() }?.fullChargeCapacityMah?.toFloat()
+        } catch (e: Exception) {
+            null
+        }
+
         if (cachedCap != null && cachedSource != null && (now - lastCapacityCachedTime) < 60_000L) {
-            return Pair(cachedCap, cachedSource)
+            if (currentEstCap != null) {
+                if (cachedCap == currentEstCap && cachedSource == "预估满电容量") {
+                    return Pair(cachedCap, cachedSource)
+                }
+            } else {
+                return Pair(cachedCap, cachedSource)
+            }
         }
 
         var capacity = 0f
         var source = "未知"
-        // 1. 优先从历史快照记录中获取经过算法融合或 Shizuku/Bugreport 提取到的真实满充容量与设计容量
-        try {
-            val dbHelper = HistoryDbHelper.getInstance(context)
-            val latestRecord = dbHelper.getLatestRecord()
-            val fcc = latestRecord?.fullChargeCapacity
-            if (fcc != null && fcc > 0f) {
-                capacity = fcc
-                source = "真实满充容量"
-            } else {
-                val design = latestRecord?.designCapacity
-                if (design != null && design > 0f) {
-                    capacity = design
-                    source = "出厂设计容量"
+
+        // 0. 优先从 BatteryCapacityManager 获取经过稳健融合算法自学习的预估满电容量（FCC，反映真实电池健康衰减）
+        if (currentEstCap != null && currentEstCap > 0f) {
+            capacity = currentEstCap
+            source = "预估满电容量"
+        }
+
+        // 1. 若自学习未就绪，尝试从历史快照记录中获取真实满充容量与设计容量
+        if (capacity <= 0f) {
+            try {
+                val dbHelper = HistoryDbHelper.getInstance(context)
+                val latestRecord = dbHelper.getLatestRecord()
+                val fcc = latestRecord?.fullChargeCapacity
+                if (fcc != null && fcc > 0f) {
+                    capacity = fcc
+                    source = "真实满充容量"
+                } else {
+                    val design = latestRecord?.designCapacity
+                    if (design != null && design > 0f) {
+                        capacity = design
+                        source = "出厂设计容量"
+                    }
                 }
+            } catch (e: Exception) {
+                // 数据库读取容错
             }
-        } catch (e: Exception) {
-            // 数据库读取容错
         }
 
         // 2. 尝试从系统 PowerProfile 反射获取出厂设计容量
@@ -5194,7 +5224,13 @@ class PowerUsageManager private constructor(private val context: Context) {
                 val finalAvgWatts = if (dischargeHours > 0f && finalRealTotalEnergyWh > 0f) finalRealTotalEnergyWh / dischargeHours else avgWatts
 
                 val targetCapacityMah = if (stats.capacityMah > 0f) stats.capacityMah else effectiveCapacity
-                val nominalTotalWh = if (targetCapacityMah > 0f && nominalVoltageVolts > 0f) (targetCapacityMah * nominalVoltageVolts / 1000f) else finalRealTotalEnergyWh
+                val (predictedFullWh, _) = BatteryCapacityManager.getInstance(context)
+                    .getPredictedFullCapacityWithFallback(
+                        fallbackCapacityWh = if (targetCapacityMah > 0f && nominalVoltageVolts > 0f) (targetCapacityMah * nominalVoltageVolts / 1000f) else null,
+                        fallbackCapacityMah = targetCapacityMah
+                    )
+                val nominalTotalWh = predictedFullWh
+                    ?: if (targetCapacityMah > 0f && nominalVoltageVolts > 0f) (targetCapacityMah * nominalVoltageVolts / 1000f) else finalRealTotalEnergyWh
                 val screenOffPercent = if (nominalTotalWh > 0f && finalOffEnergyWh > 0f) (finalOffEnergyWh / nominalTotalWh) * 100f else 0f
                 val screenOnPercent = if (nominalTotalWh > 0f && onEnergyWh > 0f) (onEnergyWh / nominalTotalWh) * 100f else 0f
                 val isDecomposedAvailable = decomposedOff.isDecomposedAvailable
@@ -7643,7 +7679,13 @@ class PowerUsageManager private constructor(private val context: Context) {
         val finalRealTotalEnergyWh = onEnergyWh + finalOffEnergyWh
         val finalAvgWatts = if (dischargeHours > 0f && finalRealTotalEnergyWh > 0f) finalRealTotalEnergyWh / dischargeHours else avgPower
 
-        val nominalTotalWh = if (effectiveCapacity > 0f && nominalVoltageVolts > 0f) (effectiveCapacity * nominalVoltageVolts / 1000f) else finalRealTotalEnergyWh
+        val (predictedFullWh, _) = BatteryCapacityManager.getInstance(context)
+            .getPredictedFullCapacityWithFallback(
+                fallbackCapacityWh = if (effectiveCapacity > 0f && nominalVoltageVolts > 0f) (effectiveCapacity * nominalVoltageVolts / 1000f) else null,
+                fallbackCapacityMah = effectiveCapacity
+            )
+        val nominalTotalWh = predictedFullWh
+            ?: if (effectiveCapacity > 0f && nominalVoltageVolts > 0f) (effectiveCapacity * nominalVoltageVolts / 1000f) else finalRealTotalEnergyWh
         val screenOffPercent = if (nominalTotalWh > 0f && finalOffEnergyWh > 0f) (finalOffEnergyWh / nominalTotalWh) * 100f else 0f
         val screenOnPercent = if (nominalTotalWh > 0f && onEnergyWh > 0f) (onEnergyWh / nominalTotalWh) * 100f else 0f
         val isDecomposedAvailable = decomposedOff.isDecomposedAvailable
@@ -7937,7 +7979,10 @@ class PowerUsageManager private constructor(private val context: Context) {
         // 1. 转换物理采样点（确保 startTs 与 endTs 100% 闭合覆盖）
         val samples = mutableListOf<BatterySample>()
         val effectiveCapacity = getEffectiveDeviceCapacityMah()
-        val totalEnergyWh = fullPackage.batterySnapshot.totalEnergyWh
+        val (predictedFullWh, _) = BatteryCapacityManager.getInstance(context)
+            .getPredictedFullCapacityWithFallback(fullPackage.batterySnapshot.totalEnergyWh, effectiveCapacity)
+        val totalEnergyWh = predictedFullWh
+            ?: fullPackage.batterySnapshot.totalEnergyWh
             ?: BatteryEnergyCalculator.calculateTotalEnergyWh(effectiveCapacity)
 
         if (points.isNotEmpty()) {
@@ -7965,7 +8010,7 @@ class PowerUsageManager private constructor(private val context: Context) {
 
             val initialEnergyWh = if (!isHistory) {
                 val unplugWh = getLastUnplugEnergyWh()
-                if (unplugWh != null && unplugWh > 0f) {
+                if (unplugWh != null && unplugWh > 0f && (totalEnergyWh == null || unplugWh <= totalEnergyWh)) {
                     unplugWh.toDouble()
                 } else if (totalEnergyWh != null && totalEnergyWh > 0f) {
                     (initialLevel / 100.0) * totalEnergyWh
@@ -8025,10 +8070,10 @@ class PowerUsageManager private constructor(private val context: Context) {
                     if (snap.voltageVolts > 0f) (snap.voltageVolts * 1000).toInt() else (lastPt.voltageVolts * 1000).toInt()
                 }
                 val finalTemp = if (isHistory) lastPt.temperature.toDouble() else snap.temperature.toDouble()
-                val finalEnergyWh = if (!isHistory && snap.energyWh > 0f) {
-                    snap.energyWh.toDouble()
-                } else if (totalEnergyWh != null && totalEnergyWh > 0f) {
+                val finalEnergyWh = if (totalEnergyWh != null && totalEnergyWh > 0f) {
                     (finalLevel / 100.0) * totalEnergyWh
+                } else if (!isHistory && snap.energyWh > 0f) {
+                    snap.energyWh.toDouble()
                 } else null
 
                 samples.add(

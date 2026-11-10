@@ -106,13 +106,26 @@ class RemainingEnergyEstimator {
         // 默认不进行未经设备标定的通用硬编码温度折损，忠实反映底层硬件真实数据
         val kt = if (enableTemperatureDerating) calculateTemperatureFactor(tempCelsius) else 1.0
 
+        val maxFullWh = if (effectiveCapacityMah != null && effectiveCapacityMah > 0f) {
+            (effectiveCapacityMah.toDouble() * safeVolt) / 1000.0
+        } else null
+        val expectedFccRemainingWh = if (maxFullWh != null && batteryLevelPercent != null && batteryLevelPercent > 0f) {
+            maxFullWh * (batteryLevelPercent.toDouble().coerceIn(0.0, 100.0) / 100.0)
+        } else null
+
         // 策略 1：直接传入的有效硬件剩余能量 Wh
         if (remainingEnergyWh != null && remainingEnergyWh > 0f && remainingEnergyWh.isFinite()) {
             val raw = remainingEnergyWh.toDouble()
-            val usable = raw * kt
+            // 防御性校验：若传入的剩余能量超过了当前基准满电总容量（说明硬件上报基于出厂设计容量未校准），强制校准至预期 FCC 剩余能量
+            val safeRaw = if (maxFullWh != null && raw > maxFullWh) {
+                expectedFccRemainingWh ?: maxFullWh
+            } else {
+                raw
+            }
+            val usable = safeRaw * kt
             return UsableRemainingEnergyEstimate(
                 usableEnergyWh = if (usable > 0.0 && usable.isFinite()) usable else null,
-                rawEnergyWh = raw,
+                rawEnergyWh = safeRaw,
                 source = EnergySource.NATIVE_FULL_ENERGY,
                 quality = DataQuality.VALID,
                 temperatureFactor = kt,
@@ -125,10 +138,15 @@ class RemainingEnergyEstimator {
         if (nativeEnergyNwh != null && nativeEnergyNwh != Long.MIN_VALUE && nativeEnergyNwh > 0L) {
             val raw = nativeEnergyNwh.toDouble() / NWH_TO_WH_FACTOR
             if (raw > 0.0 && raw.isFinite()) {
-                val usable = raw * kt
+                val safeRaw = if (maxFullWh != null && raw > maxFullWh) {
+                    expectedFccRemainingWh ?: maxFullWh
+                } else {
+                    raw
+                }
+                val usable = safeRaw * kt
                 return UsableRemainingEnergyEstimate(
                     usableEnergyWh = if (usable > 0.0 && usable.isFinite()) usable else null,
-                    rawEnergyWh = raw,
+                    rawEnergyWh = safeRaw,
                     source = EnergySource.NATIVE_FULL_ENERGY,
                     quality = DataQuality.VALID,
                     temperatureFactor = kt,

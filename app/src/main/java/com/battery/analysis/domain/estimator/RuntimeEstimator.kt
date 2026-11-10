@@ -860,10 +860,16 @@ class RuntimeEstimator(
         } else {
             1.0
         }
+        val maxTheoreticalRatio = batteryLevelPercent?.let { (it.toDouble().coerceIn(0.0, 100.0) / 100.0) } ?: 1.0
+        val maxFullOnMs = if (longOnPower != null && longOnPower > 0.0 && totalCapacityWh != null && totalCapacityWh > 0f) {
+            ((totalCapacityWh.toDouble() / longOnPower) * 3600.0 * 1000.0 * maxTheoreticalRatio).roundToLong().coerceAtLeast(0L)
+        } else null
+
         val rawBaseOnMs = if (longOnPower != null && longOnPower > 0.0 && usableEnergy != null && usableEnergy > 0.0) {
-            ((usableEnergy / longOnPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
+            val unconstrained = ((usableEnergy / longOnPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
+            if (maxFullOnMs != null && maxFullOnMs > 0L) minOf(unconstrained, maxFullOnMs) else unconstrained
         } else {
-            onEstimate.remainingMs
+            if (maxFullOnMs != null && onEstimate.remainingMs != null) minOf(onEstimate.remainingMs, maxFullOnMs) else onEstimate.remainingMs
         }
 
         val hasAuthoritativeLongOn = longOnPower != null && longOnPower > 0.0
@@ -886,10 +892,14 @@ class RuntimeEstimator(
         } else {
             1.0
         }
+        val maxFullOffMs = if (longOffPower != null && longOffPower > 0.0 && totalCapacityWh != null && totalCapacityWh > 0f) {
+            ((totalCapacityWh.toDouble() / longOffPower) * 3600.0 * 1000.0 * maxTheoreticalRatio).roundToLong().coerceAtLeast(0L)
+        } else null
         val rawBaseOffMs = if (longOffPower != null && longOffPower > 0.0 && usableEnergy != null && usableEnergy > 0.0) {
-            ((usableEnergy / longOffPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
+            val unconstrained = ((usableEnergy / longOffPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
+            if (maxFullOffMs != null && maxFullOffMs > 0L) minOf(unconstrained, maxFullOffMs) else unconstrained
         } else {
-            offEstimate.remainingMs
+            if (maxFullOffMs != null && offEstimate.remainingMs != null) minOf(offEstimate.remainingMs, maxFullOffMs) else offEstimate.remainingMs
         }
 
         val hasAuthoritativeLongOff = longOffPower != null && longOffPower > 0.0
@@ -914,10 +924,14 @@ class RuntimeEstimator(
         } else {
             1.0
         }
+        val maxFullGlobalMs = if (baseGlobalPower != null && baseGlobalPower > 0.0 && totalCapacityWh != null && totalCapacityWh > 0f) {
+            ((totalCapacityWh.toDouble() / baseGlobalPower) * 3600.0 * 1000.0 * maxTheoreticalRatio).roundToLong().coerceAtLeast(0L)
+        } else null
         val rawBaseGlobalMs = if (baseGlobalPower != null && baseGlobalPower > 0.0 && usableEnergy != null && usableEnergy > 0.0) {
-            ((usableEnergy / baseGlobalPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
+            val unconstrained = ((usableEnergy / baseGlobalPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
+            if (maxFullGlobalMs != null && maxFullGlobalMs > 0L) minOf(unconstrained, maxFullGlobalMs) else unconstrained
         } else {
-            globalEstimate.remainingMs
+            if (maxFullGlobalMs != null && globalEstimate.remainingMs != null) minOf(globalEstimate.remainingMs, maxFullGlobalMs) else globalEstimate.remainingMs
         }
 
         val hasAuthoritativeLongGlobal = longGlobalPower != null && longGlobalPower > 0.0
@@ -932,7 +946,9 @@ class RuntimeEstimator(
             hasAuthoritativeLongTerm = hasAuthoritativeLongGlobal
         )
 
-        val effectiveSmoothedOnMs = smoothedOnMs ?: onEstimate.remainingMs
+        val effectiveSmoothedOnMs = (smoothedOnMs ?: onEstimate.remainingMs)?.let {
+            if (maxFullOnMs != null && maxFullOnMs > 0L) minOf(it, maxFullOnMs) else it
+        }
         val safeMinOn = onEstimate.minRemainingMs?.let { minOf(it, effectiveSmoothedOnMs ?: it) } ?: effectiveSmoothedOnMs
         val safeMaxOn = onEstimate.maxRemainingMs?.let { maxOf(it, effectiveSmoothedOnMs ?: it) } ?: effectiveSmoothedOnMs
         val finalOnEstimate = onEstimate.copy(
@@ -944,7 +960,9 @@ class RuntimeEstimator(
             drainRateMultiplier = onDrainRate
         )
 
-        val effectiveSmoothedOffMs = smoothedOffMs ?: offEstimate.remainingMs
+        val effectiveSmoothedOffMs = (smoothedOffMs ?: offEstimate.remainingMs)?.let {
+            if (maxFullOffMs != null && maxFullOffMs > 0L) minOf(it, maxFullOffMs) else it
+        }
         val safeMinOff = offEstimate.minRemainingMs?.let { minOf(it, effectiveSmoothedOffMs ?: it) } ?: effectiveSmoothedOffMs
         val safeMaxOff = offEstimate.maxRemainingMs?.let { maxOf(it, effectiveSmoothedOffMs ?: it) } ?: effectiveSmoothedOffMs
         val finalOffEstimate = offEstimate.copy(
@@ -956,7 +974,9 @@ class RuntimeEstimator(
             drainRateMultiplier = offDrainRate
         )
 
-        val effectiveSmoothedGlobalMs = smoothedGlobalMs ?: globalEstimate.remainingMs
+        val effectiveSmoothedGlobalMs = (smoothedGlobalMs ?: globalEstimate.remainingMs)?.let {
+            if (maxFullGlobalMs != null && maxFullGlobalMs > 0L) minOf(it, maxFullGlobalMs) else it
+        }
         val safeMinGlobal = globalEstimate.minRemainingMs?.let { minOf(it, effectiveSmoothedGlobalMs ?: it) } ?: effectiveSmoothedGlobalMs
         val safeMaxGlobal = globalEstimate.maxRemainingMs?.let { maxOf(it, effectiveSmoothedGlobalMs ?: it) } ?: effectiveSmoothedGlobalMs
         val finalGlobalEstimate = globalEstimate.copy(

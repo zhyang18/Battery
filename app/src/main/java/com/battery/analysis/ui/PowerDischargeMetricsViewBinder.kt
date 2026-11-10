@@ -133,12 +133,24 @@ object PowerDischargeMetricsViewBinder {
             val offEffectiveRate = getEffectiveDischargeRate(BatteryEnergyCalculator.ROW_SCREEN_OFF, totalCapacityWh, overview, sevenDaysStats)
             val globalEffectiveRate = getEffectiveDischargeRate(BatteryEnergyCalculator.ROW_GLOBAL, totalCapacityWh, overview, sevenDaysStats)
 
+            // 确保剩余能量基准与 totalCapacityWh (FCC) 保持严格物理量级守恒（杜绝未校准的硬件计数器导致剩余续航反超满电续航）
+            val calibratedRemainingWh = if (totalCapacityWh != null && totalCapacityWh > 0f && batteryLevelPercent != null && batteryLevelPercent > 0f) {
+                val theoreticalRemainingWh = totalCapacityWh * (batteryLevelPercent.coerceIn(0f, 100f) / 100f)
+                if (remainingEnergyWh == null || remainingEnergyWh <= 0f || remainingEnergyWh > totalCapacityWh || remainingEnergyWh > theoreticalRemainingWh * 1.20f) {
+                    theoreticalRemainingWh
+                } else {
+                    remainingEnergyWh
+                }
+            } else {
+                remainingEnergyWh
+            }
+
             // --- 优先获取/计算三维度剩余续航结果实体，提取稳态基准放电功率与剩余续航 ---
             val tripleResult = precalculatedRuntimeResult ?: BatteryEnergyCalculator.estimateTripleRuntimes(
                 overview = overview,
                 sevenDaysStats = sevenDaysStats,
                 batteryLevelPercent = batteryLevelPercent,
-                remainingEnergyWh = remainingEnergyWh,
+                remainingEnergyWh = calibratedRemainingWh,
                 totalCapacityWh = totalCapacityWh,
                 tempCelsius = tempCelsius,
                 currentTrendPoints = currentTrendPoints

@@ -101,15 +101,24 @@ data class PowerUsageRecord(
         val pm = context.packageManager
 
         val totalEnergyInfo = com.battery.analysis.manager.PowerUsageManager.getInstance(context).getTotalEnergyInfo()
-        val batteryTotalEnergyWh = totalEnergyInfo?.totalWh ?: com.battery.analysis.util.BatteryEnergyCalculator.calculateTotalEnergyWh(
-            effectiveCapacityMah = com.battery.analysis.manager.PowerUsageManager.getInstance(context).getEffectiveDeviceCapacityMah(),
+        val fallbackCapacityMah = com.battery.analysis.manager.PowerUsageManager.getInstance(context).getEffectiveDeviceCapacityMah()
+        val fallbackCapacityWh = totalEnergyInfo?.totalWh ?: com.battery.analysis.util.BatteryEnergyCalculator.calculateTotalEnergyWh(
+            effectiveCapacityMah = fallbackCapacityMah,
             nominalVoltageVolts = com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
         )
+        val (predictedFullWh, _) = com.battery.analysis.manager.BatteryCapacityManager.getInstance(context)
+            .getPredictedFullCapacityWithFallback(fallbackCapacityWh, fallbackCapacityMah)
+        val batteryTotalEnergyWh = predictedFullWh ?: fallbackCapacityWh
+        val calibratedEnergyWh = if (batteryTotalEnergyWh != null && batteryTotalEnergyWh > 0f && energyWh > batteryTotalEnergyWh) {
+            (levelPercent / 100f) * batteryTotalEnergyWh
+        } else {
+            energyWh
+        }
         val snapshot = BatteryStatusSnapshot(
             levelPercent = levelPercent,
             voltageVolts = voltageVolts,
             temperature = temperature,
-            energyWh = energyWh,
+            energyWh = calibratedEnergyWh,
             isCharging = isCharging,
             totalEnergyWh = batteryTotalEnergyWh,
             totalEnergyInfo = totalEnergyInfo

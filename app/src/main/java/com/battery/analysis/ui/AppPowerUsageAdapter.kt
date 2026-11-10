@@ -864,13 +864,19 @@ class AppPowerUsageAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         animateProgress: Boolean = false
     ) {
         val precalculated = if (forceRecalculate) null else cachedTripleRuntimeResult
+        val predictedFullWh = getPredictedFullEnergyWh()
+        val effectiveRemainingWh = if (predictedFullWh != null && predictedFullWh > 0f && cachedBatteryLevelPercent != null && cachedBatteryLevelPercent!! > 0f) {
+            predictedFullWh * (cachedBatteryLevelPercent!!.coerceIn(0f, 100f) / 100f)
+        } else {
+            cachedRemainingEnergyWh
+        }
         val result = PowerDischargeMetricsViewBinder.bindDischargeSpeed(
             binding = holder.binding,
             overview = cachedOverviewStats,
-            totalCapacityWh = getPredictedFullEnergyWh(),
+            totalCapacityWh = predictedFullWh,
             sevenDaysStats = cachedSevenDaysStats,
             batteryLevelPercent = cachedBatteryLevelPercent,
-            remainingEnergyWh = cachedRemainingEnergyWh,
+            remainingEnergyWh = effectiveRemainingWh,
             tempCelsius = cachedTemperature.takeIf { it != 0f },
             currentTrendPoints = cachedTrendPoints,
             precalculatedRuntimeResult = precalculated,

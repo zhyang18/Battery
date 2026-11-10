@@ -66,7 +66,13 @@ object BatteryEnergyCalculator {
         if (hardwareEnergyNwh != null && hardwareEnergyNwh > 0L) {
             val wh = hardwareEnergyNwh / NWH_TO_WH_FACTOR
             if (wh > 0f) {
-                return wh
+                val maxFullWh = if (effectiveCapacityMah > 0f) (effectiveCapacityMah * safeNominalVoltage) / 1000f else null
+                val expectedWh = if (maxFullWh != null && safePercent in 1..100) maxFullWh * (safePercent / 100f) else null
+                return if (maxFullWh != null && (wh > maxFullWh || (expectedWh != null && wh > expectedWh * 1.20f))) {
+                    expectedWh ?: minOf(wh, maxFullWh)
+                } else {
+                    wh
+                }
             }
         }
 
@@ -81,7 +87,13 @@ object BatteryEnergyCalculator {
             if (currentMah != null && currentMah > 0f) {
                 val wh = (currentMah * safeNominalVoltage) / 1000f
                 if (wh > 0f) {
-                    return wh
+                    val maxFullWh = if (effectiveCapacityMah > 0f) (effectiveCapacityMah * safeNominalVoltage) / 1000f else null
+                    val expectedWh = if (maxFullWh != null && safePercent in 1..100) maxFullWh * (safePercent / 100f) else null
+                    return if (maxFullWh != null && (wh > maxFullWh || (expectedWh != null && wh > expectedWh * 1.20f))) {
+                        expectedWh ?: minOf(wh, maxFullWh)
+                    } else {
+                        wh
+                    }
                 }
             }
         }
@@ -124,6 +136,24 @@ object BatteryEnergyCalculator {
         val safePercent = batteryPercent?.coerceIn(1, 100)
         val isZh = context?.resources?.configuration?.locales?.get(0)?.language?.startsWith("zh")
             ?: java.util.Locale.getDefault().language.startsWith("zh")
+
+        // 策略 0：若具有真实满充容量或算法预估满电容量（FCC），优先采用真实基准容量（杜绝未校准的硬件计数器基于出厂设计容量覆盖）
+        val isCalibratedFcc = effectiveCapacityMah > 0f && (
+            capacitySource?.contains("预估") == true ||
+            capacitySource?.contains("满充") == true ||
+            capacitySource?.contains("FCC", ignoreCase = true) == true
+        )
+        if (isCalibratedFcc) {
+            val totalWh = (effectiveCapacityMah * safeNominalVoltage) / 1000f
+            if (totalWh > 0f) {
+                val source = capacitySource ?: if (isZh) "预估满电容量" else "FCC"
+                return BatteryTotalEnergyInfo(
+                    totalWh = totalWh,
+                    sourceDescription = source,
+                    equivalentMah = effectiveCapacityMah
+                )
+            }
+        }
 
         // 策略 1：硬件原生能量计数器结合当前电量反推满电物理总能量 (nWh -> Wh)
         if (hardwareEnergyNwh != null && hardwareEnergyNwh > 0L && safePercent != null && safePercent > 0) {

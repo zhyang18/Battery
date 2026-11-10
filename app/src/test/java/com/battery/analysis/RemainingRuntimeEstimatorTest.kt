@@ -1,5 +1,6 @@
 package com.battery.analysis
 
+import com.battery.analysis.domain.estimator.EnduranceRuntimeSmoother
 import com.battery.analysis.domain.estimator.PowerAnomalyDetector
 import com.battery.analysis.domain.estimator.PowerEstimator
 import com.battery.analysis.domain.estimator.PowerStateDetector
@@ -520,6 +521,48 @@ class RemainingRuntimeEstimatorTest {
             "质量解释中必须包含审慎提示而非假数据掩饰",
             lowSocResult.qualityReasons.any { it.contains("低于10%") }
         )
+    }
+
+    /**
+     * 测试电池健康衰减场景下（FCC 6276mAh / 24.16Wh，SOH 78.5%），底层未校准硬件上报设计容量读数（28.5Wh）被严格校准，
+     * 确保 94% 电量下的剩余可用能量为 22.71Wh，且剩余续航绝不反超满电续航。
+     */
+    @Test
+    fun testDegradedBatteryHardwareReadingCappedByFcc() {
+        val energyEstimator = RemainingEnergyEstimator()
+        val fccMah = 6276.0f
+        val nominalV = 3.85
+        val fullWh = (fccMah * nominalV) / 1000.0 // 24.1626 Wh
+        val batteryPercent = 94.0f
+        val hardwareUncalibratedWh = 28.5f
+
+        val estimate = energyEstimator.estimateUsableRemainingEnergy(
+            remainingEnergyWh = hardwareUncalibratedWh,
+            batteryLevelPercent = batteryPercent,
+            effectiveCapacityMah = fccMah,
+            nominalVoltage = nominalV
+        )
+
+        assertNotNull(estimate.usableEnergyWh)
+        val expectedRemainingWh = fullWh * (batteryPercent / 100.0) // 22.7128 Wh
+        assertEquals(expectedRemainingWh, estimate.usableEnergyWh!!, 0.05)
+        assertTrue("剩余能量必须小于满电总能量", estimate.usableEnergyWh!! < fullWh)
+
+        // 验证三维续航推算中剩余续航不得反超满电续航
+        val runtimeEstimator = RuntimeEstimator()
+        val triple = runtimeEstimator.estimateTripleRuntimes(
+            overview = null,
+            sevenDaysStats = null,
+            batteryLevelPercent = batteryPercent,
+            remainingEnergyWh = hardwareUncalibratedWh,
+            totalCapacityWh = fullWh.toFloat()
+        )
+        // 只要推算出的剩余续航有效，必须满足物理自洽
+        triple.screenOnEstimate.remainingMs?.let { remOn ->
+            val maxOn = ((fullWh / (triple.screenOnEstimate.benchmarkPowerWatts ?: 1.8)) * 3600_000.0).toLong()
+            assertTrue("亮屏剩余续航 ($remOn ms) 不得大于满电续航 ($maxOn ms)", remOn <= maxOn)
+        }
+        EnduranceRuntimeSmoother.getInstance().reset()
     }
 }
 

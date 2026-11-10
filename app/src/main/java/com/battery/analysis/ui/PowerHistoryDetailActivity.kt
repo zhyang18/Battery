@@ -383,18 +383,29 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
     private fun showEnergyTooltip(anchorView: View, touchX: Float? = null, touchY: Float? = null) {
         val record = currentRecord
         val powerManager = PowerUsageManager.getInstance(this)
-        val totalCapMah = powerManager.getEffectiveDeviceCapacityMah()
+        val totalEnergyInfo = cachedTotalEnergyInfo ?: powerManager.getTotalEnergyInfo()
+        val fallbackCapacityWh = cachedTotalCapacityWh
+            ?: record?.energyWh
+            ?: totalEnergyInfo?.totalWh
+            ?: powerManager.getTotalEnergyWh()
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
+                BatteryEnergyCalculator.calculateTotalEnergyWh(it)
+            }
+        val fallbackCapacityMah = totalEnergyInfo?.equivalentMah
+            ?: powerManager.getEffectiveDeviceCapacityMah().takeIf { it > 0f }
+            ?: fallbackCapacityWh?.takeIf { it > 0f }?.let { (it * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
 
-        val totalWh = if (totalCapMah > 0f) {
-            totalCapMah / 1000f * BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
+        val (predictedWh, _) = com.battery.analysis.manager.BatteryCapacityManager.getInstance(this)
+            .getPredictedFullCapacityWithFallback(fallbackCapacityWh, fallbackCapacityMah)
+
+        val totalWh = predictedWh ?: fallbackCapacityWh
+
+        val currentWh = if (totalWh != null && record != null) {
+            val calcWh = (record.levelPercent / 100f) * totalWh
+            record.energyWh.takeIf { it > 0f && it <= totalWh } ?: calcWh
         } else {
-            null
+            record?.energyWh?.takeIf { it > 0f }
         }
-
-        val currentWh = record?.energyWh?.takeIf { it > 0f }
-            ?: (if (totalCapMah > 0f && record != null) {
-                record.levelPercent / 100f * (totalCapMah / 1000f * BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS)
-            } else null)
 
         val consumedWh = record?.totalEnergyWh?.takeIf { it > 0f }
         val unplugWh = if (currentWh != null && consumedWh != null) {
@@ -564,14 +575,32 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
 
         val powerMgr = PowerUsageManager.getInstance(this@PowerHistoryDetailActivity)
         val totalEnergyInfo = cachedTotalEnergyInfo ?: powerMgr.getTotalEnergyInfo()
-        val totalCapacityWh = cachedTotalCapacityWh
+        val fallbackCapacityWh = cachedTotalCapacityWh
             ?: currentPrefixData?.totalCapacityWh?.takeIf { it > 0f }
             ?: totalEnergyInfo?.totalWh
             ?: powerMgr.getTotalEnergyWh()
             ?: powerMgr.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
                 BatteryEnergyCalculator.calculateTotalEnergyWh(it)
             }
+        val fallbackCapacityMah = totalEnergyInfo?.equivalentMah
+            ?: powerMgr.getEffectiveDeviceCapacityMah().takeIf { it > 0f }
+            ?: fallbackCapacityWh?.takeIf { it > 0f }?.let { (it * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+
+        val (predictedWh, predictedMah) = com.battery.analysis.manager.BatteryCapacityManager.getInstance(this)
+            .getPredictedFullCapacityWithFallback(fallbackCapacityWh, fallbackCapacityMah)
+
+        val totalCapacityWh = predictedWh ?: fallbackCapacityWh
         val baseTotalEnergy = totalCapacityWh?.takeIf { it > 0f }
+
+        val effectiveTotalEnergyInfo = if (predictedWh != null && predictedMah != null) {
+            com.battery.analysis.util.BatteryTotalEnergyInfo(
+                totalWh = predictedWh,
+                sourceDescription = "预估满电容量",
+                equivalentMah = predictedMah
+            )
+        } else {
+            totalEnergyInfo
+        }
 
         val onEnergyRatioStr = if (baseTotalEnergy != null) {
             val ratio = (onEnergy / baseTotalEnergy * 100f)
@@ -688,7 +717,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
                 title = getString(R.string.power_header_screen_on),
                 energyWh = onEnergy,
                 ratioStr = onEnergyRatioStr.takeIf { it != "--%" },
-                totalEnergyInfo = totalEnergyInfo
+                totalEnergyInfo = effectiveTotalEnergyInfo
             )
             showBubbleTooltip(hBinding.tvMetricScreenOnEnergy, message, autoDismissMs = 0L)
         }
@@ -697,7 +726,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
                 title = getString(R.string.power_header_screen_off),
                 energyWh = offEnergy,
                 ratioStr = offEnergyRatioStr.takeIf { it != "--%" },
-                totalEnergyInfo = totalEnergyInfo
+                totalEnergyInfo = effectiveTotalEnergyInfo
             )
             showBubbleTooltip(hBinding.tvMetricScreenOffEnergy, message, autoDismissMs = 0L)
         }
@@ -706,7 +735,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
                 title = getString(R.string.power_header_global),
                 energyWh = totalEnergy,
                 ratioStr = globalEnergyRatioStr.takeIf { it != "--%" },
-                totalEnergyInfo = totalEnergyInfo
+                totalEnergyInfo = effectiveTotalEnergyInfo
             )
             showBubbleTooltip(hBinding.tvMetricGlobalEnergy, message, autoDismissMs = 0L)
         }
@@ -934,7 +963,11 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
         }
 
         val batteryPercent = currentRecord?.levelPercent?.toFloat()
-        val remainingEnergyWh = currentRecord?.energyWh
+        val remainingEnergyWh = if (totalCapacityWh != null && totalCapacityWh > 0f && batteryPercent != null && batteryPercent > 0f) {
+            totalCapacityWh * (batteryPercent.coerceIn(0f, 100f) / 100f)
+        } else {
+            currentRecord?.energyWh
+        }
         val trendPoints = currentRecord?.parseTrendPointsList()
         val tripleResult = BatteryEnergyCalculator.estimateTripleRuntimes(
             overview = overview,
@@ -1011,13 +1044,19 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
 
         val powerMgr = PowerUsageManager.getInstance(this)
         val totalEnergyInfo = cachedTotalEnergyInfo ?: powerMgr.getTotalEnergyInfo()
-        val totalCapacityWh = cachedTotalCapacityWh
+        val fallbackCapacityWh = cachedTotalCapacityWh
             ?: totalEnergyInfo?.totalWh
             ?: powerMgr.getTotalEnergyWh()
             ?: powerMgr.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
                 BatteryEnergyCalculator.calculateTotalEnergyWh(it)
             }
-        val nominalTotalWh = totalCapacityWh?.takeIf { it > 0f }
+        val fallbackCapacityMah = totalEnergyInfo?.equivalentMah
+            ?: powerMgr.getEffectiveDeviceCapacityMah().takeIf { it > 0f }
+            ?: fallbackCapacityWh?.takeIf { it > 0f }?.let { (it * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+
+        val (predictedWh, _) = com.battery.analysis.manager.BatteryCapacityManager.getInstance(this)
+            .getPredictedFullCapacityWithFallback(fallbackCapacityWh, fallbackCapacityMah)
+        val nominalTotalWh = predictedWh?.takeIf { it > 0f } ?: fallbackCapacityWh?.takeIf { it > 0f }
         val nominalVoltage = BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
 
         val message = when (cardType) {
@@ -1065,12 +1104,19 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             val fullPackage = record.toFullPowerPackage(this@PowerHistoryDetailActivity)
             val powerMgr = PowerUsageManager.getInstance(this@PowerHistoryDetailActivity)
             val totalEnergyInfo = fullPackage.batterySnapshot?.totalEnergyInfo ?: powerMgr.getTotalEnergyInfo()
-            val totalCapacityWh = fullPackage.batterySnapshot?.totalEnergyWh
+            val fallbackCapacityWh = fullPackage.batterySnapshot?.totalEnergyWh
                 ?: totalEnergyInfo?.totalWh
                 ?: powerMgr.getTotalEnergyWh()
                 ?: powerMgr.getEffectiveDeviceCapacityMah().takeIf { it > 0f }?.let {
                     BatteryEnergyCalculator.calculateTotalEnergyWh(it)
                 }
+            val fallbackCapacityMah = totalEnergyInfo?.equivalentMah
+                ?: powerMgr.getEffectiveDeviceCapacityMah().takeIf { it > 0f }
+                ?: fallbackCapacityWh?.takeIf { it > 0f }?.let { (it * 1000f) / BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+
+            val (predictedWh, _) = com.battery.analysis.manager.BatteryCapacityManager.getInstance(this@PowerHistoryDetailActivity)
+                .getPredictedFullCapacityWithFallback(fallbackCapacityWh, fallbackCapacityMah)
+            val totalCapacityWh = predictedWh ?: fallbackCapacityWh
             val sevenDaysStats = SevenDaysDischargeCalculator.calculateSevenDaysStats(
                 context = applicationContext,
                 currentOverview = null,

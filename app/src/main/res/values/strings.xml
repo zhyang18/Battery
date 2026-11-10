@@ -1018,7 +1018,21 @@
     <string name="capacity_remaining_charge_title">当前剩余可用电荷</string>
     <string name="capacity_remaining_energy_title">可用剩余能量</string>
     <string name="capacity_fcc_baseline_label">基准满充(FCC): </string>
-    <string name="capacity_open_energy_model">放电能量学习 ›</string>
+    <string name="capacity_open_energy_model">FCC 双向学习 ›</string>
+    <string name="capacity_open_fcc_learning">FCC 双向学习 ›</string>
+    <string name="fcc_diag_title">FCC 充放双向学习与 SOH 估算</string>
+    <string name="fcc_diag_subtitle">放电主估计 + 充电辅助估计 + 独立能量学习 + 鲁棒融合</string>
+    <string name="fcc_overview_title">双向容量与健康度总览</string>
+    <string name="fcc_discharge_channel_title">放电容量学习通道 (主估计通道)</string>
+    <string name="fcc_discharge_channel_desc">电池侧放电电流库仑积分 · 最贴近用户实际可用电荷量</string>
+    <string name="fcc_charge_channel_title">充电容量学习通道 (辅助估计通道)</string>
+    <string name="fcc_charge_channel_desc">电池侧净充入电流积分 · 表观容量与端点质量交叉检验</string>
+    <string name="fcc_fusion_title">双向鲁棒融合与冲突状态</string>
+    <string name="fcc_energy_channel_title">SOC 分段能量曲线 (独立能量通道)</string>
+    <string name="fcc_boundary_statement_title">容量边界与健康度口径说明</string>
+    <string name="fcc_boundary_statement_desc">本应用默认输出与当前手机工作区间对应的【系统可用容量健康度】(SOH_usable)。仅靠用户态数据无法分离电芯实际化学老化与系统预留锁容，因此未确认边界匹配前不宣称电芯物理健康度，杜绝将系统锁容误判为电池老化。</string>
+    <string name="fcc_channel_conflict_warning">⚠️ 充放电两通道差异超过各自不确定度可解释范围，进入 DISAGREEMENT 状态，暂停融合更新。</string>
+    <string name="fcc_channel_conflict_normal">充放两通道数据自洽，已加权融合</string>
     <string name="energy_model_dialog_title">放电能量模型与实测学习档案</string>
     <string name="energy_model_dialog_subtitle" formatted="false">基于端电压与电流微积分 · 满电做功预测与 5% SOC 学习档案</string>
     <string name="energy_model_overview_title">能量模型预测与实时对比</string>

@@ -10,10 +10,10 @@
     android:paddingHorizontal="9dp"
     android:paddingVertical="8dp">
 
-    <!-- 区间电量范围（固定宽度 80dp 确保 95% - 100% 绝对不出现省略号截断） -->
+    <!-- 区间电量范围（固定宽度 72dp 确保 95% - 100% 绝对不换行） -->
     <TextView
         android:id="@+id/tv_bin_range_label"
-        android:layout_width="80dp"
+        android:layout_width="72dp"
         android:layout_height="wrap_content"
         android:gravity="start|center_vertical"
         android:singleLine="true"
@@ -22,9 +22,9 @@
         android:textStyle="bold"
         tools:text="95% - 100%" />
 
-    <!-- 数据源类型徽章列（固定列宽 38dp 并居中对齐，严防换行） -->
+    <!-- 数据源类型徽章列（固定列宽 40dp 并居中对齐，严防换行） -->
     <FrameLayout
-        android:layout_width="38dp"
+        android:layout_width="40dp"
         android:layout_height="wrap_content"
         android:layout_marginStart="2dp">
 

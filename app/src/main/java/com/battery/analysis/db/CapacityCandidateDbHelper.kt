@@ -18,7 +18,7 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "battery_capacity_candidates.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
         private const val TABLE_NAME = "capacity_candidates"
 
         private const val COL_ID = "id"
@@ -37,6 +37,8 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
         private const val COL_QUALITY_SCORE = "quality_score"
         private const val COL_IS_EXCLUDED = "is_excluded"
         private const val COL_EXCLUSION_REASON = "exclusion_reason"
+        private const val COL_ENERGY_WH = "energy_wh"
+        private const val COL_AVG_VOLTAGE = "avg_voltage"
 
         @Volatile
         private var instance: CapacityCandidateDbHelper? = null
@@ -77,7 +79,9 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
                 $COL_SAMPLE_COUNT INTEGER NOT NULL,
                 $COL_QUALITY_SCORE REAL NOT NULL,
                 $COL_IS_EXCLUDED INTEGER NOT NULL DEFAULT 0,
-                $COL_EXCLUSION_REASON TEXT NOT NULL DEFAULT ''
+                $COL_EXCLUSION_REASON TEXT NOT NULL DEFAULT '',
+                $COL_ENERGY_WH REAL NOT NULL DEFAULT 0,
+                $COL_AVG_VOLTAGE REAL NOT NULL DEFAULT 0
             )
         """.trimIndent()
         db.execSQL(createSql)
@@ -92,7 +96,14 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
      * @param newVersion 新版本号
      */
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // 当前为 V1 版本，预留升级平滑迁移
+        if (oldVersion < 2) {
+            try {
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_ENERGY_WH REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_AVG_VOLTAGE REAL NOT NULL DEFAULT 0")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     /**
@@ -122,6 +133,8 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
                 put(COL_QUALITY_SCORE, candidate.qualityScore)
                 put(COL_IS_EXCLUDED, if (candidate.isExcluded) 1 else 0)
                 put(COL_EXCLUSION_REASON, candidate.exclusionReason)
+                put(COL_ENERGY_WH, candidate.energyWh)
+                put(COL_AVG_VOLTAGE, candidate.avgVoltageVolts)
             }
             db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE)
         } catch (e: Exception) {
@@ -166,6 +179,8 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
                 val idxScore = c.getColumnIndexOrThrow(COL_QUALITY_SCORE)
                 val idxExcluded = c.getColumnIndexOrThrow(COL_IS_EXCLUDED)
                 val idxReason = c.getColumnIndexOrThrow(COL_EXCLUSION_REASON)
+                val idxEnergyWh = c.getColumnIndex(COL_ENERGY_WH)
+                val idxAvgVolt = c.getColumnIndex(COL_AVG_VOLTAGE)
 
                 while (c.moveToNext()) {
                     val typeStr = c.getString(idxType)
@@ -174,6 +189,9 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
                     } catch (e: Exception) {
                         CandidateSessionType.CHARGE
                     }
+
+                    val energyWh = if (idxEnergyWh >= 0 && !c.isNull(idxEnergyWh)) c.getDouble(idxEnergyWh) else 0.0
+                    val avgVolt = if (idxAvgVolt >= 0 && !c.isNull(idxAvgVolt)) c.getFloat(idxAvgVolt) else 0f
 
                     list.add(
                         CapacityCandidate(
@@ -192,7 +210,9 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
                             sampleCount = c.getInt(idxCount),
                             qualityScore = c.getDouble(idxScore),
                             isExcluded = c.getInt(idxExcluded) == 1,
-                            exclusionReason = c.getString(idxReason)
+                            exclusionReason = c.getString(idxReason),
+                            energyWh = energyWh,
+                            avgVoltageVolts = avgVolt
                         )
                     )
                 }

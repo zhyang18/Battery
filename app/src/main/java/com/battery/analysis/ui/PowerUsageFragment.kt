@@ -871,8 +871,8 @@ class PowerUsageFragment : Fragment() {
         }
 
         adapter.onOpenEnergyModelListener = {
-            val dialog = DischargeEnergyModelBottomSheetDialog()
-            dialog.show(childFragmentManager, "DischargeEnergyModelBottomSheetDialog")
+            val dialog = FccCapacityLearningBottomSheetDialog()
+            dialog.show(childFragmentManager, "FccCapacityLearningBottomSheetDialog")
         }
         adapter.onOpenCapacityDiagnosisListener = {
             val dialog = CapacityDiagnosisBottomSheetDialog()

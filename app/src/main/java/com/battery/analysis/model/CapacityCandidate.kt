@@ -47,7 +47,9 @@ data class CapacityCandidate(
     val sampleCount: Int,
     val qualityScore: Double,
     val isExcluded: Boolean = false,
-    val exclusionReason: String = ""
+    val exclusionReason: String = "",
+    val energyWh: Double = 0.0,
+    val avgVoltageVolts: Float = 0f
 ) {
     /**
      * 获取归一化电量变化跨度比例 Δz（0.0 至 1.0）。

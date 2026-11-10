@@ -1016,7 +1016,21 @@
     <string name="capacity_remaining_charge_title">Remaining Charge</string>
     <string name="capacity_remaining_energy_title">Remaining Energy</string>
     <string name="capacity_fcc_baseline_label">Baseline FCC: </string>
-    <string name="capacity_open_energy_model">Energy Model ›</string>
+    <string name="capacity_open_energy_model">FCC Learning ›</string>
+    <string name="capacity_open_fcc_learning">FCC Learning ›</string>
+    <string name="fcc_diag_title">FCC Bidirectional Learning &amp; SOH</string>
+    <string name="fcc_diag_subtitle">Discharge Primary + Charge Auxiliary + Independent Energy + Robust Fusion</string>
+    <string name="fcc_overview_title">Capacity &amp; Health Overview</string>
+    <string name="fcc_discharge_channel_title">Discharge Capacity Channel (Primary)</string>
+    <string name="fcc_discharge_channel_desc">Battery-side discharge coulomb counting · Reflects true usable charge</string>
+    <string name="fcc_charge_channel_title">Charge Capacity Channel (Auxiliary)</string>
+    <string name="fcc_charge_channel_desc">Battery-side net charge integral · Apparent FCC &amp; endpoint quality check</string>
+    <string name="fcc_fusion_title">Bidirectional Robust Fusion &amp; Disagreement State</string>
+    <string name="fcc_energy_channel_title">SOC Segmented Energy Curve (Independent Channel)</string>
+    <string name="fcc_boundary_statement_title">Capacity Boundary &amp; SOH Definition</string>
+    <string name="fcc_boundary_statement_desc">This app outputs System Usable Capacity Health (SOH_usable). Operating data cannot fully separate true cell degradation from system lock reservations; cell health is only declared when boundary is verified, avoiding misinterpreting system buffers as cell aging.</string>
+    <string name="fcc_channel_conflict_warning">⚠️ Channel difference exceeds explainable uncertainty. Entered DISAGREEMENT state; fusion paused.</string>
+    <string name="fcc_channel_conflict_normal">Both channels consistent and fused robustly</string>
     <string name="energy_model_dialog_title">Discharge Energy Model &amp; Profile</string>
     <string name="energy_model_dialog_subtitle" formatted="false">V×I Calculus &amp; Full Energy Prediction Profile</string>
     <string name="energy_model_overview_title">Tri-source Full Energy Prediction &amp; Comparison</string>

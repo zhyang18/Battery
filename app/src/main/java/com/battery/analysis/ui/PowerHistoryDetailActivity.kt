@@ -284,7 +284,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
     }
 
     /**
-     * 配置顶部导航栏（返回、删除快照与载入至主页）按钮点击监听。
+     * 配置顶部导航栏（返回、删除快照、载入至主页与导出放电数据）按钮点击监听。
      */
     private fun setupListeners() {
         binding.btnBack.setOnClickListener {
@@ -293,6 +293,20 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
 
         binding.btnDelete.setOnClickListener {
             showDeleteConfirmDialog()
+        }
+
+        binding.btnExportCsv.setOnClickListener {
+            val record = currentRecord
+            if (record != null) {
+                com.battery.analysis.domain.capacity.audit.DischargeDataExportHelper.exportAndShareDischargeData(this, record)
+            } else {
+                Toast.makeText(this, "暂无放电数据可供导出", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        binding.btnExportCsv.setOnLongClickListener {
+            showBubbleTooltip(it, "导出本次放电物理采样原始数据（CSV）")
+            true
         }
 
         binding.btnLoadToMain.setOnClickListener {
@@ -602,25 +616,32 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             totalEnergyInfo
         }
 
-        val onEnergyRatioStr = if (baseTotalEnergy != null) {
-            val ratio = (onEnergy / baseTotalEnergy * 100f)
-            String.format(Locale.getDefault(), "%.1f%%", ratio)
-        } else {
-            "--%"
-        }
+        // 单次放电周期核心能量占比计算：严格以本次放电周期的实际系统掉电百分比为基准进行物理分配，
+        // 彻底杜绝使用未经老化的静态出厂设计总容量（如 8000mAh）作为分母导致全局能量占比与真实掉电脱节的问题
+        val startLevel = record.getStartBatteryLevel()
+        val endLevel = record.levelPercent
+        val sessionDropPercent = kotlin.math.abs(startLevel - endLevel).toFloat()
 
-        val offEnergyRatioStr = if (baseTotalEnergy != null) {
-            val ratio = (offEnergy / baseTotalEnergy * 100f)
-            String.format(Locale.getDefault(), "%.1f%%", ratio)
+        val (globalEnergyRatioStr, onEnergyRatioStr, offEnergyRatioStr) = if (sessionDropPercent > 0f) {
+            val totalWh = totalEnergy
+            val onRatio = if (totalWh > 0f) (sessionDropPercent * (onEnergy / totalWh)).coerceIn(0f, sessionDropPercent) else 0f
+            val offRatio = (sessionDropPercent - onRatio).coerceAtLeast(0f)
+            Triple(
+                String.format(Locale.getDefault(), "%.1f%%", sessionDropPercent),
+                String.format(Locale.getDefault(), "%.1f%%", onRatio),
+                String.format(Locale.getDefault(), "%.1f%%", offRatio)
+            )
+        } else if (baseTotalEnergy != null && baseTotalEnergy > 0f) {
+            val gRatio = (totalEnergy / baseTotalEnergy * 100f)
+            val onRatio = (onEnergy / baseTotalEnergy * 100f)
+            val offRatio = (offEnergy / baseTotalEnergy * 100f)
+            Triple(
+                String.format(Locale.getDefault(), "%.1f%%", gRatio),
+                String.format(Locale.getDefault(), "%.1f%%", onRatio),
+                String.format(Locale.getDefault(), "%.1f%%", offRatio)
+            )
         } else {
-            "--%"
-        }
-
-        val globalEnergyRatioStr = if (baseTotalEnergy != null) {
-            val ratio = (totalEnergy / baseTotalEnergy * 100f)
-            String.format(Locale.getDefault(), "%.1f%%", ratio)
-        } else {
-            "--%"
+            Triple("--%", "--%", "--%")
         }
 
         val onDurationMs = parseDurationTextToMs(record.screenOnDurationText)
@@ -784,25 +805,32 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
                     }
             }?.takeIf { it > 0f }
 
-        val onEnergyRatioStr = if (baseTotalEnergy != null && baseTotalEnergy > 0f) {
-            val ratio = (subStats.screenOnEnergyWh / baseTotalEnergy * 100f)
-            String.format(Locale.getDefault(), "%.1f%%", ratio)
-        } else {
-            "--%"
-        }
+        val record = currentRecord
+        val startLevel = record?.getStartBatteryLevel() ?: 0
+        val endLevel = record?.levelPercent ?: 0
+        val sessionDropPercent = kotlin.math.abs(startLevel - endLevel).toFloat()
+        val recordTotalEnergy = record?.totalEnergyWh ?: 0f
 
-        val offEnergyRatioStr = if (baseTotalEnergy != null && baseTotalEnergy > 0f) {
-            val ratio = (subStats.screenOffEnergyWh / baseTotalEnergy * 100f)
-            String.format(Locale.getDefault(), "%.1f%%", ratio)
-        } else {
-            "--%"
-        }
-
-        val globalEnergyRatioStr = if (baseTotalEnergy != null && baseTotalEnergy > 0f) {
+        val (onEnergyRatioStr, offEnergyRatioStr, globalEnergyRatioStr) = if (sessionDropPercent > 0f && recordTotalEnergy > 0f) {
+            val cursorGlobalRatio = (sessionDropPercent * (subStats.totalEnergyWh / recordTotalEnergy)).coerceIn(0f, sessionDropPercent)
+            val onRatio = (sessionDropPercent * (subStats.screenOnEnergyWh / recordTotalEnergy)).coerceIn(0f, cursorGlobalRatio)
+            val offRatio = (cursorGlobalRatio - onRatio).coerceAtLeast(0f)
+            Triple(
+                String.format(Locale.getDefault(), "%.1f%%", onRatio),
+                String.format(Locale.getDefault(), "%.1f%%", offRatio),
+                String.format(Locale.getDefault(), "%.1f%%", cursorGlobalRatio)
+            )
+        } else if (baseTotalEnergy != null && baseTotalEnergy > 0f) {
+            val onRatio = (subStats.screenOnEnergyWh / baseTotalEnergy * 100f)
+            val offRatio = (subStats.screenOffEnergyWh / baseTotalEnergy * 100f)
             val ratio = (subStats.totalEnergyWh / baseTotalEnergy * 100f)
-            String.format(Locale.getDefault(), "%.1f%%", ratio)
+            Triple(
+                String.format(Locale.getDefault(), "%.1f%%", onRatio),
+                String.format(Locale.getDefault(), "%.1f%%", offRatio),
+                String.format(Locale.getDefault(), "%.1f%%", ratio)
+            )
         } else {
-            "--%"
+            Triple("--%", "--%", "--%")
         }
 
         val onPowerStr = if (subStats.screenOnPowerWatts >= 0.05f) {

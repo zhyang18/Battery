@@ -49,7 +49,18 @@ data class CapacityCandidate(
     val isExcluded: Boolean = false,
     val exclusionReason: String = "",
     val energyWh: Double = 0.0,
-    val avgVoltageVolts: Float = 0f
+    val avgVoltageVolts: Float = 0f,
+    val plateauMah: Double = 0.0,
+    val plateauWh: Double = 0.0,
+    val transitionMah: Double = 0.0,
+    val transitionWh: Double = 0.0,
+    val plateauDurationSec: Long = 0L,
+    val plateauSampleCount: Int = 0,
+    val effectiveStartTimestamp: Long = 0L,
+    val effectiveEndTimestamp: Long = 0L,
+    val counterConsistency: String = "UNAVAILABLE",
+    val algorithmVersion: String = "FCC-v1.1",
+    val dataSchemaVersion: Int = 3
 ) {
     /**
      * 获取归一化电量变化跨度比例 Δz（0.0 至 1.0）。

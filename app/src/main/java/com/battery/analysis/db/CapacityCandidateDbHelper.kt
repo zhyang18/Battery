@@ -18,7 +18,7 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
 
     companion object {
         private const val DATABASE_NAME = "battery_capacity_candidates.db"
-        private const val DATABASE_VERSION = 2
+        private const val DATABASE_VERSION = 3
         private const val TABLE_NAME = "capacity_candidates"
 
         private const val COL_ID = "id"
@@ -39,6 +39,17 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
         private const val COL_EXCLUSION_REASON = "exclusion_reason"
         private const val COL_ENERGY_WH = "energy_wh"
         private const val COL_AVG_VOLTAGE = "avg_voltage"
+        private const val COL_PLATEAU_MAH = "plateau_mah"
+        private const val COL_PLATEAU_WH = "plateau_wh"
+        private const val COL_TRANSITION_MAH = "transition_mah"
+        private const val COL_TRANSITION_WH = "transition_wh"
+        private const val COL_PLATEAU_DURATION_SEC = "plateau_duration_sec"
+        private const val COL_PLATEAU_SAMPLE_COUNT = "plateau_sample_count"
+        private const val COL_EFFECTIVE_START_TIME = "effective_start_time"
+        private const val COL_EFFECTIVE_END_TIME = "effective_end_time"
+        private const val COL_COUNTER_CONSISTENCY = "counter_consistency"
+        private const val COL_ALGORITHM_VERSION = "algorithm_version"
+        private const val COL_DATA_SCHEMA_VERSION = "data_schema_version" 
 
         @Volatile
         private var instance: CapacityCandidateDbHelper? = null
@@ -81,7 +92,18 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
                 $COL_IS_EXCLUDED INTEGER NOT NULL DEFAULT 0,
                 $COL_EXCLUSION_REASON TEXT NOT NULL DEFAULT '',
                 $COL_ENERGY_WH REAL NOT NULL DEFAULT 0,
-                $COL_AVG_VOLTAGE REAL NOT NULL DEFAULT 0
+                $COL_AVG_VOLTAGE REAL NOT NULL DEFAULT 0,
+                $COL_PLATEAU_MAH REAL NOT NULL DEFAULT 0,
+                $COL_PLATEAU_WH REAL NOT NULL DEFAULT 0,
+                $COL_TRANSITION_MAH REAL NOT NULL DEFAULT 0,
+                $COL_TRANSITION_WH REAL NOT NULL DEFAULT 0,
+                $COL_PLATEAU_DURATION_SEC INTEGER NOT NULL DEFAULT 0,
+                $COL_PLATEAU_SAMPLE_COUNT INTEGER NOT NULL DEFAULT 0,
+                $COL_EFFECTIVE_START_TIME INTEGER NOT NULL DEFAULT 0,
+                $COL_EFFECTIVE_END_TIME INTEGER NOT NULL DEFAULT 0,
+                $COL_COUNTER_CONSISTENCY TEXT NOT NULL DEFAULT 'UNAVAILABLE',
+                $COL_ALGORITHM_VERSION TEXT NOT NULL DEFAULT 'FCC-v1.1',
+                $COL_DATA_SCHEMA_VERSION INTEGER NOT NULL DEFAULT 3
             )
         """.trimIndent()
         db.execSQL(createSql)
@@ -100,6 +122,23 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
             try {
                 db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_ENERGY_WH REAL NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_AVG_VOLTAGE REAL NOT NULL DEFAULT 0")
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        if (oldVersion < 3) {
+            try {
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_PLATEAU_MAH REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_PLATEAU_WH REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_TRANSITION_MAH REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_TRANSITION_WH REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_PLATEAU_DURATION_SEC INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_PLATEAU_SAMPLE_COUNT INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_EFFECTIVE_START_TIME INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_EFFECTIVE_END_TIME INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_COUNTER_CONSISTENCY TEXT NOT NULL DEFAULT 'UNAVAILABLE'")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_ALGORITHM_VERSION TEXT NOT NULL DEFAULT 'FCC-v1.1'")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_DATA_SCHEMA_VERSION INTEGER NOT NULL DEFAULT 3")
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -135,6 +174,17 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
                 put(COL_EXCLUSION_REASON, candidate.exclusionReason)
                 put(COL_ENERGY_WH, candidate.energyWh)
                 put(COL_AVG_VOLTAGE, candidate.avgVoltageVolts)
+                put(COL_PLATEAU_MAH, candidate.plateauMah)
+                put(COL_PLATEAU_WH, candidate.plateauWh)
+                put(COL_TRANSITION_MAH, candidate.transitionMah)
+                put(COL_TRANSITION_WH, candidate.transitionWh)
+                put(COL_PLATEAU_DURATION_SEC, candidate.plateauDurationSec)
+                put(COL_PLATEAU_SAMPLE_COUNT, candidate.plateauSampleCount)
+                put(COL_EFFECTIVE_START_TIME, candidate.effectiveStartTimestamp)
+                put(COL_EFFECTIVE_END_TIME, candidate.effectiveEndTimestamp)
+                put(COL_COUNTER_CONSISTENCY, candidate.counterConsistency)
+                put(COL_ALGORITHM_VERSION, candidate.algorithmVersion)
+                put(COL_DATA_SCHEMA_VERSION, candidate.dataSchemaVersion)
             }
             db.insertWithOnConflict(TABLE_NAME, null, values, SQLiteDatabase.CONFLICT_REPLACE)
         } catch (e: Exception) {
@@ -181,6 +231,17 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
                 val idxReason = c.getColumnIndexOrThrow(COL_EXCLUSION_REASON)
                 val idxEnergyWh = c.getColumnIndex(COL_ENERGY_WH)
                 val idxAvgVolt = c.getColumnIndex(COL_AVG_VOLTAGE)
+                val idxPlatMah = c.getColumnIndex(COL_PLATEAU_MAH)
+                val idxPlatWh = c.getColumnIndex(COL_PLATEAU_WH)
+                val idxTransMah = c.getColumnIndex(COL_TRANSITION_MAH)
+                val idxTransWh = c.getColumnIndex(COL_TRANSITION_WH)
+                val idxPlatDur = c.getColumnIndex(COL_PLATEAU_DURATION_SEC)
+                val idxPlatCount = c.getColumnIndex(COL_PLATEAU_SAMPLE_COUNT)
+                val idxEffStartT = c.getColumnIndex(COL_EFFECTIVE_START_TIME)
+                val idxEffEndT = c.getColumnIndex(COL_EFFECTIVE_END_TIME)
+                val idxConsistency = c.getColumnIndex(COL_COUNTER_CONSISTENCY)
+                val idxAlgVer = c.getColumnIndex(COL_ALGORITHM_VERSION)
+                val idxSchemaVer = c.getColumnIndex(COL_DATA_SCHEMA_VERSION)
 
                 while (c.moveToNext()) {
                     val typeStr = c.getString(idxType)
@@ -192,6 +253,17 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
 
                     val energyWh = if (idxEnergyWh >= 0 && !c.isNull(idxEnergyWh)) c.getDouble(idxEnergyWh) else 0.0
                     val avgVolt = if (idxAvgVolt >= 0 && !c.isNull(idxAvgVolt)) c.getFloat(idxAvgVolt) else 0f
+                    val platMah = if (idxPlatMah >= 0 && !c.isNull(idxPlatMah)) c.getDouble(idxPlatMah) else 0.0
+                    val platWh = if (idxPlatWh >= 0 && !c.isNull(idxPlatWh)) c.getDouble(idxPlatWh) else 0.0
+                    val transMah = if (idxTransMah >= 0 && !c.isNull(idxTransMah)) c.getDouble(idxTransMah) else 0.0
+                    val transWh = if (idxTransWh >= 0 && !c.isNull(idxTransWh)) c.getDouble(idxTransWh) else 0.0
+                    val platDur = if (idxPlatDur >= 0 && !c.isNull(idxPlatDur)) c.getLong(idxPlatDur) else 0L
+                    val platCount = if (idxPlatCount >= 0 && !c.isNull(idxPlatCount)) c.getInt(idxPlatCount) else 0
+                    val effStartT = if (idxEffStartT >= 0 && !c.isNull(idxEffStartT)) c.getLong(idxEffStartT) else 0L
+                    val effEndT = if (idxEffEndT >= 0 && !c.isNull(idxEffEndT)) c.getLong(idxEffEndT) else 0L
+                    val consistencyStr = if (idxConsistency >= 0 && !c.isNull(idxConsistency)) c.getString(idxConsistency) else "UNAVAILABLE"
+                    val algVer = if (idxAlgVer >= 0 && !c.isNull(idxAlgVer)) c.getString(idxAlgVer) else "FCC-v1.1"
+                    val schemaVer = if (idxSchemaVer >= 0 && !c.isNull(idxSchemaVer)) c.getInt(idxSchemaVer) else 3
 
                     list.add(
                         CapacityCandidate(
@@ -212,7 +284,18 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
                             isExcluded = c.getInt(idxExcluded) == 1,
                             exclusionReason = c.getString(idxReason),
                             energyWh = energyWh,
-                            avgVoltageVolts = avgVolt
+                            avgVoltageVolts = avgVolt,
+                            plateauMah = platMah,
+                            plateauWh = platWh,
+                            transitionMah = transMah,
+                            transitionWh = transWh,
+                            plateauDurationSec = platDur,
+                            plateauSampleCount = platCount,
+                            effectiveStartTimestamp = effStartT,
+                            effectiveEndTimestamp = effEndT,
+                            counterConsistency = consistencyStr,
+                            algorithmVersion = algVer,
+                            dataSchemaVersion = schemaVer
                         )
                     )
                 }

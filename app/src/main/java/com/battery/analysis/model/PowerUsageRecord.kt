@@ -655,6 +655,19 @@ data class PowerUsageRecord(
                 // 若历史记录由于旧版本 bug 被错误标记为 screenOn，但瞬时功率处于极低待机底噪（< 0.40W 且明确 > 0W），
                 // 忠实反映系统物理事实，将其清洗还原为息屏状态，坚决杜绝历史待机能耗污染微积分
                 val isScreenOn = if (rawScreenOn && pwr in 0.001f..0.399f) false else rawScreenOn
+                val rawCurUa = if (obj.has("cur_ua")) obj.optInt("cur_ua") else null
+                val rawAvgUa = if (obj.has("cur_avg_ua")) obj.optInt("cur_avg_ua") else null
+                val rawCurMa = if (obj.has("cur_ma")) obj.optDouble("cur_ma") else null
+                val srcStr = obj.optString("src", "")
+                val src = CurrentSource.values().firstOrNull { it.name == srcStr } ?: CurrentSource.UNKNOWN
+                val polStr = obj.optString("pol", "")
+                val pol = CurrentPolarity.values().firstOrNull { it.name == polStr } ?: CurrentPolarity.UNKNOWN
+                val provStr = obj.optString("prov", "")
+                val prov = DischargeDataProvenance.values().firstOrNull { it.name == provStr } ?:
+                    if (rawCurMa != null && rawCurMa > 0.0) DischargeDataProvenance.MEASURED_BATTERY_CURRENT else DischargeDataProvenance.LEGACY_ESTIMATED_POWER
+                val isMeasured = obj.optBoolean("meas", prov == DischargeDataProvenance.MEASURED_BATTERY_CURRENT)
+                val rawCounter = if (obj.has("cc")) obj.optLong("cc") else null
+
                 list.add(
                     PowerDischargePoint(
                         timestamp = ts,
@@ -663,7 +676,15 @@ data class PowerUsageRecord(
                         voltageVolts = obj.optDouble("volt", 0.0).toFloat(),
                         temperature = obj.optDouble("temp", 0.0).toFloat(),
                         powerWatts = pwr,
-                        isScreenOn = isScreenOn
+                        isScreenOn = isScreenOn,
+                        batteryCurrentUa = rawCurUa,
+                        currentAvgUa = rawAvgUa,
+                        currentSource = src,
+                        currentPolarity = pol,
+                        dischargeCurrentMa = rawCurMa?.takeIf { it.isFinite() && it > 0.0 },
+                        currentMeasured = isMeasured,
+                        provenance = prov,
+                        chargeCounterUah = rawCounter
                     )
                 )
             }
@@ -867,7 +888,7 @@ data class PowerUsageRecord(
                 appJsonArray.put(obj)
             }
 
-            // 序列化放电折线点
+            // 序列化放电折线点（高精度物理测量与来源标签同步归档）
             val trendJsonArray = JSONArray()
             fullPackage.trendPoints.forEach { pt ->
                 val obj = JSONObject().apply {
@@ -878,6 +899,14 @@ data class PowerUsageRecord(
                     put("temp", pt.temperature.toDouble())
                     put("pwr", pt.powerWatts.toDouble())
                     put("screenOn", pt.isScreenOn)
+                    if (pt.batteryCurrentUa != null) put("cur_ua", pt.batteryCurrentUa)
+                    if (pt.currentAvgUa != null) put("cur_avg_ua", pt.currentAvgUa)
+                    if (pt.dischargeCurrentMa != null && pt.dischargeCurrentMa > 0.0) put("cur_ma", pt.dischargeCurrentMa)
+                    if (pt.currentSource != CurrentSource.UNKNOWN) put("src", pt.currentSource.name)
+                    if (pt.currentPolarity != CurrentPolarity.UNKNOWN) put("pol", pt.currentPolarity.name)
+                    if (pt.currentMeasured) put("meas", true)
+                    if (pt.provenance != DischargeDataProvenance.UNKNOWN) put("prov", pt.provenance.name)
+                    if (pt.chargeCounterUah != null) put("cc", pt.chargeCounterUah)
                 }
                 trendJsonArray.put(obj)
             }

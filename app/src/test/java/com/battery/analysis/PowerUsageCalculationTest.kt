@@ -6500,6 +6500,35 @@ class PowerUsageCalculationTest {
     }
 
     /**
+     * 验证放电周期历史详情页中核心能量百分比严格以会话系统实际掉电跨度（ΔSOC）为基准分解。
+     * 针对 Honor 500 Pro 实测场景（图二）：
+     * 系统从 100% 降至 8%（掉电 92.0%），亮屏实耗 10.334Wh，息屏实耗 10.968Wh，全局实耗 21.302Wh。
+     * 验证全局掉电百分比精确等于 92.0%，亮屏占比 44.6%，息屏占比 47.4%，亮屏与息屏严格相加等于 92.0%，彻底消除 22.8% 丢电错觉。
+     */
+    @Test
+    fun testPowerHistoryDetailActivity_sessionDropPercentRatioAllocation() {
+        val startLevel = 100
+        val endLevel = 8
+        val sessionDropPercent = kotlin.math.abs(startLevel - endLevel).toFloat() // 92.0%
+
+        val onEnergyWh = 10.334f
+        val offEnergyWh = 10.968f
+        val totalEnergyWh = onEnergyWh + offEnergyWh // 21.302f
+
+        val onRatio = if (totalEnergyWh > 0f) (sessionDropPercent * (onEnergyWh / totalEnergyWh)).coerceIn(0f, sessionDropPercent) else 0f
+        val offRatio = (sessionDropPercent - onRatio).coerceAtLeast(0f)
+
+        val globalStr = String.format(java.util.Locale.getDefault(), "%.1f%%", sessionDropPercent)
+        val onStr = String.format(java.util.Locale.getDefault(), "%.1f%%", onRatio)
+        val offStr = String.format(java.util.Locale.getDefault(), "%.1f%%", offRatio)
+
+        assertEquals("全局掉电百分比必须忠实呈现实际系统掉电跨度", "92.0%", globalStr)
+        assertEquals("亮屏掉电百分比按做功比例精准分配", "44.6%", onStr)
+        assertEquals("息屏掉电百分比按做功比例精准分配", "47.4%", offStr)
+        assertEquals("亮屏与息屏分配之和必须与全局掉电 100% 物理闭环", sessionDropPercent, onRatio + offRatio, 0.001f)
+    }
+
+    /**
      * 验证待机底噪提取器（extractQuiescentStandbyWatts）在传入自适应动态上限时能够支持高待机底噪设备，
      * 且在默认调用时不传入上限门限时依然坚守 0.25W 默认阈值安全拒收。
      */

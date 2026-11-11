@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 专门用于放电数据 CSV 导出与系统安全分享的临时缓存路径 -->
+    <cache-path name="export_cache" path="exports/" />
+    <external-files-path name="export_files" path="exports/" />
+    <external-cache-path name="external_export_cache" path="exports/" />
+</paths>

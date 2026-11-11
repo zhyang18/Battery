@@ -291,6 +291,8 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             currentCountLimit = manager.getEffectiveSampleCountLimit()
 
             allCandidates = withContext(Dispatchers.IO) {
+                // 加载前自动执行历史虚高异常放电样本自愈校准，确保呈现给用户的皆为物理真值
+                manager.sanitizeHistoricalCandidates()
                 dbHelper.getAllCandidates()
             }
             applyDataToPages()

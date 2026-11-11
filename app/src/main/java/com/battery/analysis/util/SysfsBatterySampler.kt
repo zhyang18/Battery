@@ -376,7 +376,13 @@ object SysfsBatterySampler {
         val currentMa: Float,
         val voltageVolts: Float,
         val powerWatts: Float,
-        val temperatureCelsius: Float? = null
+        val temperatureCelsius: Float? = null,
+        val rawCurrentUa: Int? = null,
+        val rawCurrentAvgUa: Int? = null,
+        val currentSource: com.battery.analysis.model.CurrentSource = com.battery.analysis.model.CurrentSource.UNKNOWN,
+        val currentPolarity: com.battery.analysis.model.CurrentPolarity = com.battery.analysis.model.CurrentPolarity.UNKNOWN,
+        val isNetDischarging: Boolean = true,
+        val chargeCounterUah: Long? = null
     )
 
     /**
@@ -477,11 +483,17 @@ object SysfsBatterySampler {
                     } else {
                         curMa
                     }
+                    val pol = if (rawCur < 0L) com.battery.analysis.model.CurrentPolarity.DISCHARGE_NEGATIVE else if (rawCur > 0L) com.battery.analysis.model.CurrentPolarity.DISCHARGE_POSITIVE else com.battery.analysis.model.CurrentPolarity.UNKNOWN
+                    val rawUa = if (rawCur != 0L && rawCur != Long.MIN_VALUE && rawCur.toInt() != Int.MIN_VALUE) rawCur.toInt() else null
                     return HardwareSample(
                         currentMa = signedCur,
                         voltageVolts = voltV,
                         powerWatts = Math.round(signedPower * 1000f) / 1000f,
-                        temperatureCelsius = tempC
+                        temperatureCelsius = tempC,
+                        rawCurrentUa = rawUa,
+                        currentSource = com.battery.analysis.model.CurrentSource.SYSFS_BATTERY,
+                        currentPolarity = pol,
+                        isNetDischarging = isNetDischarging
                     )
                 }
             } catch (_: Throwable) {}
@@ -515,7 +527,11 @@ object SysfsBatterySampler {
                 currentMa = signedCur,
                 voltageVolts = directVolt,
                 powerWatts = Math.round(signedPower * 1000f) / 1000f,
-                temperatureCelsius = directTemp
+                temperatureCelsius = directTemp,
+                rawCurrentUa = (calibratedCur * 1000f).toInt(),
+                currentSource = com.battery.analysis.model.CurrentSource.SYSFS_BATTERY,
+                currentPolarity = com.battery.analysis.model.CurrentPolarity.DISCHARGE_POSITIVE,
+                isNetDischarging = isNetDischarging
             )
         }
 
@@ -617,20 +633,23 @@ object SysfsBatterySampler {
         return try {
             val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
                 ?: return null
-            var rawCur = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+            val rawCur = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW)
+            val avgCur = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE)
+            val rawCounter = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER)
+            val validRawCurUa = if (rawCur != Int.MIN_VALUE && rawCur != 0) rawCur else null
+            val validAvgCurUa = if (avgCur != Int.MIN_VALUE && avgCur != 0) avgCur else null
+            val validCounterUah = if (rawCounter != Int.MIN_VALUE && rawCounter > 0) rawCounter.toLong() else null
+
+            var effectiveCurForCalc = validRawCurUa ?: validAvgCurUa
             var curMa = 0f
 
-            if (rawCur != 0 && rawCur != Int.MIN_VALUE) {
-                curMa = BatteryUnitNormalizer.normalizeCurrentMa(rawCur.toLong(), isCharging = isCharging)
+            if (validRawCurUa != null) {
+                curMa = BatteryUnitNormalizer.normalizeCurrentMa(validRawCurUa.toLong(), isCharging = isCharging)
             }
 
-            // 1. 若 CURRENT_NOW 为 0，尝试读取硬件平均电流 CURRENT_AVERAGE
-            if (curMa <= 0f) {
-                val avgCur = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE)
-                if (avgCur != 0 && avgCur != Int.MIN_VALUE) {
-                    rawCur = avgCur
-                    curMa = BatteryUnitNormalizer.normalizeCurrentMa(avgCur.toLong(), isCharging = isCharging)
-                }
+            // 1. 若 CURRENT_NOW 为 0 或不可用，尝试读取硬件平均电流 CURRENT_AVERAGE
+            if (curMa <= 0f && validAvgCurUa != null) {
+                curMa = BatteryUnitNormalizer.normalizeCurrentMa(validAvgCurUa.toLong(), isCharging = isCharging)
             }
 
             // 2. 若依然为 0 且允许库仑计差分推算，尝试通过硬件库仑计电荷差分推算真实物理电流
@@ -638,7 +657,7 @@ object SysfsBatterySampler {
                 val coulombMa = calculateCurrentFromChargeCounter(bm)
                 if (coulombMa != null && coulombMa > 0f) {
                     curMa = coulombMa
-                    rawCur = if (isCharging) 1 else -1
+                    effectiveCurForCalc = if (isCharging) 1 else -1
                 }
             }
 
@@ -690,11 +709,22 @@ object SysfsBatterySampler {
                 calibratedMa
             }
 
+            val pol = if (validRawCurUa != null) {
+                if (validRawCurUa < 0) com.battery.analysis.model.CurrentPolarity.DISCHARGE_NEGATIVE
+                else com.battery.analysis.model.CurrentPolarity.DISCHARGE_POSITIVE
+            } else com.battery.analysis.model.CurrentPolarity.UNKNOWN
+
             HardwareSample(
                 currentMa = signedCur,
                 voltageVolts = finalVoltage,
                 powerWatts = Math.round(signedPower * 1000f) / 1000f,
-                temperatureCelsius = finalTemp
+                temperatureCelsius = finalTemp,
+                rawCurrentUa = validRawCurUa,
+                rawCurrentAvgUa = validAvgCurUa,
+                currentSource = com.battery.analysis.model.CurrentSource.BATTERY_MANAGER,
+                currentPolarity = pol,
+                isNetDischarging = isNetDischarging,
+                chargeCounterUah = validCounterUah
             )
         } catch (_: Throwable) {
             null
@@ -1205,11 +1235,16 @@ object SysfsBatterySampler {
                             curMa
                         }
 
+                        val pol = if (rawCur < 0L) com.battery.analysis.model.CurrentPolarity.DISCHARGE_NEGATIVE else com.battery.analysis.model.CurrentPolarity.DISCHARGE_POSITIVE
                         val sample = HardwareSample(
                             currentMa = signedCur,
                             voltageVolts = voltV,
                             powerWatts = Math.round(signedPower * 1000f) / 1000f,
-                            temperatureCelsius = tempC
+                            temperatureCelsius = tempC,
+                            rawCurrentUa = if (rawCur.toInt() != Int.MIN_VALUE) rawCur.toInt() else null,
+                            currentSource = com.battery.analysis.model.CurrentSource.SYSFS_BATTERY,
+                            currentPolarity = pol,
+                            isNetDischarging = isNetDischarging
                         )
                         lastShizukuSampleTime = now
                         cachedShizukuSample = sample

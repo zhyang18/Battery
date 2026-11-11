@@ -366,9 +366,7 @@ class BatteryCapacityManager private constructor(private val context: Context) {
             remainingEWh = finalRemainingWh,
             currentSocPercent = safeSoc,
             sohQPercent = soh,
-            sohEPercent = if (finalFullWh != null && designCapMah != null && designCapMah > 0.0) {
-                (finalFullWh / ((designCapMah * NOMINAL_VOLTAGE_VOLTS) / 1000.0)) * 100.0
-            } else null
+            sohEPercent = unifiedEstimate.sohEPercent
         )
         _unifiedCapacityState.value = finalUnifiedEstimate
 
@@ -500,25 +498,42 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                 val startSoc = startSocLvl / 100.0
                 val endSoc = endSocLvl / 100.0
 
+                // 遵循评审 P0/P1-A 核心规范：
+                // 仅采纳来自底层物理测量（MEASURED_BATTERY_CURRENT）的正值放电电流，彻底废除功率反推
                 val samples = trendPoints.map { pt ->
+                    val currentAmp = pt.dischargeCurrentMa
+                        ?.takeIf { it.isFinite() && it > 0.0 && pt.provenance == com.battery.analysis.model.DischargeDataProvenance.MEASURED_BATTERY_CURRENT }
+                        ?.div(1000.0)
+
                     CapacitySample(
                         timestampMs = pt.timestamp,
                         socFraction = pt.batteryLevel / 100.0,
-                        currentAmp = if (pt.voltageVolts > 0f) (pt.powerWatts / pt.voltageVolts).toDouble() else 0.0,
-                        voltageVolt = pt.voltageVolts.toDouble(),
+                        currentAmp = currentAmp,
+                        voltageVolt = pt.voltageVolts.toDouble().takeIf { it > 0.0 },
                         temperatureC = pt.temperature.toDouble(),
                         isScreenOn = pt.isScreenOn,
-                        chargingStatus = ChargingStatus.DISCHARGING
+                        chargingStatus = ChargingStatus.DISCHARGING,
+                        chargeCounterUah = pt.chargeCounterUah
                     )
                 }
 
+                // 统计有效物理电流采样点的比例与总数
+                val validPhysicalSampleCount = samples.count { it.currentAmp != null && it.currentAmp > 0.0 }
+                if (validPhysicalSampleCount < 2 || (validPhysicalSampleCount.toDouble() / samples.size.toDouble()) < 0.60) {
+                    return@launch
+                }
+
                 val isDualCell = CurrentCalibrationManager.isDualCellEnabled(context)
+                val authEnergyWh = record.totalEnergyWh.toDouble().takeIf { it > 0.0 }
+                val authDischargedMah = authEnergyWh?.let { (it * 1000.0) / com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
                 val candidateSample = DischargeCapacityEstimator.buildCandidate(
                     sessionId = record.id.toString(),
                     samples = samples,
                     startSoc = startSoc,
                     endSoc = endSoc,
-                    isDualCell = isDualCell
+                    isDualCell = isDualCell,
+                    authoritativeDischargedMah = authDischargedMah,
+                    authoritativeEnergyWh = authEnergyWh
                 )
 
                 // 吸收至 20 段 SOC 能量曲线
@@ -527,9 +542,9 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                 val candidate = CapacityCandidate(
                     id = record.id,
                     sessionType = CandidateSessionType.DISCHARGE,
-                    startSoc = startSocLvl,
-                    endSoc = endSocLvl,
-                    socSpanPercent = span,
+                    startSoc = Math.round(candidateSample.startSoc * 100.0).toInt(),
+                    endSoc = Math.round(candidateSample.endSoc * 100.0).toInt(),
+                    socSpanPercent = Math.round(candidateSample.deltaSoc * 100.0).toInt(),
                     netBatteryChargeMah = candidateSample.chargeMah,
                     fccObservedMah = candidateSample.fccObservedMah,
                     startTimestamp = trendPoints.first().timestamp,
@@ -542,7 +557,18 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                     isExcluded = candidateSample.isExcluded,
                     exclusionReason = candidateSample.exclusionReason,
                     energyWh = candidateSample.energyWh,
-                    avgVoltageVolts = candidateSample.avgVoltageVolts?.toFloat() ?: record.voltageVolts
+                    avgVoltageVolts = candidateSample.avgVoltageVolts?.toFloat() ?: record.voltageVolts,
+                    plateauMah = candidateSample.topPlateau?.plateauMah ?: 0.0,
+                    plateauWh = candidateSample.topPlateau?.plateauWh ?: 0.0,
+                    transitionMah = candidateSample.topPlateau?.transitionMah ?: 0.0,
+                    transitionWh = candidateSample.topPlateau?.transitionWh ?: 0.0,
+                    plateauDurationSec = candidateSample.topPlateau?.durationSeconds ?: 0L,
+                    plateauSampleCount = candidateSample.topPlateau?.sampleCount ?: 0,
+                    effectiveStartTimestamp = trendPoints.firstOrNull()?.timestamp ?: 0L,
+                    effectiveEndTimestamp = trendPoints.lastOrNull()?.timestamp ?: 0L,
+                    counterConsistency = candidateSample.counterConsistency.name,
+                    algorithmVersion = "FCC-v1.1",
+                    dataSchemaVersion = 3
                 )
 
                 candidateDbHelper.insertCandidate(candidate)
@@ -643,22 +669,44 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                     val trendPoints = record.parseTrendPointsList()
                     if (trendPoints.size < 2) continue
 
+                    // 遵循评审 P0 核心规范：
+                    // 彻底删除使用功率除以电压 (powerWatts / voltageVolts) 反推电流的回退逻辑。
+                    // 仅采纳来自底层物理测量（MEASURED_BATTERY_CURRENT）的正值放电电流。
                     val samples = trendPoints.map { pt ->
+                        val currentAmp = pt.dischargeCurrentMa
+                            ?.takeIf { it.isFinite() && it > 0.0 && pt.provenance == com.battery.analysis.model.DischargeDataProvenance.MEASURED_BATTERY_CURRENT }
+                            ?.div(1000.0)
+
                         CapacitySample(
                             timestampMs = pt.timestamp,
                             socFraction = pt.batteryLevel / 100.0,
-                            currentAmp = if (pt.voltageVolts > 0f) (pt.powerWatts / pt.voltageVolts).toDouble() else 0.0,
-                            voltageVolt = pt.voltageVolts.toDouble(),
+                            currentAmp = currentAmp,
+                            voltageVolt = pt.voltageVolts.toDouble().takeIf { it > 0.0 },
                             temperatureC = pt.temperature.toDouble(),
                             isScreenOn = pt.isScreenOn,
                             chargingStatus = ChargingStatus.DISCHARGING
                         )
                     }
 
+                    // 统计有效物理电流采样点的比例与总数
+                    val validPhysicalSampleCount = samples.count { it.currentAmp != null && it.currentAmp > 0.0 }
+                    // 若实测物理电流采样点不足（例如该记录全部来自旧版本估算功率或息屏补偿），坚决拒绝入库！
+                    if (validPhysicalSampleCount < 2 || (validPhysicalSampleCount.toDouble() / samples.size.toDouble()) < 0.60) {
+                        continue
+                    }
+
                     // 持续填充 20 段能量曲线
                     socEnergyCurveLearner.absorbDischargeSession(samples)
 
-                    if (existingIds.contains(record.id)) continue
+                    val authEnergyWh = record.totalEnergyWh.toDouble().takeIf { it > 0.0 }
+                    val authDischargedMah = authEnergyWh?.let { (it * 1000.0) / com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+
+                    val existingCandidate = existingCandidates.firstOrNull { it.id == record.id }
+                    val isCandidateInflated = if (existingCandidate != null && authDischargedMah != null && authDischargedMah > 0.0) {
+                        kotlin.math.abs(existingCandidate.netBatteryChargeMah - authDischargedMah) / authDischargedMah > 0.10
+                    } else false
+
+                    if (existingCandidate != null && !isCandidateInflated) continue
 
                     val startSoc = startSocLvl / 100.0
                     val endSoc = endSocLvl / 100.0
@@ -667,15 +715,17 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                         samples = samples,
                         startSoc = startSoc,
                         endSoc = endSoc,
-                        isDualCell = isDualCell
+                        isDualCell = isDualCell,
+                        authoritativeDischargedMah = authDischargedMah,
+                        authoritativeEnergyWh = authEnergyWh
                     )
 
                     val candidate = CapacityCandidate(
                         id = record.id,
                         sessionType = CandidateSessionType.DISCHARGE,
-                        startSoc = startSocLvl,
-                        endSoc = endSocLvl,
-                        socSpanPercent = span,
+                        startSoc = Math.round(candidateSample.startSoc * 100.0).toInt(),
+                        endSoc = Math.round(candidateSample.endSoc * 100.0).toInt(),
+                        socSpanPercent = Math.round(candidateSample.deltaSoc * 100.0).toInt(),
                         netBatteryChargeMah = candidateSample.chargeMah,
                         fccObservedMah = candidateSample.fccObservedMah,
                         startTimestamp = trendPoints.first().timestamp,
@@ -700,5 +750,134 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                 e.printStackTrace()
             }
         }
+    }
+
+    /**
+     * 自动扫描并迁移校准历史入库的异常放电候选样本。
+     *
+     * 解决技术痛点：由于早期未引入长待机去噪锚定，导致息屏唤醒电流尖峰被梯形积分严重放大（如 8017mAh vs 真实 5533mAh）。
+     * 扫描数据库中已归档的放电候选样本，若其关联的放电记录 [PowerUsageRecord] 存在且权威物理放电量与当前候选净电量绝对偏差超过 10%，
+     * 自动以权威物理放电账本重新校准该候选样本并持久化更新，彻底清除被污染的异常推算容量。
+     *
+     * @return 成功校准并修复的异常历史样本数量
+     */
+    suspend fun sanitizeHistoricalCandidates(): Int {
+        var correctedCount = 0
+        try {
+            val powerDbHelper = com.battery.analysis.db.PowerUsageDbHelper.getInstance(context)
+            val candidates = candidateDbHelper.getAllCandidates().filter { it.sessionType == CandidateSessionType.DISCHARGE }
+            if (candidates.isEmpty()) return 0
+
+            val isDualCell = CurrentCalibrationManager.isDualCellEnabled(context)
+
+            for (c in candidates) {
+                val record = powerDbHelper.getRecordById(c.id) ?: continue
+                if (record.totalEnergyWh <= 0f) continue
+
+                val authEnergyWh = record.totalEnergyWh.toDouble()
+                val authDischargedMah = (authEnergyWh * 1000.0) / com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
+
+                // 检查净电量偏差是否超过 10%
+                val diffRatio = kotlin.math.abs(c.netBatteryChargeMah - authDischargedMah) / authDischargedMah
+                if (diffRatio > 0.10) {
+                    val trendPoints = record.parseTrendPointsList()
+                    val samples = trendPoints.map { pt ->
+                        val currentAmp = pt.dischargeCurrentMa
+                            ?.takeIf { it.isFinite() && it > 0.0 && pt.provenance == com.battery.analysis.model.DischargeDataProvenance.MEASURED_BATTERY_CURRENT }
+                            ?.div(1000.0)
+
+                        com.battery.analysis.domain.capacity.model.CapacitySample(
+                            timestampMs = pt.timestamp,
+                            socFraction = pt.batteryLevel / 100.0,
+                            currentAmp = currentAmp,
+                            voltageVolt = pt.voltageVolts.toDouble().takeIf { it > 0.0 },
+                            temperatureC = pt.temperature.toDouble(),
+                            isScreenOn = pt.isScreenOn,
+                            chargingStatus = com.battery.analysis.domain.capacity.model.ChargingStatus.DISCHARGING
+                        )
+                    }
+
+                    val startSocLvl = record.getStartBatteryLevel()
+                    val endSocLvl = record.levelPercent
+                    val startSoc = startSocLvl / 100.0
+                    val endSoc = endSocLvl / 100.0
+
+                    val candidateSample = DischargeCapacityEstimator.buildCandidate(
+                        sessionId = record.id.toString(),
+                        samples = samples,
+                        startSoc = startSoc,
+                        endSoc = endSoc,
+                        isDualCell = isDualCell,
+                        authoritativeDischargedMah = authDischargedMah,
+                        authoritativeEnergyWh = authEnergyWh
+                    )
+
+                    val updatedCandidate = c.copy(
+                        startSoc = Math.round(candidateSample.startSoc * 100.0).toInt(),
+                        endSoc = Math.round(candidateSample.endSoc * 100.0).toInt(),
+                        socSpanPercent = Math.round(candidateSample.deltaSoc * 100.0).toInt(),
+                        netBatteryChargeMah = candidateSample.chargeMah,
+                        fccObservedMah = candidateSample.fccObservedMah,
+                        energyWh = candidateSample.energyWh,
+                        isExcluded = candidateSample.isExcluded,
+                        exclusionReason = candidateSample.exclusionReason,
+                        qualityScore = candidateSample.coverageRatio,
+                        plateauMah = candidateSample.topPlateau?.plateauMah ?: 0.0,
+                        plateauWh = candidateSample.topPlateau?.plateauWh ?: 0.0,
+                        transitionMah = candidateSample.topPlateau?.transitionMah ?: 0.0,
+                        transitionWh = candidateSample.topPlateau?.transitionWh ?: 0.0
+                    )
+                    candidateDbHelper.insertCandidate(updatedCandidate)
+                    correctedCount++
+                }
+            }
+
+            if (correctedCount > 0) {
+                refreshEstimateInternal()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return correctedCount
+    }
+
+    /**
+     * 导出最近一条完整放电会话的底层原始物理采样数据审计日志（CSV 格式）。
+     * 忠实反映原始硬件数据字段，未采集到的字段保留为空，杜绝人为补值或保底伪造。
+     *
+     * @param context 应用程序上下文
+     * @return 格式化后的 CSV 字符串，若无可用记录则返回说明
+     */
+    fun exportLatestDischargeAuditLog(context: Context): String {
+        val records = PowerUsageDbHelper.getInstance(context).getAllRecords()
+        val latest = records.firstOrNull { it.isCompleted } ?: records.firstOrNull()
+        if (latest == null) {
+            return "timestamp_elapsed,soc,battery_status,plugged_status,current_now_uA,current_avg_uA,battery_current_sysfs_uA,voltage_uV,charge_counter_uAh,temperature\n# 暂无可用放电会话记录"
+        }
+
+        val points = latest.parseTrendPointsList()
+        val sb = java.lang.StringBuilder()
+        sb.append("timestamp_elapsed,soc,battery_status,plugged_status,current_now_uA,current_avg_uA,battery_current_sysfs_uA,voltage_uV,charge_counter_uAh,temperature\n")
+
+        val startTs = points.firstOrNull()?.timestamp ?: latest.id
+        for (pt in points) {
+            val elapsedSec = ((pt.timestamp - startTs).coerceAtLeast(0L) / 1000.0)
+            val soc = pt.batteryLevel
+            val bStatus = "DISCHARGING"
+            val plugged = "UNPLUGGED"
+            val curNowUa = pt.batteryCurrentUa?.toString() ?: ""
+            val curAvgUa = pt.currentAvgUa?.toString() ?: ""
+            val sysfsUa = if (pt.currentSource == com.battery.analysis.model.CurrentSource.SYSFS_BATTERY && pt.batteryCurrentUa != null) {
+                pt.batteryCurrentUa.toString()
+            } else ""
+            val voltUv = if (pt.voltageVolts > 0f) (pt.voltageVolts * 1_000_000L).toLong().toString() else ""
+            val chargeCounterUah = pt.chargeCounterUah?.toString() ?: ""
+            val temp = pt.temperature.toString()
+
+            sb.append(String.format(java.util.Locale.US, "%.1f,%d,%s,%s,%s,%s,%s,%s,%s,%s\n",
+                elapsedSec, soc, bStatus, plugged, curNowUa, curAvgUa, sysfsUa, voltUv, chargeCounterUah, temp
+            ))
+        }
+        return sb.toString()
     }
 }

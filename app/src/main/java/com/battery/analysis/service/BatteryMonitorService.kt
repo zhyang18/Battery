@@ -307,7 +307,14 @@ class BatteryMonitorService : Service() {
                             voltageVolts = curVolt,
                             temperature = curTemp,
                             powerWatts = pWatts,
-                            isScreenOn = true
+                            isScreenOn = true,
+                            dischargeCurrentMa = hwSample?.currentMa?.takeIf { it > 0f }?.toDouble(),
+                            batteryCurrentUa = hwSample?.rawCurrentUa,
+                            currentAvgUa = hwSample?.rawCurrentAvgUa,
+                            currentSource = hwSample?.currentSource ?: com.battery.analysis.model.CurrentSource.UNKNOWN,
+                            currentPolarity = hwSample?.currentPolarity ?: com.battery.analysis.model.CurrentPolarity.UNKNOWN,
+                            provenance = if (hwSample?.currentMa != null && hwSample.currentMa > 0f) com.battery.analysis.model.DischargeDataProvenance.MEASURED_BATTERY_CURRENT else com.battery.analysis.model.DischargeDataProvenance.UNKNOWN,
+                            chargeCounterUah = hwSample?.chargeCounterUah
                         )
                     }
 
@@ -362,7 +369,14 @@ class BatteryMonitorService : Service() {
                             voltageVolts = curVolt,
                             temperature = curTemp,
                             powerWatts = pWatts,
-                            isScreenOn = false
+                            isScreenOn = false,
+                            dischargeCurrentMa = hwSample?.currentMa?.takeIf { it > 0f }?.toDouble(),
+                            batteryCurrentUa = hwSample?.rawCurrentUa,
+                            currentAvgUa = hwSample?.rawCurrentAvgUa,
+                            currentSource = hwSample?.currentSource ?: com.battery.analysis.model.CurrentSource.UNKNOWN,
+                            currentPolarity = hwSample?.currentPolarity ?: com.battery.analysis.model.CurrentPolarity.UNKNOWN,
+                            provenance = if (hwSample?.currentMa != null && hwSample.currentMa > 0f) com.battery.analysis.model.DischargeDataProvenance.MEASURED_BATTERY_CURRENT else com.battery.analysis.model.DischargeDataProvenance.UNKNOWN,
+                            chargeCounterUah = hwSample?.chargeCounterUah
                         )
                     }
 
@@ -474,7 +488,14 @@ class BatteryMonitorService : Service() {
                                 voltageVolts = curVolt,
                                 temperature = curTemp,
                                 powerWatts = pWatts,
-                                isScreenOn = false
+                                isScreenOn = false,
+                                dischargeCurrentMa = hwSample?.currentMa?.takeIf { it > 0f }?.toDouble(),
+                                batteryCurrentUa = hwSample?.rawCurrentUa,
+                                currentAvgUa = hwSample?.rawCurrentAvgUa,
+                                currentSource = hwSample?.currentSource ?: com.battery.analysis.model.CurrentSource.UNKNOWN,
+                                currentPolarity = hwSample?.currentPolarity ?: com.battery.analysis.model.CurrentPolarity.UNKNOWN,
+                                provenance = if (hwSample?.currentMa != null && hwSample.currentMa > 0f) com.battery.analysis.model.DischargeDataProvenance.MEASURED_BATTERY_CURRENT else com.battery.analysis.model.DischargeDataProvenance.UNKNOWN,
+                            chargeCounterUah = hwSample?.chargeCounterUah
                             )
                         }
                     }
@@ -913,7 +934,14 @@ class BatteryMonitorService : Service() {
                                 temperature = currentTemp,
                                 powerWatts = pWatts,
                                 isScreenOn = isInteractive,
-                                packageName = currentPkg
+                                packageName = currentPkg,
+                                dischargeCurrentMa = hwSample?.currentMa?.takeIf { it > 0f }?.toDouble(),
+                                batteryCurrentUa = hwSample?.rawCurrentUa,
+                                currentAvgUa = hwSample?.rawCurrentAvgUa,
+                                currentSource = hwSample?.currentSource ?: com.battery.analysis.model.CurrentSource.UNKNOWN,
+                                currentPolarity = hwSample?.currentPolarity ?: com.battery.analysis.model.CurrentPolarity.UNKNOWN,
+                                provenance = if (hwSample?.currentMa != null && hwSample.currentMa > 0f) com.battery.analysis.model.DischargeDataProvenance.MEASURED_BATTERY_CURRENT else com.battery.analysis.model.DischargeDataProvenance.UNKNOWN,
+                            chargeCounterUah = hwSample?.chargeCounterUah
                             )
                         }
                     } catch (e: Throwable) {

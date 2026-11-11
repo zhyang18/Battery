@@ -17,6 +17,9 @@ import com.battery.analysis.db.PowerUsageDbHelper
 import com.battery.analysis.model.AppPowerUsageItem
 import com.battery.analysis.model.PowerDischargePoint
 import com.battery.analysis.model.PowerUsageRecord
+import com.battery.analysis.model.CurrentSource
+import com.battery.analysis.model.CurrentPolarity
+import com.battery.analysis.model.DischargeDataProvenance
 import com.battery.analysis.provider.NormalApiProvider
 import com.battery.analysis.provider.ShizukuBatteryStatsParser
 import java.text.SimpleDateFormat
@@ -2833,7 +2836,14 @@ class PowerUsageManager private constructor(private val context: Context) {
         temperature: Float,
         powerWatts: Float,
         isScreenOn: Boolean,
-        packageName: String? = null
+        packageName: String? = null,
+        dischargeCurrentMa: Double? = null,
+        batteryCurrentUa: Int? = null,
+        currentAvgUa: Int? = null,
+        currentSource: CurrentSource = CurrentSource.UNKNOWN,
+        currentPolarity: CurrentPolarity = CurrentPolarity.UNKNOWN,
+        provenance: DischargeDataProvenance = DischargeDataProvenance.MEASURED_BATTERY_CURRENT,
+        chargeCounterUah: Long? = null
     ) {
         ensureDischargeSamplesLoaded()
         val lastPoint = dischargeRealtimeSamples.lastOrNull()
@@ -2939,6 +2949,7 @@ class PowerUsageManager private constructor(private val context: Context) {
         dischargeAccumulator.lastSampleScreenOn = isScreenOn
         dischargeAccumulator.lastSampleTemp = roundedTemp
 
+        val isPhysicallyMeasured = dischargeCurrentMa != null && dischargeCurrentMa.isFinite() && dischargeCurrentMa > 0.0 && provenance == DischargeDataProvenance.MEASURED_BATTERY_CURRENT
         val point = PowerDischargePoint(
             timestamp = timestamp,
             elapsedHours = elapsedHours,
@@ -2949,7 +2960,15 @@ class PowerUsageManager private constructor(private val context: Context) {
             activeAppIcons = emptyList(),
             isScreenOn = isScreenOn,
             activeAppNames = emptyList(),
-            packageName = packageName
+            packageName = packageName,
+            batteryCurrentUa = batteryCurrentUa,
+            currentAvgUa = currentAvgUa,
+            currentSource = currentSource,
+            currentPolarity = currentPolarity,
+            dischargeCurrentMa = dischargeCurrentMa?.takeIf { it.isFinite() && it > 0.0 },
+            currentMeasured = isPhysicallyMeasured,
+            provenance = provenance,
+            chargeCounterUah = chargeCounterUah
         )
         dischargeRealtimeSamples.add(point)
         // 同步追加至线性滑动放电缓冲区（跨插拔电维持连续放电记忆）
@@ -3236,6 +3255,13 @@ class PowerUsageManager private constructor(private val context: Context) {
                     .append(",\"temp\":").append(p.temperature)
                     .append(",\"pwr\":").append(p.powerWatts)
                     .append(",\"screenOn\":").append(p.isScreenOn)
+                if (p.batteryCurrentUa != null) sb.append(",\"cur_ua\":").append(p.batteryCurrentUa)
+                if (p.currentAvgUa != null) sb.append(",\"cur_avg_ua\":").append(p.currentAvgUa)
+                if (p.dischargeCurrentMa != null && p.dischargeCurrentMa > 0.0) sb.append(",\"cur_ma\":").append(p.dischargeCurrentMa)
+                if (p.currentSource != CurrentSource.UNKNOWN) sb.append(",\"src\":\"").append(p.currentSource.name).append("\"")
+                if (p.currentPolarity != CurrentPolarity.UNKNOWN) sb.append(",\"pol\":\"").append(p.currentPolarity.name).append("\"")
+                if (p.currentMeasured) sb.append(",\"meas\":true")
+                if (p.provenance != DischargeDataProvenance.UNKNOWN) sb.append(",\"prov\":\"").append(p.provenance.name).append("\"")
                 if (!p.packageName.isNullOrEmpty()) {
                     sb.append(",\"pkg\":\"").append(p.packageName.replace("\\", "\\\\").replace("\"", "\\\"")).append("\"")
                 }
@@ -3327,6 +3353,18 @@ class PowerUsageManager private constructor(private val context: Context) {
                 for (i in 0 until jsonArray.length()) {
                     val obj = jsonArray.getJSONObject(i)
                     val pkgName = obj.optString("pkg").takeIf { it.isNotEmpty() }
+                    val rawCurUa = if (obj.has("cur_ua")) obj.optInt("cur_ua") else null
+                    val rawAvgUa = if (obj.has("cur_avg_ua")) obj.optInt("cur_avg_ua") else null
+                    val rawCurMa = if (obj.has("cur_ma")) obj.optDouble("cur_ma") else null
+                    val srcStr = obj.optString("src", "")
+                    val src = CurrentSource.values().firstOrNull { it.name == srcStr } ?: CurrentSource.UNKNOWN
+                    val polStr = obj.optString("pol", "")
+                    val pol = CurrentPolarity.values().firstOrNull { it.name == polStr } ?: CurrentPolarity.UNKNOWN
+                    val provStr = obj.optString("prov", "")
+                    val prov = DischargeDataProvenance.values().firstOrNull { it.name == provStr } ?:
+                        if (rawCurMa != null && rawCurMa > 0.0) DischargeDataProvenance.MEASURED_BATTERY_CURRENT else DischargeDataProvenance.LEGACY_ESTIMATED_POWER
+                    val isMeasured = obj.optBoolean("meas", prov == DischargeDataProvenance.MEASURED_BATTERY_CURRENT)
+
                     dischargeRealtimeSamples.add(
                         PowerDischargePoint(
                             timestamp = obj.optLong("ts", 0L),
@@ -3336,7 +3374,14 @@ class PowerUsageManager private constructor(private val context: Context) {
                             temperature = obj.optDouble("temp", 0.0).toFloat(),
                             powerWatts = obj.optDouble("pwr", 0.0).toFloat(),
                             isScreenOn = obj.optBoolean("screenOn", false),
-                            packageName = pkgName
+                            packageName = pkgName,
+                            batteryCurrentUa = rawCurUa,
+                            currentAvgUa = rawAvgUa,
+                            currentSource = src,
+                            currentPolarity = pol,
+                            dischargeCurrentMa = rawCurMa?.takeIf { it.isFinite() && it > 0.0 },
+                            currentMeasured = isMeasured,
+                            provenance = prov
                         )
                     )
                 }
@@ -7080,7 +7125,14 @@ class PowerUsageManager private constructor(private val context: Context) {
                         activeAppIcons = icons,
                         isScreenOn = isScreenOn,
                         activeAppNames = names,
-                        packageName = matchedPkg
+                        packageName = matchedPkg,
+                        batteryCurrentUa = s.batteryCurrentUa,
+                        currentAvgUa = s.currentAvgUa,
+                        currentSource = s.currentSource,
+                        currentPolarity = s.currentPolarity,
+                        dischargeCurrentMa = s.dischargeCurrentMa,
+                        currentMeasured = s.currentMeasured,
+                        provenance = s.provenance
                     )
                 )
             }

@@ -77,6 +77,20 @@
             android:textSize="13sp"
             android:textStyle="bold" />
 
+        <!-- 导出放电原始数据 CSV 按钮 -->
+        <ImageView
+            android:id="@+id/btn_export_csv"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="2dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:contentDescription="导出放电数据"
+            android:focusable="true"
+            android:padding="8dp"
+            android:src="@drawable/ic_backup_export"
+            app:tint="?android:attr/textColorPrimary" />
+
         <!-- 删除按钮 -->
         <ImageView
             android:id="@+id/btn_delete"

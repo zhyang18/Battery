@@ -884,10 +884,38 @@
 
     <!-- 放电双重条件选择器与说明 -->
     <string name="discharge_filter_label">学习条件设置</string>
+    <string name="capacity_diag_filter_data_label">数据筛选</string>
+    <string name="capacity_diag_filter_discharge_label">放电准入</string>
     <string name="discharge_threshold_picker_title">设置放电单次周期百分比门限</string>
     <string name="discharge_threshold_picker_hint">仅纳入单次掉电达到门限的放电周期，过滤碎片化浅充浅放</string>
     <string name="discharge_count_picker_title">设置放电自学习有效数据条数</string>
     <string name="discharge_count_picker_hint">仅取时间最新的有效放电周期，淘汰过往陈旧数据以追踪当前健康度</string>
+
+    <!-- 起始放电政策与数据纯度选择器 -->
+    <string name="start_discharge_policy_picker_title">设置起始放电政策</string>
+    <string name="start_discharge_policy_picker_hint">设置放电样本准入起始电量政策，默认满电起步以抑制浅放电噪声</string>
+    <string name="start_discharge_policy_opt_95">满电起步 (≥95%)</string>
+    <string name="start_discharge_policy_desc_95">推荐标准实验工况 · 大幅抑制浅放电分母放大与测量噪声</string>
+    <string name="start_discharge_policy_opt_90">满电起步 (≥90%)</string>
+    <string name="start_discharge_policy_desc_90">宽松满电工况 · 包容 90% 以上拔线的日常放电周期</string>
+    <string name="start_discharge_policy_opt_85">高电量起步 (≥85%)</string>
+    <string name="start_discharge_policy_desc_85">高电量起步 · 允许轻度浅充后起跑，提升样本纳入率</string>
+    <string name="start_discharge_policy_opt_any">任意电量起步</string>
+    <string name="start_discharge_policy_desc_any">全工况模式 · 不限制起始电量，允许中低电量起步样本参与</string>
+    <string name="toast_start_discharge_policy_updated">已更新起始放电政策为: %s</string>
+
+    <string name="data_purity_picker_title">设置数据纯度门限</string>
+    <string name="data_purity_picker_hint">设置放电自学习有效区间实测覆盖率门限，默认 ≥80%</string>
+    <string name="data_purity_opt_80">实测纯度 ≥80%</string>
+    <string name="data_purity_desc_80">推荐工业标准 · 要求物理采样实测覆盖率不低于 80%，数据最高纯度</string>
+    <string name="data_purity_opt_70">实测纯度 ≥70%</string>
+    <string name="data_purity_desc_70">兼顾纯度与样本量 · 允许偶发息屏深度休眠导致的采样切断</string>
+    <string name="data_purity_opt_60">实测纯度 ≥60%</string>
+    <string name="data_purity_desc_60">包容较多断层 · 适合长待机息屏或系统省电严苛的设备</string>
+    <string name="data_purity_opt_50">实测纯度 ≥50%</string>
+    <string name="data_purity_desc_50">底线宽松门限 · 只要半数区间具备有效实测即纳入，样本更易达标</string>
+    <string name="toast_data_purity_updated">已更新数据纯度门限为: %s</string>
+    <string name="capacity_session_conditions_title">准入条件 ▾</string>
     <string name="discharge_count_desc_3">极速敏感追踪 · 适合刚换新电芯或突发衰减检测</string>
     <string name="discharge_count_desc_5">高灵敏度平滑 · 快速追踪近期电池性能</string>
     <string name="discharge_count_desc_10">推荐基准 · 兼顾统计稳健性与老化时效性</string>

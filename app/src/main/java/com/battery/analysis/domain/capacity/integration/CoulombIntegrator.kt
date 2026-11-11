@@ -15,8 +15,11 @@ import kotlin.math.max
  */
 object CoulombIntegrator {
 
-    /** 允许连续梯形微积分的最大时间间隔（单位：秒）。超过此门限视为系统断层，切断积分 */
-    const val MAX_INTEGRATION_GAP_SEC: Double = 60.0
+    /** 允许连续梯形微积分的最大时间间隔（单位：秒，默认 180 秒/3分钟）。
+     * 严格对齐 BatteryChargeIntegrator.DEFAULT_MAX_VALID_GAP_MS，
+     * 充分包容息屏快充与待机状态下 1% SOC 变化周期（通常在 60~120 秒）。
+     */
+    const val MAX_INTEGRATION_GAP_SEC: Double = 180.0
 
     /**
      * 对标准化采样点时序执行梯形库仑积分与能量积分。

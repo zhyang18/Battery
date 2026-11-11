@@ -322,7 +322,7 @@
                     tools:text="CONVERGED (多会话收敛)" />
             </LinearLayout>
 
-            <!-- 学习条件设置（有效数据门限 + 时效有效条数） -->
+            <!-- 学习条件设置 第一行：数据筛选（跨度门限 + 时效条数） -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -334,7 +334,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="@string/discharge_filter_label"
+                    android:text="@string/capacity_diag_filter_data_label"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="11sp" />
 
@@ -371,6 +371,57 @@
                     android:textSize="10.5sp"
                     android:textStyle="bold"
                     tools:text="最近 10 条 ▾" />
+            </LinearLayout>
+
+            <!-- 学习条件设置 第二行：放电准入（起始政策 + 数据纯度） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/capacity_diag_filter_discharge_label"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="11sp" />
+
+                <TextView
+                    android:id="@+id/tv_diag_start_soc_selector"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_diag_pill_badge"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackground"
+                    android:gravity="center"
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="3dp"
+                    android:textColor="#f59e0b"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold"
+                    tools:text="起始: ≥95% ▾" />
+
+                <TextView
+                    android:id="@+id/tv_diag_purity_selector"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_diag_pill_badge"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackground"
+                    android:gravity="center"
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="3dp"
+                    android:textColor="#8b5cf6"
+                    android:textSize="10.5sp"
+                    android:textStyle="bold"
+                    tools:text="纯度: ≥80% ▾" />
             </LinearLayout>
 
             <View

@@ -56,6 +56,9 @@ import com.battery.analysis.domain.capacity.model.SocBinOperatingCondition
 import com.battery.analysis.domain.capacity.model.SocBoundaryQuality
 import com.battery.analysis.domain.capacity.model.SocEnergyBinInfo
 import com.battery.analysis.domain.capacity.model.SocOverlapStatus
+import com.battery.analysis.domain.capacity.model.StartDischargeCondition
+import com.battery.analysis.domain.capacity.model.StartDischargePolicy
+import com.battery.analysis.domain.capacity.model.DataPurityCondition
 import com.battery.analysis.domain.capacity.model.ThermalProfileType
 import com.battery.analysis.domain.capacity.model.TopPlateauNormalizationPolicy
 import com.battery.analysis.domain.capacity.model.TransitionNormalizationPolicy
@@ -231,6 +234,37 @@ class CapacityDomainTest {
             lastStatus = ChargingStatus.CHARGING
         )
         assertEquals(FullEndpointQuality.UNKNOWN, poorQ)
+    }
+
+    @Test
+    fun testChargeCapacityEstimator_withAuthoritativeChargeMahAnd180sGap() {
+        // 模拟息屏快充，电量每涨 1% 耗时 80 秒（大于 60 秒但小于 180 秒）
+        val samples = listOf(
+            CapacitySample(timestampMs = 0L, socFraction = 0.29, currentAmp = 4.0, voltageVolt = 4.4, temperatureC = 35.0, chargingStatus = ChargingStatus.CHARGING),
+            CapacitySample(timestampMs = 80_000L, socFraction = 0.30, currentAmp = 4.0, voltageVolt = 4.4, temperatureC = 35.0, chargingStatus = ChargingStatus.CHARGING),
+            CapacitySample(timestampMs = 160_000L, socFraction = 0.31, currentAmp = 4.0, voltageVolt = 4.4, temperatureC = 35.0, chargingStatus = ChargingStatus.CHARGING)
+        )
+
+        // 默认 180 秒门限下，80 秒间隔能够完整积分，绝不被判定为断层切断
+        val segment = CoulombIntegrator.integrate(samples)
+        assertTrue("80s 间隔在 180s 容差下覆盖率必须为 100%", segment.coverageRatio >= 0.99)
+        assertTrue("80s 间隔必须正常累加电量", segment.chargeMah > 0.0)
+
+        // 测试透传权威主账本电量（如 4421 mAh，跨度 71%）
+        val candidate = ChargeCapacityEstimator.buildCandidate(
+            sessionId = "chg_001",
+            samples = samples,
+            startSoc = 0.29,
+            endSoc = 1.00,
+            authoritativeChargeMah = 4421.0,
+            authoritativeEnergyWh = 19.50
+        )
+
+        assertEquals(4421.0, candidate.chargeMah, 1e-6)
+        assertEquals(19.50, candidate.energyWh, 1e-6)
+        assertEquals(4421.0 / 0.71, candidate.fccObservedMah, 0.5)
+        assertEquals(6226.76, candidate.fccObservedMah, 1.0)
+        assertFalse("具备权威主账本电量时严禁误标记为排除", candidate.isExcluded)
     }
 
     @Test
@@ -5340,5 +5374,217 @@ class CapacityDomainTest {
 
         // 2. SOH_E 核心门控铁律：由于条件归一化模型目前未启用/未全量验证，SOH_E 必须严格为 null，冻结更新！
         assertNull("未达归一化验证标准前，SOH_E 必须严格为 null 保持冻结", unified.sohEPercent)
+    }
+
+    /**
+     * 测试起始放电政策（StartDischargeCondition）：
+     * 1. 默认政策为 START_FROM_100_FULL 且门限为 95%；
+     * 2. 95%、96%、100% 判定为通过；
+     * 3. 94%、90% 判定为拦截拒绝；
+     * 4. 自定义门限（如 90%）下 92% 判定为通过；
+     * 5. ANY_SOC 模式下任意电量（如 50%）均判定通过；
+     * 6. 非法门限（< 0 或 > 100）触发 isValid() == false 且 Fail-Closed 拦截。
+     */
+    @Test
+    fun testStartDischargeCondition_defaultAndCustomThresholds() {
+        val defaultCondition = StartDischargeCondition()
+        assertEquals(StartDischargePolicy.START_FROM_100_FULL, defaultCondition.policy)
+        assertEquals(95, defaultCondition.minStartSocPercent)
+        assertTrue(defaultCondition.isValid())
+
+        // 边界值与标准值测试
+        assertTrue("95% 满电起步边界点必须通过", defaultCondition.isSatisfied(95))
+        assertTrue("96% 满电起步必须通过", defaultCondition.isSatisfied(96))
+        assertTrue("100% 满电起步必须通过", defaultCondition.isSatisfied(100))
+        assertFalse("94% 略低于 95% 必须严格拦截", defaultCondition.isSatisfied(94))
+        assertFalse("80% 低于 95% 必须严格拦截", defaultCondition.isSatisfied(80))
+
+        // 自定义门限测试（如 90%）
+        val customCondition = StartDischargeCondition(
+            policy = StartDischargePolicy.START_FROM_100_FULL,
+            minStartSocPercent = 90
+        )
+        assertTrue(customCondition.isValid())
+        assertTrue("自定义 90% 门限下 92% 必须通过", customCondition.isSatisfied(92))
+        assertFalse("自定义 90% 门限下 89% 必须拦截", customCondition.isSatisfied(89))
+
+        // ANY_SOC 任意电量起步模式测试
+        val anyCondition = StartDischargeCondition(policy = StartDischargePolicy.ANY_SOC)
+        assertTrue(anyCondition.isValid())
+        assertTrue("ANY_SOC 模式下 50% 起步必须通过", anyCondition.isSatisfied(50))
+        assertTrue("ANY_SOC 模式下 10% 起步必须通过", anyCondition.isSatisfied(10))
+
+        // 非法门限校验与 Fail-Closed 拦截
+        val invalidLow = StartDischargeCondition(minStartSocPercent = -1)
+        assertFalse(invalidLow.isValid())
+        assertFalse("非法门限必须 Fail-Closed 拦截", invalidLow.isSatisfied(100))
+
+        val invalidHigh = StartDischargeCondition(minStartSocPercent = 101)
+        assertFalse(invalidHigh.isValid())
+        assertFalse("非法门限必须 Fail-Closed 拦截", invalidHigh.isSatisfied(100))
+    }
+
+    /**
+     * 测试数据纯度条件设置（DataPurityCondition）：
+     * 1. 默认分箱实测覆盖率门限为 80.0%，且默认拒绝 REJECTED 劣质样本；
+     * 2. 80.0%、85.0%、100.0% 判定通过；
+     * 3. 79.9%、70.0% 判定拦截；
+     * 4. 自定义覆盖率门限（如 60.0%）下 70.0% 判定通过；
+     * 5. REJECTED 样本无论覆盖率多高坚决拦截；
+     * 6. 非法数值（< 0.0、> 100.0、NaN）触发 isValid() == false 且 Fail-Closed 拦截。
+     */
+    @Test
+    fun testDataPurityCondition_defaultAndCustomCoverage() {
+        val defaultPurity = DataPurityCondition()
+        assertEquals(80.0, defaultPurity.minMeasuredCoveragePercent, 1e-6)
+        assertTrue(defaultPurity.rejectPoorQuality)
+        assertTrue(defaultPurity.isValid())
+
+        // 覆盖率阈值测试
+        assertTrue("80.0% 边界覆盖率必须通过", defaultPurity.isSatisfied(80.0, DischargeQuality.HIGH))
+        assertTrue("85.0% 覆盖率必须通过", defaultPurity.isSatisfied(85.0, DischargeQuality.MEDIUM))
+        assertTrue("100.0% 覆盖率必须通过", defaultPurity.isSatisfied(100.0, DischargeQuality.HIGH))
+        assertFalse("79.9% 略低于 80.0% 必须严格拦截", defaultPurity.isSatisfied(79.9, DischargeQuality.HIGH))
+        assertFalse("50.0% 远低于 80.0% 必须严格拦截", defaultPurity.isSatisfied(50.0, DischargeQuality.HIGH))
+
+        // 劣质样本 REJECTED 拦截测试
+        assertFalse("即使 100% 覆盖率，REJECTED 样本必须坚决拦截", defaultPurity.isSatisfied(100.0, DischargeQuality.REJECTED))
+
+        // 自定义覆盖率门限测试（如 60.0%）
+        val customPurity = DataPurityCondition(minMeasuredCoveragePercent = 60.0)
+        assertTrue(customPurity.isValid())
+        assertTrue("自定义 60% 门限下 70% 覆盖率必须通过", customPurity.isSatisfied(70.0, DischargeQuality.HIGH))
+        assertFalse("自定义 60% 门限下 59.9% 覆盖率必须拦截", customPurity.isSatisfied(59.9, DischargeQuality.HIGH))
+
+        // 异常非法覆盖率 Fail-Closed 校验
+        val invalidLow = DataPurityCondition(minMeasuredCoveragePercent = -0.1)
+        assertFalse(invalidLow.isValid())
+        assertFalse(invalidLow.isSatisfied(100.0, DischargeQuality.HIGH))
+
+        val invalidHigh = DataPurityCondition(minMeasuredCoveragePercent = 100.1)
+        assertFalse(invalidHigh.isValid())
+        assertFalse(invalidHigh.isSatisfied(100.0, DischargeQuality.HIGH))
+
+        val invalidNan = DataPurityCondition(minMeasuredCoveragePercent = Double.NaN)
+        assertFalse(invalidNan.isValid())
+        assertFalse(invalidNan.isSatisfied(100.0, DischargeQuality.HIGH))
+    }
+
+    /**
+     * 测试 EnergyReferenceProtocol 与 StartDischargeCondition / DataPurityCondition 协同集成与动态匹配：
+     * 1. 验证默认配置下，起始 SOC ≥ 95% 且实测覆盖率 ≥ 80.0% 判定为通过；
+     * 2. 验证起始 SOC 为 94% 时被默认起始政策拒绝，但在将 minStartSocPercent 改为 90% 后成功通过；
+     * 3. 验证实测覆盖率为 75% 时被默认纯度条件拒绝，但在将 minMeasuredCoveragePercent 改为 70.0% 后成功通过；
+     * 4. 验证注入非法条件设置时 protocol.isProtocolValid() 为 false，且 matches() 严格 Fail-Closed。
+     */
+    @Test
+    fun testEnergyReferenceProtocol_conditionSettingsIntegrationAndMatching() {
+        val protocol = EnergyReferenceProtocol(
+            protocolVersion = "ERP-v1.1",
+            targetRange = ReferenceConditionRange(
+                temperatureMinC = 20.0,
+                temperatureMaxC = 30.0,
+                currentMinMa = 500.0,
+                currentMaxMa = 1500.0
+            )
+        )
+        assertTrue(protocol.isProtocolValid())
+
+        val sample94Soc = DischargeConditionSample(
+            sessionId = "sample_94",
+            observedEnergyWh = 28.0,
+            measuredEnergyCoverage = 85.0,
+            unresolvedEnergyWh = 0.0,
+            condition = DischargeOperatingCondition(
+                averageTemperatureC = 25.0,
+                averageDischargeCurrentMa = 1000.0
+            ),
+            startSoc = 94,
+            endSoc = 10,
+            socSpanPercent = 84,
+            quality = DischargeQuality.HIGH,
+            counterConsistency = CounterConsistency.AGREE
+        )
+
+        // 默认满电起步 95% 门限下，94% 必须被拒绝
+        assertFalse("默认 95% 起步门限下，94% 起始电量必须被拒绝", protocol.matches(sample94Soc))
+
+        // 配置为 minStartSocPercent = 90 后，94% 允许匹配通过
+        val protocol90Soc = protocol.copy(
+            startSocCondition = StartDischargeCondition(
+                policy = StartDischargePolicy.START_FROM_100_FULL,
+                minStartSocPercent = 90
+            )
+        )
+        assertTrue("放宽起始门限至 90% 后，94% 起始电量必须成功匹配", protocol90Soc.matches(sample94Soc))
+
+        // 覆盖率 75% 样本测试
+        val sample75Cov = sample94Soc.copy(
+            sessionId = "sample_75_cov",
+            startSoc = 98,
+            measuredEnergyCoverage = 75.0
+        )
+        assertFalse("默认 80% 实测覆盖率门限下，75% 覆盖率必须被拒绝", protocol.matches(sample75Cov))
+
+        // 配置为 minMeasuredCoveragePercent = 70.0% 后，75% 覆盖率允许匹配通过
+        val protocol70Cov = protocol.copy(
+            dataPurityCondition = DataPurityCondition(minMeasuredCoveragePercent = 70.0)
+        )
+        assertTrue("放宽覆盖率门限至 70% 后，75% 覆盖率必须成功匹配", protocol70Cov.matches(sample75Cov))
+
+        // 验证非法条件导致协议整体失效
+        val invalidProtocol = protocol.copy(
+            startSocCondition = StartDischargeCondition(minStartSocPercent = -5)
+        )
+        assertFalse("存在非法条件设置时协议自洽校验必须返回 false", invalidProtocol.isProtocolValid())
+        assertFalse("协议非法时 matches 必须严格 Fail-Closed", invalidProtocol.matches(sample94Soc.copy(startSoc = 100, measuredEnergyCoverage = 100.0)))
+    }
+
+    /**
+     * 测试放电候选样本在不同起始放电政策与数据纯度条件下的准入判定效果。
+     */
+    @Test
+    fun testCandidateFilteringWithStartPolicyAndDataPurityConditions() {
+        val candidate93Start = CapacityCandidate(
+            id = 1L,
+            sessionType = CandidateSessionType.DISCHARGE,
+            startSoc = 93,
+            endSoc = 56,
+            socSpanPercent = 37,
+            netBatteryChargeMah = 2638.0,
+            fccObservedMah = 7129.0,
+            startTimestamp = 1000L,
+            endTimestamp = 2000L,
+            durationMs = 1000L,
+            avgTemperatureCelsius = 25f,
+            maxTemperatureCelsius = 26f,
+            sampleCount = 100,
+            qualityScore = 0.85,
+            isExcluded = false
+        )
+
+        // 默认满电起步门限 95%
+        val defaultStartCondition = StartDischargeCondition(StartDischargePolicy.START_FROM_100_FULL, minStartSocPercent = 95)
+        assertFalse("默认 95% 起步门限下，93% 放电候选样本判定不合格", defaultStartCondition.isSatisfied(candidate93Start.startSoc))
+
+        // 放宽至 90% 满电起步
+        val relaxedStartCondition = StartDischargeCondition(StartDischargePolicy.START_FROM_100_FULL, minStartSocPercent = 90)
+        assertTrue("放宽至 90% 起步门限后，93% 放电候选样本合格", relaxedStartCondition.isSatisfied(candidate93Start.startSoc))
+
+        // 任意电量起步
+        val anyStartCondition = StartDischargeCondition(StartDischargePolicy.ANY_SOC)
+        assertTrue("任意起步模式下，93% 放电候选样本合格", anyStartCondition.isSatisfied(candidate93Start.startSoc))
+
+        // 纯度 75% 样本
+        val candidate75Purity = candidate93Start.copy(
+            id = 2L,
+            startSoc = 98,
+            qualityScore = 0.75
+        )
+        val defaultPurityCondition = DataPurityCondition(minMeasuredCoveragePercent = 80.0)
+        assertFalse("默认 80% 纯度下，75% 候选样本不合格", candidate75Purity.qualityScore * 100.0 >= defaultPurityCondition.minMeasuredCoveragePercent)
+
+        val relaxedPurityCondition = DataPurityCondition(minMeasuredCoveragePercent = 70.0)
+        assertTrue("放宽至 70% 纯度后，75% 候选样本合格", candidate75Purity.qualityScore * 100.0 >= relaxedPurityCondition.minMeasuredCoveragePercent)
     }
 }

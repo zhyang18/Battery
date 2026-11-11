@@ -205,12 +205,10 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             appAdapter.updateDisplayUnit(latestUnit)
         }
         if (unitChanged) {
-            headerBinding?.batteryTimelineView?.setDisplayUnit(latestUnit)
             val record = currentRecord
             val hBinding = headerBinding
             if (record != null && hBinding != null) {
-                renderHeaderDetails(record, hBinding)
-                bindMetricsCards(hBinding)
+                bindHeaderAll(hBinding, force = true)
             }
         }
     }
@@ -245,7 +243,6 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             onBindingReady = { hBinding ->
                 headerBinding = hBinding
                 setupHeaderListeners(hBinding)
-                bindHeaderAll(hBinding)
             },
             onBind = { hBinding ->
                 headerBinding = hBinding
@@ -273,6 +270,8 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
 
         val concatAdapter = ConcatAdapter(headerAdapter, appAdapter)
         binding.recyclerHistoryDetail.layoutManager = LinearLayoutManager(this)
+        // 增加离屏视图缓存容量，确保上下滑动时头部卡片与临近条目保留在缓存中，避免无意义的频繁回收与重新绑定
+        binding.recyclerHistoryDetail.setItemViewCacheSize(10)
         binding.recyclerHistoryDetail.adapter = concatAdapter
         binding.recyclerHistoryDetail.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: androidx.recyclerview.widget.RecyclerView, newState: Int) {
@@ -883,18 +882,52 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
     }
 
     /**
+     * 上次已成功绑定的快照记录 ID、显示单位、时间轴状态与指标概览缓存，
+     * 用于在 RecyclerView 上下滑动引发 ViewHolder 重复 onBind 时快速短路，杜绝无意义的重复计算与视图重绘。
+     */
+    private var lastBoundRecordId: Long = -1L
+    private var lastBoundUnit: PowerDisplayUnit? = null
+    private var lastBoundTimelineState: BatteryTimelineState? = null
+    private var lastBoundOverviewStats: PowerOverviewStats? = null
+
+    /**
      * 将当前缓存的全部快照数据（时段状态、三维核心看板、6个放电与息屏指标卡片、走势折线图、列表操作栏与条目数量）完整绑定至头部视图。
      * 无论后台数据反序列化与 ViewHolder 创建的先后时序如何，均能确保所有卡片与折线图数据完整无遗漏地呈现。
+     * 支持增量绑定短路优化，滑动复用时直接跳过昂贵的数学计算与文本格式化。
      *
      * @param hBinding 头部组合视图绑定对象
+     * @param force 是否强制全量重绘刷新（在数据包初次加载完成、电量单位切换等场景下置为 true）
      */
-    private fun bindHeaderAll(hBinding: ItemHistoryDetailHeaderBinding) {
+    private fun bindHeaderAll(hBinding: ItemHistoryDetailHeaderBinding, force: Boolean = false) {
         val record = currentRecord ?: return
+        val currentUnit = currentDisplayUnit
+        val currentTimeline = cachedTimelineState
+        val currentOverview = cachedOverviewStats
+
+        val isDataUnchanged = !force &&
+            lastBoundRecordId == record.id &&
+            lastBoundUnit == currentUnit &&
+            lastBoundTimelineState === currentTimeline &&
+            lastBoundOverviewStats === currentOverview
+
+        if (isDataUnchanged) {
+            val count = if (cachedDisplayAppCount > 0) cachedDisplayAppCount else appAdapter.getDisplayItemCount()
+            if (count > 0) {
+                hBinding.tvAppListTitle.text = getString(R.string.power_usage_list_format, count)
+            }
+            return
+        }
+
+        lastBoundRecordId = record.id
+        lastBoundUnit = currentUnit
+        lastBoundTimelineState = currentTimeline
+        lastBoundOverviewStats = currentOverview
+
         renderHeaderDetails(record, hBinding)
         bindMetricsCards(hBinding)
 
         hBinding.batteryTimelineView.setDisplayUnit(currentDisplayUnit)
-        cachedTimelineState?.let { state ->
+        currentTimeline?.let { state ->
             hBinding.batteryTimelineView.setState(state.copy(displayUnit = currentDisplayUnit))
         }
 
@@ -1125,7 +1158,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
      */
     private fun renderRecordDetails(record: PowerUsageRecord) {
         currentRecord = record
-        headerBinding?.let { bindHeaderAll(it) }
+        headerBinding?.let { bindHeaderAll(it, force = true) }
 
         // 反序列化全量数据包加载功耗时间轴、应用排行榜以及 7 天统计放电速度
         lifecycleScope.launch(Dispatchers.IO) {
@@ -1175,7 +1208,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
                 appAdapter.submitList(fullPackage.appList)
                 cachedDisplayAppCount = appAdapter.getDisplayItemCount()
                 headerBinding?.let { hBinding ->
-                    bindHeaderAll(hBinding)
+                    bindHeaderAll(hBinding, force = true)
                 } ?: run {
                     headerAdapter.notifyItemChanged(0)
                 }
@@ -1324,6 +1357,9 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
      * 活动销毁生命周期回调，强制安全关闭所有残留 Window。
      */
     override fun onDestroy() {
+        if (::headerAdapter.isInitialized) {
+            headerAdapter.clear()
+        }
         dismissAllActiveWindows()
         super.onDestroy()
     }

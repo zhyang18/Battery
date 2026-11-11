@@ -10,6 +10,9 @@ import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import com.battery.analysis.R
+import com.battery.analysis.domain.capacity.model.DataPurityCondition
+import com.battery.analysis.domain.capacity.model.StartDischargeCondition
+import com.battery.analysis.domain.capacity.model.StartDischargePolicy
 import com.battery.analysis.manager.BatteryCapacityManager
 import com.battery.analysis.model.CapacityEstimateResult
 import com.battery.analysis.model.MaturityLevel
@@ -156,6 +159,18 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
         }
         view.findViewById<View>(R.id.tv_diag_count_selector)?.setOnClickListener(countClickListener)
 
+        // 绑定起始放电政策设置项点击事件
+        val startSocClickListener = View.OnClickListener {
+            showStartDischargePolicyPickerDialog(view)
+        }
+        view.findViewById<View>(R.id.tv_diag_start_soc_selector)?.setOnClickListener(startSocClickListener)
+
+        // 绑定数据纯度门限设置项点击事件
+        val purityClickListener = View.OnClickListener {
+            showDataPurityPickerDialog(view)
+        }
+        view.findViewById<View>(R.id.tv_diag_purity_selector)?.setOnClickListener(purityClickListener)
+
         // 获取并动态观察最新的容量状态结果流，自动刷新诊断视图
         val context = view.context ?: return
         viewLifecycleOwner.lifecycleScope.launch {
@@ -198,6 +213,33 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
     }
 
     /**
+     * 弹出起始放电政策选择底部抽屉弹窗。
+     */
+    private fun showStartDischargePolicyPickerDialog(rootView: View) {
+        val pickerDialog = StartDischargePolicyBottomSheetDialog()
+        pickerDialog.setOnPolicySelectedListener { condition ->
+            val labelText = when (condition.policy) {
+                StartDischargePolicy.START_FROM_100_FULL -> "起始: ≥${condition.minStartSocPercent}% ▾"
+                StartDischargePolicy.ANY_SOC -> "起始: 任意 ▾"
+            }
+            rootView.findViewById<TextView>(R.id.tv_diag_start_soc_selector)?.text = labelText
+        }
+        pickerDialog.show(parentFragmentManager, "StartDischargePolicyBottomSheetDialog")
+    }
+
+    /**
+     * 弹出数据纯度门限选择底部抽屉弹窗。
+     */
+    private fun showDataPurityPickerDialog(rootView: View) {
+        val pickerDialog = DataPurityPickerBottomSheetDialog()
+        pickerDialog.setOnPuritySelectedListener { condition ->
+            val labelText = "纯度: ≥${condition.minMeasuredCoveragePercent.toInt()}% ▾"
+            rootView.findViewById<TextView>(R.id.tv_diag_purity_selector)?.text = labelText
+        }
+        pickerDialog.show(parentFragmentManager, "DataPurityPickerBottomSheetDialog")
+    }
+
+    /**
      * 将容量估计全景结果数据绑定渲染至各个子视图。
      * 严格遵守零假数据原则：在数据缺失时如实显示 "--" 或未知，绝不伪造硬编码数据。
      *
@@ -227,6 +269,17 @@ class CapacityDiagnosisBottomSheetDialog : BottomSheetDialogFragment() {
         val countLimit = BatteryCapacityManager.getInstance(root.context).getEffectiveSampleCountLimit()
         val tvCountSelector = root.findViewById<TextView>(R.id.tv_diag_count_selector)
         tvCountSelector?.text = if (countLimit <= 0) "全部数据 ▾" else "最近 $countLimit 条 ▾"
+
+        val startCondition = BatteryCapacityManager.getInstance(root.context).getStartDischargeCondition()
+        val tvStartSocSelector = root.findViewById<TextView>(R.id.tv_diag_start_soc_selector)
+        tvStartSocSelector?.text = when (startCondition.policy) {
+            StartDischargePolicy.START_FROM_100_FULL -> "起始: ≥${startCondition.minStartSocPercent}% ▾"
+            StartDischargePolicy.ANY_SOC -> "起始: 任意 ▾"
+        }
+
+        val purityCondition = BatteryCapacityManager.getInstance(root.context).getDataPurityCondition()
+        val tvPuritySelector = root.findViewById<TextView>(R.id.tv_diag_purity_selector)
+        tvPuritySelector?.text = "纯度: ≥${purityCondition.minMeasuredCoveragePercent.toInt()}% ▾"
 
         if (result == null) {
             tvRemainingCharge?.text = "-- mAh"

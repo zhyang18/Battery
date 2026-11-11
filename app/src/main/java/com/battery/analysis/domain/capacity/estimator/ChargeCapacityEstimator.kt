@@ -73,19 +73,39 @@ object ChargeCapacityEstimator {
 
     /**
      * 从一组充电采样点中评估并构建单次充电候选样本。
+     *
+     * @param sessionId 会话唯一标识
+     * @param samples 充电瞬时采样序列
+     * @param startSoc 起始 SOC 比例（0.0 ~ 1.0）
+     * @param endSoc 终止 SOC 比例（0.0 ~ 1.0）
+     * @param isDualCell 是否为串联双电芯
+     * @param authoritativeChargeMah 可选的主账本权威净充入电量（mAh，由全局连续微积分计算得出）
+     * @param authoritativeEnergyWh 可选的主账本权威充入能量（Wh）
+     * @return 单次充电候选样本 [FccCandidateSample]
      */
     fun buildCandidate(
         sessionId: String,
         samples: List<CapacitySample>,
         startSoc: Double,
         endSoc: Double,
-        isDualCell: Boolean = false
+        isDualCell: Boolean = false,
+        authoritativeChargeMah: Double? = null,
+        authoritativeEnergyWh: Double? = null
     ): FccCandidateSample {
         val deltaSoc = abs(endSoc - startSoc)
         val segment = CoulombIntegrator.integrate(samples)
 
-        val qMah = segment.chargeMah
-        val eWh = segment.energyWh
+        // 优先采纳由主账本基于高容差时钟完整计算的权威净充入量，防止息屏广播步长较长时微元切片丢失
+        val qMah = if (authoritativeChargeMah != null && authoritativeChargeMah > 0.0) {
+            authoritativeChargeMah
+        } else {
+            segment.chargeMah
+        }
+        val eWh = if (authoritativeEnergyWh != null && authoritativeEnergyWh > 0.0) {
+            authoritativeEnergyWh
+        } else {
+            segment.energyWh
+        }
         val dz = deltaSoc.coerceIn(0.001, 1.0)
         val fccApparent = if (deltaSoc > 0.0) qMah / dz else 0.0
         val variance = calculateSampleVariance(qMah, dz)
@@ -103,7 +123,11 @@ object ChargeCapacityEstimator {
 
         val isSpanTooSmall = deltaSoc < MIN_ELIGIBLE_SOC_SPAN
         val isRangeDefective = fccApparent < 500.0 || fccApparent > 25000.0
-        val isCoveragePoor = segment.coverageRatio < 0.60
+        val isCoveragePoor = if (authoritativeChargeMah != null && authoritativeChargeMah > 0.0) {
+            false // 具备权威主账本微积分支持，不因微元切片断层被误排除
+        } else {
+            segment.coverageRatio < 0.60
+        }
         val isReverseDrain = endSoc <= startSoc
 
         val isExcluded = isSpanTooSmall || isRangeDefective || isCoveragePoor || isReverseDrain
@@ -115,6 +139,9 @@ object ChargeCapacityEstimator {
             else -> ""
         }
 
+        val effAvgVolt = segment.avgVoltageVolts ?: (if (qMah > 0.0 && eWh > 0.0) eWh / (qMah / 1000.0) else null)
+        val effCoverage = if (authoritativeChargeMah != null && authoritativeChargeMah > 0.0) 1.0 else segment.coverageRatio
+
         return FccCandidateSample(
             sessionId = sessionId,
             channel = CapacityChannel.CHARGE,
@@ -125,11 +152,11 @@ object ChargeCapacityEstimator {
             energyWh = eWh,
             fccObservedMah = fccApparent,
             varianceMah2 = variance,
-            avgVoltageVolts = segment.avgVoltageVolts,
+            avgVoltageVolts = effAvgVolt,
             avgTemperatureC = segment.avgTemperatureC,
             maxTemperatureC = maxTemp,
             durationSec = segment.validDurationSec,
-            coverageRatio = segment.coverageRatio,
+            coverageRatio = effCoverage,
             endpointQuality = endpointQuality,
             isExcluded = isExcluded,
             exclusionReason = exclusionReason

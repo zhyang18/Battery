@@ -629,6 +629,49 @@ class ChargingHistoryDbHelper private constructor(private val context: Context) 
     }
 
     /**
+     * 根据主键 ID 精确查询单条充电历史记录。
+     *
+     * @param id 充电记录的主键 ID
+     * @return 对应的充电历史记录实体，不存在时返回 null
+     */
+    fun getRecordById(id: Long): ChargingHistoryRecord? {
+        val db = readableDatabase
+        val cursor = db.query(
+            TABLE_NAME,
+            null,
+            "$COL_ID = ?",
+            arrayOf(id.toString()),
+            null,
+            null,
+            null
+        )
+        return cursor.use {
+            if (it.moveToNext()) {
+                val sampleIdx = it.getColumnIndex(COL_SAMPLE_POINTS_JSON)
+                ChargingHistoryRecord(
+                    id = it.getLong(it.getColumnIndexOrThrow(COL_ID)),
+                    recordTime = it.getString(it.getColumnIndexOrThrow(COL_RECORD_TIME)),
+                    startTimestamp = it.getLong(it.getColumnIndexOrThrow(COL_START_TIMESTAMP)),
+                    endTimestamp = it.getLong(it.getColumnIndexOrThrow(COL_END_TIMESTAMP)),
+                    durationMs = it.getLong(it.getColumnIndexOrThrow(COL_DURATION_MS)),
+                    startLevel = it.getInt(it.getColumnIndexOrThrow(COL_START_LEVEL)),
+                    endLevel = it.getInt(it.getColumnIndexOrThrow(COL_END_LEVEL)),
+                    levelGain = it.getInt(it.getColumnIndexOrThrow(COL_LEVEL_GAIN)),
+                    chargedEnergyWh = it.getFloat(it.getColumnIndexOrThrow(COL_CHARGED_ENERGY_WH)),
+                    avgPowerWatts = it.getFloat(it.getColumnIndexOrThrow(COL_AVG_POWER_WATTS)),
+                    maxPowerWatts = it.getFloat(it.getColumnIndexOrThrow(COL_MAX_POWER_WATTS)),
+                    maxTemperature = it.getFloat(it.getColumnIndexOrThrow(COL_MAX_TEMPERATURE)),
+                    chargeType = it.getString(it.getColumnIndexOrThrow(COL_CHARGE_TYPE)) ?: "",
+                    screenOffDurationMs = it.getLong(it.getColumnIndexOrThrow(COL_SCREEN_OFF_DURATION_MS)),
+                    screenOffLevelGain = it.getInt(it.getColumnIndexOrThrow(COL_SCREEN_OFF_LEVEL_GAIN)),
+                    screenOffEnergyWh = it.getFloat(it.getColumnIndexOrThrow(COL_SCREEN_OFF_ENERGY_WH)),
+                    samplePointsJson = if (sampleIdx >= 0) it.getString(sampleIdx) ?: "" else ""
+                )
+            } else null
+        }
+    }
+
+    /**
      * 根据主键 ID 删除指定的单条充电历史记录。
      *
      * @param id 待删除记录的主键 ID

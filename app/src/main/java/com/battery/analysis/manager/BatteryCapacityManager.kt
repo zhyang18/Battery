@@ -14,8 +14,12 @@ import com.battery.analysis.domain.capacity.fusion.ChargeDischargeFusionEngine
 import com.battery.analysis.domain.capacity.model.CapacityChannel
 import com.battery.analysis.domain.capacity.model.CapacitySample
 import com.battery.analysis.domain.capacity.model.ChargingStatus
+import com.battery.analysis.domain.capacity.model.DataPurityCondition
+import com.battery.analysis.domain.capacity.model.EnergyReferenceProtocol
 import com.battery.analysis.domain.capacity.model.FccCandidateSample
 import com.battery.analysis.domain.capacity.model.FccUnifiedEstimate
+import com.battery.analysis.domain.capacity.model.StartDischargeCondition
+import com.battery.analysis.domain.capacity.model.StartDischargePolicy
 import com.battery.analysis.domain.estimator.BatteryChargeIntegrator
 import com.battery.analysis.domain.estimator.IntegrablePoint
 import com.battery.analysis.domain.estimator.RobustFccEstimator
@@ -111,6 +115,14 @@ class BatteryCapacityManager private constructor(private val context: Context) {
         const val PREF_KEY_EFFECTIVE_SAMPLE_COUNT_LIMIT = "pref_capacity_effective_sample_count"
         const val DEFAULT_EFFECTIVE_SAMPLE_COUNT_LIMIT: Int = 10
 
+        /** 放电起始 SOC 政策与门限持久化键 */
+        const val PREF_KEY_START_DISCHARGE_POLICY = "pref_key_start_discharge_policy"
+        const val PREF_KEY_START_DISCHARGE_MIN_SOC = "pref_key_start_discharge_min_soc"
+
+        /** 放电数据纯度（实测覆盖率）持久化键 */
+        const val PREF_KEY_DATA_PURITY_MIN_COVERAGE = "pref_key_data_purity_min_coverage"
+        const val PREF_KEY_DATA_PURITY_REJECT_POOR = "pref_key_data_purity_reject_poor"
+
         /** 纳入满充容量自学习样本池的最小物理入库门限（10%） */
         private const val MIN_SOC_SPAN_THRESHOLD: Int = 10
 
@@ -181,6 +193,66 @@ class BatteryCapacityManager private constructor(private val context: Context) {
     }
 
     /**
+     * 获取当前配置的放电样本起始 SOC 政策条件（默认满电起步 ≥95%）。
+     */
+    fun getStartDischargeCondition(): StartDischargeCondition {
+        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val policyName = sp.getString(PREF_KEY_START_DISCHARGE_POLICY, StartDischargePolicy.START_FROM_100_FULL.name)
+        val policy = try {
+            StartDischargePolicy.valueOf(policyName ?: StartDischargePolicy.START_FROM_100_FULL.name)
+        } catch (e: Exception) {
+            StartDischargePolicy.START_FROM_100_FULL
+        }
+        val minStartSoc = sp.getInt(PREF_KEY_START_DISCHARGE_MIN_SOC, StartDischargeCondition.DEFAULT_MIN_START_SOC_PERCENT)
+        return StartDischargeCondition(policy = policy, minStartSocPercent = minStartSoc)
+    }
+
+    /**
+     * 设置放电样本起始 SOC 政策条件，并立即持久化触发模型重算。
+     */
+    fun setStartDischargeCondition(condition: StartDischargeCondition) {
+        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        sp.edit()
+            .putString(PREF_KEY_START_DISCHARGE_POLICY, condition.policy.name)
+            .putInt(PREF_KEY_START_DISCHARGE_MIN_SOC, condition.minStartSocPercent)
+            .apply()
+        refreshEstimateAsync()
+    }
+
+    /**
+     * 获取当前配置的放电样本数据纯度条件（默认分箱实测覆盖率 ≥80%）。
+     */
+    fun getDataPurityCondition(): DataPurityCondition {
+        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val minCoverage = sp.getFloat(PREF_KEY_DATA_PURITY_MIN_COVERAGE, DataPurityCondition.DEFAULT_MIN_MEASURED_COVERAGE_PERCENT.toFloat()).toDouble()
+        val rejectPoor = sp.getBoolean(PREF_KEY_DATA_PURITY_REJECT_POOR, true)
+        return DataPurityCondition(minMeasuredCoveragePercent = minCoverage, rejectPoorQuality = rejectPoor)
+    }
+
+    /**
+     * 设置放电样本数据纯度条件，并立即持久化触发模型重算。
+     */
+    fun setDataPurityCondition(condition: DataPurityCondition) {
+        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        sp.edit()
+            .putFloat(PREF_KEY_DATA_PURITY_MIN_COVERAGE, condition.minMeasuredCoveragePercent.toFloat())
+            .putBoolean(PREF_KEY_DATA_PURITY_REJECT_POOR, condition.rejectPoorQuality)
+            .apply()
+        refreshEstimateAsync()
+    }
+
+    /**
+     * 获取依据当前用户设置构建的标准参考工况实验协议实体。
+     */
+    fun getEffectiveReferenceProtocol(): EnergyReferenceProtocol {
+        return EnergyReferenceProtocol(
+            protocolVersion = "ERP-v1.0",
+            startSocCondition = getStartDischargeCondition(),
+            dataPurityCondition = getDataPurityCondition()
+        )
+    }
+
+    /**
      * 异步触发容量模型重新计算与状态更新。
      */
     fun refreshEstimateAsync() {
@@ -203,12 +275,22 @@ class BatteryCapacityManager private constructor(private val context: Context) {
         // 2. 从本地 SQLite 查询所有候选样本
         val allCandidates = candidateDbHelper.getAllCandidates()
 
-        // 依据用户设置的有效数据百分比门限与最新有效数据条数进行双重加权样本动态筛选
+        // 依据用户设置的有效数据百分比门限、最新有效数据条数、起始放电政策与数据纯度进行多维加权样本动态筛选
         // 遵循新方案：充放电双向样本共同入库并独立通道建模，放电为主，充电为辅
         val threshold = getEffectiveSocSpanThreshold()
         val countLimit = getEffectiveSampleCountLimit()
-        val eligibleCandidates = allCandidates.filter {
-            !it.isExcluded && it.socSpanPercent >= threshold && it.fccObservedMah > 0.0
+        val startCondition = getStartDischargeCondition()
+        val purityCondition = getDataPurityCondition()
+
+        val eligibleCandidates = allCandidates.filter { c ->
+            if (c.isExcluded || c.fccObservedMah <= 0.0) return@filter false
+            if (c.socSpanPercent < threshold) return@filter false
+            if (c.sessionType == CandidateSessionType.DISCHARGE) {
+                if (!startCondition.isSatisfied(c.startSoc)) return@filter false
+                val coveragePercent = c.qualityScore * 100.0
+                if (coveragePercent < purityCondition.minMeasuredCoveragePercent) return@filter false
+            }
+            true
         }
         val qualifiedCandidates = if (countLimit > 0) eligibleCandidates.take(countLimit) else eligibleCandidates
 
@@ -439,12 +521,16 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                 }
 
                 val isDualCell = CurrentCalibrationManager.isDualCellEnabled(context)
+                val authChargeMah = record.getNetChargeMah()?.toDouble()
+                val authEnergyWh = record.chargedEnergyWh.toDouble().takeIf { it > 0.0 }
                 val candidateSample = ChargeCapacityEstimator.buildCandidate(
                     sessionId = record.id.toString(),
                     samples = samples,
                     startSoc = startSoc,
                     endSoc = endSoc,
-                    isDualCell = isDualCell
+                    isDualCell = isDualCell,
+                    authoritativeChargeMah = authChargeMah,
+                    authoritativeEnergyWh = authEnergyWh
                 )
 
                 val candidate = CapacityCandidate(
@@ -594,7 +680,14 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                 val isDualCell = CurrentCalibrationManager.isDualCellEnabled(context)
 
                 for (record in chargingRecords) {
-                    if (existingIds.contains(record.id)) continue
+                    val authChargeMah = record.getNetChargeMah()?.toDouble()
+                    val authEnergyWh = record.chargedEnergyWh.toDouble().takeIf { it > 0.0 }
+                    val existingCandidate = existingCandidates.firstOrNull { it.id == record.id }
+                    val isCandidateDeviated = if (existingCandidate != null && authChargeMah != null && authChargeMah > 0.0) {
+                        kotlin.math.abs(existingCandidate.netBatteryChargeMah - authChargeMah) / authChargeMah > 0.05
+                    } else false
+
+                    if (existingCandidate != null && !isCandidateDeviated) continue
                     val startSocLvl = record.startLevel
                     val endSocLvl = record.getEffectiveEndLevel()
                     if (endSocLvl <= startSocLvl) continue
@@ -630,7 +723,9 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                         samples = samples,
                         startSoc = startSoc,
                         endSoc = endSoc,
-                        isDualCell = isDualCell
+                        isDualCell = isDualCell,
+                        authoritativeChargeMah = authChargeMah,
+                        authoritativeEnergyWh = authEnergyWh
                     )
 
                     val candidate = CapacityCandidate(
@@ -744,6 +839,9 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                     insertedAny = true
                 }
 
+                // 扫描并自愈校准历史可能存在偏差的候选样本（如微元门限导致电量低估）
+                sanitizeHistoricalCandidates()
+
                 // 无论是否新入库样本，因为 20 段 SOC 能量曲线已在内存中全量吸收，均触发一次最新估计刷新
                 refreshEstimateInternal()
             } catch (e: Exception) {
@@ -753,11 +851,12 @@ class BatteryCapacityManager private constructor(private val context: Context) {
     }
 
     /**
-     * 自动扫描并迁移校准历史入库的异常放电候选样本。
+     * 自动扫描并迁移校准历史入库的异常放电与充电候选样本。
      *
-     * 解决技术痛点：由于早期未引入长待机去噪锚定，导致息屏唤醒电流尖峰被梯形积分严重放大（如 8017mAh vs 真实 5533mAh）。
-     * 扫描数据库中已归档的放电候选样本，若其关联的放电记录 [PowerUsageRecord] 存在且权威物理放电量与当前候选净电量绝对偏差超过 10%，
-     * 自动以权威物理放电账本重新校准该候选样本并持久化更新，彻底清除被污染的异常推算容量。
+     * 解决技术痛点：
+     * 1. 历史放电：早期未引入长待机去噪锚定，导致息屏唤醒电流尖峰被梯形积分严重放大；
+     * 2. 历史充电：微元切片门限过严导致息屏快充电量被切断丢弃（如 2595mAh vs 真实 4421mAh）。
+     * 自动以权威物理账本重新校准该候选样本并持久化更新，彻底清除被污染的异常推算容量。
      *
      * @return 成功校准并修复的异常历史样本数量
      */
@@ -765,12 +864,14 @@ class BatteryCapacityManager private constructor(private val context: Context) {
         var correctedCount = 0
         try {
             val powerDbHelper = com.battery.analysis.db.PowerUsageDbHelper.getInstance(context)
-            val candidates = candidateDbHelper.getAllCandidates().filter { it.sessionType == CandidateSessionType.DISCHARGE }
+            val chargingDbHelper = ChargingHistoryDbHelper.getInstance(context)
+            val candidates = candidateDbHelper.getAllCandidates()
             if (candidates.isEmpty()) return 0
 
             val isDualCell = CurrentCalibrationManager.isDualCellEnabled(context)
 
-            for (c in candidates) {
+            // 1. 扫描校准放电候选样本
+            for (c in candidates.filter { it.sessionType == CandidateSessionType.DISCHARGE }) {
                 val record = powerDbHelper.getRecordById(c.id) ?: continue
                 if (record.totalEnergyWh <= 0f) continue
 
@@ -826,6 +927,64 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                         plateauWh = candidateSample.topPlateau?.plateauWh ?: 0.0,
                         transitionMah = candidateSample.topPlateau?.transitionMah ?: 0.0,
                         transitionWh = candidateSample.topPlateau?.transitionWh ?: 0.0
+                    )
+                    candidateDbHelper.insertCandidate(updatedCandidate)
+                    correctedCount++
+                }
+            }
+
+            // 2. 扫描校准充电候选样本（解决因微元切片门限过严导致的息屏快充电量低估）
+            for (c in candidates.filter { it.sessionType == CandidateSessionType.CHARGE }) {
+                val record = chargingDbHelper.getRecordById(c.id) ?: continue
+                val authChargeMah = record.getNetChargeMah()?.toDouble() ?: continue
+                if (authChargeMah <= 0.0) continue
+
+                val diffRatio = kotlin.math.abs(c.netBatteryChargeMah - authChargeMah) / authChargeMah
+                if (diffRatio > 0.05) {
+                    val points = record.getSamplePoints()
+                    val startSocLvl = record.startLevel
+                    val endSocLvl = record.getEffectiveEndLevel()
+                    val startSoc = startSocLvl / 100.0
+                    val endSoc = endSocLvl / 100.0
+
+                    val samples = points.map { pt ->
+                        val currentA = if (pt.currentMa > 0f) {
+                            (pt.currentMa / 1000.0).toDouble()
+                        } else if (pt.voltageVolts > 0f && pt.powerWatts > 0f) {
+                            (pt.powerWatts / pt.voltageVolts).toDouble()
+                        } else {
+                            0.0
+                        }
+                        CapacitySample(
+                            timestampMs = pt.timestamp,
+                            socFraction = pt.batteryLevel / 100.0,
+                            currentAmp = currentA,
+                            voltageVolt = pt.voltageVolts.toDouble(),
+                            temperatureC = pt.temperature.toDouble(),
+                            isScreenOn = pt.isScreenOn,
+                            chargingStatus = ChargingStatus.CHARGING
+                        )
+                    }
+
+                    val authEnergyWh = record.chargedEnergyWh.toDouble().takeIf { it > 0.0 }
+                    val candidateSample = ChargeCapacityEstimator.buildCandidate(
+                        sessionId = record.id.toString(),
+                        samples = samples,
+                        startSoc = startSoc,
+                        endSoc = endSoc,
+                        isDualCell = isDualCell,
+                        authoritativeChargeMah = authChargeMah,
+                        authoritativeEnergyWh = authEnergyWh
+                    )
+
+                    val updatedCandidate = c.copy(
+                        netBatteryChargeMah = candidateSample.chargeMah,
+                        fccObservedMah = candidateSample.fccObservedMah,
+                        energyWh = candidateSample.energyWh,
+                        isExcluded = candidateSample.isExcluded,
+                        exclusionReason = candidateSample.exclusionReason,
+                        qualityScore = candidateSample.coverageRatio,
+                        avgVoltageVolts = candidateSample.avgVoltageVolts?.toFloat() ?: c.avgVoltageVolts
                     )
                     candidateDbHelper.insertCandidate(updatedCandidate)
                     correctedCount++

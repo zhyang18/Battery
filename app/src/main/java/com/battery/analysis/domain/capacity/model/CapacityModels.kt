@@ -1152,18 +1152,112 @@ enum class ImprovementSignificanceLevel {
 }
 
 /**
+ * 放电会话起始 SOC 准入政策枚举。
+ */
+enum class StartDischargePolicy(val description: String) {
+    /** 满电起步（要求放电起始 SOC 达到设定门限，默认 ≥ 95%） */
+    START_FROM_100_FULL("满电起步（起始 SOC ≥ 95%）"),
+
+    /** 任意电量起步（无起始 SOC 门限要求） */
+    ANY_SOC("任意电量起步")
+}
+
+/**
+ * 放电会话起始电量政策条件设置实体（StartDischargeCondition）。
+ *
+ * 遵循技术评审铁律：起始电量政策与门限必须严格显式化与可配置，
+ * 杜绝将 95% 等门限硬编码为不可变数字。
+ *
+ * @property policy 起始放电政策枚举 [StartDischargePolicy]
+ * @property minStartSocPercent 满电起步模式下允许的最低起始 SOC 百分比（默认 95%）
+ */
+data class StartDischargeCondition(
+    val policy: StartDischargePolicy = StartDischargePolicy.START_FROM_100_FULL,
+    val minStartSocPercent: Int = DEFAULT_MIN_START_SOC_PERCENT
+) {
+    /**
+     * 校验起始放电政策设置的合法性。
+     */
+    fun isValid(): Boolean {
+        return minStartSocPercent in 0..100
+    }
+
+    /**
+     * 判断样本的起始电量是否满足当前起始放电政策。
+     *
+     * @param startSoc 样本起始电量百分比（0..100）
+     * @return 若符合政策准入要求返回 true，否则返回 false
+     */
+    fun isSatisfied(startSoc: Int): Boolean {
+        if (!isValid()) return false
+        return when (policy) {
+            StartDischargePolicy.START_FROM_100_FULL -> startSoc >= minStartSocPercent
+            StartDischargePolicy.ANY_SOC -> true
+        }
+    }
+
+    companion object {
+        /** 默认满电起步最低起始 SOC 门限（95%） */
+        const val DEFAULT_MIN_START_SOC_PERCENT: Int = 95
+    }
+}
+
+/**
+ * 放电工况样本数据纯度条件设置实体（DataPurityCondition）。
+ *
+ * 遵循技术评审 P2-B3 铁律：
+ * 将分箱实测覆盖度门限与样本质量拦截准则提取为独立、可配置、自校验的显式条件设置，
+ * 杜绝将 80% 实测覆盖率硬编码为单一固定常量。
+ *
+ * @property minMeasuredCoveragePercent 分箱实测覆盖率最低百分比门限（0.0 ~ 100.0%，默认 80.0%）
+ * @property rejectPoorQuality 是否严格拒绝 DischargeQuality.REJECTED 样本（默认 true）
+ */
+data class DataPurityCondition(
+    val minMeasuredCoveragePercent: Double = DEFAULT_MIN_MEASURED_COVERAGE_PERCENT,
+    val rejectPoorQuality: Boolean = true
+) {
+    /**
+     * 校验数据纯度条件设置的合法性与物理自洽性。
+     */
+    fun isValid(): Boolean {
+        return !minMeasuredCoveragePercent.isNaN() && minMeasuredCoveragePercent in 0.0..100.0
+    }
+
+    /**
+     * 判断样本的分箱实测覆盖率与质检评级是否满足当前数据纯度条件。
+     *
+     * @param measuredEnergyCoverage 分箱实测覆盖率百分比（0.0 ~ 100.0%）
+     * @param quality 样本综合质检分级 [DischargeQuality]
+     * @return 若满足纯度要求返回 true，否则返回 false
+     */
+    fun isSatisfied(measuredEnergyCoverage: Double, quality: DischargeQuality): Boolean {
+        if (!isValid()) return false
+        if (measuredEnergyCoverage < minMeasuredCoveragePercent) return false
+        if (rejectPoorQuality && quality == DischargeQuality.REJECTED) return false
+        return true
+    }
+
+    companion object {
+        /** 默认分箱实测覆盖率最低门限（80.0%） */
+        const val DEFAULT_MIN_MEASURED_COVERAGE_PERCENT: Double = 80.0
+    }
+}
+
+/**
  * 标准参考工况实验协议实体（EnergyReferenceProtocol）。
  *
  * 遵循技术评审 P2-B3 铁律：
  * 完整规范标准工况的各项物理政策与可信准入标准，
- * 包含参考工况物理允许区间、放电截止政策、100% 满电平台政策、边界过渡段政策及实测分箱覆盖要求。
+ * 包含参考工况物理允许区间、起始放电政策、数据纯度门限、放电截止政策、100% 满电平台政策、边界过渡段政策及实测分箱覆盖要求。
  *
  * @property protocolVersion 协议版本号（如 "ERP-v1.0"）
  * @property targetRange 参考工况物理允许区间范围 [ReferenceConditionRange]
  * @property targetTemperatureC 单点参考温度（摄氏度 ℃，向前兼容可选）
  * @property targetCurrentMa 单点参考电流（毫安 mA，向前兼容可选）
  * @property targetPowerW 单点参考功率（瓦 W，可选）
- * @property startSocPolicy 起始 SOC 准入协议（如 "START_FROM_100_FULL"）
+ * @property startSocCondition 起始放电政策条件设置 [StartDischargeCondition]
+ * @property dataPurityCondition 数据纯度条件设置 [DataPurityCondition]
+ * @property startSocPolicy 起始 SOC 准入协议名称（兼容旧字符串，如 "START_FROM_100_FULL"）
  * @property cutoffPolicy 放电截止条件枚举政策 [DischargeCutoffPolicy]
  * @property dischargeEndPolicy 放电终止事件政策描述文本
  * @property topPlateauPolicy 100% 满电平台处理政策 [TopPlateauNormalizationPolicy]
@@ -1192,7 +1286,9 @@ data class EnergyReferenceProtocol(
     val targetTemperatureC: Double? = 25.0,
     val targetCurrentMa: Double? = 1000.0,
     val targetPowerW: Double? = null,
-    val startSocPolicy: String = "START_FROM_100_FULL",
+    val startSocCondition: StartDischargeCondition = StartDischargeCondition(),
+    val dataPurityCondition: DataPurityCondition = DataPurityCondition(),
+    val startSocPolicy: String = startSocCondition.policy.name,
     val cutoffPolicy: DischargeCutoffPolicy = DischargeCutoffPolicy.NORMAL_SYSTEM_SHUTDOWN,
     val dischargeEndPolicy: String = "NORMAL_SYSTEM_SHUTDOWN",
     val topPlateauPolicy: TopPlateauNormalizationPolicy = TopPlateauNormalizationPolicy.EXCLUDE_FROM_CURVE,
@@ -1209,6 +1305,24 @@ data class EnergyReferenceProtocol(
     val terminationObserved: Boolean = false
 ) {
     /**
+     * 实际生效的起始放电政策设置实体。
+     * 若调用方通过旧字段 [startSocPolicy] 字符串传入了不同的策略，自适应同步解析更新。
+     */
+    val effectiveStartSocCondition: StartDischargeCondition
+        get() {
+            val policyFromStr = try {
+                StartDischargePolicy.valueOf(startSocPolicy)
+            } catch (_: Exception) {
+                startSocCondition.policy
+            }
+            return if (policyFromStr != startSocCondition.policy) {
+                startSocCondition.copy(policy = policyFromStr)
+            } else {
+                startSocCondition
+            }
+        }
+
+    /**
      * 校验整套参考实验协议的自洽性与合法性。
      *
      * @return 协议是否自洽合法
@@ -1216,6 +1330,8 @@ data class EnergyReferenceProtocol(
     fun isProtocolValid(): Boolean {
         if (protocolVersion.isBlank()) return false
         if (!targetRange.isValid()) return false
+        if (!effectiveStartSocCondition.isValid()) return false
+        if (!dataPurityCondition.isValid()) return false
         if (requiredMeasuredBins.isEmpty()) return false
         if (terminationObserved) {
             // 若标明已观测终止，必须具备完整的物理终止证据（时间戳、电压、SOC均不可为空且有效）
@@ -1243,13 +1359,13 @@ data class EnergyReferenceProtocol(
         val cur = sample.condition.averageDischargeCurrentMa ?: sample.condition.currentP50Ma ?: return false
         if (!targetRange.contains(temp, cur)) return false
 
-        // 2. 检查起始与终止 SOC 政策要求（若要求满电放电则 startSoc 至少达到 95%）
-        if (startSocPolicy == "START_FROM_100_FULL" && sample.startSoc < 95) {
+        // 2. 检查起始与终止 SOC 政策要求（通过 StartDischargeCondition 校验）
+        if (!effectiveStartSocCondition.isSatisfied(sample.startSoc)) {
             return false
         }
 
-        // 3. 检查实测分箱覆盖度与质检评级
-        if (sample.measuredEnergyCoverage < 80.0 || sample.quality == DischargeQuality.REJECTED) {
+        // 3. 检查实测分箱覆盖度与质检评级（通过 DataPurityCondition 校验）
+        if (!dataPurityCondition.isSatisfied(sample.measuredEnergyCoverage, sample.quality)) {
             return false
         }
 

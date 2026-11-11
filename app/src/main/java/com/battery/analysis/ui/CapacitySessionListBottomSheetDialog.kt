@@ -17,6 +17,9 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.battery.analysis.R
 import com.battery.analysis.db.CapacityCandidateDbHelper
+import com.battery.analysis.domain.capacity.model.DataPurityCondition
+import com.battery.analysis.domain.capacity.model.StartDischargeCondition
+import com.battery.analysis.domain.capacity.model.StartDischargePolicy
 import com.battery.analysis.manager.BatteryCapacityManager
 import com.battery.analysis.model.CandidateSessionType
 import com.battery.analysis.model.CapacityCandidate
@@ -41,6 +44,8 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
     private var allCandidates: List<CapacityCandidate> = emptyList()
     private var currentThreshold: Int = 15
     private var currentCountLimit: Int = 10
+    private var currentStartCondition: StartDischargeCondition = StartDischargeCondition()
+    private var currentPurityCondition: DataPurityCondition = DataPurityCondition()
     private var isOnlyMeetsThreshold: Boolean = false
     private lateinit var sessionPageAdapter: SessionPageAdapter
     private var viewPager: ViewPager2? = null
@@ -153,6 +158,13 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             toggleThresholdFilter()
         }
         updateThresholdFilterButtonUI()
+
+        view.findViewById<TextView>(R.id.btn_session_conditions)?.setOnClickListener {
+            showConditionsMenuDialog()
+        }
+        view.findViewById<TextView>(R.id.tv_session_list_subtitle)?.setOnClickListener {
+            showConditionsMenuDialog()
+        }
 
         val vp = view.findViewById<ViewPager2>(R.id.vp_capacity_sessions)
         viewPager = vp
@@ -289,6 +301,8 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             val manager = BatteryCapacityManager.getInstance(ctx)
             currentThreshold = manager.getEffectiveSocSpanThreshold()
             currentCountLimit = manager.getEffectiveSampleCountLimit()
+            currentStartCondition = manager.getStartDischargeCondition()
+            currentPurityCondition = manager.getDataPurityCondition()
 
             allCandidates = withContext(Dispatchers.IO) {
                 // 加载前自动执行历史虚高异常放电样本自愈校准，确保呈现给用户的皆为物理真值
@@ -300,16 +314,28 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
     }
 
     /**
+     * 判断单条样本是否满足当前设定的全部自学习准入条件（跨度、起始政策、数据纯度）。
+     */
+    private fun isCandidateEligible(candidate: CapacityCandidate): Boolean {
+        if (candidate.isExcluded || candidate.fccObservedMah <= 0.0) return false
+        if (candidate.socSpanPercent < currentThreshold) return false
+        if (candidate.sessionType == CandidateSessionType.DISCHARGE) {
+            if (!currentStartCondition.isSatisfied(candidate.startSoc)) return false
+            val coveragePercent = candidate.qualityScore * 100.0
+            if (coveragePercent < currentPurityCondition.minMeasuredCoveragePercent) return false
+        }
+        return true
+    }
+
+    /**
      * 将候选样本数据按分类（全部、充电、放电）及当前门限过滤状态分发至 ViewPager2 的各个子页面，并同步更新副标题统计和 Tab 数量。
      */
     private fun applyDataToPages() {
-        val eligibleCandidates = allCandidates.filter {
-            !it.isExcluded && it.socSpanPercent >= currentThreshold && it.fccObservedMah > 0.0
-        }
+        val eligibleCandidates = allCandidates.filter { isCandidateEligible(it) }
         val includedIds = (if (currentCountLimit > 0) eligibleCandidates.take(currentCountLimit) else eligibleCandidates).map { it.id }.toSet()
 
         val filteredCandidates = if (isOnlyMeetsThreshold) {
-            allCandidates.filter { !it.isExcluded && it.socSpanPercent >= currentThreshold }
+            allCandidates.filter { isCandidateEligible(it) }
         } else {
             allCandidates
         }
@@ -322,17 +348,21 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             dischargeData = dischargeList,
             threshold = currentThreshold,
             includedIds = includedIds,
-            countLimit = currentCountLimit
+            countLimit = currentCountLimit,
+            startCondition = currentStartCondition,
+            purityCondition = currentPurityCondition
         )
 
         val totalCount = allCandidates.size
-        val validCount = allCandidates.count { !it.isExcluded && it.socSpanPercent >= currentThreshold }
+        val validCount = eligibleCandidates.size
         val subtitle = view?.findViewById<TextView>(R.id.tv_session_list_subtitle)
-        if (currentCountLimit > 0 && validCount > currentCountLimit) {
-            subtitle?.text = getString(R.string.capacity_session_subtitle_format_with_limit, totalCount, validCount, currentCountLimit, currentThreshold)
-        } else {
-            subtitle?.text = getString(R.string.capacity_session_subtitle_format, totalCount, validCount, currentThreshold)
+        val startPolicyDesc = when (currentStartCondition.policy) {
+            StartDischargePolicy.START_FROM_100_FULL -> "起始≥${currentStartCondition.minStartSocPercent}%"
+            StartDischargePolicy.ANY_SOC -> "任意起步"
         }
+        val purityDesc = "纯度≥${currentPurityCondition.minMeasuredCoveragePercent.toInt()}%"
+        val limitDesc = if (currentCountLimit > 0 && validCount > currentCountLimit) "纳入最新 ${currentCountLimit} 条 · " else ""
+        subtitle?.text = "共 $totalCount 次 · $validCount 次达标 (${limitDesc}跨度>${currentThreshold}% · $startPolicyDesc · $purityDesc) ⚙️"
 
         val tabAll = view?.findViewById<TextView>(R.id.tab_session_all)
         val tabCharge = view?.findViewById<TextView>(R.id.tab_session_charge)
@@ -452,6 +482,64 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
     }
 
     /**
+     * 弹出准入条件快速设置选择框，支持一键切换跨度门限、时效条数、起始放电政策与数据纯度。
+     */
+    private fun showConditionsMenuDialog() {
+        val ctx = context ?: return
+        val startDesc = when (currentStartCondition.policy) {
+            StartDischargePolicy.START_FROM_100_FULL -> "满电 ≥${currentStartCondition.minStartSocPercent}%"
+            StartDischargePolicy.ANY_SOC -> "任意起步"
+        }
+        val countDesc = if (currentCountLimit > 0) "最新 $currentCountLimit 条" else "全部数据"
+        val purityDesc = "实测纯度 ≥${currentPurityCondition.minMeasuredCoveragePercent.toInt()}%"
+
+        val options = arrayOf(
+            "1. 跨度门限: 当前 > ${currentThreshold}%",
+            "2. 时效条数: 当前 $countDesc",
+            "3. 起始放电政策: 当前 $startDesc",
+            "4. 数据纯度门限: 当前 $purityDesc"
+        )
+
+        AlertDialog.Builder(ctx)
+            .setTitle(getString(R.string.discharge_filter_label))
+            .setItems(options) { dialog, which ->
+                dialog.dismiss()
+                when (which) {
+                    0 -> {
+                        val picker = CapacityThresholdPickerBottomSheetDialog()
+                        picker.setOnThresholdSelectedListener {
+                            loadData()
+                        }
+                        picker.show(parentFragmentManager, "CapacityThresholdPickerBottomSheetDialog")
+                    }
+                    1 -> {
+                        val picker = CapacityCountPickerBottomSheetDialog()
+                        picker.setOnCountSelectedListener {
+                            loadData()
+                        }
+                        picker.show(parentFragmentManager, "CapacityCountPickerBottomSheetDialog")
+                    }
+                    2 -> {
+                        val picker = StartDischargePolicyBottomSheetDialog()
+                        picker.setOnPolicySelectedListener {
+                            loadData()
+                        }
+                        picker.show(parentFragmentManager, "StartDischargePolicyBottomSheetDialog")
+                    }
+                    3 -> {
+                        val picker = DataPurityPickerBottomSheetDialog()
+                        picker.setOnPuritySelectedListener {
+                            loadData()
+                        }
+                        picker.show(parentFragmentManager, "DataPurityPickerBottomSheetDialog")
+                    }
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    /**
      * ViewPager2 承载全部、充电、放电三大分类样本列表的分页适配器。
      *
      * @property formatTimeRange 起止时间格式化委托函数
@@ -471,13 +559,6 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
 
         /**
          * 更新所有页面的数据并触发子列表渲染。
-         *
-         * @param allData 全部样本列表
-         * @param chargeData 充电样本列表
-         * @param dischargeData 放电样本列表
-         * @param threshold 当前有效电量跨度门限
-         * @param includedIds 当前模型纳入计算的样本 ID 集合
-         * @param countLimit 当前有效条数时效窗口限制
          */
         fun updateAllPages(
             allData: List<CapacityCandidate>,
@@ -485,7 +566,9 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             dischargeData: List<CapacityCandidate>,
             threshold: Int,
             includedIds: Set<Long>,
-            countLimit: Int
+            countLimit: Int,
+            startCondition: StartDischargeCondition = StartDischargeCondition(),
+            purityCondition: DataPurityCondition = DataPurityCondition()
         ) {
             currentThreshold = threshold
             pageDataList[0] = allData
@@ -493,7 +576,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             pageDataList[2] = dischargeData
 
             for (i in 0..2) {
-                candidateAdapters[i].submitList(pageDataList[i], threshold, includedIds, countLimit)
+                candidateAdapters[i].submitList(pageDataList[i], threshold, includedIds, countLimit, startCondition, purityCondition)
                 attachedHolders[i]?.let { holder ->
                     bindPageHolder(holder, i)
                 }
@@ -591,6 +674,8 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
         private var threshold: Int = 15
         private var includedCandidateIds: Set<Long> = emptySet()
         private var countLimit: Int = 0
+        private var startCondition: StartDischargeCondition = StartDischargeCondition()
+        private var purityCondition: DataPurityCondition = DataPurityCondition()
 
         /**
          * 提交最新的候选样本列表并更新当前电量门限与有效时效名单。
@@ -599,17 +684,23 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
          * @param currentThreshold 当前生效的电量跨度最低门限百分比
          * @param includedIds 当前模型纳入计算的样本 ID 集合
          * @param limit 当前生效的有效条数窗口限制
+         * @param currentStartCondition 当前放电起始政策条件
+         * @param currentPurityCondition 当前放电数据纯度条件
          */
         fun submitList(
             list: List<CapacityCandidate>,
             currentThreshold: Int,
             includedIds: Set<Long> = emptySet(),
-            limit: Int = 0
+            limit: Int = 0,
+            currentStartCondition: StartDischargeCondition = StartDischargeCondition(),
+            currentPurityCondition: DataPurityCondition = DataPurityCondition()
         ) {
             items = list
             threshold = currentThreshold
             includedCandidateIds = includedIds
             countLimit = limit
+            startCondition = currentStartCondition
+            purityCondition = currentPurityCondition
             notifyDataSetChanged()
         }
 
@@ -650,6 +741,8 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
 
             // 3. 状态标签与排除说明
             val meetsThreshold = item.socSpanPercent >= threshold
+            val meetsStartPolicy = item.sessionType != CandidateSessionType.DISCHARGE || startCondition.isSatisfied(item.startSoc)
+            val meetsPurity = item.sessionType != CandidateSessionType.DISCHARGE || (item.qualityScore * 100.0 >= purityCondition.minMeasuredCoveragePercent)
             val isWithinWindow = includedCandidateIds.contains(item.id)
             when {
                 item.isExcluded -> {
@@ -662,7 +755,19 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
                     holder.tvStatus.text = holder.itemView.context.getString(R.string.capacity_session_status_below_threshold)
                     holder.tvStatus.setTextColor(Color.parseColor("#64748b"))
                     holder.tvReason.visibility = View.VISIBLE
-                    holder.tvReason.text = "${item.socSpanPercent}% <= $threshold%"
+                    holder.tvReason.text = "${item.socSpanPercent}% < $threshold%"
+                }
+                !meetsStartPolicy -> {
+                    holder.tvStatus.text = holder.itemView.context.getString(R.string.capacity_session_status_below_threshold)
+                    holder.tvStatus.setTextColor(Color.parseColor("#64748b"))
+                    holder.tvReason.visibility = View.VISIBLE
+                    holder.tvReason.text = "起始电量未达政策要求 (${item.startSoc}% < ${startCondition.minStartSocPercent}%)"
+                }
+                !meetsPurity -> {
+                    holder.tvStatus.text = holder.itemView.context.getString(R.string.capacity_session_status_below_threshold)
+                    holder.tvStatus.setTextColor(Color.parseColor("#64748b"))
+                    holder.tvReason.visibility = View.VISIBLE
+                    holder.tvReason.text = String.format(Locale.US, "数据纯度不足 (%.1f%% < %.0f%%)", item.qualityScore * 100.0, purityCondition.minMeasuredCoveragePercent)
                 }
                 countLimit > 0 && !isWithinWindow -> {
                     holder.tvStatus.text = holder.itemView.context.getString(R.string.capacity_session_status_exceeded_window)

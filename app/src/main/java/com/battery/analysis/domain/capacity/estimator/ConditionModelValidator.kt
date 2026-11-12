@@ -330,7 +330,7 @@ object ConditionModelValidator {
 
         if (refTarget == null || validRefSessions.isEmpty()) {
             return ConditionModelValidation(
-                modelVersion = "FCC-E-v1.1",
+                modelVersion = "FCC-E-v1.2",
                 maturity = ConditionModelMaturity.VALIDATING,
                 trainingGroupCount = trainingSamples.groupBy { it.identity?.sessionGroupId ?: it.sessionId }.size,
                 validationGroupCount = validationSamples.groupBy { it.identity?.sessionGroupId ?: it.sessionId }.size,
@@ -354,7 +354,7 @@ object ConditionModelValidator {
             baselinePredictions = basePreds,
             normalizedPredictions = normPreds,
             referenceTargetsWh = targets,
-            modelVersion = "FCC-E-v1.1",
+            modelVersion = "FCC-E-v1.2",
             bootstrapIterations = bootstrapIterations,
             randomSeed = randomSeed
         )

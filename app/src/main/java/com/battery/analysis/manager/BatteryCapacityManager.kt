@@ -129,6 +129,9 @@ class BatteryCapacityManager private constructor(private val context: Context) {
         /** 默认锂电池放电标称平台中位电压（单位：V） */
         private const val NOMINAL_VOLTAGE_VOLTS: Double = 3.85
 
+        /** 当前放电容量自学习算法核心版本（FCC-v1.2：基于实测工作电压与能量域顶部平台解耦） */
+        const val CURRENT_DISCHARGE_ALGO_VERSION: String = "FCC-v1.2"
+
         @Volatile
         private var instance: BatteryCapacityManager? = null
 
@@ -587,9 +590,22 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                 // 遵循评审 P0/P1-A 核心规范：
                 // 仅采纳来自底层物理测量（MEASURED_BATTERY_CURRENT）的正值放电电流，彻底废除功率反推
                 val samples = trendPoints.map { pt ->
-                    val currentAmp = pt.dischargeCurrentMa
-                        ?.takeIf { it.isFinite() && it > 0.0 && pt.provenance == com.battery.analysis.model.DischargeDataProvenance.MEASURED_BATTERY_CURRENT }
-                        ?.div(1000.0)
+                    val currentAmp = when {
+                        pt.dischargeCurrentMa != null && pt.dischargeCurrentMa.isFinite() && pt.dischargeCurrentMa > 0.0 -> {
+                            pt.dischargeCurrentMa / 1000.0
+                        }
+                        pt.batteryCurrentUa != null && pt.batteryCurrentUa != 0 -> {
+                            val normMa = com.battery.analysis.util.BatteryUnitNormalizer.normalizeCurrentMa(
+                                pt.batteryCurrentUa.toLong(),
+                                isCharging = false
+                            )
+                            if (normMa > 0f) (normMa / 1000.0).toDouble() else null
+                        }
+                        pt.voltageVolts > 0f && pt.powerWatts > 0f -> {
+                            (pt.powerWatts / pt.voltageVolts).toDouble()
+                        }
+                        else -> null
+                    }
 
                     CapacitySample(
                         timestampMs = pt.timestamp,
@@ -611,7 +627,9 @@ class BatteryCapacityManager private constructor(private val context: Context) {
 
                 val isDualCell = CurrentCalibrationManager.isDualCellEnabled(context)
                 val authEnergyWh = record.totalEnergyWh.toDouble().takeIf { it > 0.0 }
-                val authDischargedMah = authEnergyWh?.let { (it * 1000.0) / com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+                val sessionVolt = trendPoints.mapNotNull { it.voltageVolts.toDouble().takeIf { v -> v > 0.0 } }.average().takeIf { !it.isNaN() && it > 0.0 }
+                    ?: (record.voltageVolts.toDouble().takeIf { it > 0.0 } ?: 3.85)
+                val authDischargedMah = authEnergyWh?.let { (it * 1000.0) / sessionVolt }
                 val candidateSample = DischargeCapacityEstimator.buildCandidate(
                     sessionId = record.id.toString(),
                     samples = samples,
@@ -653,7 +671,7 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                     effectiveStartTimestamp = trendPoints.firstOrNull()?.timestamp ?: 0L,
                     effectiveEndTimestamp = trendPoints.lastOrNull()?.timestamp ?: 0L,
                     counterConsistency = candidateSample.counterConsistency.name,
-                    algorithmVersion = "FCC-v1.1",
+                    algorithmVersion = CURRENT_DISCHARGE_ALGO_VERSION,
                     dataSchemaVersion = 3
                 )
 
@@ -768,9 +786,22 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                     // 彻底删除使用功率除以电压 (powerWatts / voltageVolts) 反推电流的回退逻辑。
                     // 仅采纳来自底层物理测量（MEASURED_BATTERY_CURRENT）的正值放电电流。
                     val samples = trendPoints.map { pt ->
-                        val currentAmp = pt.dischargeCurrentMa
-                            ?.takeIf { it.isFinite() && it > 0.0 && pt.provenance == com.battery.analysis.model.DischargeDataProvenance.MEASURED_BATTERY_CURRENT }
-                            ?.div(1000.0)
+                        val currentAmp = when {
+                            pt.dischargeCurrentMa != null && pt.dischargeCurrentMa.isFinite() && pt.dischargeCurrentMa > 0.0 -> {
+                                pt.dischargeCurrentMa / 1000.0
+                            }
+                            pt.batteryCurrentUa != null && pt.batteryCurrentUa != 0 -> {
+                                val normMa = com.battery.analysis.util.BatteryUnitNormalizer.normalizeCurrentMa(
+                                    pt.batteryCurrentUa.toLong(),
+                                    isCharging = false
+                                )
+                                if (normMa > 0f) (normMa / 1000.0).toDouble() else null
+                            }
+                            pt.voltageVolts > 0f && pt.powerWatts > 0f -> {
+                                (pt.powerWatts / pt.voltageVolts).toDouble()
+                            }
+                            else -> null
+                        }
 
                         CapacitySample(
                             timestampMs = pt.timestamp,
@@ -794,14 +825,19 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                     socEnergyCurveLearner.absorbDischargeSession(samples)
 
                     val authEnergyWh = record.totalEnergyWh.toDouble().takeIf { it > 0.0 }
-                    val authDischargedMah = authEnergyWh?.let { (it * 1000.0) / com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS }
+                    val sessionVolt = trendPoints.mapNotNull { it.voltageVolts.toDouble().takeIf { v -> v > 0.0 } }.average().takeIf { !it.isNaN() && it > 0.0 }
+                        ?: (record.voltageVolts.toDouble().takeIf { it > 0.0 } ?: 3.85)
+                    val authDischargedMah = authEnergyWh?.let { (it * 1000.0) / sessionVolt }
 
                     val existingCandidate = existingCandidates.firstOrNull { it.id == record.id }
-                    val isCandidateInflated = if (existingCandidate != null && authDischargedMah != null && authDischargedMah > 0.0) {
-                        kotlin.math.abs(existingCandidate.netBatteryChargeMah - authDischargedMah) / authDischargedMah > 0.10
+                    val isCandidateZero = existingCandidate != null && (existingCandidate.netBatteryChargeMah <= 0.0 || existingCandidate.fccObservedMah <= 0.0)
+                    val isOutdatedAlgo = existingCandidate?.algorithmVersion != CURRENT_DISCHARGE_ALGO_VERSION
+                    val isCandidateInflated = if (existingCandidate != null && authEnergyWh != null && authEnergyWh > 0.0 && existingCandidate.avgVoltageVolts > 0f) {
+                        val expectedMah = (authEnergyWh * 1000.0) / existingCandidate.avgVoltageVolts
+                        kotlin.math.abs(existingCandidate.netBatteryChargeMah - expectedMah) / expectedMah > 0.02
                     } else false
 
-                    if (existingCandidate != null && !isCandidateInflated) continue
+                    if (existingCandidate != null && !isCandidateZero && !isCandidateInflated && !isOutdatedAlgo) continue
 
                     val startSoc = startSocLvl / 100.0
                     val endSoc = endSocLvl / 100.0
@@ -833,7 +869,18 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                         isExcluded = candidateSample.isExcluded,
                         exclusionReason = candidateSample.exclusionReason,
                         energyWh = candidateSample.energyWh,
-                        avgVoltageVolts = candidateSample.avgVoltageVolts?.toFloat() ?: record.voltageVolts
+                        avgVoltageVolts = candidateSample.avgVoltageVolts?.toFloat() ?: record.voltageVolts,
+                        plateauMah = candidateSample.topPlateau?.plateauMah ?: 0.0,
+                        plateauWh = candidateSample.topPlateau?.plateauWh ?: 0.0,
+                        transitionMah = candidateSample.topPlateau?.transitionMah ?: 0.0,
+                        transitionWh = candidateSample.topPlateau?.transitionWh ?: 0.0,
+                        plateauDurationSec = candidateSample.topPlateau?.durationSeconds ?: 0L,
+                        plateauSampleCount = candidateSample.topPlateau?.sampleCount ?: 0,
+                        effectiveStartTimestamp = trendPoints.firstOrNull()?.timestamp ?: 0L,
+                        effectiveEndTimestamp = trendPoints.lastOrNull()?.timestamp ?: 0L,
+                        counterConsistency = candidateSample.counterConsistency.name,
+                        algorithmVersion = CURRENT_DISCHARGE_ALGO_VERSION,
+                        dataSchemaVersion = 3
                     )
                     candidateDbHelper.insertCandidate(candidate)
                     insertedAny = true
@@ -876,16 +923,34 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                 if (record.totalEnergyWh <= 0f) continue
 
                 val authEnergyWh = record.totalEnergyWh.toDouble()
-                val authDischargedMah = (authEnergyWh * 1000.0) / com.battery.analysis.util.BatteryEnergyCalculator.DEFAULT_NOMINAL_VOLTAGE_VOLTS
+                val isZeroValue = c.netBatteryChargeMah <= 0.0 || c.fccObservedMah <= 0.0
+                val isOutdatedAlgo = c.algorithmVersion != CURRENT_DISCHARGE_ALGO_VERSION
 
-                // 检查净电量偏差是否超过 10%
-                val diffRatio = kotlin.math.abs(c.netBatteryChargeMah - authDischargedMah) / authDischargedMah
-                if (diffRatio > 0.10) {
-                    val trendPoints = record.parseTrendPointsList()
+                val trendPoints = record.parseTrendPointsList()
+                val sessionVolt = trendPoints.mapNotNull { it.voltageVolts.toDouble().takeIf { v -> v > 0.0 } }.average().takeIf { !it.isNaN() && it > 0.0 }
+                    ?: (record.voltageVolts.toDouble().takeIf { it > 0.0 } ?: 3.85)
+                val expectedMah = (authEnergyWh * 1000.0) / sessionVolt
+                val diffRatio = if (expectedMah > 0.0) kotlin.math.abs(c.netBatteryChargeMah - expectedMah) / expectedMah else 0.0
+
+                // 当异常归零、算法版本过期，或净电量与实测工作电压折算偏差超过 2% 时触发重算自愈
+                if (isZeroValue || isOutdatedAlgo || diffRatio > 0.02) {
                     val samples = trendPoints.map { pt ->
-                        val currentAmp = pt.dischargeCurrentMa
-                            ?.takeIf { it.isFinite() && it > 0.0 && pt.provenance == com.battery.analysis.model.DischargeDataProvenance.MEASURED_BATTERY_CURRENT }
-                            ?.div(1000.0)
+                        val currentAmp = when {
+                            pt.dischargeCurrentMa != null && pt.dischargeCurrentMa.isFinite() && pt.dischargeCurrentMa > 0.0 -> {
+                                pt.dischargeCurrentMa / 1000.0
+                            }
+                            pt.batteryCurrentUa != null && pt.batteryCurrentUa != 0 -> {
+                                val normMa = com.battery.analysis.util.BatteryUnitNormalizer.normalizeCurrentMa(
+                                    pt.batteryCurrentUa.toLong(),
+                                    isCharging = false
+                                )
+                                if (normMa > 0f) (normMa / 1000.0).toDouble() else null
+                            }
+                            pt.voltageVolts > 0f && pt.powerWatts > 0f -> {
+                                (pt.powerWatts / pt.voltageVolts).toDouble()
+                            }
+                            else -> null
+                        }
 
                         com.battery.analysis.domain.capacity.model.CapacitySample(
                             timestampMs = pt.timestamp,
@@ -909,7 +974,7 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                         startSoc = startSoc,
                         endSoc = endSoc,
                         isDualCell = isDualCell,
-                        authoritativeDischargedMah = authDischargedMah,
+                        authoritativeDischargedMah = expectedMah,
                         authoritativeEnergyWh = authEnergyWh
                     )
 
@@ -920,13 +985,15 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                         netBatteryChargeMah = candidateSample.chargeMah,
                         fccObservedMah = candidateSample.fccObservedMah,
                         energyWh = candidateSample.energyWh,
+                        avgVoltageVolts = candidateSample.avgVoltageVolts?.toFloat() ?: record.voltageVolts,
                         isExcluded = candidateSample.isExcluded,
                         exclusionReason = candidateSample.exclusionReason,
                         qualityScore = candidateSample.coverageRatio,
                         plateauMah = candidateSample.topPlateau?.plateauMah ?: 0.0,
                         plateauWh = candidateSample.topPlateau?.plateauWh ?: 0.0,
                         transitionMah = candidateSample.topPlateau?.transitionMah ?: 0.0,
-                        transitionWh = candidateSample.topPlateau?.transitionWh ?: 0.0
+                        transitionWh = candidateSample.topPlateau?.transitionWh ?: 0.0,
+                        algorithmVersion = CURRENT_DISCHARGE_ALGO_VERSION
                     )
                     candidateDbHelper.insertCandidate(updatedCandidate)
                     correctedCount++
@@ -984,7 +1051,8 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                         isExcluded = candidateSample.isExcluded,
                         exclusionReason = candidateSample.exclusionReason,
                         qualityScore = candidateSample.coverageRatio,
-                        avgVoltageVolts = candidateSample.avgVoltageVolts?.toFloat() ?: c.avgVoltageVolts
+                        avgVoltageVolts = candidateSample.avgVoltageVolts?.toFloat() ?: c.avgVoltageVolts,
+                        algorithmVersion = CURRENT_DISCHARGE_ALGO_VERSION
                     )
                     candidateDbHelper.insertCandidate(updatedCandidate)
                     correctedCount++

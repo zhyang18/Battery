@@ -162,7 +162,7 @@ class SocEnergyCurveLearner {
                 estimatedSessionCount = estimatedSessionCount,
                 estimatedEnergySigmaWh = null,
                 allocationMethod = allocationMethod,
-                allocationAlgorithmVersion = "FCC-v1.1"
+                allocationAlgorithmVersion = "FCC-v1.2"
             )
         }
     }

@@ -102,7 +102,7 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
                 $COL_EFFECTIVE_START_TIME INTEGER NOT NULL DEFAULT 0,
                 $COL_EFFECTIVE_END_TIME INTEGER NOT NULL DEFAULT 0,
                 $COL_COUNTER_CONSISTENCY TEXT NOT NULL DEFAULT 'UNAVAILABLE',
-                $COL_ALGORITHM_VERSION TEXT NOT NULL DEFAULT 'FCC-v1.1',
+                $COL_ALGORITHM_VERSION TEXT NOT NULL DEFAULT 'FCC-v1.2',
                 $COL_DATA_SCHEMA_VERSION INTEGER NOT NULL DEFAULT 3
             )
         """.trimIndent()
@@ -137,7 +137,7 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
                 db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_EFFECTIVE_START_TIME INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_EFFECTIVE_END_TIME INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_COUNTER_CONSISTENCY TEXT NOT NULL DEFAULT 'UNAVAILABLE'")
-                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_ALGORITHM_VERSION TEXT NOT NULL DEFAULT 'FCC-v1.1'")
+                db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_ALGORITHM_VERSION TEXT NOT NULL DEFAULT 'FCC-v1.2'")
                 db.execSQL("ALTER TABLE $TABLE_NAME ADD COLUMN $COL_DATA_SCHEMA_VERSION INTEGER NOT NULL DEFAULT 3")
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -262,7 +262,7 @@ class CapacityCandidateDbHelper private constructor(context: Context) :
                     val effStartT = if (idxEffStartT >= 0 && !c.isNull(idxEffStartT)) c.getLong(idxEffStartT) else 0L
                     val effEndT = if (idxEffEndT >= 0 && !c.isNull(idxEffEndT)) c.getLong(idxEffEndT) else 0L
                     val consistencyStr = if (idxConsistency >= 0 && !c.isNull(idxConsistency)) c.getString(idxConsistency) else "UNAVAILABLE"
-                    val algVer = if (idxAlgVer >= 0 && !c.isNull(idxAlgVer)) c.getString(idxAlgVer) else "FCC-v1.1"
+                    val algVer = if (idxAlgVer >= 0 && !c.isNull(idxAlgVer)) c.getString(idxAlgVer) else "FCC-v1.2"
                     val schemaVer = if (idxSchemaVer >= 0 && !c.isNull(idxSchemaVer)) c.getInt(idxSchemaVer) else 3
 
                     list.add(

@@ -107,17 +107,28 @@ object DischargeCapacityEstimator {
         val segment = CoulombIntegrator.integrate(decoupled.effectiveSamples)
 
         // 物理主账本锚定与长待机采样漂移去噪校准：
-        // 若提供了主账本权威核算的真实物理放电量与能量（经过亮屏微积分与待机底噪去噪严格闭环），
-        // 优先采用权威物理值扣除 100% 顶部平台与过渡区后的有效区间电量，
-        // 坚决杜绝息屏深度休眠期间唤醒大电流被过宽 dt 盲目累加导致的虚假膨胀（Standby Current Inflation）
-        val (qMah, eWh) = if (authoritativeDischargedMah != null && authoritativeDischargedMah > 0.0) {
-            val qEffective = kotlin.math.max(0.0, authoritativeDischargedMah - decoupled.topPlateau.plateauMah - decoupled.topPlateau.transitionMah)
-            val eEffective = if (authoritativeEnergyWh != null && authoritativeEnergyWh > 0.0) {
-                kotlin.math.max(0.0, authoritativeEnergyWh - decoupled.topPlateau.plateauWh - decoupled.topPlateau.transitionWh)
+        // 若提供了主账本权威核算的真实物理能量（经过亮屏微积分与待机底噪去噪严格闭环），
+        // 优先在能量 Wh 维度扣除 100% 顶部平台与过渡区能量，并基于本场有效区间实测电荷加权平均电压还原真实物理电荷量，
+        // 坚决杜绝使用 3.85V 虚设标称电压引入的系统性偏差，同时杜绝息屏深度休眠期间唤醒大电流被过宽 dt 盲目累加导致的虚假膨胀（Standby Current Inflation）
+        val (qMah, eWh) = if (authoritativeEnergyWh != null && authoritativeEnergyWh > 0.0) {
+            val eEffective = kotlin.math.max(0.0, authoritativeEnergyWh - decoupled.topPlateau.plateauWh - decoupled.topPlateau.transitionWh)
+            val effectiveVolt = segment.avgVoltageVolts
+                ?: (if (segment.chargeMah > 0.0 && segment.energyWh > 0.0) segment.energyWh / (segment.chargeMah / 1000.0) else null)
+                ?: decoupled.effectiveSamples.mapNotNull { it.voltageVolt }.takeIf { it.isNotEmpty() }?.average()
+                ?: samples.mapNotNull { it.voltageVolt }.takeIf { it.isNotEmpty() }?.average()
+            val qEffective = if (effectiveVolt != null && effectiveVolt > 0.0) {
+                (eEffective * 1000.0) / effectiveVolt
+            } else if (authoritativeDischargedMah != null && authoritativeDischargedMah > 0.0) {
+                kotlin.math.max(0.0, authoritativeDischargedMah - decoupled.topPlateau.plateauMah - decoupled.topPlateau.transitionMah)
+            } else if (segment.chargeMah > 0.0) {
+                segment.chargeMah
             } else {
-                segment.energyWh
+                (eEffective * 1000.0) / 3.85
             }
             Pair(qEffective, eEffective)
+        } else if (authoritativeDischargedMah != null && authoritativeDischargedMah > 0.0) {
+            val qEffective = kotlin.math.max(0.0, authoritativeDischargedMah - decoupled.topPlateau.plateauMah - decoupled.topPlateau.transitionMah)
+            Pair(qEffective, segment.energyWh)
         } else {
             Pair(segment.chargeMah, segment.energyWh)
         }

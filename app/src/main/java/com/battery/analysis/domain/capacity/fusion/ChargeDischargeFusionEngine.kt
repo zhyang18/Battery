@@ -298,7 +298,7 @@ object ChargeDischargeFusionEngine {
             energyCurveCoverage = energyCoverage,
             channelConflictPercent = conflictPercent,
             isSameGaugeSource = true,
-            algorithmVersion = "FCC-v1.1",
+            algorithmVersion = "FCC-v1.2",
             updatedTimestampMs = System.currentTimeMillis(),
             energyCapacityResult = energyResult,
             isFusionFrozen = isFusionFrozen,

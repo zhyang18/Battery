@@ -129,7 +129,7 @@ class StartDischargePolicyBottomSheetDialog : BottomSheetDialogFragment() {
             )
             manager.setStartDischargeCondition(newCondition)
             onPolicySelectedListener?.invoke(newCondition)
-            Toast.makeText(ctx, getString(R.string.toast_start_discharge_policy_updated, selectedItem.valueLabel), Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, getString(R.string.toast_start_discharge_policy_updated, getString(selectedItem.labelResId)), Toast.LENGTH_SHORT).show()
             dismissWithSlideDownAnimation()
         }
 
@@ -149,15 +149,17 @@ class StartDischargePolicyBottomSheetDialog : BottomSheetDialogFragment() {
     private data class PolicyOptionItem(
         val policy: StartDischargePolicy,
         val minStartSoc: Int,
-        val valueLabel: String,
+        val labelResId: Int,
         val descResId: Int
     )
 
     private val policyOptions = listOf(
-        PolicyOptionItem(StartDischargePolicy.START_FROM_100_FULL, 95, "满电起步 (≥95%)", R.string.start_discharge_policy_desc_95),
-        PolicyOptionItem(StartDischargePolicy.START_FROM_100_FULL, 90, "满电起步 (≥90%)", R.string.start_discharge_policy_desc_90),
-        PolicyOptionItem(StartDischargePolicy.START_FROM_100_FULL, 85, "高电量起步 (≥85%)", R.string.start_discharge_policy_desc_85),
-        PolicyOptionItem(StartDischargePolicy.ANY_SOC, 0, "任意电量起步", R.string.start_discharge_policy_desc_any)
+        PolicyOptionItem(StartDischargePolicy.START_FROM_100_FULL, 95, R.string.start_discharge_policy_opt_95, R.string.start_discharge_policy_desc_95),
+        PolicyOptionItem(StartDischargePolicy.START_FROM_100_FULL, 90, R.string.start_discharge_policy_opt_90, R.string.start_discharge_policy_desc_90),
+        PolicyOptionItem(StartDischargePolicy.START_FROM_100_FULL, 85, R.string.start_discharge_policy_opt_85, R.string.start_discharge_policy_desc_85),
+        PolicyOptionItem(StartDischargePolicy.START_FROM_100_FULL, 50, R.string.start_discharge_policy_opt_50, R.string.start_discharge_policy_desc_50),
+        PolicyOptionItem(StartDischargePolicy.START_FROM_100_FULL, 30, R.string.start_discharge_policy_opt_30, R.string.start_discharge_policy_desc_30),
+        PolicyOptionItem(StartDischargePolicy.ANY_SOC, 0, R.string.start_discharge_policy_opt_any, R.string.start_discharge_policy_desc_any)
     )
 
     private class PolicyOptionAdapter(
@@ -177,7 +179,7 @@ class StartDischargePolicyBottomSheetDialog : BottomSheetDialogFragment() {
             val item = items[position]
             val isSelected = item == selectedItem
 
-            holder.tvValue.text = item.valueLabel
+            holder.tvValue.setText(item.labelResId)
             holder.tvDesc.setText(item.descResId)
 
             if (isSelected) {

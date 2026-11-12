@@ -128,7 +128,7 @@ class DataPurityPickerBottomSheetDialog : BottomSheetDialogFragment() {
             )
             manager.setDataPurityCondition(newCondition)
             onPuritySelectedListener?.invoke(newCondition)
-            Toast.makeText(ctx, getString(R.string.toast_data_purity_updated, selectedItem.valueLabel), Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, getString(R.string.toast_data_purity_updated, getString(selectedItem.labelResId)), Toast.LENGTH_SHORT).show()
             dismissWithSlideDownAnimation()
         }
 
@@ -147,15 +147,18 @@ class DataPurityPickerBottomSheetDialog : BottomSheetDialogFragment() {
 
     private data class PurityOptionItem(
         val minCoverage: Double,
-        val valueLabel: String,
+        val labelResId: Int,
         val descResId: Int
     )
 
     private val purityOptions = listOf(
-        PurityOptionItem(80.0, "实测纯度 ≥80%", R.string.data_purity_desc_80),
-        PurityOptionItem(70.0, "实测纯度 ≥70%", R.string.data_purity_desc_70),
-        PurityOptionItem(60.0, "实测纯度 ≥60%", R.string.data_purity_desc_60),
-        PurityOptionItem(50.0, "实测纯度 ≥50%", R.string.data_purity_desc_50)
+        PurityOptionItem(80.0, R.string.data_purity_opt_80, R.string.data_purity_desc_80),
+        PurityOptionItem(70.0, R.string.data_purity_opt_70, R.string.data_purity_desc_70),
+        PurityOptionItem(60.0, R.string.data_purity_opt_60, R.string.data_purity_desc_60),
+        PurityOptionItem(50.0, R.string.data_purity_opt_50, R.string.data_purity_desc_50),
+        PurityOptionItem(40.0, R.string.data_purity_opt_40, R.string.data_purity_desc_40),
+        PurityOptionItem(30.0, R.string.data_purity_opt_30, R.string.data_purity_desc_30),
+        PurityOptionItem(10.0, R.string.data_purity_opt_10, R.string.data_purity_desc_10)
     )
 
     private class PurityOptionAdapter(
@@ -175,7 +178,7 @@ class DataPurityPickerBottomSheetDialog : BottomSheetDialogFragment() {
             val item = items[position]
             val isSelected = item == selectedItem
 
-            holder.tvValue.text = item.valueLabel
+            holder.tvValue.setText(item.labelResId)
             holder.tvDesc.setText(item.descResId)
 
             if (isSelected) {

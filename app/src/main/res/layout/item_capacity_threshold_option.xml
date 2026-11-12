@@ -30,12 +30,17 @@
         android:id="@+id/tv_threshold_desc"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="10dp"
+        android:layout_marginStart="8dp"
+        android:layout_marginEnd="6dp"
         android:layout_weight="1"
         android:ellipsize="end"
         android:maxLines="1"
         android:textColor="?android:attr/textColorSecondary"
         android:textSize="11sp"
+        app:autoSizeMaxTextSize="11sp"
+        app:autoSizeMinTextSize="9sp"
+        app:autoSizeStepGranularity="0.5sp"
+        app:autoSizeTextType="uniform"
         tools:text="推荐 · 精度与收敛平衡" />
 
     <!-- 选中对勾状态图标 -->

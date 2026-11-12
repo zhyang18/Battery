@@ -53,7 +53,7 @@ object DischargeConditionDatasetBuilder {
             effectiveEndTimestampMs = endTs,
             topPlateauMah = candidate.topPlateau?.plateauMah ?: 0.0,
             topPlateauWh = candidate.topPlateau?.plateauWh ?: 0.0,
-            algorithmVersion = "FCC-v1.1",
+            algorithmVersion = "FCC-v1.2",
             dataSchemaVersion = 3
         )
     }

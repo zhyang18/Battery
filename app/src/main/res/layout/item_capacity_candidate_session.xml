@@ -31,24 +31,28 @@
                 android:background="@drawable/bg_diag_pill_badge"
                 android:paddingHorizontal="6dp"
                 android:paddingVertical="2dp"
-                android:singleLine="true"
+                android:maxLines="1"
                 android:textColor="#10b981"
                 android:textSize="10.5sp"
                 android:textStyle="bold"
-                tools:text="⚡ 充电会话" />
+                tools:text="⚡ 充电" />
 
             <TextView
                 android:id="@+id/tv_item_session_time"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:layout_marginEnd="6dp"
+                android:layout_marginStart="6dp"
+                android:layout_marginEnd="4dp"
                 android:layout_weight="1"
                 android:ellipsize="end"
-                android:singleLine="true"
+                android:maxLines="1"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="11sp"
-                tools:text="10-28 14:20 ~ 15:05" />
+                app:autoSizeMaxTextSize="11sp"
+                app:autoSizeMinTextSize="8.5sp"
+                app:autoSizeStepGranularity="0.5sp"
+                app:autoSizeTextType="uniform"
+                tools:text="11-05 20:07 ~ 11-06 07:05" />
 
             <TextView
                 android:id="@+id/tv_item_session_status"
@@ -57,7 +61,7 @@
                 android:background="@drawable/bg_diag_pill_badge"
                 android:paddingHorizontal="6dp"
                 android:paddingVertical="2dp"
-                android:singleLine="true"
+                android:maxLines="1"
                 android:textColor="#10b981"
                 android:textSize="10sp"
                 android:textStyle="bold"
@@ -93,7 +97,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:singleLine="true"
+                    android:maxLines="1"
                     android:text="@string/charging_detail_level_change"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="10.5sp" />
@@ -104,7 +108,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:ellipsize="end"
-                    android:singleLine="true"
+                    android:maxLines="1"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="13.5sp"
                     android:textStyle="bold"
@@ -123,7 +127,7 @@
                     android:layout_height="wrap_content"
                     android:gravity="end"
                     android:layout_gravity="end"
-                    android:singleLine="true"
+                    android:maxLines="1"
                     android:text="@string/capacity_item_fcc_label"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="10.5sp" />
@@ -135,7 +139,7 @@
                     android:layout_marginTop="2dp"
                     android:gravity="end"
                     android:layout_gravity="end"
-                    android:singleLine="true"
+                    android:maxLines="1"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="14sp"
                     android:textStyle="bold"
@@ -161,7 +165,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:singleLine="true"
+                android:maxLines="1"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="10.5sp"
                 tools:text="净电量: 4,030 mAh" />
@@ -170,7 +174,7 @@
                 android:id="@+id/tv_item_session_duration"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:singleLine="true"
+                android:maxLines="1"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="10.5sp"
                 tools:text="时长: 45m" />
@@ -180,7 +184,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="10dp"
-                android:singleLine="true"
+                android:maxLines="1"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="10.5sp"
                 tools:text="均温: 32.5℃" />

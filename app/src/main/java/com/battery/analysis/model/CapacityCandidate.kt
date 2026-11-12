@@ -59,7 +59,7 @@ data class CapacityCandidate(
     val effectiveStartTimestamp: Long = 0L,
     val effectiveEndTimestamp: Long = 0L,
     val counterConsistency: String = "UNAVAILABLE",
-    val algorithmVersion: String = "FCC-v1.1",
+    val algorithmVersion: String = "FCC-v1.2",
     val dataSchemaVersion: Int = 3
 ) {
     /**

@@ -1187,7 +1187,7 @@ class CapacityDomainTest {
             effectiveStartTimestamp = 2800L,
             effectiveEndTimestamp = 5000L,
             counterConsistency = CounterConsistency.AGREE.name,
-            algorithmVersion = "FCC-v1.1",
+            algorithmVersion = "FCC-v1.2",
             dataSchemaVersion = 3
         )
 
@@ -1196,7 +1196,7 @@ class CapacityDomainTest {
         assertEquals(1800L, candidate.plateauDurationSec)
         assertEquals(60, candidate.plateauSampleCount)
         assertEquals("AGREE", candidate.counterConsistency)
-        assertEquals("FCC-v1.1", candidate.algorithmVersion)
+        assertEquals("FCC-v1.2", candidate.algorithmVersion)
         assertEquals(3, candidate.dataSchemaVersion)
     }
 
@@ -2435,7 +2435,7 @@ class CapacityDomainTest {
         val acceptedHistory = AcceptedFccQ(
             fccMah = 7950.0,
             uncertaintyMah = 280.0,
-            algorithmVersion = "FCC-v1.1",
+            algorithmVersion = "FCC-v1.2",
             dataSchemaVersion = 3,
             acceptedTimestampMs = 1700000000000L,
             maturity = LearningMaturity.CONVERGED,
@@ -2468,7 +2468,7 @@ class CapacityDomainTest {
 
         // 验证历史实体完整透传，保留算法版本与审计证据
         assertNotNull(unified.acceptedFccQ)
-        assertEquals("FCC-v1.1", unified.acceptedFccQ!!.algorithmVersion)
+        assertEquals("FCC-v1.2", unified.acceptedFccQ!!.algorithmVersion)
         assertEquals(3, unified.acceptedFccQ!!.dataSchemaVersion)
         assertEquals(LearningMaturity.CONVERGED, unified.acceptedFccQ!!.maturity)
         assertTrue(unified.acceptedFccQ!!.acceptanceReason.contains("历史已通过双通道"))
@@ -3775,9 +3775,9 @@ class CapacityDomainTest {
 
         // 4. AcceptedFccQ 历史趋势发生显著下滑（从 5000mAh 跌到 4600mAh，降幅 8% 且超出不确定度）：AGING_DETECTED
         val acceptedHistory = listOf(
-            AcceptedFccQ(5000.0, 20.0, "FCC-v1.1", 3, 1700000000000L, LearningMaturity.STABLE),
-            AcceptedFccQ(4900.0, 20.0, "FCC-v1.1", 3, 1701000000000L, LearningMaturity.STABLE),
-            AcceptedFccQ(4600.0, 20.0, "FCC-v1.1", 3, 1702000000000L, LearningMaturity.STABLE)
+            AcceptedFccQ(5000.0, 20.0, "FCC-v1.2", 3, 1700000000000L, LearningMaturity.STABLE),
+            AcceptedFccQ(4900.0, 20.0, "FCC-v1.2", 3, 1701000000000L, LearningMaturity.STABLE),
+            AcceptedFccQ(4600.0, 20.0, "FCC-v1.2", 3, 1702000000000L, LearningMaturity.STABLE)
         )
         val historyStatus = ConditionComparisonMatcher.evaluateHistoryAgingTrend(acceptedHistory)
         assertEquals(AgingTrendStatus.AGING_DETECTED, historyStatus)
@@ -3945,9 +3945,9 @@ class CapacityDomainTest {
     @Test
     fun testP2B3_agingDetectionRequiresComparableHistory() {
         val nonComparableHistory = listOf(
-            AcceptedFccQ(5000.0, 20.0, "FCC-v1.1", 3, 1700000000000L, LearningMaturity.STABLE),
-            AcceptedFccQ(4900.0, 20.0, "FCC-v1.1", 3, 1701000000000L, LearningMaturity.STABLE),
-            AcceptedFccQ(4600.0, 20.0, "FCC-v1.1", 3, 1702000000000L, LearningMaturity.STABLE)
+            AcceptedFccQ(5000.0, 20.0, "FCC-v1.2", 3, 1700000000000L, LearningMaturity.STABLE),
+            AcceptedFccQ(4900.0, 20.0, "FCC-v1.2", 3, 1701000000000L, LearningMaturity.STABLE),
+            AcceptedFccQ(4600.0, 20.0, "FCC-v1.2", 3, 1702000000000L, LearningMaturity.STABLE)
         )
 
         // 显式传入 isComparableHistory = false（例如跨温区或不同放电倍率下的测试）
@@ -4281,18 +4281,18 @@ class CapacityDomainTest {
 
         // 1. 下降 180 mAh（降幅 3.6% 在 3%~5% 疑似区间，且 180 mAh 未达 5% 门限）：判定为 AGING_SUSPECTED
         val historyMild = listOf(
-            AcceptedFccQ(5000.0, sigmaOld, "FCC-v1.1", 3, 1700000000000L, LearningMaturity.STABLE),
-            AcceptedFccQ(4900.0, 45.0, "FCC-v1.1", 3, 1701000000000L, LearningMaturity.STABLE),
-            AcceptedFccQ(4820.0, sigmaNew, "FCC-v1.1", 3, 1702000000000L, LearningMaturity.STABLE)
+            AcceptedFccQ(5000.0, sigmaOld, "FCC-v1.2", 3, 1700000000000L, LearningMaturity.STABLE),
+            AcceptedFccQ(4900.0, 45.0, "FCC-v1.2", 3, 1701000000000L, LearningMaturity.STABLE),
+            AcceptedFccQ(4820.0, sigmaNew, "FCC-v1.2", 3, 1702000000000L, LearningMaturity.STABLE)
         )
         val statusMild = ConditionComparisonMatcher.evaluateHistoryAgingTrend(historyMild)
         assertEquals(AgingTrendStatus.AGING_SUSPECTED, statusMild)
 
         // 2. 下降 350 mAh（降幅 7% > 5% 且 350 > 2 * 64.03 = 128 mAh，单调持续）：确认 AGING_DETECTED
         val historySevere = listOf(
-            AcceptedFccQ(5000.0, sigmaOld, "FCC-v1.1", 3, 1700000000000L, LearningMaturity.STABLE),
-            AcceptedFccQ(4800.0, 45.0, "FCC-v1.1", 3, 1701000000000L, LearningMaturity.STABLE),
-            AcceptedFccQ(4650.0, sigmaNew, "FCC-v1.1", 3, 1702000000000L, LearningMaturity.STABLE)
+            AcceptedFccQ(5000.0, sigmaOld, "FCC-v1.2", 3, 1700000000000L, LearningMaturity.STABLE),
+            AcceptedFccQ(4800.0, 45.0, "FCC-v1.2", 3, 1701000000000L, LearningMaturity.STABLE),
+            AcceptedFccQ(4650.0, sigmaNew, "FCC-v1.2", 3, 1702000000000L, LearningMaturity.STABLE)
         )
         val statusSevere = ConditionComparisonMatcher.evaluateHistoryAgingTrend(historySevere)
         assertEquals(AgingTrendStatus.AGING_DETECTED, statusSevere)
@@ -4320,8 +4320,8 @@ class CapacityDomainTest {
     @Test
     fun testP2B3_singleDropCannotConfirmPermanentAging() {
         val twoMeasurements = listOf(
-            AcceptedFccQ(5000.0, 20.0, "FCC-v1.1", 3, 1700000000000L, LearningMaturity.STABLE),
-            AcceptedFccQ(4600.0, 20.0, "FCC-v1.1", 3, 1701000000000L, LearningMaturity.STABLE)
+            AcceptedFccQ(5000.0, 20.0, "FCC-v1.2", 3, 1700000000000L, LearningMaturity.STABLE),
+            AcceptedFccQ(4600.0, 20.0, "FCC-v1.2", 3, 1701000000000L, LearningMaturity.STABLE)
         )
         // 历史会话不足 3 条时，坚决返回数据不足，绝不轻率判定老化
         assertEquals(AgingTrendStatus.AGING_DATA_INSUFFICIENT, ConditionComparisonMatcher.evaluateHistoryAgingTrend(twoMeasurements))

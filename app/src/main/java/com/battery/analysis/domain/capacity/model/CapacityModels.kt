@@ -444,7 +444,7 @@ data class EnergyCapacityResult(
  * @property estimatedSessionCount 模型估算会话计数
  * @property estimatedEnergySigmaWh 模型估算能量不确定度标准差（Wh，若无严密统计依据则保持为 null）
  * @property allocationMethod 能量分配方法标识（如 DIRECT_MEASURED, CROSS_BIN_INTERPOLATION）
- * @property allocationAlgorithmVersion 分箱分配算法版本标识（如 FCC-v1.1）
+ * @property allocationAlgorithmVersion 分箱分配算法版本标识（如 FCC-v1.2）
  */
 data class SocEnergyBinInfo(
     val binIndex: Int,
@@ -469,7 +469,7 @@ data class SocEnergyBinInfo(
     val estimatedSessionCount: Int = if (status == BinLearningStatus.MODEL_ESTIMATED) sampleCount else 0,
     val estimatedEnergySigmaWh: Double? = null,
     val allocationMethod: String? = null,
-    val allocationAlgorithmVersion: String = "FCC-v1.1",
+    val allocationAlgorithmVersion: String = "FCC-v1.2",
     val binCondition: SocBinOperatingCondition? = null
 ) {
     /**
@@ -544,7 +544,7 @@ data class FccUnifiedEstimate(
     val energyCurveCoverage: Double = 0.0,
     val channelConflictPercent: Double? = null,
     val isSameGaugeSource: Boolean = true,
-    val algorithmVersion: String = "FCC-v1.1",
+    val algorithmVersion: String = "FCC-v1.2",
     val updatedTimestampMs: Long = System.currentTimeMillis(),
     val energyCapacityResult: EnergyCapacityResult? = null,
     val isFusionFrozen: Boolean = false,
@@ -562,7 +562,7 @@ data class FccUnifiedEstimate(
  *
  * @property fccMah 已确认的可信 FCC 容量（mAh）
  * @property uncertaintyMah 容量评估合成不确定度标准差（mAh）
- * @property algorithmVersion 生成该可信容量的算法版本（如 "FCC-v1.1"）
+ * @property algorithmVersion 生成该可信容量的算法版本（如 "FCC-v1.2"）
  * @property dataSchemaVersion 对应的数据结构版本号（如 3）
  * @property acceptedTimestampMs 确认采纳的时间戳（ms）
  * @property maturity 当时达到的成熟度状态 [LearningMaturity]
@@ -827,7 +827,7 @@ data class DischargeConditionSample(
     val effectiveEndTimestampMs: Long = sessionTimestampMs,
     val topPlateauMah: Double = 0.0,
     val topPlateauWh: Double = 0.0,
-    val algorithmVersion: String = "FCC-v1.1",
+    val algorithmVersion: String = "FCC-v1.2",
     val dataSchemaVersion: Int = 3,
     val identity: ConditionSampleIdentity? = null,
     val binMeasuredEnergiesWh: Map<Int, Double> = emptyMap(),
@@ -1516,7 +1516,7 @@ data class JointConditionSupport(
     val supportDetails: String = "",
     val featureScaleSource: String = "HISTORICAL_MIN_MAX",
     val supportCalibrationMethod: String = "EMPIRICAL_EUCLIDEAN_NEIGHBORHOOD",
-    val supportModelVersion: String = "FCC-v1.1"
+    val supportModelVersion: String = "FCC-v1.2"
 )
 
 /**

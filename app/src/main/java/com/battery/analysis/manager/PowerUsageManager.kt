@@ -4077,7 +4077,12 @@ class PowerUsageManager private constructor(private val context: Context) {
 
         // 优先检查并自愈本地是否存在未完结的 RUNNING 放电草稿会话
         val dbHelper = PowerUsageDbHelper.getInstance(context)
-        val runningSession = dbHelper.getRunningDischargeRecord()
+        val runningSession = try {
+            dbHelper.getRunningDischargeRecord()
+        } catch (e: Throwable) {
+            android.util.Log.e("PowerUsageManager", "获取进行中放电草稿失败，执行自愈降级", e)
+            null
+        }
         if (runningSession != null) {
             if (isCharging) {
                 // 场景 B：设备当前处于充电状态，严禁将进行中草稿保存为耗电记录，直接物理删除草稿并清理会话

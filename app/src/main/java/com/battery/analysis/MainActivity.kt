@@ -147,8 +147,12 @@ class MainActivity : AppCompatActivity() {
 
         // 7. 若启用了充放电统计，才执行充放电断层自愈对齐检测
         if (com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(this)) {
-            com.battery.analysis.manager.ChargingStatsManager.getInstance(this).checkAndReconcileChargingState()
-            com.battery.analysis.manager.PowerUsageManager.getInstance(this).checkAndReconcileDischargeState()
+            try {
+                com.battery.analysis.manager.ChargingStatsManager.getInstance(this).checkAndReconcileChargingState()
+                com.battery.analysis.manager.PowerUsageManager.getInstance(this).checkAndReconcileDischargeState()
+            } catch (e: Throwable) {
+                android.util.Log.e("MainActivity", "充放电状态核验自愈异常", e)
+            }
         }
 
         // 8. 检查并按需启动后台电池监控前台服务
@@ -469,10 +473,14 @@ class MainActivity : AppCompatActivity() {
         updateShizukuStatusState()
         val isStatsEnabled = com.battery.analysis.service.BatteryMonitorService.isChargeDischargeStatsEnabled(this)
         if (isStatsEnabled) {
-            com.battery.analysis.manager.ChargingStatsManager.getInstance(this).checkAndReconcileChargingState()
-            com.battery.analysis.manager.PowerUsageManager.getInstance(this).checkAndReconcileDischargeState()
-            val isCharging = com.battery.analysis.manager.ChargingStatsManager.getInstance(this).isCharging()
-            updateBottomNavPowerTab(isCharging)
+            try {
+                com.battery.analysis.manager.ChargingStatsManager.getInstance(this).checkAndReconcileChargingState()
+                com.battery.analysis.manager.PowerUsageManager.getInstance(this).checkAndReconcileDischargeState()
+                val isCharging = com.battery.analysis.manager.ChargingStatsManager.getInstance(this).isCharging()
+                updateBottomNavPowerTab(isCharging)
+            } catch (e: Throwable) {
+                android.util.Log.e("MainActivity", "前台恢复充放电状态核验异常", e)
+            }
         }
         if (com.battery.analysis.manager.FloatingWindowManager.isFloatingEnabled(this) &&
             com.battery.analysis.manager.FloatingWindowManager.canDrawOverlays(this)) {

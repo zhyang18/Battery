@@ -8,11 +8,17 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.FileProvider
+import com.battery.analysis.R
 import com.battery.analysis.model.PowerDischargePoint
 import com.battery.analysis.model.PowerUsageRecord
+import com.battery.analysis.util.DialogWindowHelper
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -232,7 +238,7 @@ object DischargeDataExportHelper {
     }
 
     /**
-     * 弹出导出成功的引导确认弹窗。
+     * 弹出导出成功的现代化圆角引导弹窗。
      *
      * @param activity 宿主 Activity
      * @param fileName 文件名称
@@ -251,28 +257,46 @@ object DischargeDataExportHelper {
         endSoc: Int,
         shareIntent: Intent?
     ) {
-        val message = "放电原始采样数据已成功生成！\n\n" +
-                "• 文件名称: $fileName\n" +
-                "• 保存路径: $filePath\n" +
-                "• 采样点数: $pointCount 个采样点\n" +
-                "• 放电跨度: $startSoc% → $endSoc%\n\n" +
-                "数据格式已符合 P2-B3.1-A 审计标准，可直接用于工况分析与容量回放。"
+        val dialogView = LayoutInflater.from(activity)
+            .inflate(R.layout.dialog_discharge_export_success, null)
 
-        val builder = AlertDialog.Builder(activity)
-            .setTitle("放电数据导出成功")
-            .setMessage(message)
-            .setPositiveButton("知道了") { dialog, _ ->
-                dialog.dismiss()
-                Toast.makeText(activity, "已保存至: $filePath", Toast.LENGTH_LONG).show()
-            }
+        dialogView.findViewById<TextView>(R.id.tv_export_point_count).text = "${pointCount} 个"
+        dialogView.findViewById<TextView>(R.id.tv_export_soc_span).text = "${startSoc}% → ${endSoc}%"
+        dialogView.findViewById<TextView>(R.id.tv_export_file_name).text = fileName
+        dialogView.findViewById<TextView>(R.id.tv_export_file_path).text = filePath
+
+        val dialog = AlertDialog.Builder(activity)
+            .setView(dialogView)
+            .create()
+
+        val btnShare = dialogView.findViewById<TextView>(R.id.btn_export_share)
+        val btnConfirm = dialogView.findViewById<TextView>(R.id.btn_export_confirm)
 
         if (shareIntent != null) {
-            builder.setNeutralButton("分享/发送") { dialog, _ ->
+            btnShare.visibility = View.VISIBLE
+            btnShare.setOnClickListener {
                 dialog.dismiss()
                 activity.startActivity(Intent.createChooser(shareIntent, "发送放电数据 CSV"))
             }
+        } else {
+            btnShare.visibility = View.GONE
+            (btnConfirm.layoutParams as? ViewGroup.MarginLayoutParams)?.let { lp ->
+                lp.marginStart = 0
+                btnConfirm.layoutParams = lp
+            }
         }
 
-        builder.show()
+        btnConfirm.setOnClickListener {
+            dialog.dismiss()
+            Toast.makeText(activity, "已保存至: $filePath", Toast.LENGTH_LONG).show()
+        }
+
+        dialog.show()
+        DialogWindowHelper.applyAdaptiveDialogWindowStyle(
+            dialog = dialog,
+            dialogView = dialogView,
+            widthRatio = 0.92,
+            maxHeightRatio = 0.90f
+        )
     }
 }

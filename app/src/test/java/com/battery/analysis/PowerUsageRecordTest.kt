@@ -258,4 +258,60 @@ class PowerUsageRecordTest {
         assertEquals("无点集时结束时间应为起始时间正向累加持续时长", endTs, recordNoPoints.getEffectiveEndTimeMs())
         assertTrue("结束时间绝不能早于或等于拔电起始时间", recordNoPoints.getEffectiveEndTimeMs() > recordNoPoints.getEffectiveStartTimeMs())
     }
+
+    /**
+     * 测试放电折线点 JSON 在超出 CursorWindow 安全阈值时的物理高保真抽稀与防溢出保护。
+     * 验证当点数多达 5000 点且 JSON 字符串长度超 500KB 时，经安全净化后点数被规范化为 1200 点以内，
+     * 且所有点均为真实采样的物理点，体积被严格限制在 500KB 以内。
+     */
+    @Test
+    fun testTrendPointsJsonSanitizationUnderCursorWindowLimit() {
+        val now = System.currentTimeMillis()
+        val bigArray = org.json.JSONArray()
+        for (i in 0 until 5000) {
+            val obj = org.json.JSONObject().apply {
+                put("ts", now + i * 1000L)
+                put("elapsed", i * 0.001)
+                put("lvl", 100 - (i / 100))
+                put("volt", 4.1 - (i * 0.0001))
+                put("temp", 30.0 + (i % 5))
+                put("pwr", 1.5 + (i % 3) * 0.5)
+                put("screenOn", (i % 2 == 0))
+                put("cur_ua", -300000)
+                put("cur_avg_ua", -290000)
+                put("cur_ma", 300.0)
+                put("src", "BATTERY_PROPERTIES")
+                put("pol", "NEGATIVE")
+                put("meas", true)
+                put("prov", "MEASURED_BATTERY_CURRENT")
+                put("cc", 2000000)
+            }
+            bigArray.put(obj)
+        }
+        val rawJson = bigArray.toString()
+        assertTrue("原始 5000 点 JSON 应显著超出 500KB 安全限制", rawJson.length > 500_000)
+
+        val sanitizedJson = com.battery.analysis.db.PowerUsageDbHelper.sanitizeTrendPointsJsonForStorage(rawJson)
+
+        assertTrue("净化后的 JSON 字符串长度必须小于 500KB", sanitizedJson.length <= 500_000)
+        val sanitizedArray = org.json.JSONArray(sanitizedJson)
+        assertTrue("净化后的采样点集数量必须控制在 1200 点以内", sanitizedArray.length() in 2..1200)
+
+        // 验证关键物理采样真实性：首点时间戳必须完全一致
+        val firstObj = sanitizedArray.getJSONObject(0)
+        assertEquals("抽稀后的首点时间戳必须忠实保留真实物理起点", now, firstObj.optLong("ts"))
+    }
+
+    /**
+     * 测试轻量列集定义完整性，验证其绝对排除超大 JSON 列，保障单行在 1KB 极低体积内运行。
+     */
+    @Test
+    fun testLightweightColumnsSafety() {
+        val lightCols = com.battery.analysis.db.PowerUsageDbHelper.SAFE_LIGHTWEIGHT_COLUMNS
+        assertTrue("轻量列集合必须包含主键 id", lightCols.contains("id"))
+        assertTrue("轻量列集合必须包含电量百分比", lightCols.contains("level_percent"))
+        assertTrue("轻量列集合必须包含平均功耗", lightCols.contains("avg_power_watts"))
+        assertTrue("轻量列集合严禁包含 trend_points_json", !lightCols.contains("trend_points_json"))
+        assertTrue("轻量列集合严禁包含 app_list_json", !lightCols.contains("app_list_json"))
+    }
 }

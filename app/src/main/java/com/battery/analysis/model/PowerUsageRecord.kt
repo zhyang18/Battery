@@ -866,9 +866,14 @@ data class PowerUsageRecord(
             val snapshot = fullPackage.batterySnapshot
             val overview = fullPackage.overviewStats
 
-            // 序列化应用列表
+            // 序列化应用列表（为数据库持久化控制尺寸，最多保留前 100 项按能耗排序的代表性应用，保障轻量安全）
             val appJsonArray = JSONArray()
-            fullPackage.appList.forEach { item ->
+            val safeAppList = if (fullPackage.appList.size > 100) {
+                fullPackage.appList.sortedByDescending { it.energyWh }.take(100)
+            } else {
+                fullPackage.appList
+            }
+            safeAppList.forEach { item ->
                 val obj = JSONObject().apply {
                     put("pkg", item.packageName)
                     put("name", item.appName)
@@ -889,8 +894,18 @@ data class PowerUsageRecord(
             }
 
             // 序列化放电折线点（高精度物理测量与来源标签同步归档）
+            // 针对历史快照存储，当点数超过 1200 点时，统一采用高保真均匀保留算法，
+            // 严格锁定起止点、工况跳变点、全局与局部波峰波谷，点集 100% 为底层真实物理采样，
+            // 同时将序列化体积严格约束在 300KB 以内，杜绝触发 Android CursorWindow 2MB 硬限制
+            val rawPoints = fullPackage.trendPoints
+            val targetPoints = if (rawPoints.size > 1200) {
+                com.battery.analysis.manager.PowerUsageManager.downsampleDischargeSamplesUniformly(rawPoints, targetCount = 1200)
+            } else {
+                rawPoints
+            }
+
             val trendJsonArray = JSONArray()
-            fullPackage.trendPoints.forEach { pt ->
+            targetPoints.forEach { pt ->
                 val obj = JSONObject().apply {
                     put("ts", pt.timestamp)
                     put("elapsed", pt.elapsedHours.toDouble())

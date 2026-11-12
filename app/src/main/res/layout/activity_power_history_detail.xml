@@ -88,7 +88,7 @@
             android:contentDescription="导出放电数据"
             android:focusable="true"
             android:padding="8dp"
-            android:src="@drawable/ic_backup_export"
+            android:src="@drawable/ic_export_csv"
             app:tint="?android:attr/textColorPrimary" />
 
         <!-- 删除按钮 -->

@@ -482,61 +482,104 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
     }
 
     /**
-     * 弹出准入条件快速设置选择框，支持一键切换跨度门限、时效条数、起始放电政策与数据纯度。
+     * 弹出准入条件快速设置选择框，采用与其他系统弹窗一致的圆角分层卡片风格，
+     * 直观展示并支持一键切换跨度门限、时效条数、起始放电政策与数据纯度。
      */
     private fun showConditionsMenuDialog() {
         val ctx = context ?: return
+        val dialogView = layoutInflater.inflate(R.layout.dialog_capacity_conditions_menu, null)
+
         val startDesc = when (currentStartCondition.policy) {
             StartDischargePolicy.START_FROM_100_FULL -> "满电 ≥${currentStartCondition.minStartSocPercent}%"
             StartDischargePolicy.ANY_SOC -> "任意起步"
         }
         val countDesc = if (currentCountLimit > 0) "最新 $currentCountLimit 条" else "全部数据"
         val purityDesc = "实测纯度 ≥${currentPurityCondition.minMeasuredCoveragePercent.toInt()}%"
+        val thresholdDesc = if (currentThreshold == 100) "100%" else "> ${currentThreshold}%"
 
-        val options = arrayOf(
-            "1. 跨度门限: 当前 > ${currentThreshold}%",
-            "2. 时效条数: 当前 $countDesc",
-            "3. 起始放电政策: 当前 $startDesc",
-            "4. 数据纯度门限: 当前 $purityDesc"
-        )
+        val tvThresholdVal = dialogView.findViewById<TextView>(R.id.tv_condition_threshold_value)
+        val tvCountVal = dialogView.findViewById<TextView>(R.id.tv_condition_count_value)
+        val tvStartVal = dialogView.findViewById<TextView>(R.id.tv_condition_start_value)
+        val tvPurityVal = dialogView.findViewById<TextView>(R.id.tv_condition_purity_value)
 
-        AlertDialog.Builder(ctx)
-            .setTitle(getString(R.string.discharge_filter_label))
-            .setItems(options) { dialog, which ->
-                dialog.dismiss()
-                when (which) {
-                    0 -> {
-                        val picker = CapacityThresholdPickerBottomSheetDialog()
-                        picker.setOnThresholdSelectedListener {
-                            loadData()
-                        }
-                        picker.show(parentFragmentManager, "CapacityThresholdPickerBottomSheetDialog")
-                    }
-                    1 -> {
-                        val picker = CapacityCountPickerBottomSheetDialog()
-                        picker.setOnCountSelectedListener {
-                            loadData()
-                        }
-                        picker.show(parentFragmentManager, "CapacityCountPickerBottomSheetDialog")
-                    }
-                    2 -> {
-                        val picker = StartDischargePolicyBottomSheetDialog()
-                        picker.setOnPolicySelectedListener {
-                            loadData()
-                        }
-                        picker.show(parentFragmentManager, "StartDischargePolicyBottomSheetDialog")
-                    }
-                    3 -> {
-                        val picker = DataPurityPickerBottomSheetDialog()
-                        picker.setOnPuritySelectedListener {
-                            loadData()
-                        }
-                        picker.show(parentFragmentManager, "DataPurityPickerBottomSheetDialog")
-                    }
-                }
+        tvThresholdVal.text = thresholdDesc
+        tvCountVal.text = countDesc
+        tvStartVal.text = startDesc
+        tvPurityVal.text = purityDesc
+
+        applyConditionBadgeStyle(tvThresholdVal, Color.parseColor("#10B981"))
+        applyConditionBadgeStyle(tvCountVal, Color.parseColor("#3B82F6"))
+        applyConditionBadgeStyle(tvStartVal, Color.parseColor("#F59E0B"))
+        applyConditionBadgeStyle(tvPurityVal, Color.parseColor("#8B5CF6"))
+
+        val dialog = AlertDialog.Builder(ctx)
+            .setView(dialogView)
+            .create()
+
+        dialogView.findViewById<View>(R.id.item_condition_threshold).setOnClickListener {
+            dialog.dismiss()
+            val picker = CapacityThresholdPickerBottomSheetDialog()
+            picker.setOnThresholdSelectedListener {
+                loadData()
             }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
+            picker.show(parentFragmentManager, "CapacityThresholdPickerBottomSheetDialog")
+        }
+
+        dialogView.findViewById<View>(R.id.item_condition_count).setOnClickListener {
+            dialog.dismiss()
+            val picker = CapacityCountPickerBottomSheetDialog()
+            picker.setOnCountSelectedListener {
+                loadData()
+            }
+            picker.show(parentFragmentManager, "CapacityCountPickerBottomSheetDialog")
+        }
+
+        dialogView.findViewById<View>(R.id.item_condition_start_policy).setOnClickListener {
+            dialog.dismiss()
+            val picker = StartDischargePolicyBottomSheetDialog()
+            picker.setOnPolicySelectedListener {
+                loadData()
+            }
+            picker.show(parentFragmentManager, "StartDischargePolicyBottomSheetDialog")
+        }
+
+        dialogView.findViewById<View>(R.id.item_condition_purity).setOnClickListener {
+            dialog.dismiss()
+            val picker = DataPurityPickerBottomSheetDialog()
+            picker.setOnPuritySelectedListener {
+                loadData()
+            }
+            picker.show(parentFragmentManager, "DataPurityPickerBottomSheetDialog")
+        }
+
+        dialogView.findViewById<View>(R.id.btn_conditions_cancel).setOnClickListener {
+            dialog.dismiss()
+        }
+
+        dialog.show()
+        DialogWindowHelper.applyAdaptiveDialogWindowStyle(
+            dialog = dialog,
+            dialogView = dialogView,
+            widthRatio = 0.92,
+            maxHeightRatio = 0.90f
+        )
+    }
+
+    /**
+     * 为学习条件状态值徽章配置半透明胶囊圆角背景。
+     *
+     * @param view 目标状态值文本视图 [TextView]
+     * @param accentColor 状态主题高亮色值
+     */
+    private fun applyConditionBadgeStyle(view: TextView, accentColor: Int) {
+        val density = view.resources.displayMetrics.density
+        val bgAlphaColor = Color.argb(30, Color.red(accentColor), Color.green(accentColor), Color.blue(accentColor))
+        val drawable = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+            setColor(bgAlphaColor)
+            cornerRadius = 8f * density
+        }
+        view.background = drawable
     }
 
     /**

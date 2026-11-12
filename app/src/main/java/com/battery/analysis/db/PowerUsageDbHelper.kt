@@ -2,9 +2,16 @@ package com.battery.analysis.db
 
 import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
+import android.database.CursorWindow
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.util.Log
+import com.battery.analysis.manager.PowerUsageManager
+import com.battery.analysis.model.PowerDischargePoint
 import com.battery.analysis.model.PowerUsageRecord
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * 耗电历史快照 SQLite 本地轻量数据库助手。
@@ -163,12 +170,16 @@ class PowerUsageDbHelper private constructor(context: Context) :
 
     /**
      * 将耗电历史记录对象映射构建为用于 SQLite 操作的 [ContentValues]。
+     * 具备字段容错能力与超大 JSON 安全防护守卫，坚决防止写入超出 CursorWindow 限制的膨胀数据。
      *
      * @param record 耗电历史实体对象
      * @param targetId 指定的主键 ID（可选，若传入则覆盖实体自身 ID）
      * @return 填充完成的 [ContentValues] 键值对象
      */
     private fun buildContentValues(record: PowerUsageRecord, targetId: Long? = null): ContentValues {
+        val safeTrendJson = sanitizeTrendPointsJsonForStorage(record.trendPointsJson)
+        val safeAppListJson = sanitizeAppListJsonForStorage(record.appListJson)
+
         return ContentValues().apply {
             put(COL_ID, if (targetId != null && targetId > 0L) targetId else record.id)
             put(COL_RECORD_TIME, record.recordTime)
@@ -188,8 +199,8 @@ class PowerUsageDbHelper private constructor(context: Context) :
             put(COL_REM_SCREEN_OFF, record.remainingScreenOffText)
             put(COL_IS_SHIZUKU_REAL_DATA, if (record.isShizukuRealData) 1 else 0)
             put(COL_APP_COUNT, record.appCount)
-            put(COL_TREND_POINTS_JSON, record.trendPointsJson)
-            put(COL_APP_LIST_JSON, record.appListJson)
+            put(COL_TREND_POINTS_JSON, safeTrendJson)
+            put(COL_APP_LIST_JSON, safeAppListJson)
             put(COL_BACKGROUND_POWER_WATTS, record.backgroundPowerWatts)
             put(COL_BACKGROUND_DURATION, record.backgroundDurationText)
             put(COL_REM_BACKGROUND, record.remainingBackgroundText)
@@ -428,6 +439,8 @@ class PowerUsageDbHelper private constructor(context: Context) :
 
     /**
      * 查询所有已持久化的耗电历史记录，按时间从近到远倒序排列。
+     * 具备双层容灾防护：若单条历史记录由于早期版本遗留超大 JSON 导致底层 SQLiteBlobTooBigException，
+     * 自动无缝降级为分条安全自愈模式，确保界面正常加载耗电历史并后台自动重置修复超大脏数据。
      * 自动执行单会话进行中自愈守护：物理上整机在同一时刻至多只允许存在一个处于“放电中”（RUNNING）的活跃会话。
      * 若历史数据中检测到多条未完结草稿，自动保留最新一条为进行中，其余多余草稿物理删除清理。
      * 自动过滤剔除并清理任何处于充电状态（is_charging = 1）或放电功耗为零且时长超1分钟的异常脏记录，保证耗电历史绝对纯净。
@@ -450,21 +463,32 @@ class PowerUsageDbHelper private constructor(context: Context) :
             )
         } catch (_: Exception) {}
 
-        val cursor = db.query(
-            TABLE_NAME,
-            null,
-            "$COL_IS_CHARGING = 0 AND NOT ($COL_IS_COMPLETED = 1 AND $COL_AVG_POWER_WATTS <= 0.001 AND ($COL_TOTAL_DURATION LIKE '%m%' OR $COL_TOTAL_DURATION LIKE '%h%' OR $COL_TOTAL_DURATION LIKE '%d%'))",
-            null,
-            null,
-            null,
-            "$COL_ID DESC"
-        )
-        cursor.use { c ->
-            if (c.moveToFirst()) {
-                do {
-                    list.add(parseRecordFromCursor(c))
-                } while (c.moveToNext())
+        var loadedSuccessfully = false
+        try {
+            val cursor = db.query(
+                TABLE_NAME,
+                null,
+                "$COL_IS_CHARGING = 0 AND NOT ($COL_IS_COMPLETED = 1 AND $COL_AVG_POWER_WATTS <= 0.001 AND ($COL_TOTAL_DURATION LIKE '%m%' OR $COL_TOTAL_DURATION LIKE '%h%' OR $COL_TOTAL_DURATION LIKE '%d%'))",
+                null,
+                null,
+                null,
+                "$COL_ID DESC"
+            )
+            cursor.use { c ->
+                if (c.moveToFirst()) {
+                    do {
+                        list.add(parseRecordFromCursor(c))
+                    } while (c.moveToNext())
+                }
             }
+            loadedSuccessfully = true
+        } catch (e: Exception) {
+            Log.e(TAG, "全量查询耗电历史抛出异常，触发逐行安全加载与自愈净化模式", e)
+        }
+
+        if (!loadedSuccessfully) {
+            list.clear()
+            list.addAll(recoverOversizedAllRecords(db))
         }
 
         var foundFirstRunning = false
@@ -498,34 +522,41 @@ class PowerUsageDbHelper private constructor(context: Context) :
 
     /**
      * 查询当前最新的一条未完成（RUNNING 状态，即 is_completed = 0）的放电会话记录。
+     * 具备 SQLiteBlobTooBigException 自愈防护：当单行体积超出 CursorWindow 时，
+     * 自动切换轻量安全列读取基础放电指标，并就地重置超大 JSON 字段完成自愈，杜绝主线程崩溃。
      * 严格排除处于充电状态的异常记录。
      *
      * @return 未完结且处于非充电状态的放电草稿实体 [PowerUsageRecord]，若不存在返回 null
      */
     fun getRunningDischargeRecord(): PowerUsageRecord? {
         val db = readableDatabase
-        val cursor = db.query(
-            TABLE_NAME,
-            null,
-            "$COL_IS_COMPLETED = 0 AND $COL_IS_CHARGING = 0",
-            null,
-            null,
-            null,
-            "$COL_ID DESC",
-            "1"
-        )
-        return cursor.use { c ->
-            if (c.moveToFirst()) {
-                parseRecordFromCursor(c)
-            } else {
-                null
+        return try {
+            val cursor = db.query(
+                TABLE_NAME,
+                null,
+                "$COL_IS_COMPLETED = 0 AND $COL_IS_CHARGING = 0",
+                null,
+                null,
+                null,
+                "$COL_ID DESC",
+                "1"
+            )
+            cursor.use { c ->
+                if (c.moveToFirst()) {
+                    parseRecordFromCursor(c)
+                } else {
+                    null
+                }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "查询进行中放电草稿抛出异常，触发安全降级自愈", e)
+            recoverOversizedRunningRecord(db)
         }
     }
 
     /**
      * 根据主键 ID 精确查询单条耗电快照记录。
-     * 严格排除处于充电状态的记录。
+     * 具备 SQLiteBlobTooBigException 自愈防护，严格排除处于充电状态的记录。
      *
      * @param id 目标记录唯一主键 ID
      * @return 匹配到的非充电耗电快照实体 [PowerUsageRecord]，若未查到或属于充电状态返回 null
@@ -533,33 +564,175 @@ class PowerUsageDbHelper private constructor(context: Context) :
     fun getRecordById(id: Long): PowerUsageRecord? {
         if (id <= 0L) return null
         val db = readableDatabase
-        val cursor = db.query(
-            TABLE_NAME,
-            null,
-            "$COL_ID = ? AND $COL_IS_CHARGING = 0",
-            arrayOf(id.toString()),
-            null,
-            null,
-            null,
-            "1"
-        )
-        return cursor.use { c ->
+        return try {
+            val cursor = db.query(
+                TABLE_NAME,
+                null,
+                "$COL_ID = ? AND $COL_IS_CHARGING = 0",
+                arrayOf(id.toString()),
+                null,
+                null,
+                null,
+                "1"
+            )
+            cursor.use { c ->
+                if (c.moveToFirst()) {
+                    parseRecordFromCursor(c)
+                } else {
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "根据 ID 查询耗电记录抛出异常，执行安全自愈降级，ID: $id", e)
+            recoverOversizedRecordById(db, id)
+        }
+    }
+
+    /**
+     * 当常规查询因单行数据过大（抛出 SQLiteBlobTooBigException）时，触发安全降级查询并就地自愈修复未结案草稿。
+     * 仅查询轻量基础物理指标列，杜绝 CursorWindow 溢出，并自动将数据库中异常膨胀的 JSON 字段重置为安全空集合。
+     *
+     * @param db SQLite 数据库实例
+     * @return 还原的基础放电草稿实体 [PowerUsageRecord]，若无记录则返回 null
+     */
+    private fun recoverOversizedRunningRecord(db: SQLiteDatabase): PowerUsageRecord? {
+        val lightCursor = try {
+            db.query(
+                TABLE_NAME,
+                SAFE_LIGHTWEIGHT_COLUMNS,
+                "$COL_IS_COMPLETED = 0 AND $COL_IS_CHARGING = 0",
+                null,
+                null,
+                null,
+                "$COL_ID DESC",
+                "1"
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "安全轻量列查询未完成放电草稿失败", e)
+            null
+        }
+
+        val record = lightCursor?.use { c ->
             if (c.moveToFirst()) {
                 parseRecordFromCursor(c)
             } else {
                 null
             }
         }
+
+        if (record != null) {
+            try {
+                val fixValues = ContentValues().apply {
+                    put(COL_TREND_POINTS_JSON, "[]")
+                    put(COL_APP_LIST_JSON, "[]")
+                }
+                val writeDb = try { writableDatabase } catch (_: Exception) { db }
+                writeDb.update(TABLE_NAME, fixValues, "$COL_ID = ?", arrayOf(record.id.toString()))
+                Log.w(TAG, "已成功就地自愈并净化超大放电草稿，ID: ${record.id}")
+            } catch (e: Exception) {
+                Log.e(TAG, "自愈重置超大草稿失败，ID: ${record.id}", e)
+            }
+        }
+
+        return record
+    }
+
+    /**
+     * 当根据 ID 单条查询因单行数据过大抛出异常时，执行轻量列降级查询并就地自愈净化。
+     *
+     * @param db SQLite 数据库实例
+     * @param id 目标记录 ID
+     * @return 还原的基础放电记录实体 [PowerUsageRecord]，若未查到则返回 null
+     */
+    private fun recoverOversizedRecordById(db: SQLiteDatabase, id: Long): PowerUsageRecord? {
+        val lightCursor = try {
+            db.query(
+                TABLE_NAME,
+                SAFE_LIGHTWEIGHT_COLUMNS,
+                "$COL_ID = ? AND $COL_IS_CHARGING = 0",
+                arrayOf(id.toString()),
+                null,
+                null,
+                null,
+                "1"
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "安全轻量列根据 ID 查询记录失败: $id", e)
+            null
+        }
+
+        val record = lightCursor?.use { c ->
+            if (c.moveToFirst()) {
+                parseRecordFromCursor(c)
+            } else {
+                null
+            }
+        }
+
+        if (record != null) {
+            try {
+                val fixValues = ContentValues().apply {
+                    put(COL_TREND_POINTS_JSON, "[]")
+                    put(COL_APP_LIST_JSON, "[]")
+                }
+                val writeDb = try { writableDatabase } catch (_: Exception) { db }
+                writeDb.update(TABLE_NAME, fixValues, "$COL_ID = ?", arrayOf(record.id.toString()))
+                Log.w(TAG, "已成功就地自愈并净化超大历史记录，ID: ${record.id}")
+            } catch (e: Exception) {
+                Log.e(TAG, "自愈重置超大历史记录失败，ID: ${record.id}", e)
+            }
+        }
+
+        return record
+    }
+
+    /**
+     * 当全量历史列表查询因包含超大单行记录抛出异常时，触发逐行安全加载与全库自愈。
+     * 优先通过仅检索 ID 集合后逐行安全读取基础物理指标，并自动修复其中的超大脏行。
+     *
+     * @param db SQLite 数据库实例
+     * @return 完整有效的耗电历史记录列表
+     */
+    private fun recoverOversizedAllRecords(db: SQLiteDatabase): List<PowerUsageRecord> {
+        val list = mutableListOf<PowerUsageRecord>()
+        val ids = mutableListOf<Long>()
+        try {
+            val idCursor = db.query(
+                TABLE_NAME,
+                arrayOf(COL_ID),
+                "$COL_IS_CHARGING = 0 AND NOT ($COL_IS_COMPLETED = 1 AND $COL_AVG_POWER_WATTS <= 0.001 AND ($COL_TOTAL_DURATION LIKE '%m%' OR $COL_TOTAL_DURATION LIKE '%h%' OR $COL_TOTAL_DURATION LIKE '%d%'))",
+                null,
+                null,
+                null,
+                "$COL_ID DESC"
+            )
+            idCursor.use { c ->
+                while (c.moveToNext()) {
+                    ids.add(c.getLong(0))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "降级检索记录 ID 列表失败", e)
+            return emptyList()
+        }
+
+        for (id in ids) {
+            val rec = getRecordById(id)
+            if (rec != null) {
+                list.add(rec)
+            }
+        }
+        return list
     }
 
     /**
      * 将 Cursor 当前指向的数据行解析构建为 [PowerUsageRecord] 数据实体。
-     * 具备字段容错能力，向下平滑兼容缺省列。
+     * 具备字段容错能力，向下平滑兼容缺省列，并对超大字符串列具备异常隔离保护。
      *
      * @param c 移动到有效行位置的数据库 [Cursor]
      * @return 还原构建的 [PowerUsageRecord] 实例
      */
-    private fun parseRecordFromCursor(c: android.database.Cursor): PowerUsageRecord {
+    private fun parseRecordFromCursor(c: Cursor): PowerUsageRecord {
         val idxId = c.getColumnIndexOrThrow(COL_ID)
         val idxTime = c.getColumnIndexOrThrow(COL_RECORD_TIME)
         val idxLvl = c.getColumnIndexOrThrow(COL_LEVEL_PERCENT)
@@ -578,8 +751,8 @@ class PowerUsageDbHelper private constructor(context: Context) :
         val idxRemOff = c.getColumnIndexOrThrow(COL_REM_SCREEN_OFF)
         val idxShizuku = c.getColumnIndexOrThrow(COL_IS_SHIZUKU_REAL_DATA)
         val idxAppCnt = c.getColumnIndexOrThrow(COL_APP_COUNT)
-        val idxPts = c.getColumnIndexOrThrow(COL_TREND_POINTS_JSON)
-        val idxApps = c.getColumnIndexOrThrow(COL_APP_LIST_JSON)
+        val idxPts = c.getColumnIndex(COL_TREND_POINTS_JSON)
+        val idxApps = c.getColumnIndex(COL_APP_LIST_JSON)
         val idxBgPwr = c.getColumnIndex(COL_BACKGROUND_POWER_WATTS)
         val idxBgDur = c.getColumnIndex(COL_BACKGROUND_DURATION)
         val idxRemBg = c.getColumnIndex(COL_REM_BACKGROUND)
@@ -596,6 +769,26 @@ class PowerUsageDbHelper private constructor(context: Context) :
         val idxAwakeMah = c.getColumnIndex(COL_SCREEN_OFF_AWAKE_DRAIN_MAH)
         val idxSleepMah = c.getColumnIndex(COL_SCREEN_OFF_DEEP_SLEEP_DRAIN_MAH)
         val idxDecomposed = c.getColumnIndex(COL_IS_SCREEN_OFF_DECOMPOSED)
+
+        val trendPointsJson = if (idxPts >= 0) {
+            try {
+                c.getString(idxPts) ?: "[]"
+            } catch (_: Exception) {
+                "[]"
+            }
+        } else {
+            "[]"
+        }
+
+        val appListJson = if (idxApps >= 0) {
+            try {
+                c.getString(idxApps) ?: "[]"
+            } catch (_: Exception) {
+                "[]"
+            }
+        } else {
+            "[]"
+        }
 
         return PowerUsageRecord(
             id = c.getLong(idxId),
@@ -616,8 +809,8 @@ class PowerUsageDbHelper private constructor(context: Context) :
             remainingScreenOffText = c.getString(idxRemOff) ?: "",
             isShizukuRealData = c.getInt(idxShizuku) == 1,
             appCount = c.getInt(idxAppCnt),
-            trendPointsJson = c.getString(idxPts) ?: "[]",
-            appListJson = c.getString(idxApps) ?: "[]",
+            trendPointsJson = trendPointsJson,
+            appListJson = appListJson,
             backgroundPowerWatts = if (idxBgPwr >= 0) c.getFloat(idxBgPwr) else 0f,
             backgroundDurationText = if (idxBgDur >= 0) c.getString(idxBgDur) ?: "" else "",
             remainingBackgroundText = if (idxRemBg >= 0) c.getString(idxRemBg) ?: "" else "",
@@ -682,6 +875,7 @@ class PowerUsageDbHelper private constructor(context: Context) :
     }
 
     companion object {
+        private const val TAG = "PowerUsageDbHelper"
         private const val DATABASE_NAME = "power_usage_history.db"
         private const val DATABASE_VERSION = 4
         private const val TABLE_NAME = "power_usage_history"
@@ -722,6 +916,159 @@ class PowerUsageDbHelper private constructor(context: Context) :
         private const val COL_SCREEN_OFF_AWAKE_DRAIN_MAH = "screen_off_awake_drain_mah"
         private const val COL_SCREEN_OFF_DEEP_SLEEP_DRAIN_MAH = "screen_off_deep_sleep_drain_mah"
         private const val COL_IS_SCREEN_OFF_DECOMPOSED = "is_screen_off_decomposed"
+
+        /**
+         * 剔除了超大 JSON 字段（[COL_TREND_POINTS_JSON] 与 [COL_APP_LIST_JSON]）的安全轻量数据列集。
+         * 仅包含数值与简短文本指标，单行数据体积小于 1KB，用于单行数据异常膨胀触发 CursorWindow 溢出时的安全降级自愈查询。
+         */
+        val SAFE_LIGHTWEIGHT_COLUMNS = arrayOf(
+            COL_ID,
+            COL_RECORD_TIME,
+            COL_LEVEL_PERCENT,
+            COL_VOLTAGE_VOLTS,
+            COL_TEMPERATURE,
+            COL_ENERGY_WH,
+            COL_IS_CHARGING,
+            COL_AVG_POWER_WATTS,
+            COL_SCREEN_ON_POWER_WATTS,
+            COL_SCREEN_OFF_POWER_WATTS,
+            COL_SCREEN_ON_DURATION,
+            COL_SCREEN_OFF_DURATION,
+            COL_TOTAL_DURATION,
+            COL_REM_SCREEN_ON,
+            COL_REM_COMPOSITE,
+            COL_REM_SCREEN_OFF,
+            COL_IS_SHIZUKU_REAL_DATA,
+            COL_APP_COUNT,
+            COL_BACKGROUND_POWER_WATTS,
+            COL_BACKGROUND_DURATION,
+            COL_REM_BACKGROUND,
+            COL_SCREEN_ON_ENERGY_WH,
+            COL_TOTAL_ENERGY_WH,
+            COL_SCREEN_OFF_ENERGY_WH,
+            COL_BACKGROUND_ENERGY_WH,
+            COL_IS_COMPLETED,
+            COL_LAST_CHECKPOINT_TIME,
+            COL_SCREEN_OFF_AWAKE_ENERGY_WH,
+            COL_SCREEN_OFF_DEEP_SLEEP_ENERGY_WH,
+            COL_SCREEN_OFF_AWAKE_DURATION_MS,
+            COL_SCREEN_OFF_DEEP_SLEEP_DURATION_MS,
+            COL_SCREEN_OFF_AWAKE_DRAIN_MAH,
+            COL_SCREEN_OFF_DEEP_SLEEP_DRAIN_MAH,
+            COL_IS_SCREEN_OFF_DECOMPOSED
+        )
+
+        init {
+            tryAdjustCursorWindowSize()
+        }
+
+        /**
+         * 尝试反射调大 SQLite CursorWindow 的全局静态默认缓冲区分配大小（从系统默认 2MB 提升至 16MB）。
+         * 作为底层 Native 缓冲区的预防性防溢出加固措施。
+         */
+        private fun tryAdjustCursorWindowSize() {
+            try {
+                val field = CursorWindow::class.java.getDeclaredField("sCursorWindowSize")
+                field.isAccessible = true
+                val currentSize = field.get(null) as? Int ?: 0
+                val targetSize = 16 * 1024 * 1024
+                if (currentSize < targetSize) {
+                    field.set(null, targetSize)
+                }
+            } catch (_: Throwable) {
+                // 忽略非公开 API 反射限制异常，由上层轻量列安全查询与写入端体积控制提供可靠兜底
+            }
+        }
+
+        /**
+         * 针对持久化存储执行放电折线点 JSON 字符串的安全体积检查与物理高保真抽稀。
+         * 若 JSON 长度在 500KB 以内直接放行；若超出安全上限，利用统一均匀采样算法保留关键真实波峰波谷点集，
+         * 确保入库体积远低于 CursorWindow 的 2MB 硬限制，杜绝产生 CursorWindow 溢出毒药行。
+         *
+         * @param trendPointsJson 原始 JSON 字符串
+         * @return 经过安全体积校验后的纯净 JSON 字符串
+         */
+        @JvmStatic
+        fun sanitizeTrendPointsJsonForStorage(trendPointsJson: String?): String {
+            if (trendPointsJson.isNullOrBlank() || trendPointsJson == "[]") return "[]"
+            if (trendPointsJson.length <= 500_000) return trendPointsJson
+
+            return try {
+                val jsonArray = JSONArray(trendPointsJson)
+                val len = jsonArray.length()
+                if (len <= 1200) return trendPointsJson
+
+                val points = mutableListOf<PowerDischargePoint>()
+                for (i in 0 until len) {
+                    val obj = jsonArray.getJSONObject(i)
+                    points.add(
+                        PowerDischargePoint(
+                            timestamp = obj.optLong("ts", 0L),
+                            elapsedHours = obj.optDouble("elapsed", 0.0).toFloat(),
+                            batteryLevel = obj.optInt("lvl", 0),
+                            voltageVolts = obj.optDouble("volt", 0.0).toFloat(),
+                            temperature = obj.optDouble("temp", 0.0).toFloat(),
+                            powerWatts = obj.optDouble("pwr", 0.0).toFloat(),
+                            isScreenOn = obj.optBoolean("screenOn", false)
+                        )
+                    )
+                }
+                val sampled = PowerUsageManager.downsampleDischargeSamplesUniformly(points, targetCount = 1200)
+                // 工业级严格硬上限保障：若极端工况跳变点极其密集导致保留点数仍超出 1200 点，
+                // 实施等距物理点锁定抽取，保证最终持久化点数绝对不超过 1200 点且首末点严格保留真实数据
+                val finalPoints = if (sampled.size > 1200) {
+                    val step = (sampled.size - 1).toDouble() / 1199.0
+                    val reduced = mutableListOf<PowerDischargePoint>()
+                    for (idx in 0 until 1200) {
+                        val sIdx = (idx * step).toInt().coerceIn(0, sampled.size - 1)
+                        reduced.add(sampled[sIdx])
+                    }
+                    reduced
+                } else {
+                    sampled
+                }
+                val outArray = JSONArray()
+                for (pt in finalPoints) {
+                    val obj = JSONObject().apply {
+                        put("ts", pt.timestamp)
+                        put("elapsed", pt.elapsedHours.toDouble())
+                        put("lvl", pt.batteryLevel)
+                        put("volt", pt.voltageVolts.toDouble())
+                        put("temp", pt.temperature.toDouble())
+                        put("pwr", pt.powerWatts.toDouble())
+                        put("screenOn", pt.isScreenOn)
+                    }
+                    outArray.put(obj)
+                }
+                outArray.toString()
+            } catch (_: Exception) {
+                "[]"
+            }
+        }
+
+        /**
+         * 针对持久化存储执行应用列表 JSON 字符串的安全体积检查。
+         *
+         * @param appListJson 原始应用列表 JSON 字符串
+         * @return 经过安全体积校验后的 JSON 字符串
+         */
+        @JvmStatic
+        fun sanitizeAppListJsonForStorage(appListJson: String?): String {
+            if (appListJson.isNullOrBlank() || appListJson == "[]") return "[]"
+            if (appListJson.length <= 300_000) return appListJson
+            return try {
+                val jsonArray = JSONArray(appListJson)
+                val len = jsonArray.length()
+                if (len <= 100) return appListJson
+                val outArray = JSONArray()
+                for (i in 0 until minOf(len, 100)) {
+                    outArray.put(jsonArray.getJSONObject(i))
+                }
+                outArray.toString()
+            } catch (_: Exception) {
+                "[]"
+            }
+        }
 
         @Volatile
         private var instance: PowerUsageDbHelper? = null

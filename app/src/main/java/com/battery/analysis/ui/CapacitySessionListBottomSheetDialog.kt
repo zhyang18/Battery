@@ -46,6 +46,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
     private var currentCountLimit: Int = 10
     private var currentStartCondition: StartDischargeCondition = StartDischargeCondition()
     private var currentPurityCondition: DataPurityCondition = DataPurityCondition()
+    private var currentDesignCapacityMah: Double? = null
     private var isOnlyMeetsThreshold: Boolean = false
     private lateinit var sessionPageAdapter: SessionPageAdapter
     private var viewPager: ViewPager2? = null
@@ -159,9 +160,6 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
         }
         updateThresholdFilterButtonUI()
 
-        view.findViewById<TextView>(R.id.btn_session_conditions)?.setOnClickListener {
-            showConditionsMenuDialog()
-        }
         view.findViewById<TextView>(R.id.tv_session_list_subtitle)?.setOnClickListener {
             showConditionsMenuDialog()
         }
@@ -293,6 +291,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
 
     /**
      * 异步从本地数据库加载所有充放电候选样本数据，并同步有效电量跨度阈值与最新条数时效窗口。
+     * 采用两段式极速秒开设计：优先直出已有缓存数据消除开屏等待，后台静默执行历史样本自愈校准与按需刷新。
      */
     private fun loadData() {
         val ctx = context ?: return
@@ -303,18 +302,35 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             currentCountLimit = manager.getEffectiveSampleCountLimit()
             currentStartCondition = manager.getStartDischargeCondition()
             currentPurityCondition = manager.getDataPurityCondition()
+            currentDesignCapacityMah = manager.capacityState.value?.designCapacityMah
+                ?: withContext(Dispatchers.IO) {
+                    com.battery.analysis.manager.BatterySourceProbe.probeCapability(ctx).designCapacityMah?.toDouble()
+                }
 
+            // 1. 优先极速从本地数据库直出当前已有候选样本，彻底消除弹窗白屏等待，实现 0 延迟秒开
             allCandidates = withContext(Dispatchers.IO) {
-                // 加载前自动执行历史虚高异常放电样本自愈校准，确保呈现给用户的皆为物理真值
-                manager.sanitizeHistoricalCandidates()
                 dbHelper.getAllCandidates()
             }
             applyDataToPages()
+
+            // 2. 在后台静默执行历史异常样本自愈校准，若存在校准修正则平滑刷新呈现物理真值
+            val correctedCount = withContext(Dispatchers.IO) {
+                manager.sanitizeHistoricalCandidates()
+            }
+            if (correctedCount > 0 && isAdded) {
+                allCandidates = withContext(Dispatchers.IO) {
+                    dbHelper.getAllCandidates()
+                }
+                applyDataToPages()
+            }
         }
     }
 
     /**
      * 判断单条样本是否满足当前设定的全部自学习准入条件（跨度、起始政策、数据纯度）。
+     *
+     * @param candidate 待检验的候选容量样本实体 [CapacityCandidate]
+     * @return 若样本完全符合当前设定的各项准入条件则返回 true，否则返回 false
      */
     private fun isCandidateEligible(candidate: CapacityCandidate): Boolean {
         if (candidate.isExcluded || candidate.fccObservedMah <= 0.0) return false
@@ -350,7 +366,8 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             includedIds = includedIds,
             countLimit = currentCountLimit,
             startCondition = currentStartCondition,
-            purityCondition = currentPurityCondition
+            purityCondition = currentPurityCondition,
+            designCapacityMah = currentDesignCapacityMah
         )
 
         val totalCount = allCandidates.size
@@ -501,16 +518,22 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
         val tvCountVal = dialogView.findViewById<TextView>(R.id.tv_condition_count_value)
         val tvStartVal = dialogView.findViewById<TextView>(R.id.tv_condition_start_value)
         val tvPurityVal = dialogView.findViewById<TextView>(R.id.tv_condition_purity_value)
+        val tvEnergyCoverageVal = dialogView.findViewById<TextView>(R.id.tv_condition_energy_coverage_value)
+
+        val currentCoverageThreshold = BatteryCapacityManager.getInstance(ctx).getEnergyCurveCoverageThreshold()
+        val energyCoverageDesc = "覆盖率 ≥$currentCoverageThreshold%"
 
         tvThresholdVal.text = thresholdDesc
         tvCountVal.text = countDesc
         tvStartVal.text = startDesc
         tvPurityVal.text = purityDesc
+        tvEnergyCoverageVal.text = energyCoverageDesc
 
         applyConditionBadgeStyle(tvThresholdVal, Color.parseColor("#10B981"))
         applyConditionBadgeStyle(tvCountVal, Color.parseColor("#3B82F6"))
         applyConditionBadgeStyle(tvStartVal, Color.parseColor("#F59E0B"))
         applyConditionBadgeStyle(tvPurityVal, Color.parseColor("#8B5CF6"))
+        applyConditionBadgeStyle(tvEnergyCoverageVal, Color.parseColor("#F59E0B"))
 
         val dialog = AlertDialog.Builder(ctx)
             .setView(dialogView)
@@ -550,6 +573,15 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
                 loadData()
             }
             picker.show(parentFragmentManager, "DataPurityPickerBottomSheetDialog")
+        }
+
+        dialogView.findViewById<View>(R.id.item_condition_energy_coverage).setOnClickListener {
+            dialog.dismiss()
+            val picker = EnergyCurveCoveragePickerBottomSheetDialog()
+            picker.setOnCoverageSelectedListener {
+                loadData()
+            }
+            picker.show(parentFragmentManager, "EnergyCurveCoveragePickerBottomSheetDialog")
         }
 
         dialogView.findViewById<View>(R.id.btn_conditions_cancel).setOnClickListener {
@@ -599,9 +631,20 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
         private val pageDataList = Array<List<CapacityCandidate>>(3) { emptyList() }
         private val attachedHolders = mutableMapOf<Int, SessionPageViewHolder>()
         private var currentThreshold: Int = 15
+        private var currentDesignCapacityMah: Double? = null
 
         /**
          * 更新所有页面的数据并触发子列表渲染。
+         *
+         * @param allData 全部候选样本数据列表
+         * @param chargeData 充电分类候选样本数据列表
+         * @param dischargeData 放电分类候选样本数据列表
+         * @param threshold 当前电量跨度最低门限百分比
+         * @param includedIds 当前模型纳入计算的样本 ID 集合
+         * @param countLimit 当前生效的有效条数窗口限制
+         * @param startCondition 当前放电起始政策条件
+         * @param purityCondition 当前放电数据纯度条件
+         * @param designCapacityMah 电池出厂标称设计容量（单位：mAh，不可用时为 null）
          */
         fun updateAllPages(
             allData: List<CapacityCandidate>,
@@ -611,15 +654,25 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             includedIds: Set<Long>,
             countLimit: Int,
             startCondition: StartDischargeCondition = StartDischargeCondition(),
-            purityCondition: DataPurityCondition = DataPurityCondition()
+            purityCondition: DataPurityCondition = DataPurityCondition(),
+            designCapacityMah: Double? = null
         ) {
             currentThreshold = threshold
+            currentDesignCapacityMah = designCapacityMah
             pageDataList[0] = allData
             pageDataList[1] = chargeData
             pageDataList[2] = dischargeData
 
             for (i in 0..2) {
-                candidateAdapters[i].submitList(pageDataList[i], threshold, includedIds, countLimit, startCondition, purityCondition)
+                candidateAdapters[i].submitList(
+                    pageDataList[i],
+                    threshold,
+                    includedIds,
+                    countLimit,
+                    startCondition,
+                    purityCondition,
+                    designCapacityMah
+                )
                 attachedHolders[i]?.let { holder ->
                     bindPageHolder(holder, i)
                 }
@@ -719,6 +772,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
         private var countLimit: Int = 0
         private var startCondition: StartDischargeCondition = StartDischargeCondition()
         private var purityCondition: DataPurityCondition = DataPurityCondition()
+        private var designCapacityMah: Double? = null
 
         /**
          * 提交最新的候选样本列表并更新当前电量门限与有效时效名单。
@@ -729,6 +783,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
          * @param limit 当前生效的有效条数窗口限制
          * @param currentStartCondition 当前放电起始政策条件
          * @param currentPurityCondition 当前放电数据纯度条件
+         * @param designCapacity 电池出厂标称设计容量（单位：mAh，不可用时为 null）
          */
         fun submitList(
             list: List<CapacityCandidate>,
@@ -736,7 +791,8 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             includedIds: Set<Long> = emptySet(),
             limit: Int = 0,
             currentStartCondition: StartDischargeCondition = StartDischargeCondition(),
-            currentPurityCondition: DataPurityCondition = DataPurityCondition()
+            currentPurityCondition: DataPurityCondition = DataPurityCondition(),
+            designCapacity: Double? = null
         ) {
             items = list
             threshold = currentThreshold
@@ -744,6 +800,7 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             countLimit = limit
             startCondition = currentStartCondition
             purityCondition = currentPurityCondition
+            designCapacityMah = designCapacity
             notifyDataSetChanged()
         }
 
@@ -828,8 +885,16 @@ class CapacitySessionListBottomSheetDialog : BottomSheetDialogFragment() {
             // 4. 电量跨度
             holder.tvSoc.text = holder.itemView.context.getString(R.string.capacity_session_soc_span_format, item.startSoc, item.endSoc, item.socSpanPercent)
 
-            // 5. 推算 FCC
-            holder.tvFcc.text = String.format(Locale.getDefault(), "%.0f mAh", item.fccObservedMah)
+            // 5. 推算 FCC 及对应健康度百分比
+            val fccStr = String.format(Locale.getDefault(), "%.0f mAh", item.fccObservedMah)
+            val design = designCapacityMah
+            if (design != null && design > 0.0 && item.fccObservedMah > 0.0) {
+                val sohPercent = (item.fccObservedMah / design) * 100.0
+                val sohStr = String.format(Locale.getDefault(), "%.1f%%", sohPercent)
+                holder.tvFcc.text = "$fccStr · $sohStr"
+            } else {
+                holder.tvFcc.text = fccStr
+            }
 
             // 6. 测定净电量
             val netPrefix = if (isCharge) holder.itemView.context.getString(R.string.capacity_session_net_charge) else holder.itemView.context.getString(R.string.capacity_session_net_discharge)

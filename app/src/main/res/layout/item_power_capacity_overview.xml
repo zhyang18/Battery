@@ -85,21 +85,16 @@
             android:id="@+id/layout_expanded_content"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="5dp"
             android:orientation="vertical"
             android:visibility="gone"
             tools:visibility="visible">
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="#14888888" />
 
             <!-- 双轨对称子卡片 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="5dp"
                 android:baselineAligned="false"
                 android:orientation="horizontal">
 
@@ -184,7 +179,7 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="5dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 

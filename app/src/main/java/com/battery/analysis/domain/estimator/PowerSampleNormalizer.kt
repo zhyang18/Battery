@@ -263,7 +263,9 @@ class PowerSampleNormalizer {
             } else {
                 timeScale
             }
-            if (timeScale in 0.70..1.45 && energyScale in 0.70..1.45) {
+            // 息屏待机状态特殊性：由于 AP 深度休眠 Suspend 期间无密集采样，离散梯形积分往往因唤醒瞬态而存在偏置；
+            // 只要底层电量计提供了合法的真实物理总能量与总时长，必须执行物理守恒缩放，消除唤醒采样偏置（Wakeup Bias）
+            if (timeScale in 0.50..2.00 && energyScale > 0.0 && energyScale.isFinite()) {
                 for (s in offSlices) {
                     s.durMs = (s.durMs.toDouble() * timeScale).roundToLong().coerceAtLeast(1L)
                     s.energyWh = s.energyWh * energyScale
@@ -382,44 +384,49 @@ class PowerSampleNormalizer {
                 emptyList()
             }
 
+            val hasOnSlice = slicedCurrent.any { it.isScreenOn }
+            val hasOffSlice = slicedCurrent.any { !it.isScreenOn }
+
             if (slicedCurrent.isNotEmpty()) {
                 for (slice in slicedCurrent.sortedByDescending { it.endTimeMs }) {
                     val fullAppend = tryAppendInterval(slice)
                     if (fullAppend) return intervals
                 }
-            } else {
-                // 降级使用宏观会话级
-                if (onDur > 0L && onEnergy > 0.0) {
-                    val pOn = onEnergy / (onDur.toDouble() / 3600000.0)
-                    val fullAppend = tryAppendInterval(
-                        DischargeInterval(
-                            startTimeMs = now - onDur,
-                            endTimeMs = now,
-                            durationMs = onDur,
-                            energyWh = onEnergy,
-                            powerWatts = pOn,
-                            isScreenOn = true,
-                            quality = DataQuality.VALID
-                        )
-                    )
-                    if (fullAppend) return intervals
-                }
+            }
 
-                if (offDur > 0L && offEnergy > 0.0) {
-                    val pOff = offEnergy / (offDur.toDouble() / 3600000.0)
-                    val fullAppend = tryAppendInterval(
-                        DischargeInterval(
-                            startTimeMs = now - onDur - offDur,
-                            endTimeMs = now - onDur,
-                            durationMs = offDur,
-                            energyWh = offEnergy,
-                            powerWatts = pOff,
-                            isScreenOn = false,
-                            quality = DataQuality.VALID
-                        )
+            // 若细粒度采样切片中缺少息屏区间（例如整段息屏期间都在深度休眠挂起未采到离散点），
+            // 但宏观会话具备实测息屏时长与能量，必须宏观补齐，杜绝息屏物理数据丢失
+            if (!hasOffSlice && offDur > 0L && offEnergy > 0.0) {
+                val pOff = offEnergy / (offDur.toDouble() / 3600000.0)
+                val fullAppend = tryAppendInterval(
+                    DischargeInterval(
+                        startTimeMs = now - onDur - offDur,
+                        endTimeMs = now - onDur,
+                        durationMs = offDur,
+                        energyWh = offEnergy,
+                        powerWatts = pOff,
+                        isScreenOn = false,
+                        quality = DataQuality.VALID
                     )
-                    if (fullAppend) return intervals
-                }
+                )
+                if (fullAppend) return intervals
+            }
+
+            // 若细粒度采样切片中缺少亮屏区间，宏观补齐
+            if (!hasOnSlice && onDur > 0L && onEnergy > 0.0) {
+                val pOn = onEnergy / (onDur.toDouble() / 3600000.0)
+                val fullAppend = tryAppendInterval(
+                    DischargeInterval(
+                        startTimeMs = now - onDur,
+                        endTimeMs = now,
+                        durationMs = onDur,
+                        energyWh = onEnergy,
+                        powerWatts = pOn,
+                        isScreenOn = true,
+                        quality = DataQuality.VALID
+                    )
+                )
+                if (fullAppend) return intervals
             }
         }
 

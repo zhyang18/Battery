@@ -186,7 +186,15 @@ class FullChargeRuntimeEstimator(
             }
 
             if (effectiveRatioSum > 0.0) {
-                weightedPowerSum / effectiveRatioSum
+                // 亮屏核心守恒准则：若所有已确立工况覆盖了全部时间（effectiveRatioSum 接近 1.0），直接按工况加权和求解；
+                // 若工况仅覆盖了部分时间（例如轻载缺失导致 effectiveRatioSum < 1.0），未覆盖的时间比例必须严格依据
+                // 亮屏历史物理真实平均功耗 pGlobalOn 进行能量守恒回填，严禁直接除以 effectiveRatioSum 将未覆盖工况按高功耗等比放大！
+                val missingRatio = (1.0 - effectiveRatioSum).coerceAtLeast(0.0)
+                if (missingRatio > 0.0001 && pGlobalOn != null && pGlobalOn > 0.0) {
+                    weightedPowerSum + (missingRatio * pGlobalOn)
+                } else {
+                    weightedPowerSum / effectiveRatioSum
+                }
             } else {
                 pGlobalOn
             }
@@ -235,7 +243,15 @@ class FullChargeRuntimeEstimator(
             }
 
             if (effectiveOffRatioSum > 0.0) {
-                weightedOffPowerSum / effectiveOffRatioSum
+                // 息屏核心守恒准则：若低功耗深睡工况缺失（如 AP Suspend 挂起未采到低功耗离散点导致 effectiveOffRatioSum < 1.0），
+                // 未覆盖的时间比例必须按息屏实测全局物理加权均值 pGlobalOff 进行能量守恒回填，
+                // 严禁直接除以 effectiveOffRatioSum 将未覆盖的休眠时间全数作为高功耗唤醒放大！
+                val missingRatio = (1.0 - effectiveOffRatioSum).coerceAtLeast(0.0)
+                if (missingRatio > 0.0001 && pGlobalOff != null && pGlobalOff > 0.0) {
+                    weightedOffPowerSum + (missingRatio * pGlobalOff)
+                } else {
+                    weightedOffPowerSum / effectiveOffRatioSum
+                }
             } else {
                 pGlobalOff
             }

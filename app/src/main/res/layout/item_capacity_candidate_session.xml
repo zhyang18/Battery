@@ -89,9 +89,8 @@
             android:orientation="horizontal">
 
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1.35"
                 android:orientation="vertical">
 
                 <TextView
@@ -112,13 +111,14 @@
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="13.5sp"
                     android:textStyle="bold"
-                    tools:text="25% → 85% (跨度 60%)" />
+                    tools:text="25% → 85% (60%)" />
             </LinearLayout>
 
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="0.95"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
                 android:gravity="end"
                 android:orientation="vertical">
 
@@ -139,11 +139,12 @@
                     android:layout_marginTop="2dp"
                     android:gravity="end"
                     android:layout_gravity="end"
-                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:ellipsize="end"
                     android:textColor="?android:attr/textColorPrimary"
                     android:textSize="14sp"
                     android:textStyle="bold"
-                    tools:text="6,717 mAh" />
+                    tools:text="6939 mAh · 95.2%" />
             </LinearLayout>
         </LinearLayout>
 

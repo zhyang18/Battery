@@ -119,9 +119,13 @@ class BatteryCapacityManager private constructor(private val context: Context) {
         const val PREF_KEY_START_DISCHARGE_POLICY = "pref_key_start_discharge_policy"
         const val PREF_KEY_START_DISCHARGE_MIN_SOC = "pref_key_start_discharge_min_soc"
 
-        /** 放电数据纯度（实测覆盖率）持久化键 */
+                /** 放电数据纯度（实测覆盖率）持久化键 */
         const val PREF_KEY_DATA_PURITY_MIN_COVERAGE = "pref_key_data_purity_min_coverage"
         const val PREF_KEY_DATA_PURITY_REJECT_POOR = "pref_key_data_purity_reject_poor"
+
+        /** 20 段 SOC 能量曲线全量能量推算覆盖率门限持久化键（默认 80%） */
+        const val PREF_KEY_ENERGY_CURVE_COVERAGE_THRESHOLD = "pref_key_energy_curve_coverage_threshold"
+        const val DEFAULT_ENERGY_CURVE_COVERAGE_THRESHOLD: Int = 80
 
         /** 纳入满充容量自学习样本池的最小物理入库门限（10%） */
         private const val MIN_SOC_SPAN_THRESHOLD: Int = 10
@@ -246,6 +250,8 @@ class BatteryCapacityManager private constructor(private val context: Context) {
 
     /**
      * 获取依据当前用户设置构建的标准参考工况实验协议实体。
+     *
+     * @return 当前生效的工况实验协议实体 [EnergyReferenceProtocol]
      */
     fun getEffectiveReferenceProtocol(): EnergyReferenceProtocol {
         return EnergyReferenceProtocol(
@@ -253,6 +259,127 @@ class BatteryCapacityManager private constructor(private val context: Context) {
             startSocCondition = getStartDischargeCondition(),
             dataPurityCondition = getDataPurityCondition()
         )
+    }
+
+    /**
+     * 获取当前配置的 20 段 SOC 能量曲线全量能量推算覆盖率门限百分比（默认 80%）。
+     *
+     * @return 覆盖率门限百分比整数值（如 70, 80, 85, 90, 100）
+     */
+    fun getEnergyCurveCoverageThreshold(): Int {
+        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return sp.getInt(PREF_KEY_ENERGY_CURVE_COVERAGE_THRESHOLD, DEFAULT_ENERGY_CURVE_COVERAGE_THRESHOLD)
+    }
+
+    /**
+     * 设置 20 段 SOC 能量曲线全量能量推算覆盖率门限百分比，并持久化触发模型重算。
+     *
+     * @param thresholdPercent 覆盖率门限百分比（例如 80）
+     */
+    fun setEnergyCurveCoverageThreshold(thresholdPercent: Int) {
+        val sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        sp.edit().putInt(PREF_KEY_ENERGY_CURVE_COVERAGE_THRESHOLD, thresholdPercent).apply()
+        refreshEstimateAsync()
+    }
+
+    /**
+     * 从本地历史放电记录中重构 20 段 SOC 能量曲线自学习器。
+     *
+     * 遵循方案 A 物理分层解耦与主账本权威真值锚定铁律：
+     * 1. 彻底清空当前内存中的旧模型状态，杜绝内存累加漂移；
+     * 2. 能量分箱属于微观电化学局部微分拼图，吸收所有底层物理有效、未被明确排除（!it.isExcluded）的历史放电记录；
+     *    严禁受宏观整段容量单次大跨度（如 >70%）与狭窄条数窗口（如最近 3 条）人为截断，确保 20 段拼图覆盖率与平滑度；
+     * 3. 提取会话权威核算的纯电池端物理能耗与电荷，对有效采样区间的各分箱积分进行真值对齐缩放；
+     * 4. 彻底消除长待机息屏唤醒电流漂移与整机高功耗导致的能量虚高膨胀（Standby Current Inflation）。
+     *
+     * @param candidates 可选的候选样本集，若提供可用于识别被明确标记为排除（isExcluded）的异常会话并提取权威真值
+     */
+    @Synchronized
+    fun rebuildSocEnergyCurveLearner(candidates: List<CapacityCandidate>? = null) {
+        socEnergyCurveLearner.reset()
+        val dischargeDb = PowerUsageDbHelper.getInstance(context)
+        val excludedDischargeIds = candidates
+            ?.filter { it.sessionType == CandidateSessionType.DISCHARGE && it.isExcluded }
+            ?.map { it.id }
+            ?.toSet() ?: emptySet()
+
+        val allRecords = dischargeDb.getAllRecords()
+        val targetRecords = if (excludedDischargeIds.isNotEmpty()) {
+            allRecords.filter { it.id !in excludedDischargeIds }
+        } else {
+            allRecords
+        }
+
+        for (record in targetRecords) {
+            if (!record.isCompleted) continue
+            val startSocLvl = record.getStartBatteryLevel()
+            val endSocLvl = record.levelPercent
+            val span = abs(startSocLvl - endSocLvl)
+            if (span < MIN_SOC_SPAN_THRESHOLD) continue
+
+            val trendPoints = record.parseTrendPointsList()
+            if (trendPoints.size < 2) continue
+
+            val samples = trendPoints.map { pt ->
+                val currentAmp = when {
+                    pt.dischargeCurrentMa != null && pt.dischargeCurrentMa.isFinite() && pt.dischargeCurrentMa > 0.0 -> {
+                        pt.dischargeCurrentMa / 1000.0
+                    }
+                    pt.batteryCurrentUa != null && pt.batteryCurrentUa != 0 -> {
+                        val normMa = com.battery.analysis.util.BatteryUnitNormalizer.normalizeCurrentMa(
+                            pt.batteryCurrentUa.toLong(),
+                            isCharging = false
+                        )
+                        if (normMa > 0f) (normMa / 1000.0).toDouble() else null
+                    }
+                    pt.voltageVolts > 0f && pt.powerWatts > 0f -> {
+                        (pt.powerWatts / pt.voltageVolts).toDouble()
+                    }
+                    else -> null
+                }
+
+                CapacitySample(
+                    timestampMs = pt.timestamp,
+                    socFraction = pt.batteryLevel / 100.0,
+                    currentAmp = currentAmp,
+                    voltageVolt = pt.voltageVolts.toDouble().takeIf { it > 0.0 },
+                    temperatureC = pt.temperature.toDouble(),
+                    isScreenOn = pt.isScreenOn,
+                    chargingStatus = ChargingStatus.DISCHARGING
+                )
+            }
+
+            val validPhysicalSampleCount = samples.count { it.currentAmp != null && it.currentAmp > 0.0 }
+            if (validPhysicalSampleCount < 2 || (validPhysicalSampleCount.toDouble() / samples.size.toDouble()) < 0.60) {
+                continue
+            }
+
+            val matchedCandidate = candidates?.firstOrNull { it.id == record.id }
+            val authEnergyWh = matchedCandidate?.energyWh?.takeIf { it > 0.0 } ?: record.totalEnergyWh.toDouble().takeIf { it > 0.0 }
+            val authDischargedMah = matchedCandidate?.netBatteryChargeMah?.takeIf { it > 0.0 }
+                ?: authEnergyWh?.let {
+                    val v = trendPoints.mapNotNull { it.voltageVolts.toDouble().takeIf { v -> v > 0.0 } }.average().takeIf { !it.isNaN() && it > 0.0 }
+                        ?: (record.voltageVolts.toDouble().takeIf { it > 0.0 } ?: 3.85)
+                    (it * 1000.0) / v
+                }
+
+            socEnergyCurveLearner.absorbDischargeSession(
+                samples = samples,
+                authoritativeEnergyWh = authEnergyWh,
+                authoritativeChargeMah = authDischargedMah
+            )
+        }
+    }
+
+    /**
+     * 挂起执行全量容量融合重新计算，等待计算完成并返回最新的双向融合估计结果。
+     * 供 UI 弹窗在用户切换门限或条件时挂起等待最新计算结果，杜绝竞态与未刷新问题。
+     *
+     * @return 最新的双向融合统一容量估计结果 [FccUnifiedEstimate]
+     */
+    suspend fun refreshEstimateSuspended(): FccUnifiedEstimate? {
+        refreshEstimateInternal()
+        return _unifiedCapacityState.value
     }
 
     /**
@@ -325,13 +452,19 @@ class BatteryCapacityManager private constructor(private val context: Context) {
             )
         }
 
+        // 遵循方案 A 物理分层解耦：20 段 SOC 能量曲线全量历史放电拼图吸收（仅剔除已标记排除的脏数据），
+        // 宏观容量估计（FCC_Q 与融合模型）则严格遵循 4 项准入条件（跨度门限、时效条数、起始政策、纯度）筛选
+        rebuildSocEnergyCurveLearner(allCandidates)
+
         val robustResult = RobustFccEstimator.estimateFusedFcc(qualifiedCandidates)
+        val energyCoverageThreshold = getEnergyCurveCoverageThreshold()
         val unifiedEstimate = ChargeDischargeFusionEngine.fuse(
             candidates = domainCandidates,
             energyLearner = socEnergyCurveLearner,
             designCapacityMah = designCapMah,
             designVoltageVolts = NOMINAL_VOLTAGE_VOLTS,
-            currentSocPercent = null // 将在下方获取 safeSoc 后重算剩余量
+            currentSocPercent = null, // 将在下方获取 safeSoc 后重算剩余量
+            energyCoverageThresholdPercent = energyCoverageThreshold
         )
 
         // 4. 读取系统底层当前的即时电量与电压（严格遵循零脏数据与真实电量比例）
@@ -451,7 +584,8 @@ class BatteryCapacityManager private constructor(private val context: Context) {
             remainingEWh = finalRemainingWh,
             currentSocPercent = safeSoc,
             sohQPercent = soh,
-            sohEPercent = unifiedEstimate.sohEPercent
+            sohEPercent = unifiedEstimate.sohEPercent,
+            updatedTimestampMs = System.currentTimeMillis()
         )
         _unifiedCapacityState.value = finalUnifiedEstimate
 
@@ -640,8 +774,12 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                     authoritativeEnergyWh = authEnergyWh
                 )
 
-                // 吸收至 20 段 SOC 能量曲线
-                socEnergyCurveLearner.absorbDischargeSession(samples)
+                // 吸收至 20 段 SOC 能量曲线（严格物理真值对齐）
+                socEnergyCurveLearner.absorbDischargeSession(
+                    samples = samples,
+                    authoritativeEnergyWh = authEnergyWh,
+                    authoritativeChargeMah = authDischargedMah
+                )
 
                 val candidate = CapacityCandidate(
                     id = record.id,
@@ -821,13 +959,17 @@ class BatteryCapacityManager private constructor(private val context: Context) {
                         continue
                     }
 
-                    // 持续填充 20 段能量曲线
-                    socEnergyCurveLearner.absorbDischargeSession(samples)
-
                     val authEnergyWh = record.totalEnergyWh.toDouble().takeIf { it > 0.0 }
                     val sessionVolt = trendPoints.mapNotNull { it.voltageVolts.toDouble().takeIf { v -> v > 0.0 } }.average().takeIf { !it.isNaN() && it > 0.0 }
                         ?: (record.voltageVolts.toDouble().takeIf { it > 0.0 } ?: 3.85)
                     val authDischargedMah = authEnergyWh?.let { (it * 1000.0) / sessionVolt }
+
+                    // 持续填充 20 段能量曲线（严格物理真值对齐）
+                    socEnergyCurveLearner.absorbDischargeSession(
+                        samples = samples,
+                        authoritativeEnergyWh = authEnergyWh,
+                        authoritativeChargeMah = authDischargedMah
+                    )
 
                     val existingCandidate = existingCandidates.firstOrNull { it.id == record.id }
                     val isCandidateZero = existingCandidate != null && (existingCandidate.netBatteryChargeMah <= 0.0 || existingCandidate.fccObservedMah <= 0.0)
@@ -919,6 +1061,11 @@ class BatteryCapacityManager private constructor(private val context: Context) {
 
             // 1. 扫描校准放电候选样本
             for (c in candidates.filter { it.sessionType == CandidateSessionType.DISCHARGE }) {
+                // 极速短路剪枝：若样本已处于当前最新算法版本且具备有效物理电量与容量，直接跳过，杜绝高频访问 SQLite 与解析大型 JSON
+                if (c.algorithmVersion == CURRENT_DISCHARGE_ALGO_VERSION && c.netBatteryChargeMah > 0.0 && c.fccObservedMah > 0.0) {
+                    continue
+                }
+
                 val record = powerDbHelper.getRecordById(c.id) ?: continue
                 if (record.totalEnergyWh <= 0f) continue
 
@@ -1002,6 +1149,11 @@ class BatteryCapacityManager private constructor(private val context: Context) {
 
             // 2. 扫描校准充电候选样本（解决因微元切片门限过严导致的息屏快充电量低估）
             for (c in candidates.filter { it.sessionType == CandidateSessionType.CHARGE }) {
+                // 极速短路剪枝：若版本已是最新且具备有效正向电量，直接跳过
+                if (c.algorithmVersion == CURRENT_DISCHARGE_ALGO_VERSION && c.netBatteryChargeMah > 0.0 && c.fccObservedMah > 0.0) {
+                    continue
+                }
+
                 val record = chargingDbHelper.getRecordById(c.id) ?: continue
                 val authChargeMah = record.getNetChargeMah()?.toDouble() ?: continue
                 if (authChargeMah <= 0.0) continue

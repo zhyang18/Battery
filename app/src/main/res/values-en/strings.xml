@@ -1025,7 +1025,7 @@
     <string name="history_snapshot_suffix"> (Snapshot)</string>
     <string name="history_snapshot_in_progress"> · Active</string>
     <string name="app_usage_resident_format"> (Resident: %s)</string>
-    <string name="capacity_session_soc_span_format">%1$d%% → %2$d%% (span %3$d%%)</string>
+    <string name="capacity_session_soc_span_format">%1$d%% → %2$d%% (%3$d%%)</string>
     <string name="power_avg_screen_on_power">Screen-on Avg Power</string>
     <string name="power_avg_discharge_power">Avg Discharge Power</string>
     <string name="charging_avg_power_label">Avg Charging Power</string>
@@ -1065,6 +1065,7 @@
     <string name="fcc_charge_channel_desc">Battery-side net charge integral · Apparent FCC &amp; endpoint quality check</string>
     <string name="fcc_fusion_title">Bidirectional Robust Fusion &amp; Disagreement State</string>
     <string name="fcc_energy_channel_title">SOC Segmented Energy Curve (Independent Channel)</string>
+    <string name="fcc_energy_channel_desc">20 segmented 5% bins work · Full historical discharge cumulative puzzle · Extrapolates full energy when threshold met</string>
     <string name="fcc_boundary_statement_title">Capacity Boundary &amp; SOH Definition</string>
     <string name="fcc_boundary_statement_desc">This app outputs System Usable Capacity Health (SOH_usable). Operating data cannot fully separate true cell degradation from system lock reservations; cell health is only declared when boundary is verified, avoiding misinterpreting system buffers as cell aging.</string>
     <string name="fcc_channel_conflict_warning">⚠️ Channel difference exceeds explainable uncertainty. Entered DISAGREEMENT state; fusion paused.</string>
@@ -1374,6 +1375,21 @@
     <string name="energy_source_bootstrap_desc">Shape Bootstrap</string>
     <string name="energy_source_badge_model">Model</string>
     <string name="energy_source_badge_unknown">Pending</string>
+    <!-- Energy Curve Coverage Threshold Selection -->
+    <string name="energy_curve_coverage_picker_title">Energy Coverage Threshold</string>
+    <string name="energy_curve_coverage_picker_hint">Extrapolate Full Energy (FCC_E) when measured bins reach the coverage threshold</string>
+    <string name="energy_curve_coverage_title">Energy Coverage Threshold</string>
+    <string name="energy_curve_coverage_opt_80">≥ 80% (16/20 bins) · Recommended</string>
+    <string name="energy_curve_coverage_desc_80">Balanced &amp; reliable · Suitable for daily recharge at 20%</string>
+    <string name="energy_curve_coverage_opt_85">≥ 85% (17/20 bins)</string>
+    <string name="energy_curve_coverage_desc_85">High confidence · Suitable for daily recharge at 15%</string>
+    <string name="energy_curve_coverage_opt_90">≥ 90% (18/20 bins)</string>
+    <string name="energy_curve_coverage_desc_90">Ultra high precision · Suitable for occasional discharge to 10%</string>
+    <string name="energy_curve_coverage_opt_70">≥ 70% (14/20 bins)</string>
+    <string name="energy_curve_coverage_desc_70">Relaxed mode · Suitable for shallow cycle habits</string>
+    <string name="energy_curve_coverage_opt_100">100% (20/20 bins) · Strict Measured</string>
+    <string name="energy_curve_coverage_desc_100">All 20 bins fully measured · Requires complete discharge to 0%</string>
+    <string name="toast_energy_curve_coverage_updated">Updated energy coverage threshold to: %s</string>
 </resources>
 
 

@@ -935,6 +935,23 @@
     <string name="discharge_count_desc_all">全量累计 · 纳入全部放电周期</string>
     <string name="toast_discharge_condition_updated">已更新放电自学习条件并即时重算</string>
 
+    <!-- 能量覆盖推算门限设置 -->
+    <string name="energy_curve_coverage_picker_title">能量覆盖推算门限</string>
+    <string name="energy_curve_coverage_picker_hint">实测分箱达到设定覆盖率时，按比例推算满电可用能量 (FCC_E)</string>
+    <string name="energy_curve_coverage_title">能量覆盖门限</string>
+    <string name="energy_curve_coverage_opt_80">≥ 80% (16/20段) · 推荐</string>
+    <string name="energy_curve_coverage_desc_80">兼顾实用与置信度 · 适合日常用至 20% 即充</string>
+    <string name="energy_curve_coverage_opt_85">≥ 85% (17/20段)</string>
+    <string name="energy_curve_coverage_desc_85">高置信度 · 适合日常用至 15% 充电</string>
+    <string name="energy_curve_coverage_opt_90">≥ 90% (18/20段)</string>
+    <string name="energy_curve_coverage_desc_90">极高精度 · 适合偶尔用至 10% 电量</string>
+    <string name="energy_curve_coverage_opt_70">≥ 70% (14/20段)</string>
+    <string name="energy_curve_coverage_desc_70">宽松模式 · 适合随充随用的浅充放习惯</string>
+    <string name="energy_curve_coverage_opt_100">100% (20/20段) · 严格实测</string>
+    <string name="energy_curve_coverage_desc_100">必须全部分箱实测学满 · 需放电至 0% 关机</string>
+    <string name="toast_energy_curve_coverage_updated">已更新能量覆盖推算门限为: %s</string>
+
+
     <!-- 耗电与充电卡片提示 -->
     <string name="power_bubble_screen_on_summary">亮屏：时间、平均功耗、放电速度、能量</string>
     <string name="power_bubble_screen_off_summary">息屏：时间、平均功耗、放电速度、能量</string>
@@ -1027,7 +1044,7 @@
     <string name="history_snapshot_suffix"> (快照)</string>
     <string name="history_snapshot_in_progress"> · 进行中</string>
     <string name="app_usage_resident_format"> (常驻: %s)</string>
-    <string name="capacity_session_soc_span_format">%1$d%% → %2$d%% (跨度 %3$d%%)</string>
+    <string name="capacity_session_soc_span_format">%1$d%% → %2$d%% (%3$d%%)</string>
     <string name="power_avg_screen_on_power">平均亮屏功耗</string>
     <string name="power_avg_discharge_power">平均放电功耗</string>
     <string name="charging_avg_power_label">平均充电功率</string>
@@ -1066,7 +1083,8 @@
     <string name="fcc_charge_channel_title">充电容量学习通道 (辅助估计通道)</string>
     <string name="fcc_charge_channel_desc">电池侧净充入电流积分 · 表观容量与端点质量交叉检验</string>
     <string name="fcc_fusion_title">双向鲁棒融合与冲突状态</string>
-    <string name="fcc_energy_channel_title">SOC 分段能量曲线 (独立能量通道)</string>
+    <string name="fcc_energy_channel_title">SOC 分段能量曲线</string>
+    <string name="fcc_energy_channel_desc">20 段 5% 分箱做功 · 历史全量放电独立拼图累计 · 达门限外推满电能量</string>
     <string name="fcc_boundary_statement_title">容量边界与健康度口径说明</string>
     <string name="fcc_boundary_statement_desc">本应用默认输出与当前手机工作区间对应的【系统可用容量健康度】(SOH_usable)。仅靠用户态数据无法分离电芯实际化学老化与系统预留锁容，因此未确认边界匹配前不宣称电芯物理健康度，杜绝将系统锁容误判为电池老化。</string>
     <string name="fcc_channel_conflict_warning">⚠️ 充放电两通道差异超过各自不确定度可解释范围，进入 DISAGREEMENT 状态，暂停融合更新。</string>

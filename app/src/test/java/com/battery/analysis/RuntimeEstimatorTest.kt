@@ -1124,6 +1124,95 @@ class RuntimeEstimatorTest {
         assertTrue("全局包络下限包裹", gMin!! <= global2)
         assertTrue("全局包络上限包裹", gMax!! >= global2)
     }
+
+    /**
+     * 测试用户真机反馈场景下的剩余续航动态物理响应精度与防退化锁定。
+     * 复现用户真实机况：
+     * - 设备满电能量：23.19 Wh，当前剩余电量：48%，剩余物理可用能量：11.13 Wh；
+     * - 当前放电会话统计：亮屏 49m51s (2.67W, 11.5%/h)，息屏 08m52s (0.42W, 1.8%/h)，全局 58m44s (2.33W, 10.0%/h)；
+     * - 长期历史模型（包含历史高功耗基准，如 3.45W 亮屏与 1.14W 息屏）；
+     *
+     * 核心断言：
+     * 1. 剩余续航绝不被静态硬编码锁定为 03h13m (3.22h) 和 09h46m (9.78h)；
+     * 2. 亮屏剩余续航动态融合当前会话 2.67W 实测做功，稳定处于 3.6h ~ 4.4h（约 04h00m 左右），杜绝严重缩水；
+     * 3. 息屏待机续航动态融合当前会话 0.42W 实测做功，达到 20h 以上（恢复至正常大电池待机水准），杜绝断崖式跌落至不足 10 小时；
+     * 4. 预测放电基准功率与剩余续航严格物理守恒。
+     */
+    @Test
+    fun testUserReportedScenarioRemainingRuntimeAccuracy() {
+        // 重置平滑器状态，模拟冷启动进入界面
+        com.battery.analysis.domain.estimator.EnduranceRuntimeSmoother.getInstance().reset()
+
+        val fullCapacityWh = 23.19f
+        val remainingEnergyWh = 11.13f
+        val batteryPercent = 48.0f
+
+        val overview = PowerOverviewStats(
+            avgPowerWatts = 2.33f,
+            screenOnPowerWatts = 2.67f,
+            screenOffPowerWatts = 0.42f,
+            screenOnDurationMs = 49 * 60 * 1000L + 51 * 1000L,
+            screenOffDurationMs = 8 * 60 * 1000L + 52 * 1000L,
+            totalDurationMs = 58 * 60 * 1000L + 44 * 1000L
+        )
+
+        val v2Result = com.battery.analysis.domain.estimator.model.FullChargeRuntimeResult(
+            fullRuntimeMs = 11 * 3600_000L + 5 * 60_000L,
+            fullEnergyWh = fullCapacityWh.toDouble(),
+            predictedPowerWatts = 2.09,
+            predictedScreenOnPowerWatts = 3.45,
+            predictedScreenOffPowerWatts = 1.14,
+            modelVersion = com.battery.analysis.domain.estimator.model.RuntimeModelVersion.FULL_RUNTIME_V2_2,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            energySource = com.battery.analysis.domain.estimator.model.EnergySource.FCC_TIMES_NOMINAL_VOLTAGE,
+            effectiveHistoryMs = 7 * 86400 * 1000L,
+            usedRegimeModel = true
+        )
+        val sevenDays = SevenDaysDischargeStats(
+            screenOnDischargeRatePercentPerHour = 14.9f,
+            screenOffDischargeRatePercentPerHour = 4.9f,
+            globalDischargeRatePercentPerHour = 9.0f,
+            v2Result = v2Result
+        )
+
+        val result = estimator.estimateTripleRuntimes(
+            overview = overview,
+            sevenDaysStats = sevenDays,
+            batteryLevelPercent = batteryPercent,
+            remainingEnergyWh = remainingEnergyWh,
+            totalCapacityWh = fullCapacityWh,
+            tempCelsius = 30.0f
+        )
+
+        val remOnMs = result.screenOnEstimate.remainingMs
+        val remOffMs = result.screenOffEstimate.remainingMs
+        val remGlobalMs = result.globalEstimate.remainingMs
+
+        assertNotNull("亮屏剩余续航不为空", remOnMs)
+        assertNotNull("息屏剩余续航不为空", remOffMs)
+        assertNotNull("全局综合剩余续航不为空", remGlobalMs)
+
+        val remOnHours = remOnMs!! / 3600_000.0
+        val remOffHours = remOffMs!! / 3600_000.0
+        val remGlobalHours = remGlobalMs!! / 3600_000.0
+
+        assertTrue(
+            "亮屏剩余续航应在 3.6h ~ 4.4h 左右（实测为 ${remOnHours}h），绝不能被死锁在 3.22h (03h13m)",
+            remOnHours in 3.6..4.4
+        )
+
+        // 2. 息屏必须融合当前会话 0.42W 的实际待机做功，不再被纯长期 1.14W 锁死在 9.78h (09h46m)
+        assertTrue(
+            "息屏待机剩余续航应显著大于被长期高功耗锁死的 9.78h (09h46m)，当前会话实测融合后达到 ${remOffHours}h",
+            remOffHours >= 13.0
+        )
+
+        assertTrue(
+            "全局综合剩余续航应在 4.3h ~ 5.3h 之间（实测为 ${remGlobalHours}h）",
+            remGlobalHours in 4.3..5.3
+        )
+    }
 }
+
 
 

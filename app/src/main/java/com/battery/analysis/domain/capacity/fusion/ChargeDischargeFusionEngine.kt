@@ -114,6 +114,7 @@ object ChargeDischargeFusionEngine {
      * @param currentSocPercent 当前电量计 SOC 百分比 (0..100)
      * @param previousAcceptedFccQMah 上次已确认收敛的可信历史容量数值（mAh，可选兼容入参）
      * @param acceptedFccQ 上次已确认收敛的可信历史容量实体（附带版本、成熟度与审计追溯）
+     * @param energyCoverageThresholdPercent 能量曲线全量能量推算覆盖率门限百分比（默认 80%）
      * @return 最终全景统一容量评估输出实体 [FccUnifiedEstimate]
      */
     fun fuse(
@@ -123,7 +124,8 @@ object ChargeDischargeFusionEngine {
         designVoltageVolts: Double = 3.85,
         currentSocPercent: Int?,
         previousAcceptedFccQMah: Double? = null,
-        acceptedFccQ: AcceptedFccQ? = null
+        acceptedFccQ: AcceptedFccQ? = null,
+        energyCoverageThresholdPercent: Int = 80
     ): FccUnifiedEstimate {
         val dischargeCandidates = candidates.filter { it.channel == CapacityChannel.DISCHARGE }
         val chargeCandidates = candidates.filter { it.channel == CapacityChannel.CHARGE }
@@ -234,7 +236,8 @@ object ChargeDischargeFusionEngine {
 
         // 能量通道独立评估快照
         val energyResult = energyLearner.getEnergyCapacityResult()
-        val (fullEWh, uncertaintyEWh) = energyLearner.estimateFullEnergyWh(fusedFcc)
+        val minCoverageRatio = (energyCoverageThresholdPercent / 100.0).coerceIn(0.1, 1.0)
+        val (fullEWh, uncertaintyEWh) = energyLearner.estimateFullEnergyWh(fusedFcc, minCoverageRatio)
         val energyCoverage = energyLearner.getCoverageRatio()
 
         // SOH_Q 计算（以系统可用边界 SYSTEM_USABLE 输出）
@@ -246,13 +249,13 @@ object ChargeDischargeFusionEngine {
             (designCapacityMah * designVoltageVolts) / 1000.0
         } else null
 
-        // 遵循技术评审 P2-B3 与 P2-C 铁律：
-        // SOH_E（能量健康度）必须基于经充分验证的标准工况归一化能量（normalizedFullUsableEnergyWh），
-        // 严禁拿未经工况补偿的非标准直接实测能量计算，更严禁拿 SOH_Q 偷梁换柱！
-        // 在能量归一化模型未达到 VALIDATED 高置信度验证前，SOH_E 严格保持为 null 冻结状态。
+        // 遵循技术评审规范与能量覆盖门限外推机制：
+        // 若标准工况归一化能量 normalizedFullEWh 存在则优先使用；
+        // 否则当分箱实测覆盖率达到用户设定门限时，采用已外推的满电能量 fullEWh 计算 SOH_E。
         val normalizedFullEWh: Double? = null
-        val sohE = if (normalizedFullEWh != null && designEnergyWh != null && designEnergyWh > 0.0) {
-            (normalizedFullEWh / designEnergyWh) * 100.0
+        val effectiveFullEWh = normalizedFullEWh ?: fullEWh
+        val sohE = if (effectiveFullEWh != null && designEnergyWh != null && designEnergyWh > 0.0) {
+            (effectiveFullEWh / designEnergyWh) * 100.0
         } else null
 
         // 剩余电量与能量
@@ -294,7 +297,7 @@ object ChargeDischargeFusionEngine {
             designEnergyWh = designEnergyWh,
             dischargeChannel = dischargeEstimate,
             chargeChannel = chargeEstimate,
-            energyBins = energyLearner.getEnergyBins(),
+            energyBins = energyLearner.getEnergyBins(fusedFcc),
             energyCurveCoverage = energyCoverage,
             channelConflictPercent = conflictPercent,
             isSameGaugeSource = true,

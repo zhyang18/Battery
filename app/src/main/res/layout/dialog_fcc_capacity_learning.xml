@@ -150,8 +150,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
-                            android:singleLine="true"
-                            android:ellipsize="end"
+                            android:maxLines="2"
                             android:textColor="?android:attr/textColorPrimary"
                             android:textSize="16sp"
                             android:textStyle="bold"
@@ -193,8 +192,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
                             android:gravity="end"
-                            android:singleLine="true"
-                            android:ellipsize="end"
+                            android:maxLines="2"
                             android:textColor="#3b82f6"
                             android:textSize="16sp"
                             android:textStyle="bold"
@@ -225,8 +223,7 @@
                     android:id="@+id/tv_fcc_design_info"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:singleLine="true"
-                    android:ellipsize="end"
+                    android:maxLines="2"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="10.5sp"
                     tools:text="设计参考: 8000 mAh · 30.8 Wh | 可信度: HIGH" />
@@ -272,7 +269,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:singleLine="true"
-                        android:text="主估计容量 (FCC_Q,dis)"
+                        android:text="主估计容量 (放电通道)"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="11sp" />
 
@@ -285,8 +282,8 @@
                         android:id="@+id/tv_discharge_fcc_val"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:singleLine="true"
-                        android:ellipsize="end"
+                        android:maxLines="2"
+                        android:gravity="end"
                         android:textColor="?android:attr/textColorPrimary"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -398,7 +395,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:singleLine="true"
-                        android:text="表观估计 (FCC_Q,chg)"
+                        android:text="表观估计 (充电通道)"
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="11sp" />
 
@@ -411,8 +408,8 @@
                         android:id="@+id/tv_charge_fcc_val"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:singleLine="true"
-                        android:ellipsize="end"
+                        android:maxLines="2"
+                        android:gravity="end"
                         android:textColor="?android:attr/textColorPrimary"
                         android:textSize="12sp"
                         android:textStyle="bold"
@@ -540,8 +537,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="5dp"
-                    android:singleLine="true"
-                    android:ellipsize="end"
+                    android:maxLines="2"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="10.5sp"
                     tools:text="充放两通道数据自洽，已加权鲁棒融合" />
@@ -573,9 +569,8 @@
                     android:orientation="horizontal">
 
                     <TextView
-                        android:layout_width="0dp"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
                         android:singleLine="true"
                         android:text="@string/fcc_energy_channel_title"
                         android:textColor="?android:attr/textColorPrimary"
@@ -584,13 +579,16 @@
 
                     <TextView
                         android:id="@+id/tv_energy_curve_coverage"
-                        android:layout_width="wrap_content"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:gravity="end"
                         android:singleLine="true"
                         android:textColor="#3b82f6"
                         android:textSize="11sp"
                         android:textStyle="bold"
-                        tools:text="覆盖率: 65% (13/20段)" />
+                        tools:text="覆盖率 90% (18/20) · 门限≥80%" />
                 </LinearLayout>
 
                 <TextView
@@ -599,7 +597,7 @@
                     android:layout_marginTop="3dp"
                     android:singleLine="true"
                     android:ellipsize="end"
-                    android:text="20 段 5% 分箱实测端电压与做功 · 未测区间标明待采集"
+                    android:text="@string/fcc_energy_channel_desc"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="10sp" />
 

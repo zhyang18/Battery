@@ -24,53 +24,23 @@
             android:layout_marginBottom="12dp"
             android:background="@drawable/bg_history_badge" />
 
-        <!-- 弹窗标题与关闭按钮 -->
+        <!-- 弹窗标题与操作栏（准入条件、仅看达标与关闭按钮） -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <LinearLayout
+            <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/capacity_session_list_title"
-                    android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="17sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tv_session_list_subtitle"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:ellipsize="end"
-                    android:singleLine="true"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="11sp"
-                    tools:text="共 27 次 · 7 次达标 (跨度 > 50%)" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/btn_session_conditions"
-                android:layout_width="wrap_content"
-                android:layout_height="26dp"
-                android:layout_marginEnd="6dp"
-                android:background="@drawable/bg_session_filter_chip_unselected"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center"
-                android:paddingHorizontal="8dp"
                 android:singleLine="true"
-                android:text="@string/capacity_session_conditions_title"
-                android:textColor="?android:attr/textColorSecondary"
-                android:textSize="11sp" />
+                android:ellipsize="end"
+                android:text="@string/capacity_session_list_title"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="17sp"
+                android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/btn_filter_meets_threshold"
@@ -98,6 +68,16 @@
                 android:src="@android:drawable/ic_menu_close_clear_cancel"
                 app:tint="?android:attr/textColorSecondary" />
         </LinearLayout>
+
+        <!-- 副标题统计与准入条件说明：整行最大宽度显示 -->
+        <TextView
+            android:id="@+id/tv_session_list_subtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="11.5sp"
+            tools:text="共 78 次 · 19 次达标 (跨度>15% · 起始≥95% · 纯度≥80%) ⚙️" />
     </LinearLayout>
 
     <!-- 过滤器 Tab 栏（全部 / 充电 / 放电） -->

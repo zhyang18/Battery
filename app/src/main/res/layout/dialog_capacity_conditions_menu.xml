@@ -316,6 +316,69 @@
                     android:src="@drawable/ic_chevron_right" />
             </LinearLayout>
 
+            <!-- 5. 能量覆盖推算门限 -->
+            <LinearLayout
+                android:id="@+id/item_condition_energy_coverage"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:background="@drawable/bg_setting_card_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="14dp"
+                android:paddingVertical="12dp">
+
+                <View
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/bg_dot_amber" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_marginEnd="8dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="能量覆盖门限"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="推算满电可用能量的分箱实测比例"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="11.5sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tv_condition_energy_coverage_value"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingHorizontal="9dp"
+                    android:paddingVertical="4dp"
+                    android:textColor="#F59E0B"
+                    android:textSize="11.5sp"
+                    android:textStyle="bold"
+                    tools:text="覆盖率 ≥80%" />
+
+                <ImageView
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_marginStart="4dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_chevron_right" />
+            </LinearLayout>
+
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
 

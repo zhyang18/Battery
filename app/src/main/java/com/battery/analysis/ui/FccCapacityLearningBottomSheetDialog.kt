@@ -43,6 +43,14 @@ import java.util.Locale
  */
 class FccCapacityLearningBottomSheetDialog : BottomSheetDialogFragment() {
 
+    /**
+     * 创建底部抽屉弹窗视图层次结构。
+     *
+     * @param inflater 布局填充器 [LayoutInflater]
+     * @param container 父容器视图组 [ViewGroup]
+     * @param savedInstanceState 状态保存包 [Bundle]
+     * @return 初始化的视图根节点 [View]
+     */
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -51,6 +59,9 @@ class FccCapacityLearningBottomSheetDialog : BottomSheetDialogFragment() {
         return inflater.inflate(R.layout.dialog_fcc_capacity_learning, container, false)
     }
 
+    /**
+     * 弹窗启动并配置动画、尺寸与无黑色半透明背景遮罩规范。
+     */
     override fun onStart() {
         super.onStart()
         val dialog = dialog as? BottomSheetDialog ?: return
@@ -97,6 +108,9 @@ class FccCapacityLearningBottomSheetDialog : BottomSheetDialogFragment() {
         }
     }
 
+    /**
+     * 触发抽屉平滑向下滑出动效并安全关闭弹窗。
+     */
     private fun dismissWithSlideDownAnimation() {
         val dialog = dialog as? BottomSheetDialog
         val bottomSheet = dialog?.findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)
@@ -109,6 +123,12 @@ class FccCapacityLearningBottomSheetDialog : BottomSheetDialogFragment() {
         }
     }
 
+    /**
+     * 绑定视图初始事件监听与数据流订阅。
+     *
+     * @param view 弹窗根视图 [View]
+     * @param savedInstanceState 状态保存包 [Bundle]
+     */
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
@@ -127,6 +147,11 @@ class FccCapacityLearningBottomSheetDialog : BottomSheetDialogFragment() {
         observeCapacityData(view)
     }
 
+    /**
+     * 注册生命周期感知协程，实时监听统一容量状态变化并刷新 UI。
+     *
+     * @param root 弹窗根视图 [View]
+     */
     private fun observeCapacityData(root: View) {
         val manager = BatteryCapacityManager.getInstance(requireContext())
 
@@ -142,6 +167,13 @@ class FccCapacityLearningBottomSheetDialog : BottomSheetDialogFragment() {
         }
     }
 
+    /**
+     * 将双向鲁棒融合统一估算结果状态渲染到弹窗的各个 UI 区域。
+     *
+     * @param root 弹窗根视图 [View]
+     * @param estimate 最新融合估计结果 [FccUnifiedEstimate]，若尚未完成则为 null
+     * @param manager 容量管理器实例 [BatteryCapacityManager]
+     */
     private fun bindUnifiedEstimate(
         root: View,
         estimate: FccUnifiedEstimate?,
@@ -161,7 +193,14 @@ class FccCapacityLearningBottomSheetDialog : BottomSheetDialogFragment() {
         val tvDesignInfo = root.findViewById<TextView>(R.id.tv_fcc_design_info)
 
         val maturity = estimate?.maturity ?: LearningMaturity.PENDING
-        tvMaturityBadge?.text = maturity.name
+        val maturityText = when (maturity) {
+            LearningMaturity.INITIAL -> "初始化"
+            LearningMaturity.CONVERGED -> "已收敛"
+            LearningMaturity.STABLE -> "稳定"
+            LearningMaturity.DISAGREEMENT -> "存在分歧"
+            LearningMaturity.PENDING -> "等待中"
+        }
+        tvMaturityBadge?.text = maturityText
         when (maturity) {
             LearningMaturity.STABLE, LearningMaturity.CONVERGED -> {
                 tvMaturityBadge?.setTextColor(Color.parseColor("#10b981"))
@@ -185,7 +224,7 @@ class FccCapacityLearningBottomSheetDialog : BottomSheetDialogFragment() {
         val uncQ = estimate?.fccQUncertaintyMah
         if (fccQ != null && fccQ > 0) {
             val uncertaintyStr = if (uncQ != null && uncQ > 0) {
-                String.format(Locale.US, " (±%.0f mAh)", uncQ)
+                String.format(Locale.US, "\n(±%.0f mAh)", uncQ)
             } else ""
             tvFccQVal?.text = String.format(Locale.US, "%,.0f mAh%s", fccQ, uncertaintyStr)
         } else {
@@ -204,7 +243,7 @@ class FccCapacityLearningBottomSheetDialog : BottomSheetDialogFragment() {
         val uncE = estimate?.fccEUncertaintyWh
         if (fccE != null && fccE > 0) {
             val uncEStr = if (uncE != null && uncE > 0) {
-                String.format(Locale.US, " (±%.2f Wh)", uncE)
+                String.format(Locale.US, "\n(±%.2f Wh)", uncE)
             } else ""
             tvFccEVal?.text = String.format(Locale.US, "%.2f Wh%s", fccE, uncEStr)
         } else {
@@ -215,21 +254,34 @@ class FccCapacityLearningBottomSheetDialog : BottomSheetDialogFragment() {
             tvSohEVal?.text = String.format(Locale.US, "SOH_E: %.1f%%", estimate.sohEPercent)
             tvSohEVal?.setTextColor(Color.parseColor("#3b82f6"))
         } else {
-            tvSohEVal?.text = "SOH_E: --"
+            val binsSnapshot = estimate?.energyBins ?: manager.socEnergyCurveLearner.getEnergyBins()
+            val learnedBinCount = binsSnapshot.count { it.isLearned }
+            val threshold = manager.getEnergyCurveCoverageThreshold()
+            val requiredCount = kotlin.math.ceil((threshold / 100.0) * 20).toInt()
+            tvSohEVal?.text = if (learnedBinCount < requiredCount) {
+                String.format(Locale.US, "SOH_E: 学习中(%d/%d)", learnedBinCount, requiredCount)
+            } else {
+                "SOH_E: --"
+            }
             tvSohEVal?.setTextColor(Color.parseColor("#64748b"))
         }
 
         val conf = estimate?.confidence ?: Confidence.LOW
+        val confText = when (conf) {
+            Confidence.HIGH -> "高"
+            Confidence.MEDIUM -> "中"
+            Confidence.LOW -> "低"
+        }
         tvDesignInfo?.text = if (designMah > 0.0) {
             String.format(
                 Locale.US,
                 "设计参考: %,.0f mAh · %.1f Wh | 可信度: %s",
                 designMah,
                 designWh,
-                conf.name
+                confText
             )
         } else {
-            String.format(Locale.US, "设计参考: -- mAh · -- Wh | 可信度: %s", conf.name)
+            String.format(Locale.US, "设计参考: -- mAh · -- Wh | 可信度: %s", confText)
         }
 
         // ======================== 板块二：放电学习主通道 ========================
@@ -276,12 +328,18 @@ class FccCapacityLearningBottomSheetDialog : BottomSheetDialogFragment() {
                 chgEst.sampleCount,
                 chgEst.totalSocSpan * 100.0
             )
-            val epStr = chgEst.endpointQuality?.name ?: "UNKNOWN"
-            tvChargeQualityEta?.text = "$epStr · η_Q待标定"
+            val epText = when (chgEst.endpointQuality) {
+                com.battery.analysis.domain.capacity.model.FullEndpointQuality.EXCELLENT -> "优秀"
+                com.battery.analysis.domain.capacity.model.FullEndpointQuality.GOOD -> "良好"
+                com.battery.analysis.domain.capacity.model.FullEndpointQuality.FAIR -> "一般"
+                com.battery.analysis.domain.capacity.model.FullEndpointQuality.POOR -> "较差"
+                com.battery.analysis.domain.capacity.model.FullEndpointQuality.UNKNOWN, null -> "未标定"
+            }
+            tvChargeQualityEta?.text = "$epText · η_Q待标定"
         } else {
             tvChargeFccVal?.text = "-- mAh (未校准)"
             tvChargeSamplesSpan?.text = "0 条样本 / 0% 跨度"
-            tvChargeQualityEta?.text = "-- · η_Q待标定"
+            tvChargeQualityEta?.text = "未标定 · η_Q待标定"
         }
 
         // ======================== 板块四：双向鲁棒融合与冲突状态 ========================
@@ -320,6 +378,13 @@ class FccCapacityLearningBottomSheetDialog : BottomSheetDialogFragment() {
         bindEnergyCurveSection(root, bins, coverage)
     }
 
+    /**
+     * 绑定 20 段 SOC 能量曲线各分箱列表及其覆盖率与门限选择交互。
+     *
+     * @param root 弹窗根视图 [View]
+     * @param bins 20 段 SOC 能量分箱信息列表
+     * @param coverageRatio 已测分箱物理覆盖率比例 (0.0 ~ 1.0)
+     */
     private fun bindEnergyCurveSection(root: View, bins: List<SocEnergyBinInfo>, coverageRatio: Double) {
         val context = root.context ?: return
         val tvCoverage = root.findViewById<TextView>(R.id.tv_energy_curve_coverage)
@@ -327,7 +392,22 @@ class FccCapacityLearningBottomSheetDialog : BottomSheetDialogFragment() {
 
         val learnedCount = bins.count { it.isLearned }
         val ratio = coverageRatio * 100.0
-        tvCoverage?.text = String.format(Locale.US, "覆盖率: %.0f%% (%d/20段)", ratio, learnedCount)
+        val threshold = BatteryCapacityManager.getInstance(context).getEnergyCurveCoverageThreshold()
+        tvCoverage?.text = String.format(Locale.US, "覆盖率 %.0f%% (%d/20) · 门限≥%d%%", ratio, learnedCount, threshold)
+        tvCoverage?.isClickable = true
+        tvCoverage?.setOnClickListener {
+            val picker = EnergyCurveCoveragePickerBottomSheetDialog()
+            picker.setOnCoverageSelectedListener { newThreshold ->
+                val currentRatio = coverageRatio * 100.0
+                tvCoverage.text = String.format(Locale.US, "覆盖率 %.0f%% (%d/20) · 门限≥%d%%", currentRatio, learnedCount, newThreshold)
+                val mgr = BatteryCapacityManager.getInstance(context)
+                viewLifecycleOwner.lifecycleScope.launch {
+                    val updatedEstimate = mgr.refreshEstimateSuspended()
+                    bindUnifiedEstimate(root, updatedEstimate, mgr)
+                }
+            }
+            picker.show(parentFragmentManager, "EnergyCurveCoveragePickerBottomSheetDialog")
+        }
 
         val inflater = LayoutInflater.from(context)
         val shouldInflate = layoutContainer.childCount != SocEnergyCurveLearner.BIN_COUNT

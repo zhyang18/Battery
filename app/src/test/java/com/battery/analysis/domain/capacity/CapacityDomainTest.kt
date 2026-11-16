@@ -302,6 +302,187 @@ class CapacityDomainTest {
         assertFalse(unlearnedBin.isLearned)
     }
 
+    /**
+     * 测试 20 段 SOC 能量曲线在达到覆盖率门限时的比例推算（FCC_E 与 SOH_E）逻辑。
+     * 验证当实测覆盖率未达门限（如 18 段对应 90% 覆盖率，但设定门限为 95%）时，如实返回 null；
+     * 当实测覆盖率达到门限（如设定 80% 门限）时，按物理实测做功严谨外推满电能量 FCC_E 并点亮 SOH_E。
+     */
+    @Test
+    fun testSocEnergyCurveLearner_coverageThresholdExtrapolation() {
+        val learner = SocEnergyCurveLearner()
+
+        // 模拟放电覆盖 10%~100% (共 18 个分箱实测，覆盖率 90%，5.4A * 1h = 5400 mAh)
+        val samples = mutableListOf<CapacitySample>()
+        for (i in 0..180) {
+            val soc = 1.0 - (i / 180.0) * 0.90 // 100% -> 10%
+            samples.add(
+                CapacitySample(
+                    timestampMs = i * 20_000L,
+                    socFraction = soc,
+                    currentAmp = 5.4,
+                    voltageVolt = 3.85,
+                    temperatureC = 25.0
+                )
+            )
+        }
+
+        learner.absorbDischargeSession(samples)
+        assertEquals(0.90, learner.getCoverageRatio(), 0.05)
+
+        // 1. 当设定门限为 95%（高于实际覆盖 90%）时，如实返回 null
+        val (fullEUnderStrict, uncUnderStrict) = learner.estimateFullEnergyWh(minCoverageRatio = 0.95)
+        assertNull(fullEUnderStrict)
+        assertNull(uncUnderStrict)
+
+        // 2. 当设定门限为 80%（低于或等于实际覆盖 90%）时，成功按比例外推满电可用能量
+        val (fullEExtrapolated, uncExtrapolated) = learner.estimateFullEnergyWh(minCoverageRatio = 0.80)
+        assertNotNull(fullEExtrapolated)
+        assertNotNull(uncExtrapolated)
+        assertTrue(fullEExtrapolated!! > 0.0)
+        assertTrue(uncExtrapolated!! > 0.0)
+
+        // 3. 验证融合引擎 ChargeDischargeFusionEngine 在达到门限时点亮 SOH_E
+        val dischargeCandidate = FccCandidateSample(
+            sessionId = "d1",
+            channel = CapacityChannel.DISCHARGE,
+            startSoc = 1.0,
+            endSoc = 0.10,
+            deltaSoc = 0.90,
+            chargeMah = 5400.0,
+            energyWh = 20.79,
+            fccObservedMah = 6000.0,
+            varianceMah2 = 100.0
+        )
+
+        val unified80 = ChargeDischargeFusionEngine.fuse(
+            candidates = listOf(dischargeCandidate),
+            energyLearner = learner,
+            designCapacityMah = 6000.0,
+            designVoltageVolts = 3.85,
+            currentSocPercent = 50,
+            energyCoverageThresholdPercent = 80
+        )
+        assertNotNull(unified80.fccEWh)
+        assertNotNull(unified80.sohEPercent)
+        assertTrue(unified80.sohEPercent!! > 90.0)
+
+        val unified95 = ChargeDischargeFusionEngine.fuse(
+            candidates = listOf(dischargeCandidate),
+            energyLearner = learner,
+            designCapacityMah = 6000.0,
+            designVoltageVolts = 3.85,
+            currentSocPercent = 50,
+            energyCoverageThresholdPercent = 95
+        )
+        assertNull(unified95.fccEWh)
+        assertNull(unified95.sohEPercent)
+    }
+
+    /**
+     * 测试 20 段 SOC 能量曲线在传入权威主账本真实能量时的去噪对齐能力。
+     * 模拟原始采样因待机长间隔唤醒存在 1.8x 虚高积分（如原始积分 37 Wh），
+     * 传入权威真实能量 20.79 Wh 时，分箱应自动按比例对齐，消除待机漂移并恢复物理真实。
+     */
+    @Test
+    fun testSocEnergyCurveLearner_authoritativeEnergyAnchoring() {
+        val learner = SocEnergyCurveLearner()
+
+        // 模拟放电覆盖 5%~95% (共 18 个完整分箱实测，覆盖率 90%)
+        // 原始电流采样虚高：9.72A 导致 1 小时内原始积分为 37.42 Wh
+        val inflatedSamples = mutableListOf<CapacitySample>()
+        for (i in 0..180) {
+            val soc = 0.95 - (i / 180.0) * 0.90
+            inflatedSamples.add(
+                CapacitySample(
+                    timestampMs = i * 20_000L,
+                    socFraction = soc,
+                    currentAmp = 9.72,
+                    voltageVolt = 3.85,
+                    temperatureC = 25.0
+                )
+            )
+        }
+
+        // 传入权威真实能量 20.79 Wh（对应 6000mAh 电池 90% 消耗）
+        learner.absorbDischargeSession(
+            samples = inflatedSamples,
+            authoritativeEnergyWh = 20.79,
+            authoritativeChargeMah = 5400.0
+        )
+
+        // 验证全局总观测能量守恒（严格对齐 20.79 Wh，消除 37.42 Wh 虚高膨胀）
+        assertEquals(20.79, learner.getEnergyCapacityResult().totalObservedEnergyWh, 0.5)
+
+        // 验证 18 个实测分箱归一化做功总和严格对齐到 ~20.79 Wh
+        val measuredBins = learner.getEnergyBins().filter { it.status == BinLearningStatus.MEASURED }
+        assertEquals(18, measuredBins.size)
+        val normalizedMeasuredSum = measuredBins.sumOf { it.measuredEnergyWh }
+        assertEquals(20.79, normalizedMeasuredSum, 0.5)
+
+        // 外推满电能量应为 20.79 / 0.90 = 23.1 Wh（杜绝未对齐前的 41.5 Wh 异常大值）
+        val (fullE, _) = learner.estimateFullEnergyWh(minCoverageRatio = 0.80)
+        assertNotNull(fullE)
+        assertEquals(23.1, fullE!!, 0.6)
+    }
+
+    /**
+     * 测试 20 段 SOC 能量曲线基于放电主容量 FCC_Q 真实物理真值锚定与抗膨胀闭环。
+     * 模拟用户手机实测工况（FCC_Q = 5941 mAh，SOH_Q = 74.3%，设计 8000 mAh · 30.8 Wh）：
+     * 18 个实测分箱（覆盖率 90%）在实测端电压（3.33V ~ 4.34V）驱动下，
+     * 每个分箱物理做功应严格处于 0.98 ~ 1.29 Wh，全域外推满电能量应为 ~22.9 Wh（SOH_E ≈ 74.4%），
+     * 坚决根除未锚定时虚高的 32 Wh 多或 41.14 Wh。
+     */
+    @Test
+    fun testSocEnergyCurveLearner_fccQGroundTruthAnchoringAndExtrapolation() {
+        val learner = SocEnergyCurveLearner()
+
+        // 模拟 18 个分箱（5%~95%），放电端电压从 4.34V 递减至 3.33V
+        val samples = mutableListOf<CapacitySample>()
+        for (i in 0..180) {
+            val progress = i / 180.0
+            val soc = 0.95 - progress * 0.90
+            // 真实物理电压：高段 4.34V 跌落至低段 3.33V
+            val volt = 4.34 - progress * (4.34 - 3.33)
+            samples.add(
+                CapacitySample(
+                    timestampMs = i * 20_000L,
+                    socFraction = soc,
+                    currentAmp = 5.0, // 假设存在长待机唤醒电流毛刺
+                    voltageVolt = volt,
+                    temperatureC = 28.0
+                )
+            )
+        }
+
+        // 吸收会话
+        learner.absorbDischargeSession(samples)
+
+        val fccQ = 5941.0 // 用户手机当前收敛的放电主容量真值
+        val bins = learner.getEnergyBins(fccQ).filter { it.status == BinLearningStatus.MEASURED }
+        assertEquals(18, bins.size)
+
+        // 验证每个分箱做功均处于合理的物理区间 (0.95 Wh ~ 1.35 Wh)，绝无 2.4Wh ~ 3.0Wh 膨胀
+        for (b in bins) {
+            assertTrue("分箱 ${b.binIndex} 做功 ${b.energyWh} 应 >= 0.90 Wh", b.energyWh >= 0.90)
+            assertTrue("分箱 ${b.binIndex} 做功 ${b.energyWh} 应 <= 1.35 Wh", b.energyWh <= 1.35)
+        }
+
+        // 验证基于 FCC_Q 锚定后的满充能量推算值（门限 80%）
+        val (fullEWh, _) = learner.estimateFullEnergyWh(fccQMah = fccQ, minCoverageRatio = 0.80)
+        assertNotNull(fullEWh)
+        // 满充能量应严格在 22.5 Wh ~ 23.3 Wh 之间（对齐 30.8 Wh 设计规格下的 74.3% SOH）
+        assertTrue("推算满电能量 $fullEWh 应在 22.5~23.3 Wh 之间，杜绝 32Wh+", fullEWh!! in 22.5..23.3)
+
+        val designWh = 30.8
+        val sohE = (fullEWh / designWh) * 100.0
+        // 能量健康度 SOH_E 应在 73.0% ~ 75.5% 之间，与 SOH_Q (74.3%) 完美吻合
+        assertTrue("SOH_E $sohE% 应与 SOH_Q 74.3% 自洽对齐", sohE in 73.0..75.5)
+
+        // 当门限设为 100%（实际覆盖 90% 未达门限）时，必须如实返回 null，绝不虚构
+        val (fullE100, _) = learner.estimateFullEnergyWh(fccQMah = fccQ, minCoverageRatio = 1.00)
+        assertNull("覆盖率 90% 未达到 100% 门限时必须如实返回 null", fullE100)
+    }
+
     @Test
     fun testChargeDischargeFusionEngine_disagreementDetection() {
         val energyLearner = SocEnergyCurveLearner()

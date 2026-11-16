@@ -1,5 +1,6 @@
 package com.battery.analysis.domain.capacity.estimator
 
+import com.battery.analysis.domain.capacity.integration.CoulombIntegrator
 import com.battery.analysis.domain.capacity.model.BinLearningStatus
 import com.battery.analysis.domain.capacity.model.CapacitySample
 import com.battery.analysis.domain.capacity.model.EnergyAllocationQuality
@@ -79,7 +80,13 @@ class SocEnergyCurveLearner {
          *
          * @return 转换后的分箱只读不可变实体 [SocEnergyBinInfo]
          */
-        fun toImmutable(): SocEnergyBinInfo {
+        /**
+         * 将分箱可变状态转换为对外只读实体 [SocEnergyBinInfo]。
+         *
+         * @param fccQMah 可选的当前全局放电收敛总电荷容量（单位：mAh），用于电化学第一性原理物理约束
+         * @return 不可变的分箱物理度量信息实体 [SocEnergyBinInfo]
+         */
+        fun toImmutable(fccQMah: Double? = null): SocEnergyBinInfo {
             val status = when {
                 measuredSpanPercent >= MIN_MEASURED_SPAN_PERCENT && measuredEnergyWh > 0.0 -> BinLearningStatus.MEASURED
                 measuredSpanPercent >= MIN_PARTIAL_SPAN_PERCENT && measuredEnergyWh > 0.0 -> BinLearningStatus.PARTIAL
@@ -90,11 +97,11 @@ class SocEnergyCurveLearner {
             val isLearned = (status == BinLearningStatus.MEASURED)
 
             // 标准化归一到完整 5% SOC 分箱做功与电荷容量
-            val normMeasuredWh = if (measuredSpanPercent > 0.0) {
+            val rawNormMeasuredWh = if (measuredSpanPercent > 0.0) {
                 (measuredEnergyWh / measuredSpanPercent) * BIN_WIDTH_PERCENT
             } else 0.0
 
-            val normMeasuredMah = if (measuredSpanPercent > 0.0) {
+            val rawNormMeasuredMah = if (measuredSpanPercent > 0.0) {
                 (measuredChargeMah / measuredSpanPercent) * BIN_WIDTH_PERCENT
             } else 0.0
 
@@ -106,21 +113,6 @@ class SocEnergyCurveLearner {
                 (estimatedChargeMah / estimatedSpanPercent) * BIN_WIDTH_PERCENT
             } else 0.0
 
-            // 综合显示值：纯实测优先，若无实测则呈现模型估算
-            val displayEnergyWh = when (status) {
-                BinLearningStatus.MEASURED -> normMeasuredWh
-                BinLearningStatus.PARTIAL -> measuredEnergyWh
-                BinLearningStatus.MODEL_ESTIMATED -> normEstimatedWh
-                BinLearningStatus.UNLEARNED -> 0.0
-            }
-
-            val displayChargeMah = when (status) {
-                BinLearningStatus.MEASURED -> normMeasuredMah
-                BinLearningStatus.PARTIAL -> measuredChargeMah
-                BinLearningStatus.MODEL_ESTIMATED -> normEstimatedMah
-                BinLearningStatus.UNLEARNED -> 0.0
-            }
-
             val totalTempDuration = measuredTempDuration + estimatedTempDuration
             val avgTemp = if (totalTempDuration > 0.0) {
                 (measuredTempSum + estimatedTempSum) / totalTempDuration
@@ -131,6 +123,33 @@ class SocEnergyCurveLearner {
             val avgVolt = if (totalChargeForVolt > 0.0 && totalEnergyForVolt > 0.0) {
                 totalEnergyForVolt / (totalChargeForVolt / 1000.0)
             } else null
+
+            // 电化学物理锚定与抗采样漂移膨胀：
+            // 当主通道已高精度收敛并提供了电池真实物理容量 fccQMah（如 5941 mAh），
+            // 且本分箱已实测出端电压 avgVolt 时，5% 分箱的物理电荷量严格锚定到电池电荷份额 (fccQMah * 0.05)，做功严格对齐至 q_bin * avgVolt，
+            // 坚决杜绝息屏长间隔采样漂移和整机高功耗将分箱能量虚高膨胀至 2.4Wh ~ 3.0Wh
+            val (normMeasuredMah, normMeasuredWh) = if (fccQMah != null && fccQMah > 0.0 && avgVolt != null && avgVolt > 0.0 && isLearned) {
+                val qBin = (fccQMah / BIN_COUNT.toDouble())
+                val eBin = (qBin * avgVolt) / 1000.0
+                Pair(qBin, eBin)
+            } else {
+                Pair(rawNormMeasuredMah, rawNormMeasuredWh)
+            }
+
+            // 综合显示值：纯实测优先，若无实测则呈现模型估算
+            val displayEnergyWh = when (status) {
+                BinLearningStatus.MEASURED -> normMeasuredWh
+                BinLearningStatus.PARTIAL -> normMeasuredWh.takeIf { it > 0.0 } ?: measuredEnergyWh
+                BinLearningStatus.MODEL_ESTIMATED -> normEstimatedWh
+                BinLearningStatus.UNLEARNED -> 0.0
+            }
+
+            val displayChargeMah = when (status) {
+                BinLearningStatus.MEASURED -> normMeasuredMah
+                BinLearningStatus.PARTIAL -> normMeasuredMah.takeIf { it > 0.0 } ?: measuredChargeMah
+                BinLearningStatus.MODEL_ESTIMATED -> normEstimatedMah
+                BinLearningStatus.UNLEARNED -> 0.0
+            }
 
             val allocationMethod = when {
                 status == BinLearningStatus.MEASURED -> "DIRECT_MEASURED"
@@ -189,46 +208,106 @@ class SocEnergyCurveLearner {
     private var totalObservedChargeMah: Double = 0.0
 
     /**
-     * 吸收一次放电会话的连续采样序列，将各段做功解耦并精确归属于对应的 5% SOC 分箱中。
+     * 吸收一次完整放电会话的采样点序列，更新 20 段 SOC 能量曲线各分箱做功。
      *
-     * 100% 满电平台做功自动解耦并独立累计，严禁混入 95%~100% 分箱。
+     * 遵循主账本权威真值锚定与无假数据铁律：
+     * 1. 若序列以 100% 满电平台启动，先进行 100% 平台与 99% 边界过渡段的物理隔离解耦；
+     * 2. 若传入了经双锚点微积分去噪核算的会话权威真实物理能量 [authoritativeEnergyWh]，
+     *    则扣除平台与过渡能量后，对有效放电区间的各分箱积分结果进行真实物理对齐缩放，
+     *    彻底消除息屏长间隔采样漂移和未经校准的电流毛刺对分箱实测能量的虚高膨胀（Standby Current Inflation）。
      *
      * @param samples 放电采样点序列
+     * @param authoritativeEnergyWh 会话主账本权威核算的真实物理总能耗（单位：Wh，可选）
+     * @param authoritativeChargeMah 会话主账本权威核算的真实物理总电荷（单位：mAh，可选）
      */
     @Synchronized
-    fun absorbDischargeSession(samples: List<CapacitySample>) {
+    fun absorbDischargeSession(
+        samples: List<CapacitySample>,
+        authoritativeEnergyWh: Double? = null,
+        authoritativeChargeMah: Double? = null
+    ) {
         if (samples.size < 2) return
 
         // 1. 若序列以 100% 满电平台启动，先进行解耦分离
         val firstSoc = samples.firstOrNull { it.socFraction != null }?.socFraction ?: 0.0
         val effectiveSamples: List<CapacitySample>
+        val plateauWh: Double
+        val plateauMah: Double
+        val transitionWh: Double
+        val transitionMah: Double
+
         if (firstSoc >= 0.995) {
             val decoupled = DischargeSessionDecoupler.decouple(
                 samples = samples,
                 fallbackStartSoc = firstSoc,
                 fallbackEndSoc = samples.lastOrNull { it.socFraction != null }?.socFraction ?: 0.0
             )
-            // 独立累加顶部平台做功与边界过渡做功，绝不污染 95%~100% 实测分箱
-            topPlateauMah += decoupled.topPlateau.plateauMah
-            topPlateauWh += decoupled.topPlateau.plateauWh
-            transitionMah += decoupled.topPlateau.transitionMah
-            transitionWh += decoupled.topPlateau.transitionWh
+            plateauWh = decoupled.topPlateau.plateauWh
+            plateauMah = decoupled.topPlateau.plateauMah
+            transitionWh = decoupled.topPlateau.transitionWh
+            transitionMah = decoupled.topPlateau.transitionMah
+            effectiveSamples = decoupled.effectiveSamples
+
             topPlateauDurationSec += decoupled.topPlateau.durationSeconds
             topPlateauSampleCount += decoupled.topPlateau.sampleCount
-
-            // 计入全局已观测物理总账本（使总观测能量 totalObservedEnergy 守恒包含平台与过渡做功）
-            totalObservedEnergyWh += (decoupled.topPlateau.plateauWh + decoupled.topPlateau.transitionWh)
-            totalObservedChargeMah += (decoupled.topPlateau.plateauMah + decoupled.topPlateau.transitionMah)
-
-            effectiveSamples = decoupled.effectiveSamples
         } else {
+            plateauWh = 0.0
+            plateauMah = 0.0
+            transitionWh = 0.0
+            transitionMah = 0.0
             effectiveSamples = samples
         }
 
         if (effectiveSamples.size < 2) return
 
-        // 2. 针对有效放电区间执行证据隔离分配
-        absorbEffectiveDischargeSamples(effectiveSamples)
+        // 2. 核算有效放电区间的原始微积分做功与电荷
+        val rawEffectiveIntegrated = CoulombIntegrator.integrate(effectiveSamples)
+        val rawEffectiveWh = rawEffectiveIntegrated.energyWh
+        val rawEffectiveMah = rawEffectiveIntegrated.chargeMah
+
+        val rawTotalSessionWh = plateauWh + transitionWh + rawEffectiveWh
+        val rawTotalSessionMah = plateauMah + transitionMah + rawEffectiveMah
+
+        // 3. 计算全局统一的主账本物理能量对齐缩放因子（消除长待机息屏采样漂移导致的电流膨胀虚高）
+        val sessionEnergyScale = if (authoritativeEnergyWh != null && authoritativeEnergyWh > 0.0 && rawTotalSessionWh > 0.0) {
+            authoritativeEnergyWh / rawTotalSessionWh
+        } else 1.0
+
+        val sessionChargeScale = if (authoritativeChargeMah != null && authoritativeChargeMah > 0.0 && rawTotalSessionMah > 0.0) {
+            authoritativeChargeMah / rawTotalSessionMah
+        } else sessionEnergyScale
+
+        // 4. 对 100% 满电平台与边界过渡区间应用相同的权威真值尺度，彻底消除未对齐时的虚高膨胀
+        val scaledPlateauWh = plateauWh * sessionEnergyScale
+        val scaledPlateauMah = plateauMah * sessionChargeScale
+        val scaledTransitionWh = transitionWh * sessionEnergyScale
+        val scaledTransitionMah = transitionMah * sessionChargeScale
+
+        topPlateauMah += scaledPlateauMah
+        topPlateauWh += scaledPlateauWh
+        this.transitionMah += scaledTransitionMah
+        this.transitionWh += scaledTransitionWh
+
+        // 计入全局已观测物理总账本（平台 + 过渡段严格守恒）
+        totalObservedEnergyWh += (scaledPlateauWh + scaledTransitionWh)
+        totalObservedChargeMah += (scaledPlateauMah + scaledTransitionMah)
+
+        // 5. 计算供给有效分箱区间的权威对齐物理能量与电荷
+        val effectiveAuthWh = if (authoritativeEnergyWh != null && authoritativeEnergyWh > 0.0) {
+            rawEffectiveWh * sessionEnergyScale
+        } else null
+
+        val effectiveAuthMah = if (authoritativeChargeMah != null && authoritativeChargeMah > 0.0) {
+            rawEffectiveMah * sessionChargeScale
+        } else null
+
+        // 6. 针对有效放电区间执行证据隔离分配并进行权威对齐
+        absorbEffectiveDischargeSamples(
+            samples = effectiveSamples,
+            stallThresholdMah = DEFAULT_STALL_CHARGE_THRESHOLD_MAH,
+            authoritativeEnergyWh = effectiveAuthWh,
+            authoritativeChargeMah = effectiveAuthMah
+        )
     }
 
     /**
@@ -236,12 +315,16 @@ class SocEnergyCurveLearner {
      *
      * @param samples 有效放电采样序列（建议时间戳升序，放电电流 I > 0）
      * @param stallThresholdMah SOC 停滞异常电荷保护门限（单位：mAh，默认 400.0）
+     * @param authoritativeEnergyWh 有效放电区间权威核算能量（单位：Wh，可选）
+     * @param authoritativeChargeMah 有效放电区间权威核算电荷（单位：mAh，可选）
      * @return 跨区间分配质量评级 [EnergyAllocationQuality]
      */
     @Synchronized
     fun absorbEffectiveDischargeSamples(
         samples: List<CapacitySample>,
-        stallThresholdMah: Double = DEFAULT_STALL_CHARGE_THRESHOLD_MAH
+        stallThresholdMah: Double = DEFAULT_STALL_CHARGE_THRESHOLD_MAH,
+        authoritativeEnergyWh: Double? = null,
+        authoritativeChargeMah: Double? = null
     ): EnergyAllocationQuality {
         if (samples.size < 2) return EnergyAllocationQuality.NORMAL
 
@@ -294,9 +377,7 @@ class SocEnergyCurveLearner {
                 (vB * avgI) * (dt / 3600.0)
             } else 0.0
 
-            // 全局真实做功与电荷无损累加
-            totalObservedEnergyWh += dE
-            totalObservedChargeMah += dQ
+            // 各分箱初值在此循环内累积，最终会话真实做功与电荷在下方统一缩放并累入总账本
 
             val socA = a.socFraction?.times(100.0) ?: continue
             val socB = b.socFraction?.times(100.0) ?: continue
@@ -409,6 +490,39 @@ class SocEnergyCurveLearner {
             }
         }
 
+        // 计算本会话原始积分做功与电荷量
+        val rawSessionEnergyWh = sessionDirectEnergy.sum() + sessionEstimatedEnergy.sum() + sessionUnresolvedEnergy.sum()
+        val rawSessionChargeMah = sessionDirectCharge.sum() + sessionEstimatedCharge.sum() + sessionUnresolvedCharge.sum()
+
+        // 物理主账本锚定与长待机采样漂移去噪对齐：
+        // 若提供了会话真实物理能耗（已扣减顶部平台与过渡段），则将各分箱积分值按比例对齐到权威真值，
+        // 彻底根除熄屏长间隔采样漂移和未经校准的电流毛刺对分箱实测能量的虚高膨胀（Standby Current Inflation）
+        val energyScale = if (authoritativeEnergyWh != null && authoritativeEnergyWh > 0.0 && rawSessionEnergyWh > 0.0) {
+            authoritativeEnergyWh / rawSessionEnergyWh
+        } else 1.0
+
+        val chargeScale = if (authoritativeChargeMah != null && authoritativeChargeMah > 0.0 && rawSessionChargeMah > 0.0) {
+            authoritativeChargeMah / rawSessionChargeMah
+        } else if (authoritativeEnergyWh != null && authoritativeEnergyWh > 0.0 && rawSessionChargeMah > 0.0) {
+            energyScale
+        } else 1.0
+
+        if (energyScale != 1.0 || chargeScale != 1.0) {
+            for (idx in 0 until BIN_COUNT) {
+                sessionDirectEnergy[idx] *= energyScale
+                sessionEstimatedEnergy[idx] *= energyScale
+                sessionUnresolvedEnergy[idx] *= energyScale
+
+                sessionDirectCharge[idx] *= chargeScale
+                sessionEstimatedCharge[idx] *= chargeScale
+                sessionUnresolvedCharge[idx] *= chargeScale
+            }
+        }
+
+        // 累入全局已观测物理总账本
+        totalObservedEnergyWh += (rawSessionEnergyWh * energyScale)
+        totalObservedChargeMah += (rawSessionChargeMah * chargeScale)
+
         // 将本会话有效吸收的数据汇入全局模型
         for (idx in 0 until BIN_COUNT) {
             val b = bins[idx]
@@ -446,11 +560,12 @@ class SocEnergyCurveLearner {
     /**
      * 获取当前 20 段 SOC 能量曲线全景快照。
      *
+     * @param fccQMah 可选的放电主通道物理总电荷容量（单位：mAh），用于电化学第一性原理电荷守恒约束
      * @return 包含 20 个分箱的只读不可变列表 [List<SocEnergyBinInfo>]
      */
     @Synchronized
-    fun getEnergyBins(): List<SocEnergyBinInfo> {
-        return bins.map { it.toImmutable() }
+    fun getEnergyBins(fccQMah: Double? = null): List<SocEnergyBinInfo> {
+        return bins.map { it.toImmutable(fccQMah) }
     }
 
     /**
@@ -471,26 +586,34 @@ class SocEnergyCurveLearner {
      *
      * 遵循技术评审规范与无假数据铁律：
      * 1. 彻底废除 (unlearnedCount * avgWhPerLearnedBin) 等粗暴脑补；
-     * 2. 必须全域 20 段全部实测学满（特别是 0%~5% 分箱实测）方可输出高置信度全量 FCC_E；
-     * 3. 存在任何非 MEASURED 分箱时，如实返回 Pair(null, null)（表示学习中，严禁捏造伪造数据）。
+     * 2. 当实测覆盖率达到设定门限（minCoverageRatio，默认 80%）时，
+     *    基于已学满分箱的物理做功累加和与实测覆盖比例进行比例外推（E_full = E_learned / R_cov）；
+     * 3. 测量不确定度随未覆盖区间的增大自适应放大（0.03 + (1 - R_cov) * 0.05）；
+     * 4. 覆盖比例未达到门限时，如实返回 Pair(null, null)（表示学习中，严禁捏造虚假数据）。
      *
-     * @param fccQMah 可选的当前安时容量参考（保留签名兼容）
-     * @return Pair(全量能量估算值 Wh, 不确定度 Wh)，未学满完备时返回 Pair(null, null)
+     * @param fccQMah 可选的当前安时容量参考（用于电化学端电压加权能量核算）
+     * @param minCoverageRatio 最小覆盖比例门限（0.0 ~ 1.0，默认 0.80 即 80% 覆盖率）
+     * @return Pair(全量能量估算值 Wh, 不确定度 Wh)，未达到门限时返回 Pair(null, null)
      */
     @Synchronized
-    fun estimateFullEnergyWh(fccQMah: Double? = null): Pair<Double?, Double?> {
-        val snapshot = getEnergyBins()
-        val allMeasured = snapshot.all { it.status == BinLearningStatus.MEASURED }
+    fun estimateFullEnergyWh(
+        fccQMah: Double? = null,
+        minCoverageRatio: Double = 0.80
+    ): Pair<Double?, Double?> {
+        val snapshot = getEnergyBins(fccQMah)
+        val measuredBins = snapshot.filter { it.status == BinLearningStatus.MEASURED }
+        val measuredCount = measuredBins.size
+        val actualCoverage = measuredCount.toDouble() / BIN_COUNT.toDouble()
 
-        if (!allMeasured) {
-            // 只要有任何一段未充分实测学满（如常见 0%~5% 缺失），如实返回 null，绝不使用全局均值虚构
+        if (actualCoverage < minCoverageRatio || actualCoverage <= 0.0) {
+            // 未达到设定的分箱覆盖率门限，如实返回 null，绝不虚构
             return Pair(null, null)
         }
 
-        // 20 段完整实测求和
-        val totalWh = snapshot.sumOf { it.measuredEnergyWh }
-        val uncertaintyWh = totalWh * 0.03 // 3% 物理测量合成不确定度
-        return Pair(totalWh, uncertaintyWh)
+        val measuredSumWh = measuredBins.sumOf { it.measuredEnergyWh }
+        val fullWh = measuredSumWh / actualCoverage
+        val uncertaintyWh = fullWh * (0.03 + (1.0 - actualCoverage) * 0.05)
+        return Pair(fullWh, uncertaintyWh)
     }
 
     /**

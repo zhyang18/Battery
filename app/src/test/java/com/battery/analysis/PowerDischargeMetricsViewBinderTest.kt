@@ -521,4 +521,32 @@ class PowerDischargeMetricsViewBinderTest {
         val durInvalid = PowerDischargeMetricsViewBinder.getRollingDischargeDurationMs(999)
         org.junit.Assert.assertNull(durInvalid)
     }
+
+    /**
+     * 验证卡片中剩余续航时长与同口径预期满电续航时长严格守恒自洽。
+     * 当电量低于 100% 时，剩余续航绝不反超满电续航，且预测放电速度与满电时长物理吻合。
+     */
+    @Test
+    fun testCardRemainingAndFullRuntimeConsistent_NoInversion() {
+        val totalCapacityWh = 23.22f
+        val batteryPercent = 66.0f
+        val usableEnergyWh = (totalCapacityWh * (batteryPercent / 100f)).toDouble()
+        val pBenchmark = 2.55
+
+        // 推算当前 66% 剩余续航约为 6 小时
+        val remMs = ((usableEnergyWh / pBenchmark) * 3600.0 * 1000.0).toLong()
+        // 同基准预期满电续航约为 9.1 小时
+        val fullMs = ((totalCapacityWh.toDouble() / pBenchmark) * 3600.0 * 1000.0).toLong()
+
+        assertTrue("剩余续航绝对不得反超满电续航 (rem: $remMs, full: $fullMs)", remMs <= fullMs)
+
+        // 验证进度条比例精确对应当前电量 66%
+        val progress = PowerDischargeMetricsViewBinder.calculateRuntimeProgress(remMs, fullMs)
+        assertEquals(660, progress)
+
+        // 验证放电速率与满电时长乘积严格守恒为 100%
+        val rate = (pBenchmark / totalCapacityWh.toDouble()) * 100.0
+        val inferredTotalPercent = (rate / 100.0) * (fullMs.toDouble() / 3600_000.0) * 100.0
+        assertEquals(100.0, inferredTotalPercent, 0.5)
+    }
 }

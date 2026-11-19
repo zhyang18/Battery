@@ -106,6 +106,7 @@ data class ConfidenceBreakdown(
  * @property benchmarkPowerWatts 计算该剩余续航实际采用的稳态基准放电功率（单位：W，若无独立基准则为 null）
  * @property actualFastPowerWatts 当前物理采集与即时多时间尺度融合做功功率（单位：W，若无独立基准则为 null）
  * @property drainRateMultiplier 动态能耗流速倍率（即时做功功率 / 稳态基准功率，如 0.75x，若无独立基准则为 null）
+ * @property benchmarkFullMs 基于预测基准放电功率与满充总能量推算的预期满电续航时长（单位：毫秒，与剩余续航采用严格同一基准，若无数据为 null）
  */
 data class RuntimeEstimate(
     val remainingMs: Long?,
@@ -123,5 +124,6 @@ data class RuntimeEstimate(
     val confidenceBreakdown: ConfidenceBreakdown? = null,
     val benchmarkPowerWatts: Double? = null,
     val actualFastPowerWatts: Double? = null,
-    val drainRateMultiplier: Double? = null
+    val drainRateMultiplier: Double? = null,
+    val benchmarkFullMs: Long? = null
 )

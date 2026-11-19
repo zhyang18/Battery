@@ -204,6 +204,7 @@ class RuntimeEstimator(
      * @param lightPowerW 历史大样本实测亮屏轻载工况功率（单位：W，可选）
      * @param tempCelsius 电池当前温度（单位：℃，可选）
      * @param energyConfidence 电池剩余电能估算数据源置信度（0.0 ~ 1.0）
+     * @param totalCapacityWh 电池满充物理总能量（单位：Wh，可选，用于推算与预测基准严格同口径的满电时长）
      * @return 亮屏剩余续航估计结果实体 [RuntimeEstimate]
      */
     fun estimateScreenOn(
@@ -213,7 +214,8 @@ class RuntimeEstimator(
         heavyPowerW: Double? = null,
         lightPowerW: Double? = null,
         tempCelsius: Float? = null,
-        energyConfidence: Double = 0.90
+        energyConfidence: Double = 0.90,
+        totalCapacityWh: Float? = null
     ): RuntimeEstimate {
         val predictedPower = onPowerEstimator.getPredictedPower()
         if (usableEnergyWh == null || usableEnergyWh <= 0.0 || predictedPower == null || predictedPower <= 0.0) {
@@ -234,6 +236,13 @@ class RuntimeEstimator(
 
         val hours = usableEnergyWh / predictedPower
         val remainingMs = (hours * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
+
+        val fullWh = totalCapacityWh?.toDouble() ?: if (batteryLevelPercent != null && batteryLevelPercent > 0f) {
+            usableEnergyWh / (batteryLevelPercent.toDouble().coerceIn(1.0, 100.0) / 100.0)
+        } else null
+        val benchmarkFullMs = if (fullWh != null && fullWh > 0.0) {
+            ((fullWh / predictedPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(remainingMs)
+        } else null
 
         // 亮屏工况预期范围：优先采用大样本历史实测与即时 Fast 实测结合的轻重载功率画像；缺失画像时基于当前预测放电功率推算动态置信区间包络
         val actualFastOn = onPowerEstimator.getFastPower()?.takeIf { it > 0.0 }
@@ -286,7 +295,8 @@ class RuntimeEstimator(
             minRemainingMs = if (remainingMs > 0L && safeMinOnMs > 0L) safeMinOnMs else null,
             maxRemainingMs = if (remainingMs > 0L && safeMaxOnMs > 0L) safeMaxOnMs else null,
             qualityReasons = qualityReasons,
-            confidenceBreakdown = breakdown
+            confidenceBreakdown = breakdown,
+            benchmarkFullMs = benchmarkFullMs
         )
     }
 
@@ -302,6 +312,7 @@ class RuntimeEstimator(
      * @param offLowPowerW 历史大样本实测息屏深睡休眠工况功率（单位：W，可选）
      * @param tempCelsius 电池当前温度（单位：℃，可选）
      * @param energyConfidence 电池剩余电能估算数据源置信度（0.0 ~ 1.0）
+     * @param totalCapacityWh 电池满充物理总能量（单位：Wh，可选，用于推算与预测基准严格同口径的满电时长）
      * @return 息屏待机剩余续航估计结果实体 [RuntimeEstimate]
      */
     fun estimateScreenOff(
@@ -311,7 +322,8 @@ class RuntimeEstimator(
         offHighPowerW: Double? = null,
         offLowPowerW: Double? = null,
         tempCelsius: Float? = null,
-        energyConfidence: Double = 0.90
+        energyConfidence: Double = 0.90,
+        totalCapacityWh: Float? = null
     ): RuntimeEstimate {
         val predictedPower = offPowerEstimator.getPredictedPower()
         if (usableEnergyWh == null || usableEnergyWh <= 0.0 || predictedPower == null || predictedPower <= 0.0) {
@@ -332,6 +344,13 @@ class RuntimeEstimator(
 
         val hours = usableEnergyWh / predictedPower
         val remainingMs = (hours * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
+
+        val fullWh = totalCapacityWh?.toDouble() ?: if (batteryLevelPercent != null && batteryLevelPercent > 0f) {
+            usableEnergyWh / (batteryLevelPercent.toDouble().coerceIn(1.0, 100.0) / 100.0)
+        } else null
+        val benchmarkFullMs = if (fullWh != null && fullWh > 0.0) {
+            ((fullWh / predictedPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(remainingMs)
+        } else null
 
         // 息屏工况预期范围：优先采用大样本历史实测的高耗电唤醒与深睡休眠画像；缺失画像时基于当前预测待机功耗推算动态置信区间包络
         val pHeavyOff = offHighPowerW?.takeIf { it > predictedPower } ?: (predictedPower * 1.80)
@@ -381,7 +400,8 @@ class RuntimeEstimator(
             minRemainingMs = if (remainingMs > 0L && safeMinOffMs > 0L) safeMinOffMs else null,
             maxRemainingMs = if (remainingMs > 0L && safeMaxOffMs > 0L) safeMaxOffMs else null,
             qualityReasons = qualityReasons,
-            confidenceBreakdown = breakdown
+            confidenceBreakdown = breakdown,
+            benchmarkFullMs = benchmarkFullMs
         )
     }
 
@@ -398,6 +418,9 @@ class RuntimeEstimator(
      * @param batteryLevelPercent 当前电池电量百分比（可选）
      * @param heavyGlobalPowerW 历史大样本实测全局偏重载工况功率（单位：W，可选）
      * @param lightGlobalPowerW 历史大样本实测全局偏轻载工况功率（单位：W，可选）
+     * @param tempCelsius 电池当前温度（单位：℃，可选）
+     * @param energyConfidence 电池剩余电能估算数据源置信度（0.0 ~ 1.0）
+     * @param totalCapacityWh 电池满充物理总能量（单位：Wh，可选，用于推算与预测基准严格同口径的满电时长）
      * @return 全局综合剩余续航估计结果实体 [RuntimeEstimate]
      */
     fun estimateGlobal(
@@ -410,7 +433,8 @@ class RuntimeEstimator(
         heavyGlobalPowerW: Double? = null,
         lightGlobalPowerW: Double? = null,
         tempCelsius: Float? = null,
-        energyConfidence: Double = 0.90
+        energyConfidence: Double = 0.90,
+        totalCapacityWh: Float? = null
     ): RuntimeEstimate {
         if (usableEnergyWh == null || usableEnergyWh <= 0.0) {
             return RuntimeEstimate(
@@ -424,6 +448,10 @@ class RuntimeEstimator(
             )
         }
 
+        val fullWh = totalCapacityWh?.toDouble() ?: if (batteryLevelPercent != null && batteryLevelPercent > 0f) {
+            usableEnergyWh / (batteryLevelPercent.toDouble().coerceIn(1.0, 100.0) / 100.0)
+        } else null
+
         val pOn = onPowerEstimator.getPredictedPower()
         val pOff = offPowerEstimator.getPredictedPower()
 
@@ -433,6 +461,9 @@ class RuntimeEstimator(
             if (pGlobal > 0.0) {
                 val hours = usableEnergyWh / pGlobal
                 val remainingMs = (hours * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
+                val benchmarkFullMs = if (fullWh != null && fullWh > 0.0) {
+                    ((fullWh / pGlobal) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(remainingMs)
+                } else null
 
                 // 全局工况预期范围：优先采用大样本历史实测全局轻重载功率画像；缺失画像时基于融合功耗推导动态置信区间包络
                 val pHeavyGlobal = heavyGlobalPowerW?.takeIf { it > pGlobal } ?: (pGlobal * 1.40)
@@ -472,7 +503,8 @@ class RuntimeEstimator(
                     minRemainingMs = if (remainingMs > 0L && safeMinGlobalMs > 0L) safeMinGlobalMs else null,
                     maxRemainingMs = if (remainingMs > 0L && safeMaxGlobalMs > 0L) safeMaxGlobalMs else null,
                     qualityReasons = qualityReasons,
-                    confidenceBreakdown = blendedBreakdown
+                    confidenceBreakdown = blendedBreakdown,
+                    benchmarkFullMs = benchmarkFullMs
                 )
             }
         }
@@ -491,6 +523,9 @@ class RuntimeEstimator(
         if (selectedEstimator != null && pFallback != null && pFallback > 0.0) {
             val hours = usableEnergyWh / pFallback
             val remainingMs = (hours * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
+            val benchmarkFullMs = if (fullWh != null && fullWh > 0.0) {
+                ((fullWh / pFallback) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(remainingMs)
+            } else null
 
             // 降级模式工况预期范围：优先采用历史实测画像；缺失画像时基于当前降级功耗推导动态置信区间包络
             val pHeavyFallback = heavyGlobalPowerW?.takeIf { it > pFallback } ?: (pFallback * 1.40)
@@ -529,7 +564,8 @@ class RuntimeEstimator(
                 minRemainingMs = if (remainingMs > 0L && safeMinFallbackMs > 0L) safeMinFallbackMs else null,
                 maxRemainingMs = if (remainingMs > 0L && safeMaxFallbackMs > 0L) safeMaxFallbackMs else null,
                 qualityReasons = qualityReasons,
-                confidenceBreakdown = fallbackBreakdown
+                confidenceBreakdown = fallbackBreakdown,
+                benchmarkFullMs = benchmarkFullMs
             )
         }
 
@@ -778,7 +814,8 @@ class RuntimeEstimator(
             heavyPowerW = heavyOnW,
             lightPowerW = lightOnW,
             tempCelsius = tempCelsius,
-            energyConfidence = energyConfidence
+            energyConfidence = energyConfidence,
+            totalCapacityWh = totalCapacityWh
         )
 
         val offEstimate = estimateScreenOff(
@@ -788,7 +825,8 @@ class RuntimeEstimator(
             offHighPowerW = offHighW,
             offLowPowerW = offLowW,
             tempCelsius = tempCelsius,
-            energyConfidence = energyConfidence
+            energyConfidence = energyConfidence,
+            totalCapacityWh = totalCapacityWh
         )
 
         // 5. 全局综合续航推算（融合当前放电周期/滑动窗口近期行为与 7 天长期习惯，自适应连续阻尼加权）
@@ -841,7 +879,8 @@ class RuntimeEstimator(
             heavyGlobalPowerW = heavyGlobalW,
             lightGlobalPowerW = lightGlobalW,
             tempCelsius = tempCelsius,
-            energyConfidence = energyConfidence
+            energyConfidence = energyConfidence,
+            totalCapacityWh = totalCapacityWh
         )
 
         // 6. 对亮屏、息屏与全局三维度剩余续航接入时序连续平滑器（EnduranceRuntimeSmoother）
@@ -958,13 +997,19 @@ class RuntimeEstimator(
         }
         val safeMinOn = onEstimate.minRemainingMs?.let { minOf(it, effectiveSmoothedOnMs ?: it) } ?: effectiveSmoothedOnMs
         val safeMaxOn = onEstimate.maxRemainingMs?.let { maxOf(it, effectiveSmoothedOnMs ?: it) } ?: effectiveSmoothedOnMs
+        val finalBenchmarkOnWatts = onEstimate.predictedPowerWatts ?: baseOnPower
+        val fullOnMs = if (finalBenchmarkOnWatts != null && finalBenchmarkOnWatts > 0.0 && totalCapacityWh != null && totalCapacityWh > 0f) {
+            ((totalCapacityWh.toDouble() / finalBenchmarkOnWatts) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(effectiveSmoothedOnMs ?: 0L)
+        } else onEstimate.benchmarkFullMs
+
         val finalOnEstimate = onEstimate.copy(
             remainingMs = effectiveSmoothedOnMs,
             minRemainingMs = safeMinOn,
             maxRemainingMs = safeMaxOn,
-            benchmarkPowerWatts = onEstimate.predictedPowerWatts ?: baseOnPower,
+            benchmarkPowerWatts = finalBenchmarkOnWatts,
             actualFastPowerWatts = actualOnPower,
-            drainRateMultiplier = onDrainRate
+            drainRateMultiplier = onDrainRate,
+            benchmarkFullMs = fullOnMs
         )
 
         val effectiveSmoothedOffMs = (smoothedOffMs ?: offEstimate.remainingMs)?.let {
@@ -972,13 +1017,19 @@ class RuntimeEstimator(
         }
         val safeMinOff = offEstimate.minRemainingMs?.let { minOf(it, effectiveSmoothedOffMs ?: it) } ?: effectiveSmoothedOffMs
         val safeMaxOff = offEstimate.maxRemainingMs?.let { maxOf(it, effectiveSmoothedOffMs ?: it) } ?: effectiveSmoothedOffMs
+        val finalBenchmarkOffWatts = offEstimate.predictedPowerWatts ?: baseOffPower
+        val fullOffMs = if (finalBenchmarkOffWatts != null && finalBenchmarkOffWatts > 0.0 && totalCapacityWh != null && totalCapacityWh > 0f) {
+            ((totalCapacityWh.toDouble() / finalBenchmarkOffWatts) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(effectiveSmoothedOffMs ?: 0L)
+        } else offEstimate.benchmarkFullMs
+
         val finalOffEstimate = offEstimate.copy(
             remainingMs = effectiveSmoothedOffMs,
             minRemainingMs = safeMinOff,
             maxRemainingMs = safeMaxOff,
-            benchmarkPowerWatts = offEstimate.predictedPowerWatts ?: baseOffPower,
+            benchmarkPowerWatts = finalBenchmarkOffWatts,
             actualFastPowerWatts = actualOffPower,
-            drainRateMultiplier = offDrainRate
+            drainRateMultiplier = offDrainRate,
+            benchmarkFullMs = fullOffMs
         )
 
         val effectiveSmoothedGlobalMs = (smoothedGlobalMs ?: globalEstimate.remainingMs)?.let {
@@ -986,13 +1037,19 @@ class RuntimeEstimator(
         }
         val safeMinGlobal = globalEstimate.minRemainingMs?.let { minOf(it, effectiveSmoothedGlobalMs ?: it) } ?: effectiveSmoothedGlobalMs
         val safeMaxGlobal = globalEstimate.maxRemainingMs?.let { maxOf(it, effectiveSmoothedGlobalMs ?: it) } ?: effectiveSmoothedGlobalMs
+        val finalBenchmarkGlobalWatts = globalEstimate.predictedPowerWatts ?: baseGlobalPower
+        val fullGlobalMs = if (finalBenchmarkGlobalWatts != null && finalBenchmarkGlobalWatts > 0.0 && totalCapacityWh != null && totalCapacityWh > 0f) {
+            ((totalCapacityWh.toDouble() / finalBenchmarkGlobalWatts) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(effectiveSmoothedGlobalMs ?: 0L)
+        } else globalEstimate.benchmarkFullMs
+
         val finalGlobalEstimate = globalEstimate.copy(
             remainingMs = effectiveSmoothedGlobalMs,
             minRemainingMs = safeMinGlobal,
             maxRemainingMs = safeMaxGlobal,
-            benchmarkPowerWatts = globalEstimate.predictedPowerWatts ?: baseGlobalPower,
+            benchmarkPowerWatts = finalBenchmarkGlobalWatts,
             actualFastPowerWatts = actualGlobalPower,
-            drainRateMultiplier = globalDrainRate
+            drainRateMultiplier = globalDrainRate,
+            benchmarkFullMs = fullGlobalMs
         )
 
         return TripleRuntimeResult(

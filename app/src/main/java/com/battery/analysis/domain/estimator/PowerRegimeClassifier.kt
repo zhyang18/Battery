@@ -59,7 +59,7 @@ class PowerRegimeClassifier {
             // 亮屏状态：以中位基准比例区分轻载、日常中载与重载
             when {
                 p < safeOnMedian * 0.65 -> PowerRegime.ON_LIGHT
-                p <= safeOnMedian * 2.20 -> PowerRegime.ON_NORMAL
+                p <= safeOnMedian * 2.00 -> PowerRegime.ON_NORMAL
                 else -> {
                     // 对于高功耗区间，严格区分偶发尖峰与真实持续重载
                     if (interval.durationMs >= minHeavySustainMs) {

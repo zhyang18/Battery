@@ -25,6 +25,7 @@ import com.battery.analysis.util.setUnitText
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 
 /**
  * 放电速度与息屏休眠指标卡片通用视图绑定辅助工具类。
@@ -69,9 +70,9 @@ object PowerDischargeMetricsViewBinder {
     const val COLOR_STATUS_LOW = 0xFFEF4444.toInt()
 
     /**
-     * 升级模型与满电续航时长数值匹配正则表达式（如匹配 "• 升级模型(v2.2)：15h41m53s (可信度高)" 或 "• 满电亮屏续航：15h41m53s (可信度高)" 中的 "15h41m53s"）。
+     * 升级模型与满电续航时长数值匹配正则表达式（如匹配 "• 升级模型(v2.2)：15h41m53s (可信度高)"、"• 满电亮屏续航：15h41m53s (可信度高)" 或 "• 预期满电续航：15h41m53s" 中的 "15h41m53s"）。
      */
-    val REGEX_V2_MODEL_DURATION = Regex("""•\s*(?:升级模型|Upgraded Model|满电亮屏续航|Full screen-on runtime|满电待机时长|Full standby duration|满电综合续航|Full overall runtime)\s*(?:\([^)]+\))?[：:]\s*([^\s(]+)""", RegexOption.IGNORE_CASE)
+    val REGEX_V2_MODEL_DURATION = Regex("""•\s*(?:升级模型|Upgraded Model|满电亮屏续航|Full screen-on runtime|满电待机时长|Full standby duration|满电综合续航|Full overall runtime|预期满电续航|预期满电待机|预期满电综合|Expected full runtime)\s*(?:\([^)]+\))?[：:]\s*([^\s(]+)""", RegexOption.IGNORE_CASE)
 
     /**
      * 预测基准放电速度数值匹配正则表达式（如匹配 "• 预测基准放电速度：7.4%/h" 中的 "7.4%/h"）。
@@ -186,9 +187,18 @@ object PowerDischargeMetricsViewBinder {
             tvScreenOffRemaining.setUnitText(formatRemainingDurationOnly(remOffMs))
             tvGlobalRemaining.setUnitText(formatRemainingDurationOnly(remGlobalMs))
 
-            val fullOnMs = sevenDaysStats?.v2Result?.screenOnFullRuntimeMs
-            val fullOffMs = sevenDaysStats?.v2Result?.screenOffFullRuntimeMs
-            val fullGlobalMs = sevenDaysStats?.v2Result?.fullRuntimeMs
+            // 核心物理口径对齐：卡片第二行右侧满电续航分母与第三行进度条分母，
+            // 必须与第一行预测基准放电速度采用严格同一物理做功基准，
+            // 保证 Rate * (FullDuration / 3600_000) ≈ 100%，且 remMs <= fullMs 绝对守恒自洽，彻底根除倒挂与数值割裂
+            val fullOnMs: Long? = tripleResult.screenOnEstimate.benchmarkFullMs
+                ?: onBenchmarkRate?.takeIf { it > 0f }?.let { ((100.0 / it.toDouble()) * 3600.0 * 1000.0).roundToLong() }
+                ?: sevenDaysStats?.v2Result?.screenOnFullRuntimeMs
+            val fullOffMs: Long? = tripleResult.screenOffEstimate.benchmarkFullMs
+                ?: offBenchmarkRate?.takeIf { it > 0f }?.let { ((100.0 / it.toDouble()) * 3600.0 * 1000.0).roundToLong() }
+                ?: sevenDaysStats?.v2Result?.screenOffFullRuntimeMs
+            val fullGlobalMs: Long? = tripleResult.globalEstimate.benchmarkFullMs
+                ?: globalBenchmarkRate?.takeIf { it > 0f }?.let { ((100.0 / it.toDouble()) * 3600.0 * 1000.0).roundToLong() }
+                ?: sevenDaysStats?.v2Result?.fullRuntimeMs
 
             tvScreenOnRemainingLabel.setUnitText(formatRemainingDurationOnly(fullOnMs))
             tvScreenOffRemainingLabel.setUnitText(formatRemainingDurationOnly(fullOffMs))

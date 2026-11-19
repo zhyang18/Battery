@@ -1212,6 +1212,104 @@ class RuntimeEstimatorTest {
             remGlobalHours in 4.3..5.3
         )
     }
+
+    /**
+     * 针对用户反馈“满电续航时长每次刷新都会变动很大”的专项单元测试：
+     * 验证在用户反复下拉刷新（数秒内多次调用）且存在瞬时 Fast 功率波动的真实场景下，
+     * 满电续航时长（benchmarkFullMs）与预测基准放电功率受时序平滑器严格保护，保持高度稳定与守恒，变动绝对在微小容限内。
+     */
+    @Test
+    fun testTripleRuntimes_BenchmarkFullMsStableOnRepeatedRefresh() {
+        com.battery.analysis.domain.estimator.EnduranceRuntimeSmoother.getInstance().reset()
+
+        val fullCapacityWh = 23.21f
+        val batteryPercent = 58.0f
+        val usableEnergyWh = fullCapacityWh * (batteryPercent / 100f) // 13.46 Wh
+
+        val profile = com.battery.analysis.domain.estimator.model.RuntimeProfile(
+            windowStartMs = 1700000000000L,
+            windowEndMs = 1700604800000L,
+            windowDays = 7,
+            effectiveDischargeMs = 7 * 86400 * 1000L,
+            screenOnMs = (7 * 86400 * 1000L * 0.25).toLong(),
+            screenOffMs = (7 * 86400 * 1000L * 0.75).toLong(),
+            screenOnRatio = 0.25,
+            screenOffRatio = 0.75,
+            lightMs = 10000L, normalMs = 10000L, heavyMs = 10000L,
+            lightRatio = 0.3, normalRatio = 0.4, heavyRatio = 0.3,
+            lightPowerW = 1.8, normalPowerW = 3.6, heavyPowerW = 7.5,
+            typicalScreenOnPowerW = 3.8,
+            offLowPowerW = 0.25, offHighPowerW = 1.0,
+            typicalScreenOffPowerW = 0.45
+        )
+        val v2Result = com.battery.analysis.domain.estimator.model.FullChargeRuntimeResult(
+            fullRuntimeMs = 22 * 3600_000L,
+            screenOnFullRuntimeMs = 6 * 3600_000L,
+            screenOffFullRuntimeMs = 45 * 3600_000L,
+            fullEnergyWh = fullCapacityWh.toDouble(),
+            predictedPowerWatts = 1.05,
+            predictedScreenOnPowerWatts = 3.8,
+            predictedScreenOffPowerWatts = 0.45,
+            modelVersion = com.battery.analysis.domain.estimator.model.RuntimeModelVersion.FULL_RUNTIME_V2_2,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            energySource = com.battery.analysis.domain.estimator.model.EnergySource.FCC_TIMES_NOMINAL_VOLTAGE,
+            effectiveHistoryMs = 7 * 86400 * 1000L,
+            usedRegimeModel = true,
+            dataSufficiency = com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.SUFFICIENT,
+            profile = profile
+        )
+        val sevenDays = com.battery.analysis.model.SevenDaysDischargeStats(
+            screenOnDurationMs = 3600_000L * 15,
+            screenOffDurationMs = 3600_000L * 45,
+            globalDurationMs = 3600_000L * 60,
+            screenOnDischargeRatePercentPerHour = 16.0f,
+            screenOffDischargeRatePercentPerHour = 1.9f,
+            globalDischargeRatePercentPerHour = 4.5f,
+            v2Result = v2Result
+        )
+
+        // 第一次刷新渲染
+        val r1 = estimator.estimateTripleRuntimes(
+            overview = null,
+            sevenDaysStats = sevenDays,
+            batteryLevelPercent = batteryPercent,
+            remainingEnergyWh = usableEnergyWh,
+            totalCapacityWh = fullCapacityWh,
+            tempCelsius = 32.0f
+        )
+        val fullOn1 = r1.screenOnEstimate.benchmarkFullMs
+        val remOn1 = r1.screenOnEstimate.remainingMs
+        assertNotNull("初始满电续航不为空", fullOn1)
+        assertNotNull("初始剩余续航不为空", remOn1)
+        assertTrue("剩余续航绝不反超满电续航", remOn1!! <= fullOn1!!)
+
+        // 模拟短时 200 毫秒后用户下拉刷新
+        Thread.sleep(200)
+
+        // 第二次刷新渲染（可能伴随细微采样点或瞬时功率变化）
+        val r2 = estimator.estimateTripleRuntimes(
+            overview = null,
+            sevenDaysStats = sevenDays,
+            batteryLevelPercent = batteryPercent,
+            remainingEnergyWh = usableEnergyWh,
+            totalCapacityWh = fullCapacityWh,
+            tempCelsius = 32.0f
+        )
+        val fullOn2 = r2.screenOnEstimate.benchmarkFullMs
+        val remOn2 = r2.screenOnEstimate.remainingMs
+        assertNotNull("第二次刷新满电续航不为空", fullOn2)
+        assertNotNull("第二次刷新剩余续航不为空", remOn2)
+
+        // 核心验证：满电续航变动必须极小（由于 200ms 自然流逝，变化率在 0.5% 以内，绝不允许从 12h 跳到 6h）
+        val diffMs = kotlin.math.abs(fullOn2!! - fullOn1)
+        val diffRatio = diffMs.toDouble() / fullOn1.toDouble()
+        assertTrue("满电续航在短时连续刷新时变化率必须极小 (diffRatio: $diffRatio)", diffRatio < 0.01)
+
+        // 验证进度条在两次刷新间保持守恒
+        val progress1 = remOn1.toDouble() / fullOn1.toDouble()
+        val progress2 = remOn2!!.toDouble() / fullOn2.toDouble()
+        assertEquals(progress1, progress2, 0.02)
+    }
 }
 
 

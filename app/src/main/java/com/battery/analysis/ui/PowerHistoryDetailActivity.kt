@@ -1061,6 +1061,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             overview = overview
         )
 
+        val effectiveFullDurationMs = remEstimate?.benchmarkFullMs ?: fullDurationMs
         val message = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
             rowType = rowType,
             currentRatePercentPerHour = benchmarkRate,
@@ -1068,7 +1069,7 @@ class PowerHistoryDetailActivity : AppCompatActivity() {
             rollingDurationMs = rollingDurationMs,
             sevenDaysRatePercentPerHour = sevenDaysRate,
             sevenDaysDurationMs = sevenDaysDurationMs,
-            fullDurationMs = fullDurationMs,
+            fullDurationMs = effectiveFullDurationMs,
             predictedCapacityWh = totalCapacityWh,
             predictedCapacityMah = capacityMah,
             sceneScreenOnRatio = if (rowType == BatteryEnergyCalculator.ROW_GLOBAL) sevenDays?.sceneScreenOnRatio else null,

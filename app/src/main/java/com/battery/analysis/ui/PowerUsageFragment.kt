@@ -1556,6 +1556,7 @@ class PowerUsageFragment : Fragment() {
             overview = overview
         )
 
+        val effectiveFullDurationMs = remEstimate?.benchmarkFullMs ?: fullDurationMs
         val message = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
             rowType = rowType,
             currentRatePercentPerHour = benchmarkRate,
@@ -1563,7 +1564,7 @@ class PowerUsageFragment : Fragment() {
             rollingDurationMs = rollingDurationMs,
             sevenDaysRatePercentPerHour = sevenDaysRate,
             sevenDaysDurationMs = sevenDaysDurationMs,
-            fullDurationMs = fullDurationMs,
+            fullDurationMs = effectiveFullDurationMs,
             predictedCapacityWh = totalCapacityWh,
             predictedCapacityMah = capacityMah,
             sceneScreenOnRatio = if (rowType == ROW_GLOBAL) sevenDays?.sceneScreenOnRatio else null,

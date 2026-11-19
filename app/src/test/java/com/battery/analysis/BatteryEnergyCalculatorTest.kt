@@ -1606,4 +1606,97 @@ class BatteryEnergyCalculatorTest {
         assertEquals("--", BatteryEnergyCalculator.formatExpectedRangeDuration(0L))
         assertEquals("--", BatteryEnergyCalculator.formatExpectedRangeDuration(-1000L))
     }
+
+    /**
+     * 验证亮屏、息屏、全局卡片弹窗详情中的满电续航时长已完成自洽修复：
+     * 1. 优先展示与卡片同源自洽的 benchmarkFullMs；
+     * 2. 当历史大盘 v2Result 时长与当前预期满电时长不同时，在二级子项如实列出历史大盘参考；
+     * 3. 绝不发生剩余续航反超满电续航的倒挂现象。
+     */
+    @Test
+    fun testFormatDischargeSpeedDetailMessage_FullScreenOnRuntimeConsistentWithBenchmarkFullMs() {
+        val remEst = com.battery.analysis.domain.estimator.model.RuntimeEstimate(
+            remainingMs = 5 * 3600_000L + 59 * 60_000L, // 05h59m00s
+            predictedPowerWatts = 2.55,
+            remainingEnergyWh = 15.30,
+            confidence = 0.85,
+            modelType = com.battery.analysis.domain.estimator.model.RuntimeModelType.MULTI_TIMESCALE,
+            benchmarkFullMs = 9 * 3600_000L + 6 * 60_000L // 09h06m00s
+        )
+        val v2Res = com.battery.analysis.domain.estimator.model.FullChargeRuntimeResult(
+            fullRuntimeMs = 20 * 3600_000L,
+            screenOnFullRuntimeMs = 5 * 3600_000L + 49 * 60_000L, // 05h49m00s (历史加权)
+            screenOffFullRuntimeMs = 50 * 3600_000L,
+            fullEnergyWh = 23.23,
+            predictedPowerWatts = 1.16,
+            predictedScreenOnPowerWatts = 3.99,
+            predictedScreenOffPowerWatts = 0.46,
+            modelVersion = com.battery.analysis.domain.estimator.model.RuntimeModelVersion.FULL_RUNTIME_V2_2,
+            confidenceLevel = com.battery.analysis.domain.estimator.model.RuntimeConfidenceLevel.HIGH,
+            energySource = com.battery.analysis.domain.estimator.model.EnergySource.FCC_TIMES_NOMINAL_VOLTAGE,
+            effectiveHistoryMs = 7 * 86400 * 1000L,
+            usedRegimeModel = true,
+            dataSufficiency = com.battery.analysis.domain.estimator.model.DataSufficiencyLevel.SUFFICIENT
+        )
+
+        // 1. 验证亮屏弹窗详情
+        val msgOn = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_ON,
+            currentRatePercentPerHour = 11.0f,
+            sevenDaysRatePercentPerHour = 17.2f,
+            sevenDaysDurationMs = 7 * 86400 * 1000L,
+            fullDurationMs = 9 * 3600_000L + 6 * 60_000L,
+            predictedCapacityWh = 23.23f,
+            v2Result = v2Res,
+            remainingEstimate = remEst
+        )
+        // 主标题行必须展示与卡片一致的预期满电续航 09h06m00s，绝不能展示旧的 05h49m00s
+        assertTrue("亮屏主标题满电续航必须展示同源预期时长 09h06m00s", msgOn.contains("• 满电亮屏续航：09h06m00s"))
+        // 二级子项中如实说明历史大盘加权时长
+        assertTrue("二级子条目必须包含历史大盘满电说明", msgOn.contains("  历史大盘满电：05h49m00s"))
+
+        // 2. 验证息屏待机弹窗详情
+        val remEstOff = com.battery.analysis.domain.estimator.model.RuntimeEstimate(
+            remainingMs = 24 * 3600_000L, // 01d00h00m
+            predictedPowerWatts = 0.5,
+            remainingEnergyWh = 12.0,
+            confidence = 0.85,
+            modelType = com.battery.analysis.domain.estimator.model.RuntimeModelType.MULTI_TIMESCALE,
+            benchmarkFullMs = 41 * 3600_000L // 01d17h00m
+        )
+        val msgOff = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_SCREEN_OFF,
+            currentRatePercentPerHour = 2.4f,
+            sevenDaysRatePercentPerHour = 2.0f,
+            sevenDaysDurationMs = 7 * 86400 * 1000L,
+            fullDurationMs = 41 * 3600_000L,
+            predictedCapacityWh = 23.23f,
+            v2Result = v2Res,
+            remainingEstimate = remEstOff
+        )
+        assertTrue("息屏主标题满电待机必须展示同源预期时长 01d17h00m", msgOff.contains("• 满电待机时长：01d17h00m"))
+        assertTrue("二级子条目必须包含历史大盘待机说明", msgOff.contains("  历史大盘待机：02d02h00m"))
+
+        // 3. 验证全局综合弹窗详情
+        val remEstGlobal = com.battery.analysis.domain.estimator.model.RuntimeEstimate(
+            remainingMs = 11 * 3600_000L, // 11h00m00s
+            predictedPowerWatts = 1.0,
+            remainingEnergyWh = 11.0,
+            confidence = 0.85,
+            modelType = com.battery.analysis.domain.estimator.model.RuntimeModelType.MULTI_TIMESCALE,
+            benchmarkFullMs = 22 * 3600_000L + 45 * 60_000L // 22h45m00s
+        )
+        val msgGlobal = BatteryEnergyCalculator.formatDischargeSpeedCardDetailMessage(
+            rowType = BatteryEnergyCalculator.ROW_GLOBAL,
+            currentRatePercentPerHour = 4.4f,
+            sevenDaysRatePercentPerHour = 5.0f,
+            sevenDaysDurationMs = 7 * 86400 * 1000L,
+            fullDurationMs = 22 * 3600_000L + 45 * 60_000L,
+            predictedCapacityWh = 23.23f,
+            v2Result = v2Res,
+            remainingEstimate = remEstGlobal
+        )
+        assertTrue("全局主标题满电综合必须展示同源预期时长 22h45m00s", msgGlobal.contains("• 满电综合续航：22h45m00s"))
+        assertTrue("二级子条目必须包含历史大盘综合说明", msgGlobal.contains("  历史大盘综合：20h00m00s"))
+    }
 }

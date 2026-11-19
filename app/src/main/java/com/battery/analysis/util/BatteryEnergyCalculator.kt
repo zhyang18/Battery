@@ -1016,61 +1016,89 @@ object BatteryEnergyCalculator {
                         }
                     }
 
-                    if (v2Result != null && v2Result.screenOnFullRuntimeMs != null) {
-                        val v2OnDurStr = formatDurationWithSeconds(v2Result.screenOnFullRuntimeMs)
-                        val pOnStr = v2Result.predictedScreenOnPowerWatts?.let { String.format(Locale.US, "%.2fW", it) }
-                        val windowStr = if (v2Result.historyWindowDays > 7.1) {
-                            if (context != null) String.format(Locale.getDefault(), context.getString(R.string.prediction_window_adaptive_format), v2Result.historyWindowDays)
-                            else String.format(Locale.US, "自适应扩展至近 %.1f 天", v2Result.historyWindowDays)
-                        } else {
-                            if (context != null) context.getString(R.string.prediction_window_past_7_days) else "最近 7 天"
-                        }
-                        val effOnStr = v2Result.screenOnEffectiveMs?.let { formatFullDuration(it) } ?: formatFullDuration(v2Result.effectiveDischargeDurationMs)
-                        val confDesc = v2Result.screenOnConfidenceLevel.getDescription(context)
-                        val suffDesc = v2Result.screenOnDataSufficiency.getDescription(context)
+                    // 亮屏满电续航时长对齐：优先采用与卡片同源平滑的 benchmarkFullMs，保证卡片与弹窗数值绝对一致，且不低于当前剩余续航
+                    val effectiveFullOnMs = (remainingEstimate?.benchmarkFullMs ?: v2Result?.screenOnFullRuntimeMs ?: fullDurationMs)?.let { full ->
+                        remainingEstimate?.remainingMs?.let { rem -> maxOf(full, rem) } ?: full
+                    }
+
+                    if (effectiveFullOnMs != null) {
+                        val fullOnDurStr = formatDurationWithSeconds(effectiveFullOnMs)
+                        val confDesc = v2Result?.screenOnConfidenceLevel?.getDescription(context)
+                            ?: remainingEstimate?.let {
+                                getBoundedRemainingConfidence(
+                                    rowType = ROW_SCREEN_ON,
+                                    remainingEstimate = it,
+                                    accumulatedDurationMs = v2Result?.screenOnEffectiveMs ?: sevenDaysDurationMs
+                                ).getDescription(context)
+                            } ?: ""
+                        val confSuffix = if (confDesc.isNotBlank()) " ($confDesc)" else ""
 
                         if (context != null) {
-                            append(context.getString(R.string.prediction_full_screen_on_runtime_with_conf, v2OnDurStr, confDesc) + "\n")
-                            appendSubItem(context.getString(R.string.prediction_model_stat_range, windowStr))
-                            appendSubItem(context.getString(R.string.prediction_eff_screen_on_format, effOnStr, suffDesc))
+                            if (confDesc.isNotBlank()) {
+                                append(context.getString(R.string.prediction_full_screen_on_runtime_with_conf, fullOnDurStr, confDesc) + "\n")
+                            } else {
+                                append(context.getString(R.string.prediction_full_screen_on_runtime, fullOnDurStr) + "\n")
+                            }
                         } else {
-                            append("• 满电亮屏续航：$v2OnDurStr ($confDesc)\n")
-                            appendSubItem("统计范围：$windowStr")
-                            appendSubItem("有效放电：累计亮屏 $effOnStr ($suffDesc)")
+                            append("• 满电亮屏续航：$fullOnDurStr$confSuffix\n")
                         }
 
-                        val prof = v2Result.profile
-                        if (prof != null && prof.screenOnMs > 0L) {
-                            val lightPct = String.format(Locale.US, "%.1f%%", prof.lightRatio * 100.0)
-                            val normalPct = String.format(Locale.US, "%.1f%%", prof.normalRatio * 100.0)
-                            val heavyPct = String.format(Locale.US, "%.1f%%", prof.heavyRatio * 100.0)
-                            if (context != null) {
-                                appendSubItem(context.getString(R.string.prediction_screen_on_workload, lightPct, normalPct, heavyPct))
-                            } else {
-                                appendSubItem("亮屏工况：轻载 $lightPct · 普通 $normalPct · 重载 $heavyPct")
+                        if (v2Result != null) {
+                            val v2OnDurStr = v2Result.screenOnFullRuntimeMs?.let { formatDurationWithSeconds(it) }
+                            if (v2OnDurStr != null && v2Result.screenOnFullRuntimeMs != effectiveFullOnMs) {
+                                appendSubItem("历史大盘满电：$v2OnDurStr")
                             }
-                            val pDetails = mutableListOf<String>()
-                            if (context != null) {
-                                prof.lightPowerW?.let { pDetails.add(context.getString(R.string.prediction_light_load_format, String.format(Locale.US, "%.2fW", it))) }
-                                prof.normalPowerW?.let { pDetails.add(context.getString(R.string.prediction_normal_load_format, String.format(Locale.US, "%.2fW", it))) }
-                                prof.heavyPowerW?.let { pDetails.add(context.getString(R.string.prediction_heavy_load_format, String.format(Locale.US, "%.2fW", it))) }
-                                if (pDetails.isNotEmpty()) {
-                                    appendSubItem(context.getString(R.string.prediction_screen_on_workload_power, pDetails.joinToString(" · ")))
-                                }
+                            val pOnStr = v2Result.predictedScreenOnPowerWatts?.let { String.format(Locale.US, "%.2fW", it) }
+                            val windowStr = if (v2Result.historyWindowDays > 7.1) {
+                                if (context != null) String.format(Locale.getDefault(), context.getString(R.string.prediction_window_adaptive_format), v2Result.historyWindowDays)
+                                else String.format(Locale.US, "自适应扩展至近 %.1f 天", v2Result.historyWindowDays)
                             } else {
-                                prof.lightPowerW?.let { pDetails.add("轻载 ${String.format(Locale.US, "%.2fW", it)}") }
-                                prof.normalPowerW?.let { pDetails.add("普通 ${String.format(Locale.US, "%.2fW", it)}") }
-                                prof.heavyPowerW?.let { pDetails.add("重载 ${String.format(Locale.US, "%.2fW", it)}") }
-                                if (pDetails.isNotEmpty()) {
-                                    appendSubItem("工况功耗：${pDetails.joinToString(" · ")}")
+                                if (context != null) context.getString(R.string.prediction_window_past_7_days) else "最近 7 天"
+                            }
+                            val effOnStr = v2Result.screenOnEffectiveMs?.let { formatFullDuration(it) } ?: formatFullDuration(v2Result.effectiveDischargeDurationMs)
+                            val suffDesc = v2Result.screenOnDataSufficiency.getDescription(context)
+
+                            if (context != null) {
+                                appendSubItem(context.getString(R.string.prediction_model_stat_range, windowStr))
+                                appendSubItem(context.getString(R.string.prediction_eff_screen_on_format, effOnStr, suffDesc))
+                            } else {
+                                appendSubItem("统计范围：$windowStr")
+                                appendSubItem("有效放电：累计亮屏 $effOnStr ($suffDesc)")
+                            }
+
+                            val prof = v2Result.profile
+                            if (prof != null && prof.screenOnMs > 0L) {
+                                val lightPct = String.format(Locale.US, "%.1f%%", prof.lightRatio * 100.0)
+                                val normalPct = String.format(Locale.US, "%.1f%%", prof.normalRatio * 100.0)
+                                val heavyPct = String.format(Locale.US, "%.1f%%", prof.heavyRatio * 100.0)
+                                if (context != null) {
+                                    appendSubItem(context.getString(R.string.prediction_screen_on_workload, lightPct, normalPct, heavyPct))
+                                } else {
+                                    appendSubItem("亮屏工况：轻载 $lightPct · 普通 $normalPct · 重载 $heavyPct")
+                                }
+                                val pDetails = mutableListOf<String>()
+                                if (context != null) {
+                                    prof.lightPowerW?.let { pDetails.add(context.getString(R.string.prediction_light_load_format, String.format(Locale.US, "%.2fW", it))) }
+                                    prof.normalPowerW?.let { pDetails.add(context.getString(R.string.prediction_normal_load_format, String.format(Locale.US, "%.2fW", it))) }
+                                    prof.heavyPowerW?.let { pDetails.add(context.getString(R.string.prediction_heavy_load_format, String.format(Locale.US, "%.2fW", it))) }
+                                    if (pDetails.isNotEmpty()) {
+                                        appendSubItem(context.getString(R.string.prediction_screen_on_workload_power, pDetails.joinToString(" · ")))
+                                    }
+                                } else {
+                                    prof.lightPowerW?.let { pDetails.add("轻载 ${String.format(Locale.US, "%.2fW", it)}") }
+                                    prof.normalPowerW?.let { pDetails.add("普通 ${String.format(Locale.US, "%.2fW", it)}") }
+                                    prof.heavyPowerW?.let { pDetails.add("重载 ${String.format(Locale.US, "%.2fW", it)}") }
+                                    if (pDetails.isNotEmpty()) {
+                                        appendSubItem("工况功耗：${pDetails.joinToString(" · ")}")
+                                    }
                                 }
                             }
-                        }
-                        if (pOnStr != null) {
-                            if (context != null) {
-                                appendSubItem(context.getString(R.string.prediction_typical_power, pOnStr))
-                            } else {
-                                appendSubItem("典型功耗：$pOnStr")
+                            if (pOnStr != null) {
+                                if (context != null) {
+                                    appendSubItem(context.getString(R.string.prediction_typical_power, pOnStr))
+                                } else {
+                                    appendSubItem("典型功耗：$pOnStr")
+                                }
                             }
                         }
                     } else {
@@ -1192,58 +1220,86 @@ object BatteryEnergyCalculator {
                         }
                     }
 
-                    if (v2Result != null && v2Result.screenOffFullRuntimeMs != null) {
-                        val v2OffDurStr = formatDurationWithSeconds(v2Result.screenOffFullRuntimeMs)
-                        val pOffStr = v2Result.predictedScreenOffPowerWatts?.let { String.format(Locale.US, "%.2fW", it) }
-                        val windowStr = if (v2Result.historyWindowDays > 7.1) {
-                            if (context != null) String.format(Locale.getDefault(), context.getString(R.string.prediction_window_adaptive_format), v2Result.historyWindowDays)
-                            else String.format(Locale.US, "自适应扩展至近 %.1f 天", v2Result.historyWindowDays)
-                        } else {
-                            if (context != null) context.getString(R.string.prediction_window_past_7_days) else "最近 7 天"
-                        }
-                        val effOffStr = v2Result.screenOffEffectiveMs?.let { formatFullDuration(it) } ?: formatFullDuration(v2Result.effectiveDischargeDurationMs)
-                        val confDesc = v2Result.screenOffConfidenceLevel.getDescription(context)
-                        val suffDesc = v2Result.screenOffDataSufficiency.getDescription(context)
+                    // 息屏满电待机时长对齐：优先采用与卡片同源平滑的 benchmarkFullMs，保证卡片与弹窗数值绝对一致，且不低于当前待机续航
+                    val effectiveFullOffMs = (remainingEstimate?.benchmarkFullMs ?: v2Result?.screenOffFullRuntimeMs ?: fullDurationMs)?.let { full ->
+                        remainingEstimate?.remainingMs?.let { rem -> maxOf(full, rem) } ?: full
+                    }
+
+                    if (effectiveFullOffMs != null) {
+                        val fullOffDurStr = formatDurationWithSeconds(effectiveFullOffMs)
+                        val confDesc = v2Result?.screenOffConfidenceLevel?.getDescription(context)
+                            ?: remainingEstimate?.let {
+                                getBoundedRemainingConfidence(
+                                    rowType = ROW_SCREEN_OFF,
+                                    remainingEstimate = it,
+                                    accumulatedDurationMs = v2Result?.screenOffEffectiveMs ?: sevenDaysDurationMs
+                                ).getDescription(context)
+                            } ?: ""
+                        val confSuffix = if (confDesc.isNotBlank()) " ($confDesc)" else ""
 
                         if (context != null) {
-                            append(context.getString(R.string.prediction_full_screen_off_runtime_with_conf, v2OffDurStr, confDesc) + "\n")
-                            appendSubItem(context.getString(R.string.prediction_model_stat_range, windowStr))
-                            appendSubItem(context.getString(R.string.prediction_eff_screen_off_format, effOffStr, suffDesc))
+                            if (confDesc.isNotBlank()) {
+                                append(context.getString(R.string.prediction_full_screen_off_runtime_with_conf, fullOffDurStr, confDesc) + "\n")
+                            } else {
+                                append(context.getString(R.string.prediction_full_screen_off_runtime, fullOffDurStr) + "\n")
+                            }
                         } else {
-                            append("• 满电待机时长：$v2OffDurStr ($confDesc)\n")
-                            appendSubItem("统计范围：$windowStr")
-                            appendSubItem("有效放电：累计息屏 $effOffStr ($suffDesc)")
+                            append("• 满电待机时长：$fullOffDurStr$confSuffix\n")
                         }
 
-                        val prof = v2Result.profile
-                        if (prof != null && prof.screenOffMs > 0L) {
-                            val lowPct = String.format(Locale.US, "%.1f%%", prof.offLowRatio * 100.0)
-                            val highPct = String.format(Locale.US, "%.1f%%", prof.offHighRatio * 100.0)
-                            if (context != null) {
-                                appendSubItem(context.getString(R.string.prediction_standby_workload, highPct, lowPct))
-                            } else {
-                                appendSubItem("待机工况：唤醒 $highPct · 休眠 $lowPct")
+                        if (v2Result != null) {
+                            val v2OffDurStr = v2Result.screenOffFullRuntimeMs?.let { formatDurationWithSeconds(it) }
+                            if (v2OffDurStr != null && v2Result.screenOffFullRuntimeMs != effectiveFullOffMs) {
+                                appendSubItem("历史大盘待机：$v2OffDurStr")
                             }
-                            val pDetails = mutableListOf<String>()
-                            if (context != null) {
-                                prof.offHighPowerW?.let { pDetails.add(context.getString(R.string.prediction_awake_load_format, String.format(Locale.US, "%.2fW", it))) }
-                                prof.offLowPowerW?.let { pDetails.add(context.getString(R.string.prediction_sleep_load_format, String.format(Locale.US, "%.2fW", it))) }
-                                if (pDetails.isNotEmpty()) {
-                                    appendSubItem(context.getString(R.string.prediction_screen_on_workload_power, pDetails.joinToString(" · ")))
-                                }
+                            val pOffStr = v2Result.predictedScreenOffPowerWatts?.let { String.format(Locale.US, "%.2fW", it) }
+                            val windowStr = if (v2Result.historyWindowDays > 7.1) {
+                                if (context != null) String.format(Locale.getDefault(), context.getString(R.string.prediction_window_adaptive_format), v2Result.historyWindowDays)
+                                else String.format(Locale.US, "自适应扩展至近 %.1f 天", v2Result.historyWindowDays)
                             } else {
-                                prof.offHighPowerW?.let { pDetails.add("唤醒 ${String.format(Locale.US, "%.2fW", it)}") }
-                                prof.offLowPowerW?.let { pDetails.add("休眠 ${String.format(Locale.US, "%.2fW", it)}") }
-                                if (pDetails.isNotEmpty()) {
-                                    appendSubItem("工况功耗：${pDetails.joinToString(" · ")}")
+                                if (context != null) context.getString(R.string.prediction_window_past_7_days) else "最近 7 天"
+                            }
+                            val effOffStr = v2Result.screenOffEffectiveMs?.let { formatFullDuration(it) } ?: formatFullDuration(v2Result.effectiveDischargeDurationMs)
+                            val suffDesc = v2Result.screenOffDataSufficiency.getDescription(context)
+
+                            if (context != null) {
+                                appendSubItem(context.getString(R.string.prediction_model_stat_range, windowStr))
+                                appendSubItem(context.getString(R.string.prediction_eff_screen_off_format, effOffStr, suffDesc))
+                            } else {
+                                appendSubItem("统计范围：$windowStr")
+                                appendSubItem("有效放电：累计息屏 $effOffStr ($suffDesc)")
+                            }
+
+                            val prof = v2Result.profile
+                            if (prof != null && prof.screenOffMs > 0L) {
+                                val lowPct = String.format(Locale.US, "%.1f%%", prof.offLowRatio * 100.0)
+                                val highPct = String.format(Locale.US, "%.1f%%", prof.offHighRatio * 100.0)
+                                if (context != null) {
+                                    appendSubItem(context.getString(R.string.prediction_standby_workload, highPct, lowPct))
+                                } else {
+                                    appendSubItem("待机工况：唤醒 $highPct · 休眠 $lowPct")
+                                }
+                                val pDetails = mutableListOf<String>()
+                                if (context != null) {
+                                    prof.offHighPowerW?.let { pDetails.add(context.getString(R.string.prediction_awake_load_format, String.format(Locale.US, "%.2fW", it))) }
+                                    prof.offLowPowerW?.let { pDetails.add(context.getString(R.string.prediction_sleep_load_format, String.format(Locale.US, "%.2fW", it))) }
+                                    if (pDetails.isNotEmpty()) {
+                                        appendSubItem(context.getString(R.string.prediction_screen_on_workload_power, pDetails.joinToString(" · ")))
+                                    }
+                                } else {
+                                    prof.offHighPowerW?.let { pDetails.add("唤醒 ${String.format(Locale.US, "%.2fW", it)}") }
+                                    prof.offLowPowerW?.let { pDetails.add("休眠 ${String.format(Locale.US, "%.2fW", it)}") }
+                                    if (pDetails.isNotEmpty()) {
+                                        appendSubItem("工况功耗：${pDetails.joinToString(" · ")}")
+                                    }
                                 }
                             }
-                        }
-                        if (pOffStr != null) {
-                            if (context != null) {
-                                appendSubItem(context.getString(R.string.prediction_typical_standby_power, pOffStr))
-                            } else {
-                                appendSubItem("典型待机功耗：$pOffStr")
+                            if (pOffStr != null) {
+                                if (context != null) {
+                                    appendSubItem(context.getString(R.string.prediction_typical_standby_power, pOffStr))
+                                } else {
+                                    appendSubItem("典型待机功耗：$pOffStr")
+                                }
                             }
                         }
                     } else {
@@ -1365,47 +1421,75 @@ object BatteryEnergyCalculator {
                         }
                     }
 
-                    if (v2Result != null && v2Result.fullRuntimeMs != null) {
-                        val v2DurStr = formatDurationWithSeconds(v2Result.fullRuntimeMs)
-                        val modelDesc = if (context != null) {
-                            if (v2Result.usedRegimeModel) context.getString(R.string.prediction_model_desc_regime) else context.getString(R.string.prediction_model_desc_fallback)
-                        } else {
-                            if (v2Result.usedRegimeModel) "工况条件化典型模型" else "全局物理基准降级"
-                        }
-                        val windowStr = if (v2Result.historyWindowDays > 7.1) {
-                            if (context != null) String.format(Locale.getDefault(), context.getString(R.string.prediction_window_adaptive_format), v2Result.historyWindowDays)
-                            else String.format(Locale.US, "自适应扩展至近 %.1f 天", v2Result.historyWindowDays)
-                        } else {
-                            if (context != null) context.getString(R.string.prediction_window_past_7_days) else "最近 7 天"
-                        }
-                        val effTotalStr = formatFullDuration(v2Result.effectiveDischargeDurationMs)
-                        val confDesc = v2Result.confidenceLevel.getDescription(context)
-                        val suffDesc = v2Result.dataSufficiency.getDescription(context)
+                    // 全局满电综合续航时长对齐：优先采用与卡片同源平滑的 benchmarkFullMs，保证卡片与弹窗数值绝对一致，且不低于当前综合剩余续航
+                    val effectiveFullGlobalMs = (remainingEstimate?.benchmarkFullMs ?: v2Result?.fullRuntimeMs ?: fullDurationMs)?.let { full ->
+                        remainingEstimate?.remainingMs?.let { rem -> maxOf(full, rem) } ?: full
+                    }
+
+                    if (effectiveFullGlobalMs != null) {
+                        val fullGlobalDurStr = formatDurationWithSeconds(effectiveFullGlobalMs)
+                        val confDesc = v2Result?.confidenceLevel?.getDescription(context)
+                            ?: remainingEstimate?.let {
+                                getBoundedRemainingConfidence(
+                                    rowType = ROW_GLOBAL,
+                                    remainingEstimate = it,
+                                    accumulatedDurationMs = v2Result?.effectiveDischargeDurationMs ?: sevenDaysDurationMs
+                                ).getDescription(context)
+                            } ?: ""
+                        val confSuffix = if (confDesc.isNotBlank()) " ($confDesc)" else ""
 
                         if (context != null) {
-                            append(context.getString(R.string.prediction_full_global_runtime_with_conf, v2DurStr, confDesc) + "\n")
-                            appendSubItem(context.getString(R.string.prediction_model_stat_range, windowStr))
-                            appendSubItem(context.getString(R.string.prediction_eff_global_format, effTotalStr, suffDesc))
-                        } else {
-                            append("• 满电综合续航：$v2DurStr ($confDesc)\n")
-                            appendSubItem("统计范围：$windowStr")
-                            appendSubItem("有效放电：实际参与累计 $effTotalStr ($suffDesc)")
-                        }
-
-                        val prof = v2Result.profile
-                        if (prof != null) {
-                            val onPct = String.format(Locale.US, "%.1f%%", prof.screenOnRatio * 100.0)
-                            val offPct = String.format(Locale.US, "%.1f%%", prof.screenOffRatio * 100.0)
-                            if (context != null) {
-                                appendSubItem(context.getString(R.string.prediction_two_state_distribution, onPct, offPct))
+                            if (confDesc.isNotBlank()) {
+                                append(context.getString(R.string.prediction_full_global_runtime_with_conf, fullGlobalDurStr, confDesc) + "\n")
                             } else {
-                                appendSubItem("两态分布：亮屏 $onPct · 息屏 $offPct")
+                                append(context.getString(R.string.prediction_full_global_runtime, fullGlobalDurStr) + "\n")
                             }
-                        }
-                        if (context != null) {
-                            appendSubItem(context.getString(R.string.prediction_workload_model_format, modelDesc))
                         } else {
-                            appendSubItem("工况建模：基于 $modelDesc 推算")
+                            append("• 满电综合续航：$fullGlobalDurStr$confSuffix\n")
+                        }
+
+                        if (v2Result != null) {
+                            val v2DurStr = v2Result.fullRuntimeMs?.let { formatDurationWithSeconds(it) }
+                            if (v2DurStr != null && v2Result.fullRuntimeMs != effectiveFullGlobalMs) {
+                                appendSubItem("历史大盘综合：$v2DurStr")
+                            }
+                            val modelDesc = if (context != null) {
+                                if (v2Result.usedRegimeModel) context.getString(R.string.prediction_model_desc_regime) else context.getString(R.string.prediction_model_desc_fallback)
+                            } else {
+                                if (v2Result.usedRegimeModel) "工况条件化典型模型" else "全局物理基准降级"
+                            }
+                            val windowStr = if (v2Result.historyWindowDays > 7.1) {
+                                if (context != null) String.format(Locale.getDefault(), context.getString(R.string.prediction_window_adaptive_format), v2Result.historyWindowDays)
+                                else String.format(Locale.US, "自适应扩展至近 %.1f 天", v2Result.historyWindowDays)
+                            } else {
+                                if (context != null) context.getString(R.string.prediction_window_past_7_days) else "最近 7 天"
+                            }
+                            val effTotalStr = formatFullDuration(v2Result.effectiveDischargeDurationMs)
+                            val suffDesc = v2Result.dataSufficiency.getDescription(context)
+
+                            if (context != null) {
+                                appendSubItem(context.getString(R.string.prediction_model_stat_range, windowStr))
+                                appendSubItem(context.getString(R.string.prediction_eff_global_format, effTotalStr, suffDesc))
+                            } else {
+                                appendSubItem("统计范围：$windowStr")
+                                appendSubItem("有效放电：实际参与累计 $effTotalStr ($suffDesc)")
+                            }
+
+                            val prof = v2Result.profile
+                            if (prof != null) {
+                                val onPct = String.format(Locale.US, "%.1f%%", prof.screenOnRatio * 100.0)
+                                val offPct = String.format(Locale.US, "%.1f%%", prof.screenOffRatio * 100.0)
+                                if (context != null) {
+                                    appendSubItem(context.getString(R.string.prediction_two_state_distribution, onPct, offPct))
+                                } else {
+                                    appendSubItem("两态分布：亮屏 $onPct · 息屏 $offPct")
+                                }
+                            }
+                            if (context != null) {
+                                appendSubItem(context.getString(R.string.prediction_workload_model_format, modelDesc))
+                            } else {
+                                appendSubItem("工况建模：基于 $modelDesc 推算")
+                            }
                         }
                     } else {
                         if (context != null) {

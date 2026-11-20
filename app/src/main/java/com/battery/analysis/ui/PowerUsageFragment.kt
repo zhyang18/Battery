@@ -2407,7 +2407,14 @@ class PowerUsageFragment : Fragment() {
             ?: lastSevenDaysStatsCache
             ?: powerManager.getCachedSevenDaysStats()
         val hasSevenDaysStats = currentCachedSevenDays != null
-        val shouldForceRecalculateNow = isFullDischargeRefresh && hasSevenDaysStats
+
+        // 统一单次原子刷新交付：若即将启动后台协程更新 7 天历史统计大盘，
+        // 主线程第一阶段仅更新基础指标并复用平滑缓存，不强制重算续航，
+        // 将权威重算推迟至后台 7 天统计计算完毕后单次原子交付，彻底杜绝 100~300ms 内旧新统计二次刷新跳变踩踏
+        val baseTsNow = System.currentTimeMillis()
+        val isWithinSevenDaysDebounce = (lastSevenDaysStatsCache != null && (baseTsNow - lastSevenDaysCalculateTime) in 0..20_000L)
+        val willLaunchAsyncSevenDays = isFullDischargeRefresh && !isWithinSevenDaysDebounce
+        val shouldForceRecalculateNow = isFullDischargeRefresh && hasSevenDaysStats && !willLaunchAsyncSevenDays
 
         val effectiveRemainingWh = if (predictionCapacityWh != null && predictionCapacityWh > 0f && currentLevel != null && currentLevel in 1f..100f) {
             predictionCapacityWh * (currentLevel / 100f)

@@ -296,7 +296,8 @@ class RuntimeEstimator(
             maxRemainingMs = if (remainingMs > 0L && safeMaxOnMs > 0L) safeMaxOnMs else null,
             qualityReasons = qualityReasons,
             confidenceBreakdown = breakdown,
-            benchmarkFullMs = benchmarkFullMs
+            benchmarkFullMs = benchmarkFullMs,
+            adaptiveWeights = onPowerEstimator.calculateAdaptiveWeights()
         )
     }
 
@@ -401,7 +402,8 @@ class RuntimeEstimator(
             maxRemainingMs = if (remainingMs > 0L && safeMaxOffMs > 0L) safeMaxOffMs else null,
             qualityReasons = qualityReasons,
             confidenceBreakdown = breakdown,
-            benchmarkFullMs = benchmarkFullMs
+            benchmarkFullMs = benchmarkFullMs,
+            adaptiveWeights = offPowerEstimator.calculateAdaptiveWeights()
         )
     }
 
@@ -504,7 +506,8 @@ class RuntimeEstimator(
                     maxRemainingMs = if (remainingMs > 0L && safeMaxGlobalMs > 0L) safeMaxGlobalMs else null,
                     qualityReasons = qualityReasons,
                     confidenceBreakdown = blendedBreakdown,
-                    benchmarkFullMs = benchmarkFullMs
+                    benchmarkFullMs = benchmarkFullMs,
+                    adaptiveWeights = onPowerEstimator.calculateAdaptiveWeights()
                 )
             }
         }
@@ -901,17 +904,17 @@ class RuntimeEstimator(
         }
         val maxTheoreticalRatio = batteryLevelPercent?.let { (it.toDouble().coerceIn(0.0, 100.0) / 100.0) } ?: 1.0
         val effectiveOnPwr = onEstimate.predictedPowerWatts ?: longOnPower
-        val maxFullOnMs = if (effectiveOnPwr != null && effectiveOnPwr > 0.0 && totalCapacityWh != null && totalCapacityWh > 0f) {
+        val theoreticalRemainingCapOnMs = if (effectiveOnPwr != null && effectiveOnPwr > 0.0 && totalCapacityWh != null && totalCapacityWh > 0f) {
             ((totalCapacityWh.toDouble() / effectiveOnPwr) * 3600.0 * 1000.0 * maxTheoreticalRatio).roundToLong().coerceAtLeast(0L)
         } else null
 
         // 核心物理修正：rawBaseOnMs 的物理基准必须以 onEstimate.remainingMs（由 PowerEstimator 多时间尺度融合计算得出）为核心！
-        // 严格遵循：若存在理论满电上限限制，则以 maxFullOnMs 约束；绝不可将目标值直接粗暴硬编码为 usableEnergy / longOnPower 导致当前会话做功被完全抹杀！
+        // 严格遵循：若存在理论剩余上限限制，则以 theoreticalRemainingCapOnMs 约束；绝不可将目标值直接粗暴硬编码为 usableEnergy / longOnPower 导致当前会话做功被完全抹杀！
         val rawBaseOnMs = onEstimate.remainingMs?.let {
-            if (maxFullOnMs != null && maxFullOnMs > 0L) minOf(it, maxFullOnMs) else it
+            if (theoreticalRemainingCapOnMs != null && theoreticalRemainingCapOnMs > 0L) minOf(it, theoreticalRemainingCapOnMs) else it
         } ?: if (longOnPower != null && longOnPower > 0.0 && usableEnergy != null && usableEnergy > 0.0) {
             val unconstrained = ((usableEnergy / longOnPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
-            if (maxFullOnMs != null && maxFullOnMs > 0L) minOf(unconstrained, maxFullOnMs) else unconstrained
+            if (theoreticalRemainingCapOnMs != null && theoreticalRemainingCapOnMs > 0L) minOf(unconstrained, theoreticalRemainingCapOnMs) else unconstrained
         } else null
 
         val hasAuthoritativeLongOn = longOnPower != null && longOnPower > 0.0
@@ -935,15 +938,15 @@ class RuntimeEstimator(
             1.0
         }
         val effectiveOffPwr = offEstimate.predictedPowerWatts ?: longOffPower
-        val maxFullOffMs = if (effectiveOffPwr != null && effectiveOffPwr > 0.0 && totalCapacityWh != null && totalCapacityWh > 0f) {
+        val theoreticalRemainingCapOffMs = if (effectiveOffPwr != null && effectiveOffPwr > 0.0 && totalCapacityWh != null && totalCapacityWh > 0f) {
             ((totalCapacityWh.toDouble() / effectiveOffPwr) * 3600.0 * 1000.0 * maxTheoreticalRatio).roundToLong().coerceAtLeast(0L)
         } else null
         // 核心物理修正：rawBaseOffMs 的物理基准必须以 offEstimate.remainingMs（由 PowerEstimator 多时间尺度融合计算得出）为核心！
         val rawBaseOffMs = offEstimate.remainingMs?.let {
-            if (maxFullOffMs != null && maxFullOffMs > 0L) minOf(it, maxFullOffMs) else it
+            if (theoreticalRemainingCapOffMs != null && theoreticalRemainingCapOffMs > 0L) minOf(it, theoreticalRemainingCapOffMs) else it
         } ?: if (longOffPower != null && longOffPower > 0.0 && usableEnergy != null && usableEnergy > 0.0) {
             val unconstrained = ((usableEnergy / longOffPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
-            if (maxFullOffMs != null && maxFullOffMs > 0L) minOf(unconstrained, maxFullOffMs) else unconstrained
+            if (theoreticalRemainingCapOffMs != null && theoreticalRemainingCapOffMs > 0L) minOf(unconstrained, theoreticalRemainingCapOffMs) else unconstrained
         } else null
 
         val hasAuthoritativeLongOff = longOffPower != null && longOffPower > 0.0
@@ -969,15 +972,15 @@ class RuntimeEstimator(
             1.0
         }
         val effectiveGlobalPwr = globalEstimate.predictedPowerWatts ?: baseGlobalPower
-        val maxFullGlobalMs = if (effectiveGlobalPwr != null && effectiveGlobalPwr > 0.0 && totalCapacityWh != null && totalCapacityWh > 0f) {
+        val theoreticalRemainingCapGlobalMs = if (effectiveGlobalPwr != null && effectiveGlobalPwr > 0.0 && totalCapacityWh != null && totalCapacityWh > 0f) {
             ((totalCapacityWh.toDouble() / effectiveGlobalPwr) * 3600.0 * 1000.0 * maxTheoreticalRatio).roundToLong().coerceAtLeast(0L)
         } else null
         // 核心物理修正：rawBaseGlobalMs 的物理基准必须以 globalEstimate.remainingMs（由 PowerEstimator 多时间尺度融合计算得出）为核心！
         val rawBaseGlobalMs = globalEstimate.remainingMs?.let {
-            if (maxFullGlobalMs != null && maxFullGlobalMs > 0L) minOf(it, maxFullGlobalMs) else it
+            if (theoreticalRemainingCapGlobalMs != null && theoreticalRemainingCapGlobalMs > 0L) minOf(it, theoreticalRemainingCapGlobalMs) else it
         } ?: if (baseGlobalPower != null && baseGlobalPower > 0.0 && usableEnergy != null && usableEnergy > 0.0) {
             val unconstrained = ((usableEnergy / baseGlobalPower) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(0L)
-            if (maxFullGlobalMs != null && maxFullGlobalMs > 0L) minOf(unconstrained, maxFullGlobalMs) else unconstrained
+            if (theoreticalRemainingCapGlobalMs != null && theoreticalRemainingCapGlobalMs > 0L) minOf(unconstrained, theoreticalRemainingCapGlobalMs) else unconstrained
         } else null
 
         val hasAuthoritativeLongGlobal = longGlobalPower != null && longGlobalPower > 0.0
@@ -993,14 +996,15 @@ class RuntimeEstimator(
         )
 
         val effectiveSmoothedOnMs = (smoothedOnMs ?: onEstimate.remainingMs)?.let {
-            if (maxFullOnMs != null && maxFullOnMs > 0L) minOf(it, maxFullOnMs) else it
+            if (theoreticalRemainingCapOnMs != null && theoreticalRemainingCapOnMs > 0L) minOf(it, theoreticalRemainingCapOnMs) else it
         }
         val safeMinOn = onEstimate.minRemainingMs?.let { minOf(it, effectiveSmoothedOnMs ?: it) } ?: effectiveSmoothedOnMs
         val safeMaxOn = onEstimate.maxRemainingMs?.let { maxOf(it, effectiveSmoothedOnMs ?: it) } ?: effectiveSmoothedOnMs
 
-        // 核心稳态平滑对齐：亮屏满电续航与预测基准放电功率必须与经过 EnduranceRuntimeSmoother 时序平滑后的剩余续航严格同源！
-        // 彻底阻断瞬态 Fast EWMA 功率噪声（随每次下拉刷新或屏幕亮度变动剧烈起伏），保障满电续航与放电速率在刷新时高度稳定平滑，杜绝每次刷新剧烈跳变
-        val finalBenchmarkOnWatts = if (effectiveSmoothedOnMs != null && effectiveSmoothedOnMs > 0L && usableEnergy != null && usableEnergy > 0.0) {
+        // 核心物理稳态解耦：预测基准放电功率优先锁定三时间尺度融合稳态功率（onEstimate.predictedPowerWatts），
+        // 彻底根除使用 (usableEnergy / effectiveSmoothedOnMs) 反算时由浮点微扰与时间流逝引发的数值放大与跳变；
+        // 仅在确立工况跃迁突变（isRegimeChanging）期间，允许以平滑后做功速率进行受控动态过渡
+        val finalBenchmarkOnWatts = if (onEstimator.isRegimeChanging && effectiveSmoothedOnMs != null && effectiveSmoothedOnMs > 0L && usableEnergy != null && usableEnergy > 0.0) {
             val derivedPower = usableEnergy / (effectiveSmoothedOnMs.toDouble() / 3600_000.0)
             if (derivedPower in 0.1..25.0) derivedPower else (onEstimate.predictedPowerWatts ?: baseOnPower)
         } else {
@@ -1010,6 +1014,7 @@ class RuntimeEstimator(
             ((totalCapacityWh.toDouble() / finalBenchmarkOnWatts) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(effectiveSmoothedOnMs ?: 0L)
         } else onEstimate.benchmarkFullMs
 
+        val onWeights = onEstimator.calculateAdaptiveWeights()
         val finalOnEstimate = onEstimate.copy(
             remainingMs = effectiveSmoothedOnMs,
             minRemainingMs = safeMinOn,
@@ -1017,17 +1022,18 @@ class RuntimeEstimator(
             benchmarkPowerWatts = finalBenchmarkOnWatts,
             actualFastPowerWatts = actualOnPower,
             drainRateMultiplier = onDrainRate,
-            benchmarkFullMs = fullOnMs
+            benchmarkFullMs = fullOnMs,
+            adaptiveWeights = onWeights
         )
 
         val effectiveSmoothedOffMs = (smoothedOffMs ?: offEstimate.remainingMs)?.let {
-            if (maxFullOffMs != null && maxFullOffMs > 0L) minOf(it, maxFullOffMs) else it
+            if (theoreticalRemainingCapOffMs != null && theoreticalRemainingCapOffMs > 0L) minOf(it, theoreticalRemainingCapOffMs) else it
         }
         val safeMinOff = offEstimate.minRemainingMs?.let { minOf(it, effectiveSmoothedOffMs ?: it) } ?: effectiveSmoothedOffMs
         val safeMaxOff = offEstimate.maxRemainingMs?.let { maxOf(it, effectiveSmoothedOffMs ?: it) } ?: effectiveSmoothedOffMs
 
-        // 核心稳态平滑对齐：息屏待机满电续航与基准待机功率同源平滑
-        val finalBenchmarkOffWatts = if (effectiveSmoothedOffMs != null && effectiveSmoothedOffMs > 0L && usableEnergy != null && usableEnergy > 0.0) {
+        // 核心物理稳态解耦：息屏待机满电续航与基准待机功率锁定稳态，彻底免受反算波动污染
+        val finalBenchmarkOffWatts = if (offEstimator.isRegimeChanging && effectiveSmoothedOffMs != null && effectiveSmoothedOffMs > 0L && usableEnergy != null && usableEnergy > 0.0) {
             val derivedPower = usableEnergy / (effectiveSmoothedOffMs.toDouble() / 3600_000.0)
             if (derivedPower in 0.005..8.0) derivedPower else (offEstimate.predictedPowerWatts ?: baseOffPower)
         } else {
@@ -1037,6 +1043,7 @@ class RuntimeEstimator(
             ((totalCapacityWh.toDouble() / finalBenchmarkOffWatts) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(effectiveSmoothedOffMs ?: 0L)
         } else offEstimate.benchmarkFullMs
 
+        val offWeights = offEstimator.calculateAdaptiveWeights()
         val finalOffEstimate = offEstimate.copy(
             remainingMs = effectiveSmoothedOffMs,
             minRemainingMs = safeMinOff,
@@ -1044,17 +1051,18 @@ class RuntimeEstimator(
             benchmarkPowerWatts = finalBenchmarkOffWatts,
             actualFastPowerWatts = actualOffPower,
             drainRateMultiplier = offDrainRate,
-            benchmarkFullMs = fullOffMs
+            benchmarkFullMs = fullOffMs,
+            adaptiveWeights = offWeights
         )
 
         val effectiveSmoothedGlobalMs = (smoothedGlobalMs ?: globalEstimate.remainingMs)?.let {
-            if (maxFullGlobalMs != null && maxFullGlobalMs > 0L) minOf(it, maxFullGlobalMs) else it
+            if (theoreticalRemainingCapGlobalMs != null && theoreticalRemainingCapGlobalMs > 0L) minOf(it, theoreticalRemainingCapGlobalMs) else it
         }
         val safeMinGlobal = globalEstimate.minRemainingMs?.let { minOf(it, effectiveSmoothedGlobalMs ?: it) } ?: effectiveSmoothedGlobalMs
         val safeMaxGlobal = globalEstimate.maxRemainingMs?.let { maxOf(it, effectiveSmoothedGlobalMs ?: it) } ?: effectiveSmoothedGlobalMs
 
-        // 核心稳态平滑对齐：全局综合满电续航与基准综合功率同源平滑
-        val finalBenchmarkGlobalWatts = if (effectiveSmoothedGlobalMs != null && effectiveSmoothedGlobalMs > 0L && usableEnergy != null && usableEnergy > 0.0) {
+        // 核心物理稳态解耦：全局综合满电续航与基准综合功率锁定稳态
+        val finalBenchmarkGlobalWatts = if (isGlobalChanging && effectiveSmoothedGlobalMs != null && effectiveSmoothedGlobalMs > 0L && usableEnergy != null && usableEnergy > 0.0) {
             val derivedPower = usableEnergy / (effectiveSmoothedGlobalMs.toDouble() / 3600_000.0)
             if (derivedPower in 0.05..20.0) derivedPower else (globalEstimate.predictedPowerWatts ?: baseGlobalPower)
         } else {
@@ -1064,6 +1072,7 @@ class RuntimeEstimator(
             ((totalCapacityWh.toDouble() / finalBenchmarkGlobalWatts) * 3600.0 * 1000.0).roundToLong().coerceAtLeast(effectiveSmoothedGlobalMs ?: 0L)
         } else globalEstimate.benchmarkFullMs
 
+        val globalWeights = (if (screenOnRatio != null) onEstimator else globalFallbackEstimator).calculateAdaptiveWeights()
         val finalGlobalEstimate = globalEstimate.copy(
             remainingMs = effectiveSmoothedGlobalMs,
             minRemainingMs = safeMinGlobal,
@@ -1071,7 +1080,8 @@ class RuntimeEstimator(
             benchmarkPowerWatts = finalBenchmarkGlobalWatts,
             actualFastPowerWatts = actualGlobalPower,
             drainRateMultiplier = globalDrainRate,
-            benchmarkFullMs = fullGlobalMs
+            benchmarkFullMs = fullGlobalMs,
+            adaptiveWeights = globalWeights
         )
 
         return TripleRuntimeResult(

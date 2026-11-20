@@ -294,9 +294,11 @@ class PowerEstimator(
             else -> deltaSec
         }
 
-        // 4. Fast 模型更新（真实连续时间物理 EWMA: alpha = 1 - exp(-dt / tau)，上限平滑约束在 0.30 避免单点支配）
+        // 4. Fast 模型更新（真实连续时间物理 EWMA: alpha = 1 - exp(-dt / tau)）
+        // 稳态防抖软限幅：在宏观稳态运行且未确立持续工况跃迁时，单步 Fast 权重上限由 0.30 软限制在 0.12，杜绝下拉刷新滑动手势瞬间脉冲拉高即时功耗
         val rawAlphaFast = 1.0 - exp(-effectiveDeltaSec / TAU_FAST_SEC)
-        val effectiveAlphaFast = (rawAlphaFast * sampleWeight * responsiveness).coerceIn(0.001, 0.30)
+        val maxFastAlpha = if (!isChanging && (observationDurationMs >= 300_000L || recentSamples.size >= 5)) 0.12 else 0.30
+        val effectiveAlphaFast = (rawAlphaFast * sampleWeight * responsiveness).coerceIn(0.001, maxFastAlpha)
         fastPowerWatts = if (fastPowerWatts == null) {
             power.toDouble()
         } else {
@@ -367,8 +369,10 @@ class PowerEstimator(
             }
 
             // Fast 模型更新 (真实物理连续 EWMA)
+            // 稳态防抖软限幅：已预设宏观稳态或样本充分且未确立工况跃迁时，单步上限约束在 0.12 杜绝单次刷新手势噪声
             val rawAlphaFast = 1.0 - exp(-effectiveDeltaSec / TAU_FAST_SEC)
-            val effectiveAlphaFast = (rawAlphaFast * sampleWeight * responsiveness).coerceIn(0.001, 0.30)
+            val maxFastAlpha = if (!isChanging && (presetDurationMs > 0L || recentSamples.size >= 5)) 0.12 else 0.30
+            val effectiveAlphaFast = (rawAlphaFast * sampleWeight * responsiveness).coerceIn(0.001, maxFastAlpha)
             fastPowerWatts = if (fastPowerWatts == null) {
                 power.toDouble()
             } else {

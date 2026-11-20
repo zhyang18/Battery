@@ -1218,6 +1218,7 @@
     <string name="prediction_pred_discharge_power">"  Predicted Discharge Power: %1$s%2$s%3$s"</string>
     <string name="prediction_pred_standby_power">"  Predicted Standby Power: %1$s%2$s%3$s"</string>
     <string name="prediction_pred_overall_power">"  Predicted Overall Power: %1$s%2$s%3$s"</string>
+    <string name="prediction_adaptive_weights">"  Weight blend ratio: Session %1$d%% · History %2$d%% · Instant %3$d%%"</string>
     <string name="prediction_instant_power">"  Instant Fused Power: %1$s%2$s%3$s"</string>
     <string name="prediction_drain_multiplier_suffix"> (Rate %1$s)</string>
     <string name="prediction_avail_energy_suffix"> (Available %s)</string>

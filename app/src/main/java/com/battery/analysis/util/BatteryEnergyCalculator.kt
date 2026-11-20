@@ -990,6 +990,18 @@ object BatteryEnergyCalculator {
                                 appendSubItem("预测放电功耗：$pStr$eSuffix$rateSuffix")
                             }
 
+                            val weights = remainingEstimate.adaptiveWeights
+                            if (weights != null) {
+                                val wf = kotlin.math.round(weights.first * 100.0).toInt()
+                                val wm = kotlin.math.round(weights.second * 100.0).toInt()
+                                val wl = (100 - wf - wm).coerceAtLeast(0)
+                                if (context != null) {
+                                    appendSubItem(context.getString(R.string.prediction_adaptive_weights, wm, wl, wf))
+                                } else {
+                                    appendSubItem("权重融合比例：本次会话 ${wm}% · 历史大盘 ${wl}% · 即时 ${wf}%")
+                                }
+                            }
+
                             val actWatts = remainingEstimate.actualFastPowerWatts
                             if (actWatts != null && actWatts > 0.0 && kotlin.math.abs(actWatts - baseWatts) >= 0.01) {
                                 val actStr = String.format(Locale.US, "%.2fW", actWatts)
@@ -1194,6 +1206,18 @@ object BatteryEnergyCalculator {
                                 appendSubItem("预测待机功耗：$pStr$eSuffix$rateSuffix")
                             }
 
+                            val weights = remainingEstimate.adaptiveWeights
+                            if (weights != null) {
+                                val wf = kotlin.math.round(weights.first * 100.0).toInt()
+                                val wm = kotlin.math.round(weights.second * 100.0).toInt()
+                                val wl = (100 - wf - wm).coerceAtLeast(0)
+                                if (context != null) {
+                                    appendSubItem(context.getString(R.string.prediction_adaptive_weights, wm, wl, wf))
+                                } else {
+                                    appendSubItem("权重融合比例：本次会话 ${wm}% · 历史大盘 ${wl}% · 即时 ${wf}%")
+                                }
+                            }
+
                             val actWatts = remainingEstimate.actualFastPowerWatts
                             if (actWatts != null && actWatts > 0.0 && kotlin.math.abs(actWatts - baseWatts) >= 0.01) {
                                 val actStr = String.format(Locale.US, "%.2fW", actWatts)
@@ -1393,6 +1417,18 @@ object BatteryEnergyCalculator {
                                 appendSubItem(context.getString(R.string.prediction_pred_overall_power, pStr, eSuffix, rateSuffix))
                             } else {
                                 appendSubItem("预测综合功耗：$pStr$eSuffix$rateSuffix")
+                            }
+
+                            val weights = remainingEstimate.adaptiveWeights
+                            if (weights != null) {
+                                val wf = kotlin.math.round(weights.first * 100.0).toInt()
+                                val wm = kotlin.math.round(weights.second * 100.0).toInt()
+                                val wl = (100 - wf - wm).coerceAtLeast(0)
+                                if (context != null) {
+                                    appendSubItem(context.getString(R.string.prediction_adaptive_weights, wm, wl, wf))
+                                } else {
+                                    appendSubItem("权重融合比例：本次会话 ${wm}% · 历史大盘 ${wl}% · 即时 ${wf}%")
+                                }
                             }
 
                             val actWatts = remainingEstimate.actualFastPowerWatts

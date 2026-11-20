@@ -1256,6 +1256,7 @@
     <string name="prediction_pred_discharge_power">"  预测放电功耗：%1$s%2$s%3$s"</string>
     <string name="prediction_pred_standby_power">"  预测待机功耗：%1$s%2$s%3$s"</string>
     <string name="prediction_pred_overall_power">"  预测综合功耗：%1$s%2$s%3$s"</string>
+    <string name="prediction_adaptive_weights">"  权重融合比例：本次会话 %1$d%% · 历史大盘 %2$d%% · 即时 %3$d%%"</string>
     <string name="prediction_instant_power">"  即时融合功耗：%1$s%2$s%3$s"</string>
     <string name="prediction_drain_multiplier_suffix"> (流速 %1$s)</string>
     <string name="prediction_avail_energy_suffix"> (可用 %s)</string>

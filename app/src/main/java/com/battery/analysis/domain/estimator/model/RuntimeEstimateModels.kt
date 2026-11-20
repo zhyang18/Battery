@@ -107,6 +107,7 @@ data class ConfidenceBreakdown(
  * @property actualFastPowerWatts 当前物理采集与即时多时间尺度融合做功功率（单位：W，若无独立基准则为 null）
  * @property drainRateMultiplier 动态能耗流速倍率（即时做功功率 / 稳态基准功率，如 0.75x，若无独立基准则为 null）
  * @property benchmarkFullMs 基于预测基准放电功率与满充总能量推算的预期满电续航时长（单位：毫秒，与剩余续航采用严格同一基准，若无数据为 null）
+ * @property adaptiveWeights 三时间尺度动态加权融合权重三元组（Fast 即时, Medium 本次会话, Long 7天历史大盘，若无则为 null）
  */
 data class RuntimeEstimate(
     val remainingMs: Long?,
@@ -125,5 +126,6 @@ data class RuntimeEstimate(
     val benchmarkPowerWatts: Double? = null,
     val actualFastPowerWatts: Double? = null,
     val drainRateMultiplier: Double? = null,
-    val benchmarkFullMs: Long? = null
+    val benchmarkFullMs: Long? = null,
+    val adaptiveWeights: Triple<Double, Double, Double>? = null
 )
